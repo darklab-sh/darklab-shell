@@ -488,16 +488,6 @@
       </div>
 
       <div class="faq-item">
-        <div class="faq-q">Why does nmap behave differently here?</div>
-        <div class="faq-a">
-          This app runs inside a Docker container. Nmap's default scan type (<code>-sS</code>, SYN stealth scan) requires raw socket privileges that are restricted in most container environments, causing it to fail or produce inaccurate results.<br><br>
-          Always use <code>-sT</code> (TCP connect scan) instead:<br>
-          <code class="faq-example">nmap -sT &lt;target&gt;</code><br>
-          TCP connect scans work reliably inside containers and produce accurate results.
-        </div>
-      </div>
-
-      <div class="faq-item">
         <div class="faq-q">How do I stop a running command?</div>
         <div class="faq-a">Click the <strong style="color:var(--red)">■ Kill</strong> button that appears while a command is running. This sends SIGTERM to the entire process group on the server, stopping it immediately.</div>
       </div>

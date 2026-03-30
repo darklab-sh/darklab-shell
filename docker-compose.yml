@@ -1,8 +1,20 @@
 services:
   bash-runner:
     build: .
-    ports:
-      - "8888:8888"
+    read_only: true
+    restart: always
+    expose:
+      - "8888"
     volumes:
       - ./app:/app
-    restart: unless-stopped
+    environment:
+      - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
+      - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
+    logging:
+      driver: "gelf"
+      options:
+        gelf-address: "udp://loghost.darklab.sh:12201/"
+networks:
+  default:
+    external: true
+    name: darklab-net
