@@ -3,7 +3,7 @@ FROM python:3.12-slim
 WORKDIR /app
 
 RUN apt-get update
-RUN apt-get install -y procps net-tools curl wget iputils-ping nmap dnsutils traceroute
+RUN apt-get install -y procps net-tools curl wget iputils-ping nmap dnsutils traceroute mtr whois tcptraceroute testssl.sh
 RUN pip install --no-cache-dir flask
 
 EXPOSE 8888

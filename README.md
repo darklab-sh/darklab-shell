@@ -12,7 +12,7 @@ A lightweight web interface for executing shell commands on a Linux server and v
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), both client-side and server-side
 - **Command history** — recent commands shown as clickable chips for quick re-runs
 - **Save output** — download the terminal output as a timestamped `.txt` file
-- **FAQ modal** — built-in help including notes on Docker-specific gotchas (e.g. nmap `-sT`)
+- **FAQ modal** — built-in help including allowed commands and usage notes
 
 ---
 
@@ -20,12 +20,13 @@ A lightweight web interface for executing shell commands on a Linux server and v
 
 ```
 .
-├── app.py                  # Flask backend
-├── index.html              # Frontend (served by Flask)
-├── allowed_commands.txt    # Allowlist config (one prefix per line)
-├── Dockerfile
 ├── docker-compose.yml
-└── requirements.txt
+├── Dockerfile
+└── app/
+    ├── app.py                  # Flask backend
+    ├── index.html              # Frontend (served by Flask)
+    ├── allowed_commands.txt    # Allowlist config (one prefix per line)
+    └── requirements.txt
 ```
 
 ---
@@ -40,11 +41,61 @@ docker compose up --build
 
 Open [http://localhost:8888](http://localhost:8888).
 
-The project folder is mounted as a volume — edits to any file take effect after a restart, no rebuild needed:
+The project files should live in an `app/` subdirectory alongside `docker-compose.yml`:
+
+```
+.
+├── docker-compose.yml
+├── Dockerfile
+└── app/
+    ├── app.py
+    ├── index.html
+    ├── allowed_commands.txt
+    └── requirements.txt
+```
+
+The `app/` folder is mounted as a volume — edits to any file take effect after a restart, no rebuild needed:
 
 ```bash
 docker compose restart
 ```
+
+#### Read-only filesystem
+
+The container and volume mount are both set to read-only (`read_only: true`, `./app:/app:ro`). This prevents any command run through the shell from writing files to the container filesystem or filling up the disk. If a command needs a writable temp directory you can add a `tmpfs` mount, but for network tooling this shouldn't be necessary.
+
+#### expose vs ports
+
+The `docker-compose.yml` uses `expose` rather than `ports`, which means the container's port 8888 is available to other containers on the same Docker network but is **not** published to the host. This is intentional for use with an nginx-proxy setup (see below).
+
+If you are running this as a standalone Docker app without a reverse proxy, replace the `expose` section with a `ports` mapping:
+
+```yaml
+ports:
+  - "8888:8888"
+```
+
+#### nginx-proxy & VIRTUAL_HOST
+
+The `VIRTUAL_HOST` and `LETSENCRYPT_HOST` environment variables are specific to a [nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) + [acme-companion](https://github.com/nginx-proxy/acme-companion) setup for automatic reverse proxying and SSL. If you are not using nginx-proxy, remove these environment variables entirely.
+
+#### Logging
+
+The `logging` block ships container logs to a Graylog instance via GELF UDP. This is specific to a self-hosted logging infrastructure and can be safely removed if you don't have a GELF-compatible log aggregator:
+
+```yaml
+# Remove this block if not using GELF logging
+logging:
+  driver: "gelf"
+  options:
+    gelf-address: "udp://loghost.darklab.sh:12201/"
+```
+
+Without this block, Docker will use its default `json-file` log driver.
+
+#### Networks
+
+The `networks` block attaches the container to an external Docker network called `darklab-net`. This is required for the container to be reachable by nginx-proxy when both are on the same network. If you are not using a shared Docker network, remove the entire `networks` section and Docker will create a default bridge network automatically.
 
 ### Without Docker
 
@@ -70,7 +121,7 @@ Allowed commands are controlled by `allowed_commands.txt`. The file is re-read o
 ping
 curl
 dig
-nmap -sT
+nmap
 whois
 ```
 
@@ -81,20 +132,6 @@ To **disable restrictions entirely**, delete `allowed_commands.txt` or leave it 
 When the allowlist is active, the following operators are blocked outright, both in the browser and on the server, to prevent chaining disallowed commands:
 
 `&&` `||` `|` `;` `;;` `` ` `` `$()` `>` `>>` `<`
-
----
-
-## Notes
-
-### nmap inside Docker
-
-nmap's default scan type (`-sS`, SYN stealth scan) requires raw socket privileges that are restricted in most container environments. Always use `-sT` (TCP connect scan) instead:
-
-```bash
-nmap -sT <target>
-```
-
-TCP connect scans work reliably inside Docker and produce accurate results.
 
 ---
 

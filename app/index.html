@@ -6,6 +6,7 @@
 <title>darklab.sh - shell</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js"></script>
 <style>
   :root {
     --bg: #0d0d0d;
@@ -551,10 +552,18 @@
     status.textContent = labels[s] || s;
   }
 
+  const ansi_up = new AnsiUp();
+  ansi_up.use_classes = false;
+
   function appendLine(text, cls) {
     const span = document.createElement('span');
     span.className = 'line' + (cls ? ' ' + cls : '');
-    span.textContent = text;
+    // Use innerHTML with ansi_up for output lines, textContent for internal messages
+    if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied') {
+      span.textContent = text;
+    } else {
+      span.innerHTML = ansi_up.ansi_to_html(text);
+    }
     output.appendChild(span);
     output.scrollTop = output.scrollHeight;
   }
@@ -567,7 +576,8 @@
   function saveOutput() {
     const lines = output.querySelectorAll('.line');
     if (!lines.length) return;
-    const text = Array.from(lines).map(l => l.textContent).join('\n');
+    // innerText gives the visible text content, stripping any HTML spans ansi_up injected
+    const text = Array.from(lines).map(l => l.innerText).join('\n');
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const filename = `darklab-shell-${ts}.txt`;
     const blob = new Blob([text], { type: 'text/plain' });

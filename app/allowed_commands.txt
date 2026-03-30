@@ -16,3 +16,6 @@ nmap
 whois
 host
 date
+mtr
+tcptraceroute
+testssl
