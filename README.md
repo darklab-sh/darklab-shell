@@ -100,9 +100,30 @@ The `networks` block attaches the container to an external Docker network called
 ### Without Docker
 
 ```bash
-pip install flask
+pip install flask gunicorn
 python3 app.py
 ```
+
+---
+
+## Installed Tools
+
+The following tools are installed in the Docker image and available for use:
+
+| Tool | Purpose |
+|------|---------|
+| `ping` | ICMP reachability |
+| `curl` / `wget` | HTTP/HTTPS requests |
+| `dig` / `nslookup` / `host` | DNS lookups |
+| `whois` | Domain & IP registration info |
+| `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
+| `mtr` | Combined ping + traceroute (auto-rewritten to report mode, see below) |
+| `nmap` | Port scanning and service detection |
+| `testssl.sh` | TLS/SSL vulnerability scanning |
+| `dnsrecon` | DNS enumeration and zone transfer testing |
+| `nikto` | Web server vulnerability scanning |
+| `wapiti` | Web application vulnerability scanning |
+| `nuclei` | Fast CVE/misconfiguration scanner using community templates (templates stored in `/tmp` via tmpfs) |
 
 ---
 
@@ -166,5 +187,5 @@ A blue notice line is shown in the output box whenever the rewrite fires. `--rep
 
 ## Requirements
 
-- Docker + Docker Compose, **or** Python 3.10+ with Flask
+- Docker + Docker Compose, **or** Python 3.12+ with Flask and Gunicorn
 - Linux host (uses `os.setsid` / `os.killpg` for process group management)

@@ -9,6 +9,7 @@ from flask import Flask, Response, request, jsonify, send_file
 import subprocess
 import json
 import os
+import re
 import signal
 import uuid
 
@@ -34,8 +35,6 @@ def load_allowed_commands():
                 prefixes.append(line.lower())
     return prefixes if prefixes else None
 
-
-import re
 
 # Shell metacharacters that can chain or redirect commands
 SHELL_CHAIN_RE = re.compile(r'&&|\|\|?|;;?|`|\$\(|>\s*>?|<')
@@ -69,15 +68,24 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
 
 # Tools that require a TTY and need to be rewritten to a non-interactive equivalent
 def rewrite_command(command: str) -> tuple[str, str | None]:
-    """Rewrite commands that need a TTY into a non-interactive equivalent.
+    """Rewrite commands that need a TTY or specific flags into a safe non-interactive equivalent.
     Returns (rewritten_command, notice_message_or_None)."""
     stripped = command.strip()
+
     # mtr: force --report-wide mode if not already using a report flag
     if re.match(r'^mtr\b', stripped, re.IGNORECASE):
         if not re.search(r'--report\b|--report-wide\b|-r\b', stripped):
             rewritten = re.sub(r'^mtr\b', 'mtr --report-wide', stripped, flags=re.IGNORECASE)
             notice = "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
             return rewritten, notice
+
+    # nuclei: force -ud /tmp/nuclei-templates so it writes to tmpfs, not the read-only fs
+    if re.match(r'^nuclei\b', stripped, re.IGNORECASE):
+        if not re.search(r'-ud\b', stripped):
+            rewritten = re.sub(r'^nuclei\b', 'nuclei -ud /tmp/nuclei-templates', stripped, flags=re.IGNORECASE)
+            notice = "Note: nuclei is using /tmp/nuclei-templates for template storage (tmpfs)."
+            return rewritten, notice
+
     return stripped, None
 
 
@@ -167,5 +175,7 @@ def kill_command():
     return jsonify({"killed": True})
 
 if __name__ == "__main__":
-    print("shell.darklab.sh running at http://localhost:8888")
+    # For local development only. In production, Gunicorn is used as the WSGI server
+    # via the Dockerfile CMD. Run locally with: python3 app.py
+    print("darklab.sh — shell running at http://localhost:8888")
     app.run(host="0.0.0.0", port=8888, threaded=True)

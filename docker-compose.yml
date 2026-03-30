@@ -6,7 +6,9 @@ services:
     expose:
       - "8888"
     volumes:
-      - ./app:/app:ro
+      - ./app:/app:ro 
+    tmpfs:
+      - /tmp
     environment:
       - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
       - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg

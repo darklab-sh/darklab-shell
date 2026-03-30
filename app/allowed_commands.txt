@@ -28,3 +28,5 @@ testssl
 dnsrecon
 nikto
 wapiti
+# nuclei uses /tmp for templates and cache (tmpfs mount via docker-compose)
+nuclei
