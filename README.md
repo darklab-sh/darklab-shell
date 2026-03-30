@@ -1,6 +1,6 @@
 # darklab.sh — shell
 
-A lightweight web interface for executing shell commands on a Linux server and viewing their output in real time. Built with Python and Flask, designed to run in Docker.
+A lightweight web interface for running network diagnostic commands against remote endpoints, with output streamed in real time. Designed for testing and troubleshooting remote hosts — DNS lookups, port scans, traceroutes, HTTP checks, and more — without needing SSH access to a server. Built with Python and Flask, designed to run in Docker.
 
 ---
 
@@ -132,6 +132,24 @@ To **disable restrictions entirely**, delete `allowed_commands.txt` or leave it 
 When the allowlist is active, the following operators are blocked outright, both in the browser and on the server, to prevent chaining disallowed commands:
 
 `&&` `||` `|` `;` `;;` `` ` `` `$()` `>` `>>` `<`
+
+---
+
+## Tool Notes
+
+### mtr
+
+`mtr` normally runs as a live, full-screen interactive display that continuously redraws in place using ncurses. This requires a real TTY, which is not available in a web-based shell environment.
+
+To work around this, the app automatically rewrites any `mtr` command to use `--report-wide` mode when no report flag is already present:
+
+| You type | What runs |
+|----------|-----------|
+| `mtr google.com` | `mtr --report-wide google.com` |
+| `mtr -c 20 google.com` | `mtr --report-wide -c 20 google.com` |
+| `mtr --report google.com` | unchanged — already in report mode |
+
+A blue notice line is shown in the output box whenever the rewrite fires. `--report-wide` runs 10 probe cycles (configurable with `-c`) and then prints a summary table — which is also the more useful format for saving or sharing results.
 
 ---
 

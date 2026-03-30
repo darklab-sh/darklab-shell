@@ -429,6 +429,7 @@
   }
 
   .line.denied { color: var(--amber); font-weight: 700; margin-top: 4px; }
+  .line.notice { color: #6ab0f5; font-style: italic; margin-bottom: 4px; }
 </style>
 </head>
 <body>
@@ -480,12 +481,22 @@
 
       <div class="faq-item">
         <div class="faq-q">What is this?</div>
-        <div class="faq-a">Bash Runner is a lightweight web interface for executing bash commands on the server and seeing their output in real time — line by line as the process produces it. It's useful for running network tools, diagnostics, or any long-running command without needing SSH access.</div>
+        <div class="faq-a">darklab.sh — shell is a lightweight web interface for running network diagnostic and reachability commands against remote endpoints, with output streamed in real time. It's designed for testing and troubleshooting remote hosts — things like DNS lookups, port scans, traceroutes, and HTTP checks — without needing SSH access to a server.</div>
       </div>
 
       <div class="faq-item">
         <div class="faq-q">What commands are allowed?</div>
         <div class="faq-a" id="faq-allowed-text">Loading…</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Why does mtr look different here?</div>
+        <div class="faq-a">
+          <code>mtr</code> normally runs as a live, full-screen interactive display that continuously updates in place. This requires a real terminal (TTY), which is not available in a web-based shell.<br><br>
+          To work around this, <code>mtr</code> is automatically run in <code>--report-wide</code> mode, which performs 10 probe cycles and then prints a clean summary table. You'll see a blue notice in the output whenever this rewrite happens.<br><br>
+          You can control the number of cycles with <code>-c</code>:<br>
+          <code class="faq-example">mtr -c 20 google.com</code>
+        </div>
       </div>
 
       <div class="faq-item">
@@ -680,6 +691,8 @@
                 const msg = JSON.parse(part.slice(6));
                 if (msg.type === 'started') {
                     currentRunId = msg.run_id;
+                  } else if (msg.type === 'notice') {
+                    appendLine(msg.text, 'notice');
                   } else if (msg.type === 'output') {
                   // split by newlines to make each line animate in
                   msg.text.split('\n').forEach((line, i, arr) => {

@@ -67,6 +67,20 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
 
     return True, ""
 
+# Tools that require a TTY and need to be rewritten to a non-interactive equivalent
+def rewrite_command(command: str) -> tuple[str, str | None]:
+    """Rewrite commands that need a TTY into a non-interactive equivalent.
+    Returns (rewritten_command, notice_message_or_None)."""
+    stripped = command.strip()
+    # mtr: force --report-wide mode if not already using a report flag
+    if re.match(r'^mtr\b', stripped, re.IGNORECASE):
+        if not re.search(r'--report\b|--report-wide\b|-r\b', stripped):
+            rewritten = re.sub(r'^mtr\b', 'mtr --report-wide', stripped, flags=re.IGNORECASE)
+            notice = "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
+            return rewritten, notice
+    return stripped, None
+
+
 @app.route("/")
 def index():
     return HTML
@@ -92,6 +106,7 @@ def run_command():
     if not allowed:
         return jsonify({"error": reason}), 403
 
+    command, notice = rewrite_command(command)
     run_id = str(uuid.uuid4())
 
     def generate():
@@ -111,6 +126,10 @@ def run_command():
 
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
+
+            # If the command was rewritten, surface a notice to the user
+            if notice:
+                yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
             for line in iter(proc.stdout.readline, ""):
                 yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"

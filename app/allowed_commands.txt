@@ -5,6 +5,12 @@
 # Matching is prefix-based: "ping" allows "ping google.com", "ping -c 4 1.1.1.1", etc.
 # Be as specific or broad as you like — "nmap -sT" only allows TCP-connect scans,
 # while "nmap" would allow any nmap invocation.
+#
+# Note on mtr: mtr's interactive full-screen mode requires a real TTY which is not
+# available here. The app automatically rewrites "mtr <target>" to
+# "mtr --report-wide <target>" so it runs in non-interactive report mode instead.
+# If you include "mtr --report" or "mtr -r" as a prefix here, users must pass
+# report flags themselves — the auto-rewrite only fires when they are absent.
 
 ping
 curl
@@ -12,10 +18,10 @@ wget
 dig
 nslookup
 traceroute
+# mtr is auto-rewritten to --report-wide mode when no report flag is present
+mtr
 nmap
 whois
 host
-date
-mtr
 tcptraceroute
-testssl
+testssl.sh
