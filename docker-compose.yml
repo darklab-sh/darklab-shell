@@ -1,5 +1,5 @@
 services:
-  bash-runner:
+  sh.darklab.sh:
     build: .
     read_only: true
     restart: always

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
-Bash Runner - Real-time bash command execution web app
+shell.darklab.sh - Real-time bash command execution web app
 Run: python3 app.py
-Then open http://localhost:5000
+Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
-from flask import Flask, Response, request, jsonify
+from flask import Flask, Response, request, jsonify, send_file
 import subprocess
 import json
 import os
@@ -79,6 +79,12 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
             notice = "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
             return rewritten, notice
     return stripped, None
+
+
+@app.route("/favicon.ico")
+def favicon():
+    return send_file(os.path.join(os.path.dirname(__file__), "favicon.ico"),
+                     mimetype="image/x-icon")
 
 
 @app.route("/")
@@ -161,5 +167,5 @@ def kill_command():
     return jsonify({"killed": True})
 
 if __name__ == "__main__":
-    print("Bash Runner running at http://localhost:8888")
+    print("shell.darklab.sh running at http://localhost:8888")
     app.run(host="0.0.0.0", port=8888, threaded=True)
