@@ -1,0 +1,8 @@
+services:
+  bash-runner:
+    build: .
+    ports:
+      - "8888:8888"
+    volumes:
+      - .:/app
+    restart: unless-stopped

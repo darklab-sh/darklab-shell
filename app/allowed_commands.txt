@@ -1,0 +1,18 @@
+# Allowed Commands
+# -----------------
+# One allowed command prefix per line.
+# Lines starting with # are comments and are ignored, as are blank lines.
+# Matching is prefix-based: "ping" allows "ping google.com", "ping -c 4 1.1.1.1", etc.
+# Be as specific or broad as you like — "nmap -sT" only allows TCP-connect scans,
+# while "nmap" would allow any nmap invocation.
+
+ping
+curl
+wget
+dig
+nslookup
+traceroute
+nmap
+whois
+host
+date
