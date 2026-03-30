@@ -13,15 +13,18 @@
 # report flags themselves — the auto-rewrite only fires when they are absent.
 
 ping
-curl
-wget
 dig
 nslookup
-traceroute
-# mtr is auto-rewritten to --report-wide mode when no report flag is present
-mtr
-nmap
 whois
 host
+traceroute
 tcptraceroute
-testssl.sh
+# mtr is auto-rewritten to --report-wide mode when no report flag is present
+mtr
+curl
+wget
+nmap
+testssl
+dnsrecon
+nikto
+wapiti
