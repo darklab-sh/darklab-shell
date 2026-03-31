@@ -42,8 +42,10 @@ DB_PATH = os.path.join(DATA_DIR, "history.db")
 
 
 def db_connect():
-    conn = sqlite3.connect(DB_PATH)
+    conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA journal_mode=WAL")
+    conn.execute("PRAGMA synchronous=NORMAL")
     return conn
 
 
@@ -93,19 +95,23 @@ db_init()
 def pid_register(run_id, pid):
     """Register an active process PID — visible to all Gunicorn workers via SQLite."""
     with db_connect() as conn:
-        conn.execute("INSERT OR REPLACE INTO active_procs (run_id, pid) VALUES (?, ?)", (run_id, pid))
+        conn.execute(
+            "INSERT OR REPLACE INTO active_procs (run_id, pid) VALUES (?, ?)",
+            (run_id, pid)
+        )
         conn.commit()
 
 
 def pid_pop(run_id):
-    """Remove and return the PID for a run_id, or None if not found."""
+    """Atomically remove and return the PID for a run_id, or None if not found.
+    Uses a single atomic DELETE...RETURNING to prevent race conditions between workers."""
     with db_connect() as conn:
-        row = conn.execute("SELECT pid FROM active_procs WHERE run_id = ?", (run_id,)).fetchone()
-        if row:
-            conn.execute("DELETE FROM active_procs WHERE run_id = ?", (run_id,))
-            conn.commit()
-            return row["pid"]
-    return None
+        row = conn.execute(
+            "DELETE FROM active_procs WHERE run_id = ? RETURNING pid",
+            (run_id,)
+        ).fetchone()
+        conn.commit()
+        return row["pid"] if row else None
 
 
 HTML = open(os.path.join(os.path.dirname(__file__), "index.html")).read()
@@ -413,25 +419,30 @@ def run_command():
     run_started = datetime.now(timezone.utc).isoformat()
     captured_lines = []
 
+    # Start the process immediately — before the generator runs — so the PID
+    # is registered in SQLite before any kill request could arrive
+    try:
+        proc = subprocess.Popen(
+            command,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            universal_newlines=True,
+            preexec_fn=os.setsid,
+        )
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+    pid_register(run_id, proc.pid)
+
     # Heartbeat interval in seconds — keeps the SSE connection alive through
     # nginx and browser idle timeouts when a command produces no output
     HEARTBEAT_INTERVAL = 20
 
     def generate():
         try:
-            proc = subprocess.Popen(
-                command,
-                shell=True,
-                stdout=subprocess.PIPE,
-                stderr=subprocess.STDOUT,
-                text=True,
-                bufsize=1,
-                universal_newlines=True,
-                # New process group so we can kill the whole tree
-                preexec_fn=os.setsid,
-            )
-            pid_register(run_id, proc.pid)
-
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
 
