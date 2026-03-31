@@ -24,10 +24,12 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── docker-compose.yml
 ├── Dockerfile
 └── app/
-    ├── app.py                  # Flask backend
+    ├── app.py                  # Flask + Gunicorn backend
     ├── index.html              # Frontend (served by Flask)
-    ├── allowed_commands.txt    # Allowlist config (one prefix per line)
-    └── requirements.txt
+    ├── allowed_commands.txt    # Command allowlist (one prefix per line)
+    ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
+    ├── favicon.ico             # Site favicon
+    └── requirements.txt        # Python dependencies (Flask, Gunicorn)
 ```
 
 ---
@@ -42,20 +44,7 @@ docker compose up --build
 
 Open [http://localhost:8888](http://localhost:8888).
 
-The project files should live in an `app/` subdirectory alongside `docker-compose.yml`:
-
-```
-.
-├── docker-compose.yml
-├── Dockerfile
-└── app/
-    ├── app.py
-    ├── index.html
-    ├── allowed_commands.txt
-    └── requirements.txt
-```
-
-The `app/` folder is mounted as a volume — edits to any file take effect after a restart, no rebuild needed:
+All app files live in the `./app/` subdirectory and are mounted as a read-only volume — edits to any file (including `allowed_commands.txt` and `auto_complete.txt`) take effect after a restart with no rebuild needed:
 
 ```bash
 docker compose restart
@@ -67,7 +56,7 @@ The container and volume mount are both set to read-only (`read_only: true`, `./
 
 #### expose vs ports
 
-The `docker-compose.yml` uses `expose` rather than `ports`, which means the container's port 8888 is available to other containers on the same Docker network but is **not** published to the host. This is intentional for use with an nginx-proxy setup (see below).
+The `docker-compose.yml` uses `expose` rather than `ports`, which makes port 8888 available to other containers on the same Docker network but does **not** publish it to the host. This is intentional for use behind an nginx-proxy setup (see below).
 
 If you are running this as a standalone Docker app without a reverse proxy, replace the `expose` section with a `ports` mapping:
 
@@ -158,7 +147,27 @@ When the allowlist is active, the following operators are blocked outright, both
 
 ---
 
-## Tool Notes
+## Autocomplete
+
+Autocomplete suggestions are loaded from `auto_complete.txt` at page load and matched against what you type. The matched portion of each suggestion is highlighted in green.
+
+**Keyboard controls:**
+
+| Key | Action |
+|-----|--------|
+| **↑ / ↓** | Navigate through suggestions |
+| **Tab** | Accept the highlighted suggestion (or the only match if one result) |
+| **Enter** | Accept highlighted suggestion, or run the command if none selected |
+| **Escape** | Dismiss the dropdown |
+
+**Format** — same conventions as `allowed_commands.txt`:
+- One suggestion per line
+- Lines starting with `#` are comments and are ignored
+- Suggestions can be full commands with flags, e.g. `nmap -sT --script vuln`
+
+The file is fetched once on page load. To update suggestions, edit `auto_complete.txt` and reload the page — no server restart needed.
+
+
 
 ### mtr
 
@@ -172,7 +181,19 @@ To work around this, the app automatically rewrites any `mtr` command to use `--
 | `mtr -c 20 google.com` | `mtr --report-wide -c 20 google.com` |
 | `mtr --report google.com` | unchanged — already in report mode |
 
-A blue notice line is shown in the output box whenever the rewrite fires. `--report-wide` runs 10 probe cycles (configurable with `-c`) and then prints a summary table — which is also the more useful format for saving or sharing results.
+### nuclei
+
+`nuclei` stores its template library and cache in `$HOME` by default, which conflicts with the read-only filesystem. The container sets `HOME=/tmp` and `NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates` so all nuclei writes go to the tmpfs mount. The app also automatically injects `-ud /tmp/nuclei-templates` if the flag isn't already present in the command.
+
+Note that templates are downloaded to tmpfs on first use each container session and are lost on restart — this means the first nuclei run after a restart will take 30–60 seconds to download the template library before scanning begins.
+
+---
+
+## Keep-Alive & Long-Running Commands
+
+For commands that produce little or no output for extended periods (e.g. slow scans, nuclei running against a large target), the SSE connection is kept alive by a server-sent heartbeat — a comment line sent every 20 seconds when no output is being produced. This prevents nginx and the browser from treating the idle connection as stale and dropping it.
+
+The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND_TIMEOUT`, `PROXY_CONNECT_TIMEOUT`) in `docker-compose.yml` are set to 3600 seconds to match the Gunicorn worker timeout, giving commands up to an hour to complete.
 
 ---
 
@@ -181,9 +202,11 @@ A blue notice line is shown in the output box whenever the rewrite fires. `--rep
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/` | Serves the web UI |
+| `GET` | `/favicon.ico` | Serves the site favicon |
+| `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
+| `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
 | `POST` | `/run` | Runs a command, streams output via SSE |
 | `POST` | `/kill` | Kills a running process by `run_id` |
-| `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 
 ---
 
