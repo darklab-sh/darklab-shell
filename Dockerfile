@@ -61,21 +61,29 @@ WORKDIR /app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Create scanner user — an unprivileged user that runs all user-submitted
-# commands. It has no write access to /data, preventing commands from
-# writing files to the persistent volume.
-RUN groupadd -r scanner && useradd -r -g scanner -s /usr/sbin/nologin scanner
+# Create two unprivileged users:
+#   appuser — owns /data and runs Gunicorn (can write SQLite database)
+#   scanner — runs all user-submitted commands, no write access to /data
+RUN groupadd -r appuser && useradd -r -g appuser appuser && \
+    groupadd -r scanner && useradd -r -g scanner -s /usr/sbin/nologin scanner
 
 # Grant nmap raw socket capabilities so the scanner user can use OS
 # fingerprinting and other features that require elevated network access,
 # without giving the scanner user full root privileges.
-RUN apt-get install -y libcap2-bin && \
-    setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+RUN apt-get install -y libcap2-bin sudo gosu && \
+    setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
+    echo "appuser ALL=(scanner) NOPASSWD: ALL" >> /etc/sudoers
 
-# Pre-create /data with root ownership and 700 permissions so only root
-# (Gunicorn) can write to it. scanner user cannot write here.
-RUN mkdir -p /data && chmod 700 /data
+# Pre-create /data owned by appuser with 700 permissions.
+# scanner user cannot write here. The entrypoint re-applies ownership
+# after the Docker volume mount potentially resets it.
+RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
+
+# Copy entrypoint script — runs as root to fix /data ownership after volume
+# mount, then drops to appuser via gosu before starting Gunicorn
+COPY entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
 
 EXPOSE 8888
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8888", "--workers", "4", "--threads", "4", "--timeout", "3600", "--control-socket", "/tmp/.gunicorn", "app:app"]
+ENTRYPOINT ["/entrypoint.sh"]

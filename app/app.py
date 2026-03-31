@@ -22,17 +22,16 @@ from datetime import datetime, timezone
 app = Flask(__name__)
 
 
-def drop_to_scanner():
-    """Drop privileges to the scanner user before exec'ing the command.
-    Called in the child process via preexec_fn — runs between fork and exec.
-    The scanner user has no write access to /data, preventing commands from
-    writing files to the persistent volume."""
-    try:
-        pw = pwd.getpwnam("scanner")
-        os.setgid(pw.pw_gid)
-        os.setuid(pw.pw_uid)
-    except (KeyError, PermissionError):
-        pass  # scanner user doesn't exist (local dev) or already unprivileged
+# Scanner user wrapping — prepend sudo -u scanner to run commands as the
+# unprivileged scanner user. appuser (Gunicorn) is granted NOPASSWD sudo
+# rights to scanner in /etc/sudoers. Falls back to running directly if
+# sudo/scanner aren't available (local dev).
+SCANNER_PREFIX = []
+try:
+    pwd.getpwnam("scanner")
+    SCANNER_PREFIX = ["sudo", "-u", "scanner", "--"]
+except KeyError:
+    pass  # scanner user doesn't exist — local dev, run directly
 
 # Rate limiting — reads real client IP from X-Forwarded-For set by nginx-proxy
 def get_client_ip():
@@ -104,14 +103,6 @@ def db_init():
 
 
 db_init()
-
-# Ensure /data is only writable by the Gunicorn process (root), not by the
-# scanner user that runs subprocesses. Volume mounts may reset permissions.
-if os.path.isdir("/data"):
-    try:
-        os.chmod("/data", 0o700)
-    except PermissionError:
-        pass
 
 
 def pid_register(run_id, pid):
@@ -197,6 +188,13 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
             rewritten = re.sub(r'^mtr\b', 'mtr --report-wide', stripped, flags=re.IGNORECASE)
             notice = "Note: mtr has been run in --report-wide mode (non-interactive). See FAQ for details."
             return rewritten, notice
+
+    # nmap: inject --privileged so raw socket features work for the scanner user
+    # (the nmap binary has cap_net_raw,cap_net_admin via setcap in the Dockerfile)
+    if re.match(r'^nmap\b', stripped, re.IGNORECASE):
+        if not re.search(r'--privileged\b', stripped):
+            rewritten = re.sub(r'^nmap\b', 'nmap --privileged', stripped, flags=re.IGNORECASE)
+            return rewritten, None  # no notice needed — transparent to the user
 
     # nuclei: force -ud /tmp/nuclei-templates so it writes to tmpfs, not the read-only fs
     if re.match(r'^nuclei\b', stripped, re.IGNORECASE):
@@ -445,14 +443,14 @@ def run_command():
     # is registered in SQLite before any kill request could arrive
     try:
         proc = subprocess.Popen(
-            command,
-            shell=True,
+            SCANNER_PREFIX + ["sh", "-c", command] if SCANNER_PREFIX else command,
+            shell=not bool(SCANNER_PREFIX),
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
             bufsize=1,
             universal_newlines=True,
-            preexec_fn=lambda: (os.setsid(), drop_to_scanner()),
+            preexec_fn=os.setsid,
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500
