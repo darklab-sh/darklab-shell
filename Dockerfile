@@ -61,6 +61,21 @@ WORKDIR /app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+# Create scanner user — an unprivileged user that runs all user-submitted
+# commands. It has no write access to /data, preventing commands from
+# writing files to the persistent volume.
+RUN groupadd -r scanner && useradd -r -g scanner -s /usr/sbin/nologin scanner
+
+# Grant nmap raw socket capabilities so the scanner user can use OS
+# fingerprinting and other features that require elevated network access,
+# without giving the scanner user full root privileges.
+RUN apt-get install -y libcap2-bin && \
+    setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+
+# Pre-create /data with root ownership and 700 permissions so only root
+# (Gunicorn) can write to it. scanner user cannot write here.
+RUN mkdir -p /data && chmod 700 /data
+
 EXPOSE 8888
 
 CMD ["gunicorn", "--bind", "0.0.0.0:8888", "--workers", "4", "--threads", "4", "--timeout", "3600", "--control-socket", "/tmp/.gunicorn", "app:app"]

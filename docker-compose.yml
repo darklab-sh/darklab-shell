@@ -11,6 +11,9 @@ services:
       - ./data:/data  # Writable volume for persistent SQLite run history
     tmpfs:
       - /tmp
+    cap_add:
+      - NET_RAW
+      - NET_ADMIN
     environment:
       - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
       - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg

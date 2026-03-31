@@ -15,10 +15,24 @@ import select
 import re
 import signal
 import sqlite3
+import pwd
 import uuid
 from datetime import datetime, timezone
 
 app = Flask(__name__)
+
+
+def drop_to_scanner():
+    """Drop privileges to the scanner user before exec'ing the command.
+    Called in the child process via preexec_fn — runs between fork and exec.
+    The scanner user has no write access to /data, preventing commands from
+    writing files to the persistent volume."""
+    try:
+        pw = pwd.getpwnam("scanner")
+        os.setgid(pw.pw_gid)
+        os.setuid(pw.pw_uid)
+    except (KeyError, PermissionError):
+        pass  # scanner user doesn't exist (local dev) or already unprivileged
 
 # Rate limiting — reads real client IP from X-Forwarded-For set by nginx-proxy
 def get_client_ip():
@@ -90,6 +104,14 @@ def db_init():
 
 
 db_init()
+
+# Ensure /data is only writable by the Gunicorn process (root), not by the
+# scanner user that runs subprocesses. Volume mounts may reset permissions.
+if os.path.isdir("/data"):
+    try:
+        os.chmod("/data", 0o700)
+    except PermissionError:
+        pass
 
 
 def pid_register(run_id, pid):
@@ -430,7 +452,7 @@ def run_command():
             text=True,
             bufsize=1,
             universal_newlines=True,
-            preexec_fn=os.setsid,
+            preexec_fn=lambda: (os.setsid(), drop_to_scanner()),
         )
     except Exception as e:
         return jsonify({"error": str(e)}), 500

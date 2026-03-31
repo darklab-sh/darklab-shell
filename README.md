@@ -296,7 +296,27 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 
 ---
 
-## Multi-Worker Setup & Process Killing
+## Security & Process Isolation
+
+### Scanner user
+
+All user-submitted commands run as the `scanner` system user, not as root. This is enforced via `os.setuid()` in the `preexec_fn` of every `subprocess.Popen` call — between `fork()` and `exec()`, the child process drops to the `scanner` user before the command executes.
+
+The `scanner` user has no write access to `/data` (the SQLite volume), so commands cannot write files to persistent storage regardless of what flags are passed. Attempts to write there will get a permission denied error. `/tmp` remains writable via the tmpfs mount, so tools that need scratch space still work.
+
+Gunicorn itself continues to run as root so it can write to `/data/history.db` and bind to the configured port.
+
+### nmap capabilities
+
+nmap requires raw socket access (`CAP_NET_RAW`, `CAP_NET_ADMIN`) for OS fingerprinting, SYN scans, and other advanced scan types. Rather than granting these capabilities to the `scanner` user broadly or running the container in privileged mode, they are applied directly to the nmap binary via Linux file capabilities:
+
+```
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+```
+
+This means any user who executes nmap — including the unprivileged `scanner` user — automatically receives those two capabilities for the duration of the nmap process only. No `--privileged` flag on Docker, no sudo, no extra flags in commands.
+
+The docker-compose file adds `NET_RAW` and `NET_ADMIN` to `cap_add` so the host kernel makes these capabilities available to the container. Without both the `setcap` on the binary and `cap_add` in compose, nmap would fall back to limited scan modes.
 
 Gunicorn runs multiple worker processes to handle concurrent requests. This introduces a challenge: if Worker A starts a command and stores its PID, a kill request might be routed to Worker B which has no knowledge of that process.
 
