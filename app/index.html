@@ -1295,7 +1295,7 @@
           const btn = entry.querySelector('[data-action="load"]');
           btn.textContent = 'loading…';
           btn.disabled = true;
-          apiFetch(`/history/${run.id}`)
+          apiFetch(`/history/${run.id}?json`)
             .then(r => r.json())
             .then(fullRun => {
               const newId = createTab(fullRun.command);

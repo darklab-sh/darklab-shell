@@ -237,6 +237,53 @@ Both types persist across container restarts via the `./data` SQLite volume. The
 
 ---
 
+## Database
+
+Run history and tab snapshots are stored in a SQLite database at `./data/history.db`. The database is created automatically on first run and persists across container restarts and recreations.
+
+### Schema
+
+**`runs` table** — one row per completed command execution:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT (UUID) | Primary key, used in `/history/<id>` permalink URLs |
+| `session_id` | TEXT | Anonymous browser session UUID (from `localStorage`) — scopes history to each user |
+| `command` | TEXT | The command as typed by the user |
+| `started` | TEXT | ISO 8601 timestamp when the command was submitted |
+| `finished` | TEXT | ISO 8601 timestamp when the process exited |
+| `exit_code` | INTEGER | Process exit code (0 = success) |
+| `output` | TEXT | JSON array of plain-text output lines |
+
+**`snapshots` table** — one row per tab permalink:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `id` | TEXT (UUID) | Primary key, used in `/share/<id>` permalink URLs |
+| `session_id` | TEXT | Anonymous browser session UUID |
+| `label` | TEXT | Tab label at the time the permalink was created (last command run) |
+| `created` | TEXT | ISO 8601 timestamp |
+| `content` | TEXT | JSON array of `{"text": "...", "cls": "..."}` objects representing every line visible in the tab, including ANSI escape codes for colour reproduction |
+
+### Retention
+
+The history panel UI shows the **50 most recent runs per session**, but the database itself has **no row limit** — every run and snapshot is kept indefinitely. Permalinks will work for as long as the database file exists regardless of how many newer runs have been added since.
+
+To inspect or manage the database directly:
+
+```bash
+# Row counts
+sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM snapshots;"
+
+# Delete runs older than 90 days
+sqlite3 data/history.db "DELETE FROM runs WHERE started < datetime('now', '-90 days');"
+
+# Delete all snapshots
+sqlite3 data/history.db "DELETE FROM snapshots;"
+```
+
+---
+
 ## Output Search
 
 Click **⌕ search** in the header (or press **Ctrl+F** equivalent) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
