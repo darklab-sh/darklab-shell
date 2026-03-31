@@ -6,25 +6,23 @@ services:
     restart: always
     expose:
       - "8888"
-    ports:
-      - "8888:8888"
     volumes:
       - ./app:/app:ro # Mount the app directory as read-only
       - ./data:/data  # Writable volume for persistent SQLite run history
     tmpfs:
       - /tmp
-#     environment:
-#       - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
-#       - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
-#       # Keep SSE connections alive through nginx-proxy for long-running commands
-#       - PROXY_READ_TIMEOUT=3600
-#       - PROXY_SEND_TIMEOUT=3600
-#       - PROXY_CONNECT_TIMEOUT=3600
-#     logging:
-#       driver: "gelf"
-#       options:
-#         gelf-address: "udp://loghost.darklab.sh:12201/"
-# networks:
-#   default:
-#     external: true
-#     name: darklab-net
+    environment:
+      - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
+      - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
+      # Keep SSE connections alive through nginx-proxy for long-running commands
+      - PROXY_READ_TIMEOUT=3600
+      - PROXY_SEND_TIMEOUT=3600
+      - PROXY_CONNECT_TIMEOUT=3600
+    logging:
+      driver: "gelf"
+      options:
+        gelf-address: "udp://loghost.darklab.sh:12201/"
+networks:
+  default:
+    external: true
+    name: darklab-net
