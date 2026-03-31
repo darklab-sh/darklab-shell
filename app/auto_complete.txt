@@ -5,162 +5,180 @@
 # Tab completes the highlighted suggestion. Arrow keys navigate the list.
 
 # ping
-ping -c 4
-ping -c 10
-ping -i 0.5 -c 20
+ping -h
+ping -c 4 example.com
+ping -c 10 example.com
+ping -i 0.5 -c 20 example.com
 
 # dig
-dig A
-dig MX
-dig TXT
-dig NS
-dig AAAA
-dig ANY
-dig +short A
-dig +short MX
-dig @8.8.8.8 A
-dig +trace A
-dig AXFR @
+dig -h
+dig A example.com
+dig MX example.com
+dig TXT example.com
+dig NS example.com
+dig AAAA example.com
+dig ANY example.com
+dig +short A example.com
+dig +short MX example.com
+dig @8.8.8.8 A example.com
+dig +trace A example.com
+dig AXFR example.com @ns1.example.com
 
 # nslookup
-nslookup -type=A
-nslookup -type=MX
-nslookup -type=TXT
-nslookup -type=NS
+nslookup -help
+nslookup -type=A example.com
+nslookup -type=MX example.com
+nslookup -type=TXT example.com
+nslookup -type=NS example.com
 
 # host
-host -t A
-host -t MX
-host -t TXT
-host -t NS
+host --help
+host -t A example.com
+host -t MX example.com
+host -t TXT example.com
+host -t NS example.com
 
 # whois
-whois
+whois example.com
 
 # traceroute
-traceroute
-traceroute -n
-traceroute -m 30
+traceroute --help
+traceroute example.com
+traceroute -n example.com
+traceroute -m 30 example.com
 
 # tcptraceroute
-tcptraceroute
-tcptraceroute -n
+tcptraceroute example.com
+tcptraceroute -n example.com
 
 # mtr (auto-rewritten to --report-wide if no report flag given)
-mtr
-mtr -c 20
-mtr -n
-mtr -n -c 20
+mtr --help
+mtr example.com
+mtr -c 20 example.com
+mtr -n example.com
+mtr -n -c 20 example.com
 
 # curl
-curl -I
-curl -v
-curl -L
-curl -o /dev/null -s -w "%{http_code}"
-curl --resolve : :
-curl -H "User-Agent: Mozilla/5.0"
-curl -k
-curl --max-time 10
+curl -h
+curl -I https://example.com
+curl -v https://example.com
+curl -L https://example.com
+curl -o /dev/null -s -w "%{http_code}" https://example.com
+curl -H "User-Agent: Mozilla/5.0" https://example.com
+curl -k https://example.com
+curl --max-time 10 https://example.com
 
 # wget
-wget -q -O /dev/null --server-response
-wget --spider
+wget --help
+wget -q -O /dev/null --server-response https://example.com
+wget --spider https://example.com
 
 # nmap
-nmap -sT
-nmap -sT -p 80,443
-nmap -sT -p 1-1000
-nmap -sT -p-
-nmap -sV -sT
-nmap -A -sT
-nmap -sT --script http-headers
-nmap -sT --script ssl-cert
-nmap -sT --script ssl-enum-ciphers
-nmap -sT --script vuln
-nmap -sT --script http-title
-nmap -Pn -sT
-nmap -6 -sT
+nmap -h
+nmap -sT example.com
+nmap -sT -p 80,443 example.com
+nmap -sT -p 1-1000 example.com
+nmap -sT -p- example.com
+nmap -sV -sT example.com
+nmap -A -sT example.com
+nmap -sT --script http-headers example.com
+nmap -sT --script ssl-cert example.com
+nmap -sT --script ssl-enum-ciphers example.com
+nmap -sT --script vuln example.com
+nmap -sT --script http-title example.com
+nmap -Pn -sT example.com
+nmap -6 -sT example.com
 
 # testssl
-testssl
-testssl --fast
-testssl --severity HIGH
-testssl --full
-testssl --sneaky
-testssl -p
-testssl --heartbleed
-testssl --poodle
-testssl --beast
+testssl -h
+testssl https://example.com
+testssl --fast https://example.com
+testssl --severity HIGH https://example.com
+testssl --full https://example.com
+testssl --sneaky https://example.com
+testssl -p https://example.com
+testssl --heartbleed https://example.com
+testssl --poodle https://example.com
+testssl --beast https://example.com
 
 # dnsrecon
-dnsrecon -d
-dnsrecon -d -t std
-dnsrecon -d -t axfr
-dnsrecon -d -t brt
-dnsrecon -d -t srv
-dnsrecon -d -t zonewalk
-dnsrecon -d -t mx
+dnsrecon -h
+dnsrecon -d example.com
+dnsrecon -d example.com -t std
+dnsrecon -d example.com -t axfr
+dnsrecon -d example.com -t brt
+dnsrecon -d example.com -t srv
+dnsrecon -d example.com -t zonewalk
+dnsrecon -d example.com -t mx
 
 # nikto
-nikto -h
-nikto -h -p 443 -ssl
-nikto -h -p 8080
-nikto -h -Tuning 1
-nikto -h -Tuning 4
-nikto -h -maxtime 120
+nikto -Help
+nikto -h example.com
+nikto -h example.com -p 443 -ssl
+nikto -h example.com -p 8080
+nikto -h example.com -Tuning 1
+nikto -h example.com -Tuning 4
+nikto -h example.com -maxtime 120
 
 # wapiti (report automatically sent to terminal — no file needed)
-wapiti -u
-wapiti -u --scope url
-wapiti -u --scope domain
-wapiti -u -m xss,sql
-wapiti -u --max-scan-time 120
-wapiti -u -v 1
+wapiti --help
+wapiti -u https://example.com
+wapiti -u https://example.com --scope url
+wapiti -u https://example.com --scope domain
+wapiti -u https://example.com -m xss,sql
+wapiti -u https://example.com --max-scan-time 120
+wapiti -u https://example.com -v 1
 
 # wpscan
-wpscan --url
-wpscan --url --enumerate p
-wpscan --url --enumerate u
-wpscan --url --enumerate t
-wpscan --url --enumerate vp
-wpscan --url --enumerate ap
-wpscan --url --detection-mode aggressive
-wpscan --url --force
+wpscan --help
+wpscan --url https://example.com
+wpscan --url https://example.com --enumerate p
+wpscan --url https://example.com --enumerate u
+wpscan --url https://example.com --enumerate t
+wpscan --url https://example.com --enumerate vp
+wpscan --url https://example.com --enumerate ap
+wpscan --url https://example.com --detection-mode aggressive
+wpscan --url https://example.com --force
 
 # nuclei (auto-uses /tmp/nuclei-templates via -ud flag)
-nuclei -u
-nuclei -u -t http/
-nuclei -u -t ssl/
-nuclei -u -t dns/
-nuclei -u -t network/
-nuclei -u -severity low,medium,high,critical
-nuclei -u -severity high,critical
-nuclei -u -as
+nuclei -h
+nuclei -u https://example.com
+nuclei -u https://example.com -t http/
+nuclei -u https://example.com -t ssl/
+nuclei -u https://example.com -t dns/
+nuclei -u https://example.com -t network/
+nuclei -u https://example.com -severity low,medium,high,critical
+nuclei -u https://example.com -severity high,critical
+nuclei -u https://example.com -as
 nuclei -list
 
 # subfinder
-subfinder -d
-subfinder -d -silent
-subfinder -d -o /dev/stdout
-subfinder -d -recursive
+subfinder -h
+subfinder -d example.com
+subfinder -d example.com -silent
+subfinder -d example.com -o /dev/stdout
+subfinder -d example.com -recursive
 
 # pd-httpx (ProjectDiscovery httpx — renamed to avoid Python httpx conflict)
-pd-httpx -u
-pd-httpx -u -title -status-code -tech-detect
-pd-httpx -u -status-code
-pd-httpx -u -follow-redirects
+pd-httpx -h
+pd-httpx -u https://example.com
+pd-httpx -u https://example.com -title -status-code -tech-detect
+pd-httpx -u https://example.com -status-code
+pd-httpx -u https://example.com -follow-redirects
 
 # dnsx
-dnsx -d
-dnsx -d -resp
-dnsx -d -a -resp
-dnsx -d -cname -resp
-dnsx -d -mx -resp
+dnsx -h
+dnsx -d example.com
+dnsx -d example.com -resp
+dnsx -d example.com -a -resp
+dnsx -d example.com -cname -resp
+dnsx -d example.com -mx -resp
 
 # gobuster
-gobuster dir -u -w /usr/share/wordlists/seclists/Web-Content/common.txt
-gobuster dir -u -w /usr/share/wordlists/seclists/Web-Content/directory-list-2.3-medium.txt
-gobuster dir -u -w /usr/share/wordlists/seclists/Web-Content/big.txt
-gobuster dns -d -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
-gobuster dns -d -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-20000.txt
-gobuster vhost -u -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
+gobuster -h
+gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/common.txt
+gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/directory-list-2.3-medium.txt
+gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/big.txt
+gobuster dns -d example.com -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
+gobuster dns -d example.com -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-20000.txt
+gobuster vhost -u https://example.com -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
