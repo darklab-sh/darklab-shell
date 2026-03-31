@@ -284,8 +284,9 @@ def get_share(share_id):
 
 
 def _permalink_page(title, label, created, content_lines, json_url):
-    """Render a self-contained HTML page for a permalink."""
-    # Escape for embedding in a JS string
+    """Render a self-contained HTML page for a permalink.
+    content_lines can be a list of strings (single-run history) or
+    a list of {text, cls} objects (tab snapshots with class info)."""
     lines_json = json.dumps(content_lines)
     created_fmt = created[:19].replace("T", " ") + " UTC"
     html = f"""<!DOCTYPE html>
@@ -312,7 +313,7 @@ def _permalink_page(title, label, created, content_lines, json_url):
   header h1 {{ font-size: 14px; font-weight: 300; letter-spacing: 3px; color: var(--green);
                text-shadow: 0 0 16px var(--green-glow); }}
   .meta {{ font-size: 11px; color: var(--muted); }}
-  .actions {{ margin-left: auto; display: flex; gap: 8px; }}
+  .actions {{ margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }}
   .btn {{ background: transparent; border: 1px solid var(--border); color: var(--muted);
           font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
           cursor: pointer; text-decoration: none; transition: border-color .2s, color .2s; }}
@@ -323,6 +324,7 @@ def _permalink_page(title, label, created, content_lines, json_url):
   .line.exit-ok   {{ color: var(--green); font-weight: 700; margin-top: 8px; }}
   .line.exit-fail {{ color: var(--red);   font-weight: 700; margin-top: 8px; }}
   .line.notice    {{ color: #6ab0f5; font-style: italic; }}
+  .line.denied    {{ color: var(--amber); font-weight: 700; }}
   a {{ color: var(--green); }}
 </style>
 </head>
@@ -342,15 +344,24 @@ def _permalink_page(title, label, created, content_lines, json_url):
   const ansi_up = new AnsiUp();
   ansi_up.use_classes = false;
   const out = document.getElementById('output');
-  lines.forEach(text => {{
+  const plainClasses = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
+
+  lines.forEach(entry => {{
     const span = document.createElement('span');
-    span.className = 'line';
-    span.innerHTML = ansi_up.ansi_to_html(text);
+    // Support both plain strings (single-run history) and {{text, cls}} objects (snapshots)
+    const text = typeof entry === 'string' ? entry : entry.text;
+    const cls  = typeof entry === 'string' ? '' : (entry.cls || '');
+    span.className = 'line' + (cls ? ' ' + cls : '');
+    if (plainClasses.has(cls)) {{
+      span.textContent = text;
+    }} else {{
+      span.innerHTML = ansi_up.ansi_to_html(text);
+    }}
     out.appendChild(span);
   }});
 
   function saveTxt() {{
-    const text = lines.join('\\n');
+    const text = lines.map(e => typeof e === 'string' ? e : e.text).join('\\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], {{type: 'text/plain'}}));
     a.download = 'shell.darklab.sh-export.txt';

@@ -1056,7 +1056,7 @@
     });
     tabPanels.appendChild(panel);
 
-    tabs.push({ id, label, runId: null, exitCode: null });
+    tabs.push({ id, label, runId: null, exitCode: null, rawLines: [] });
     activateTab(id);
     return id;
   }
@@ -1098,6 +1098,8 @@
   function clearTab(id) {
     const out = getOutput(id);
     if (out) out.innerHTML = '';
+    const t = tabs.find(t => t.id === id);
+    if (t) t.rawLines = [];
     setTabStatus(id, 'idle');
     if (id === activeTabId) { setStatus('idle'); clearSearch(); }
   }
@@ -1117,18 +1119,14 @@
 
   function permalinkTab(id) {
     const t = tabs.find(t => t.id === id);
-    if (!t) return;
-    const out = getOutput(id);
-    if (!out || !out.querySelectorAll('.line').length) {
+    if (!t || !t.rawLines.length) {
       showToast('No output to share yet');
       return;
     }
-    // Collect all plain-text lines from the tab
-    const lines = Array.from(out.querySelectorAll('.line')).map(l => l.innerText);
     apiFetch('/share', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ label: t.label, content: lines })
+      body: JSON.stringify({ label: t.label, content: t.rawLines })
     }).then(r => r.json()).then(data => {
       const url = `${location.origin}${data.url}`;
       navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard'));
@@ -1170,6 +1168,9 @@
     }
     out.appendChild(span);
     out.scrollTop = out.scrollHeight;
+    // Store raw text (with original ANSI codes) for permalink colour preservation
+    const t = tabs.find(t => t.id === (tabId || activeTabId));
+    if (t) t.rawLines.push({ text, cls: cls || '' });
   }
 
   // ── Output Search ──
