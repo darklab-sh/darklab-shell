@@ -32,7 +32,7 @@ try:
     # Pass HOME=/tmp explicitly so nuclei (and other tools) use the tmpfs mount
     # for config/cache instead of /home/scanner which doesn't exist on the
     # read-only filesystem
-    SCANNER_PREFIX = ["sudo", "-u", "scanner", "env", "HOME=/tmp", "--"]
+    SCANNER_PREFIX = ["sudo", "-u", "scanner", "env", "HOME=/tmp"]
 except KeyError:
     pass  # scanner user doesn't exist — local dev, run directly
 
@@ -203,8 +203,7 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
     if re.match(r'^nuclei\b', stripped, re.IGNORECASE):
         if not re.search(r'-ud\b', stripped):
             rewritten = re.sub(r'^nuclei\b', 'nuclei -ud /tmp/nuclei-templates', stripped, flags=re.IGNORECASE)
-            notice = "Note: nuclei is using /tmp/nuclei-templates for template storage (tmpfs)."
-            return rewritten, notice
+            return rewritten, None  # silently rewritten — no notice needed
 
     # wapiti: force plain text output to stdout so results appear in the terminal
     # instead of being written to a report file in /tmp that users can't easily access
