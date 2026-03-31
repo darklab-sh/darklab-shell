@@ -192,24 +192,6 @@
   #run-btn:active:not(:disabled) { transform: scale(0.97); }
   #run-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-  #kill-btn {
-    background: transparent;
-    color: var(--red);
-    border: 1px solid var(--red);
-    border-radius: 4px;
-    padding: 0 16px;
-    font-family: var(--font-display);
-    font-size: 12px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    text-transform: uppercase;
-    cursor: pointer;
-    display: none;
-    transition: background 0.15s;
-  }
-
-  #kill-btn:hover { background: rgba(255,60,60,0.1); }
-
   /* Terminal */
   .terminal-wrap {
     flex: 1;
@@ -803,7 +785,7 @@
     #hamburger-btn { display: block; }
     .input-row { flex-wrap: wrap; }
     .input-row .prompt-wrap { min-width: 0; }
-    #run-btn, #kill-btn { padding: 0 14px; font-size: 12px; }
+    #run-btn { padding: 0 14px; font-size: 12px; }
     .hist-chip { max-width: 140px; }
     .tabs-bar { padding: 0 8px; }
     .tab { padding: 6px 8px; font-size: 10px; }
@@ -840,7 +822,6 @@
     <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
   </div>
   <button id="run-btn">Run</button>
-  <button id="kill-btn">■ Kill</button>
 </div>
 
 <div id="history-row" class="history-row" style="display:none">
@@ -882,6 +863,20 @@
 
 <!-- Permalink toast -->
 <div id="permalink-toast">Link copied to clipboard</div>
+
+<!-- Kill confirmation modal -->
+<div id="kill-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
+  <div id="kill-modal" style="background:#111;border:1px solid var(--red);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
+    <div style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px">
+      Kill the running process in this tab?<br>
+      <span style="color:var(--muted);font-size:11px">This sends SIGTERM to the entire process group.</span>
+    </div>
+    <div style="display:flex;gap:10px;justify-content:flex-end">
+      <button id="kill-cancel" class="term-action-btn">Cancel</button>
+      <button id="kill-confirm" style="background:var(--red);color:#fff;border:none;border-radius:4px;padding:6px 18px;font-family:var(--font-mono);font-size:12px;cursor:pointer">■ Kill</button>
+    </div>
+  </div>
+</div>
 
 <!-- FAQ Modal -->
 <div id="faq-overlay" onclick="closeFaq(event)">
@@ -941,7 +936,6 @@
   // ── DOM refs ──
   const cmdInput      = document.getElementById('cmd');
   const runBtn        = document.getElementById('run-btn');
-  const killBtn       = document.getElementById('kill-btn');
   const status        = document.getElementById('status');
   const histRow       = document.getElementById('history-row');
   const tabsBar       = document.getElementById('tabs-bar');
@@ -952,7 +946,6 @@
   const historyPanel  = document.getElementById('history-panel');
   const historyList   = document.getElementById('history-list');
 
-  let currentRunId = null;
   let cmdHistory   = [];
   let searchMatches = [];
   let searchMatchIdx = -1;
@@ -1047,6 +1040,7 @@
       <div class="terminal-body">
         <div class="output" id="output-${id}"></div>
         <div class="terminal-actions">
+          <button class="term-action-btn tab-kill-btn" data-action="kill" data-tab="${id}" style="display:none;color:var(--red);border-color:var(--red)">■ Kill</button>
           <button class="term-action-btn" data-action="permalink" data-tab="${id}">permalink</button>
           <button class="term-action-btn" data-action="save"      data-tab="${id}">save</button>
           <button class="term-action-btn" data-action="clear"     data-tab="${id}">clear</button>
@@ -1055,6 +1049,7 @@
     panel.querySelectorAll('[data-action]').forEach(btn => {
       btn.addEventListener('click', () => {
         const action = btn.dataset.action;
+        if (action === 'kill')      confirmKill(id);
         if (action === 'clear')     clearTab(id);
         if (action === 'save')      saveTab(id);
         if (action === 'permalink') permalinkTab(id);
@@ -1406,7 +1401,6 @@
 
   // ── Command history chips ──
   runBtn.addEventListener('click', runCommand);
-  killBtn.addEventListener('click', killCommand);
 
   function addToHistory(cmd) {
     cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, 8);
@@ -1427,17 +1421,66 @@
     });
   }
 
-  // ── Kill ──
-  function killCommand() {
-    if (currentRunId) {
-      apiFetch('/kill', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ run_id: currentRunId }) });
-      currentRunId = null;
+  // ── Per-tab kill button ──
+  function getTabKillBtn(tabId) {
+    return document.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`);
+  }
+
+  function showTabKillBtn(tabId) {
+    const btn = getTabKillBtn(tabId);
+    if (btn) btn.style.display = 'inline-block';
+  }
+
+  function hideTabKillBtn(tabId) {
+    const btn = getTabKillBtn(tabId);
+    if (btn) btn.style.display = 'none';
+  }
+
+  // ── Kill confirmation modal ──
+  let pendingKillTabId = null;
+  const killOverlay = document.getElementById('kill-overlay');
+
+  function confirmKill(tabId) {
+    pendingKillTabId = tabId;
+    killOverlay.style.display = 'flex';
+  }
+
+  document.getElementById('kill-cancel').addEventListener('click', () => {
+    killOverlay.style.display = 'none';
+    pendingKillTabId = null;
+  });
+
+  document.getElementById('kill-confirm').addEventListener('click', () => {
+    killOverlay.style.display = 'none';
+    if (pendingKillTabId) {
+      doKill(pendingKillTabId);
+      pendingKillTabId = null;
     }
-    appendLine('\n[killed by user]', 'exit-fail');
-    setStatus('fail');
-    setTabStatus(activeTabId, 'fail');
-    runBtn.disabled = false;
-    killBtn.style.display = 'none';
+  });
+
+  killOverlay.addEventListener('click', e => {
+    if (e.target === killOverlay) {
+      killOverlay.style.display = 'none';
+      pendingKillTabId = null;
+    }
+  });
+
+  function doKill(tabId) {
+    const t = tabs.find(t => t.id === tabId);
+    if (!t || !t.runId) return;
+    apiFetch('/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: t.runId })
+    });
+    t.runId = null;
+    appendLine('\n[killed by user]', 'exit-fail', tabId);
+    setTabStatus(tabId, 'fail');
+    hideTabKillBtn(tabId);
+    if (tabId === activeTabId) {
+      setStatus('fail');
+      runBtn.disabled = false;
+    }
   }
 
   // ── Helpers ──
@@ -1463,7 +1506,7 @@
     setStatus('running');
     setTabStatus(activeTabId, 'running');
     runBtn.disabled = true;
-    killBtn.style.display = 'inline-block';
+    showTabKillBtn(activeTabId);
 
     const tabId = activeTabId;
 
@@ -1476,13 +1519,13 @@
         return res.json().then(data => {
           appendLine('[denied] ' + (data.error || 'Command not allowed.'), 'denied', tabId);
           setStatus('fail'); setTabStatus(tabId, 'fail');
-          runBtn.disabled = false; killBtn.style.display = 'none';
+          runBtn.disabled = false; hideTabKillBtn(tabId);
         });
       }
       if (res.status === 429) {
         appendLine('[rate limited] Too many requests. Please wait a moment.', 'denied', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
-        runBtn.disabled = false; killBtn.style.display = 'none';
+        runBtn.disabled = false; hideTabKillBtn(tabId);
         return;
       }
 
@@ -1492,7 +1535,7 @@
 
       function read() {
         reader.read().then(({ done, value }) => {
-          if (done) { runBtn.disabled = false; killBtn.style.display = 'none'; return; }
+          if (done) { runBtn.disabled = false; hideTabKillBtn(tabId); return; }
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split('\n\n');
           buffer = parts.pop();
@@ -1501,7 +1544,6 @@
               try {
                 const msg = JSON.parse(part.slice(6));
                 if (msg.type === 'started') {
-                  currentRunId = msg.run_id;
                   const t = tabs.find(t => t.id === tabId);
                   if (t) t.runId = msg.run_id;
                 } else if (msg.type === 'notice') {
@@ -1511,22 +1553,24 @@
                     if (i < arr.length - 1 || line) appendLine(line, '', tabId);
                   });
                 } else if (msg.type === 'exit') {
-                  currentRunId = null;
                   const t = tabs.find(t => t.id === tabId);
-                  if (t) t.exitCode = msg.code;
+                  if (t) { t.exitCode = msg.code; t.runId = null; }
                   if (msg.code === 0) {
                     appendLine('\n[process exited with code 0]', 'exit-ok', tabId);
-                    setStatus('ok'); setTabStatus(tabId, 'ok');
+                    if (tabId === activeTabId) setStatus('ok');
+                    setTabStatus(tabId, 'ok');
                   } else {
                     appendLine('\n[process exited with code ' + msg.code + ']', 'exit-fail', tabId);
-                    setStatus('fail'); setTabStatus(tabId, 'fail');
+                    if (tabId === activeTabId) setStatus('fail');
+                    setTabStatus(tabId, 'fail');
                   }
-                  runBtn.disabled = false; killBtn.style.display = 'none';
+                  runBtn.disabled = false; hideTabKillBtn(tabId);
                   if (historyPanel.classList.contains('open')) refreshHistoryPanel();
                 } else if (msg.type === 'error') {
                   appendLine('\n[error] ' + msg.text, 'exit-fail', tabId);
-                  setStatus('fail'); setTabStatus(tabId, 'fail');
-                  runBtn.disabled = false; killBtn.style.display = 'none';
+                  if (tabId === activeTabId) setStatus('fail');
+                  setTabStatus(tabId, 'fail');
+                  runBtn.disabled = false; hideTabKillBtn(tabId);
                 }
               } catch(e) {}
             }
@@ -1537,8 +1581,9 @@
       read();
     }).catch(err => {
       appendLine('\n[fetch error] ' + err.message, 'exit-fail', tabId);
-      setStatus('fail'); setTabStatus(tabId, 'fail');
-      runBtn.disabled = false; killBtn.style.display = 'none';
+      if (tabId === activeTabId) setStatus('fail');
+      setTabStatus(tabId, 'fail');
+      runBtn.disabled = false; hideTabKillBtn(tabId);
     });
   }
 </script>
