@@ -8,25 +8,23 @@ RUN apt-get install -y  procps net-tools curl wget iputils-ping nmap dnsutils tr
                         mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl \
                         libxml-writer-perl libjson-perl golang-go rubygems ruby-dev build-essential
 
-# Install nuclei via Go and create symlink
+# Set GOBIN so all Go binaries install directly into /usr/local/bin,
+# world-executable and not owned by root's home directory
+ENV GOBIN=/usr/local/bin
+
+# Install nuclei
 RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
-RUN ln -s /root/go/bin/nuclei /usr/local/bin/nuclei
 
 # Install ProjectDiscovery suite via Go
-# Note: httpx is renamed to pd-httpx to avoid collision with the Python httpx library
-# (pulled in by wapiti3), which would otherwise shadow the Go binary
+# Note: httpx binary is renamed to pd-httpx to avoid collision with the Python
+# httpx library (pulled in by wapiti3) which would otherwise shadow the Go binary
 RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-RUN ln -s /root/go/bin/subfinder /usr/local/bin/subfinder
-
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest
-RUN ln -s /root/go/bin/httpx /usr/local/bin/pd-httpx
-
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest && \
+    mv /usr/local/bin/httpx /usr/local/bin/pd-httpx
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
-RUN ln -s /root/go/bin/dnsx /usr/local/bin/dnsx
 
-# Install gobuster via Go
+# Install gobuster
 RUN go install github.com/OJ/gobuster/v3@latest
-RUN ln -s /root/go/bin/gobuster /usr/local/bin/gobuster
 
 # Install wordlists for gobuster (selective clone — web content and DNS only, ~50MB vs 1.8GB for full SecLists)
 RUN mkdir -p /usr/share/wordlists && \
