@@ -7,7 +7,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ## Features
 
 - **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
-- **Kill running processes** — stop any command mid-execution with the Kill button; terminates the entire process group
+- **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
@@ -29,6 +29,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 .
 ├── docker-compose.yml
 ├── Dockerfile
+├── entrypoint.sh           # Container startup script — fixes /data ownership, drops to appuser
 ├── data/                   # Writable volume — SQLite database (auto-created)
 │   └── history.db          #   stores run history and tab snapshots
 └── app/
@@ -298,31 +299,38 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 
 ## Security & Process Isolation
 
-### Scanner user
+### Users
 
-All user-submitted commands run as the `scanner` system user, not as root. This is enforced via `os.setuid()` in the `preexec_fn` of every `subprocess.Popen` call — between `fork()` and `exec()`, the child process drops to the `scanner` user before the command executes.
+The container uses two unprivileged system users:
 
-The `scanner` user has no write access to `/data` (the SQLite volume), so commands cannot write files to persistent storage regardless of what flags are passed. Attempts to write there will get a permission denied error. `/tmp` remains writable via the tmpfs mount, so tools that need scratch space still work.
+- **`appuser`** — Gunicorn runs as this user. Owns `/data` with `chmod 700`, so it can read and write the SQLite database. Cannot write anywhere else in the read-only container
+- **`scanner`** — all user-submitted commands run as this user, enforced by prepending `sudo -u scanner --` to every `subprocess.Popen` call. Has no write access to `/data`, so commands cannot write files to persistent storage regardless of what flags are passed
 
-Gunicorn itself continues to run as root so it can write to `/data/history.db` and bind to the configured port.
+The container starts as root only long enough for `entrypoint.sh` to run `chown -R appuser:appuser /data` (correcting ownership after the Docker volume mount resets it), then immediately drops to `appuser` via `gosu` before starting Gunicorn. Neither `appuser` nor `scanner` has a login shell or password.
+
+### Kill and cross-user signalling
+
+Because commands run as `scanner` and Gunicorn runs as `appuser`, `appuser` cannot directly signal `scanner`-owned processes — Linux only allows signalling processes owned by the same user (unless root). The kill endpoint therefore uses `sudo -u scanner kill -TERM -<pgid>` to send SIGTERM to the process group as `scanner`, who owns the processes and has permission to signal them. The `appuser ALL=(scanner) NOPASSWD: ALL` sudoers rule covers this.
 
 ### nmap capabilities
 
-nmap requires raw socket access (`CAP_NET_RAW`, `CAP_NET_ADMIN`) for OS fingerprinting, SYN scans, and other advanced scan types. Rather than granting these capabilities to the `scanner` user broadly or running the container in privileged mode, they are applied directly to the nmap binary via Linux file capabilities:
+nmap requires raw socket access (`CAP_NET_RAW`, `CAP_NET_ADMIN`) for OS fingerprinting, SYN scans, and other advanced scan types. These are applied directly to the nmap binary via Linux file capabilities:
 
 ```
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
-This means any user who executes nmap — including the unprivileged `scanner` user — automatically receives those two capabilities for the duration of the nmap process only. No `--privileged` flag on Docker, no sudo, no extra flags in commands.
+Any user who executes nmap — including the unprivileged `scanner` user — automatically receives those two capabilities for the duration of the nmap process only. The `--privileged` flag is automatically injected into every nmap command by the app (the same way `--report-wide` is injected for mtr) so that nmap uses its full capability set. Users don't need to add it manually.
 
-The docker-compose file adds `NET_RAW` and `NET_ADMIN` to `cap_add` so the host kernel makes these capabilities available to the container. Without both the `setcap` on the binary and `cap_add` in compose, nmap would fall back to limited scan modes.
+The `docker-compose.yml` adds `NET_RAW` and `NET_ADMIN` to `cap_add` so the host kernel makes these capabilities available to the container.
+
+### Multi-worker kill via SQLite
 
 Gunicorn runs multiple worker processes to handle concurrent requests. This introduces a challenge: if Worker A starts a command and stores its PID, a kill request might be routed to Worker B which has no knowledge of that process.
 
 The naive solution — an in-memory dict — fails because each worker has its own isolated memory space. Python's `multiprocessing.Manager` was tried but proved unreliable after Gunicorn forks workers, with intermittent failures under load due to broken IPC socket connections.
 
-The solution is to use the existing SQLite database as the PID registry via the `active_procs` table. Since SQLite is already shared across all workers for run history, it's a natural fit. Any worker can register a PID on process start, and any other worker can look it up and call `os.killpg()` on a kill request — the OS doesn't care which process sends the signal. SQLite's file-level locking makes concurrent reads and writes safe with no additional synchronisation needed.
+The solution is to use the existing SQLite database as the PID registry via the `active_procs` table. Since SQLite is already shared across all workers for run history, it's a natural fit. Any worker can register a PID on process start, and any other worker can look it up and issue the `sudo kill` on a kill request. SQLite's file-level locking makes concurrent reads and writes safe with no additional synchronisation needed.
 
 ---
 
@@ -336,9 +344,11 @@ Click **⌕ search** in the header (or press **Ctrl+F** equivalent) to open the 
 
 Click **◑ theme** in the header to toggle between dark and light mode. Your preference is saved in `localStorage` and persists across sessions.
 
+### nmap
+
+nmap's `--privileged` flag is automatically injected into every nmap command, telling nmap to use raw socket access (which it has via file capabilities set in the Dockerfile). This enables OS fingerprinting, SYN scans, and other features that would otherwise require running as root. Users do not need to add `--privileged` manually.
+
 ---
-
-
 
 ## API Endpoints
 
@@ -366,4 +376,4 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 ## Requirements
 
 - Docker + Docker Compose, **or** Python 3.12+ with Flask and Gunicorn
-- Linux host (uses `os.setsid` / `os.killpg` for process group management)
+- Linux host (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
