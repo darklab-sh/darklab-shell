@@ -13,7 +13,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
 - **Run history** — side panel showing completed runs with timestamps and exit codes; load any past result into a new tab or copy a permalink. Persists across container restarts via SQLite
-- **Permalinks** — each completed run gets a shareable URL (`/history/<id>`) backed by SQLite; survives container restarts and recreations
+- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history panel link to individual run results. Both persist via SQLite
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation
 - **Command history** — recent commands shown as clickable chips for quick re-runs
 - **Save output** — download the terminal output as a timestamped `.txt` file
@@ -29,8 +29,8 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 .
 ├── docker-compose.yml
 ├── Dockerfile
-├── data/                   # Writable volume — SQLite run history database (auto-created)
-│   └── history.db
+├── data/                   # Writable volume — SQLite database (auto-created)
+│   └── history.db          #   stores run history and tab snapshots
 └── app/
     ├── app.py                  # Flask + Gunicorn backend
     ├── index.html              # Frontend (served by Flask)
@@ -179,7 +179,9 @@ Autocomplete suggestions are loaded from `auto_complete.txt` at page load and ma
 
 The file is fetched once on page load. To update suggestions, edit `auto_complete.txt` and reload the page — no server restart needed.
 
+---
 
+## Tool Notes
 
 ### mtr
 
@@ -219,15 +221,19 @@ Each command runs in its own tab. Tabs are created automatically when you run a 
 
 The **⧖ history** button opens a side panel showing the last 50 completed runs with timestamps and exit codes. From the panel you can load any past result into a new tab, or copy a permalink for sharing.
 
+On mobile, the search, history, theme, and FAQ buttons are accessible via the **☰** menu in the top-right corner of the header.
+
 ---
 
 ## Permalinks
 
-Every completed run is stored in a SQLite database (`./data/history.db`) and accessible at `/history/<run_id>` as a JSON response containing the command, timestamps, exit code, and full output. The **permalink** button on each tab and in the history panel copies the URL to your clipboard.
+There are two types of permalink:
 
-Run history persists across container restarts and recreations since the database lives in the `./data` volume mount on the host. The `/history` endpoint returns the 50 most recent runs; the database itself is unbounded and grows over time — you can manage it directly with any SQLite client if needed.
+**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI colour rendering, a "save .txt" button, a "view json" option, and a link back to the shell. This is the recommended way to share results.
 
-The `./data` directory is the only writable path in an otherwise read-only container. If the directory doesn't exist on the host, Docker will create it automatically on first run.
+**Single run** (`/history/<run_id>`) — the permalink button in the run history panel links to an individual run's output, also served as a styled HTML page.
+
+Both types persist across container restarts via the `./data` SQLite volume. The `./data` directory is the only writable path in an otherwise read-only container and is created automatically on first run.
 
 ---
 
@@ -245,16 +251,20 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 
 
 
+## API Endpoints
+
 | Method | Endpoint | Description |
 |--------|----------|-------------|
 | `GET` | `/` | Serves the web UI |
 | `GET` | `/favicon.ico` | Serves the site favicon |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
-| `GET` | `/history` | Returns last 50 completed runs as JSON |
-| `GET` | `/history/<run_id>` | Returns full output of a specific run (permalink) |
+| `GET` | `/history` | Returns last 50 completed runs for the current session as JSON |
+| `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run (`?json` for raw JSON) |
+| `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
 | `POST` | `/run` | Runs a command, streams output via SSE |
 | `POST` | `/kill` | Kills a running process by `run_id` |
+| `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
 
 ---
 

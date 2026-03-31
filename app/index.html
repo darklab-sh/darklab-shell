@@ -742,11 +742,59 @@
   }
   #hist-btn:hover, #search-toggle-btn:hover { border-color: var(--green-dim); color: var(--green); }
 
+  /* ── Hamburger / mobile menu ── */
+  #hamburger-btn {
+    display: none;
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--muted);
+    font-size: 16px;
+    padding: 4px 10px;
+    border-radius: 3px;
+    cursor: pointer;
+    transition: color 0.2s, border-color 0.2s;
+    margin-left: auto;
+  }
+  #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
+
+  #mobile-menu {
+    display: none;
+    flex-direction: column;
+    background: #111;
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    overflow: hidden;
+    position: absolute;
+    top: 56px;
+    right: 12px;
+    z-index: 300;
+    min-width: 160px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+  body.light #mobile-menu { background: #fff; }
+  #mobile-menu.open { display: flex; }
+  #mobile-menu button {
+    background: transparent;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 12px 16px;
+    text-align: left;
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+  }
+  #mobile-menu button:last-child { border-bottom: none; }
+  #mobile-menu button:hover { background: var(--green-glow); color: var(--green); }
+
   /* ── Mobile ── */
   @media (max-width: 600px) {
-    body { padding: 12px; gap: 12px; }
+    body { padding: 12px; gap: 12px; position: relative; }
     header h1 { font-size: 15px; letter-spacing: 2px; }
     header .version { display: none; }
+    .header-btns { display: none; }
+    #hamburger-btn { display: block; }
     .input-row { flex-wrap: wrap; }
     .input-row .prompt-wrap { min-width: 0; }
     #run-btn, #kill-btn { padding: 0 14px; font-size: 12px; }
@@ -754,7 +802,6 @@
     .tabs-bar { padding: 0 8px; }
     .tab { padding: 6px 8px; font-size: 10px; }
     .search-bar { flex-wrap: wrap; }
-    header #search-toggle-btn, header #hist-btn, header #theme-btn { display: none; }
   }
 </style>
 </head>
@@ -763,11 +810,22 @@
 <header>
   <h1>shell.darklab.sh</h1>
   <span class="version">v1.0 · real-time</span>
-  <button id="search-toggle-btn" title="Search output">⌕ search</button>
-  <button id="hist-btn" title="Run history">⧖ history</button>
-  <button id="theme-btn" title="Toggle theme">◑ theme</button>
-  <button id="faq-btn" onclick="openFaq()">? FAQ</button>
+  <div class="header-btns" id="header-btns">
+    <button id="search-toggle-btn" title="Search output">⌕ search</button>
+    <button id="hist-btn" title="Run history">⧖ history</button>
+    <button id="theme-btn" title="Toggle theme">◑ theme</button>
+    <button id="faq-btn" onclick="openFaq()">? FAQ</button>
+  </div>
+  <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
 </header>
+
+<!-- Mobile dropdown menu -->
+<div id="mobile-menu">
+  <button data-action="search">⌕ search</button>
+  <button data-action="history">⧖ history</button>
+  <button data-action="theme">◑ theme</button>
+  <button data-action="faq">? FAQ</button>
+</div>
 
 <div class="input-row">
   <div class="prompt-wrap">
@@ -851,8 +909,22 @@
       </div>
 
       <div class="faq-item">
+        <div class="faq-q">How do tabs and permalinks work?</div>
+        <div class="faq-a">
+          Each command runs in its own tab. You can open additional tabs with the <strong>+</strong> button and run different commands simultaneously. Each tab tracks its own status independently.<br><br>
+          The <strong>permalink</strong> button on each tab captures everything currently visible in that tab — all commands and their output — and saves it as a shareable page. The link opens a styled HTML view with ANSI colour rendering and options to save as .txt or view raw JSON. Permalinks survive container restarts.<br><br>
+          The <strong>⧖ history</strong> panel shows your last 50 runs. You can load any past result into a new tab, or copy a single-run permalink from there.
+        </div>
+      </div>
+
+      <div class="faq-item">
         <div class="faq-q">How do I stop a running command?</div>
         <div class="faq-a">Click the <strong style="color:var(--red)">■ Kill</strong> button that appears while a command is running. This sends SIGTERM to the entire process group on the server, stopping it immediately.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">How do I access search, history and theme on mobile?</div>
+        <div class="faq-a">On small screens the header buttons are replaced by a <strong>☰</strong> menu in the top-right corner. Tap it to access search, run history, theme toggle, and this FAQ.</div>
       </div>
 
     </div>
@@ -899,6 +971,43 @@
     });
     return fetch(url, options);
   }
+
+  // ── Hamburger menu ──
+  const hamburgerBtn = document.getElementById('hamburger-btn');
+  const mobileMenu   = document.getElementById('mobile-menu');
+
+  hamburgerBtn.addEventListener('click', e => {
+    e.stopPropagation();
+    mobileMenu.classList.toggle('open');
+  });
+
+  document.addEventListener('click', e => {
+    if (!mobileMenu.contains(e.target) && e.target !== hamburgerBtn) {
+      mobileMenu.classList.remove('open');
+    }
+  });
+
+  mobileMenu.querySelectorAll('button[data-action]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      mobileMenu.classList.remove('open');
+      const action = btn.dataset.action;
+      if (action === 'search') {
+        const visible = searchBar.style.display !== 'none';
+        searchBar.style.display = visible ? 'none' : 'flex';
+        if (!visible) { searchInput.focus(); runSearch(); } else clearSearch();
+      }
+      if (action === 'history') {
+        historyPanel.classList.toggle('open');
+        if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+      }
+      if (action === 'theme') {
+        document.body.classList.toggle('light');
+        localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+      }
+      if (action === 'faq') openFaq();
+    });
+  });
+
   const savedTheme = localStorage.getItem('theme');
   if (savedTheme === 'light') document.body.classList.add('light');
   document.getElementById('theme-btn').addEventListener('click', () => {
@@ -1008,9 +1117,22 @@
 
   function permalinkTab(id) {
     const t = tabs.find(t => t.id === id);
-    if (!t || !t.runId) return;
-    const url = `${location.origin}/history/${t.runId}`;
-    navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard'));
+    if (!t) return;
+    const out = getOutput(id);
+    if (!out || !out.querySelectorAll('.line').length) {
+      showToast('No output to share yet');
+      return;
+    }
+    // Collect all plain-text lines from the tab
+    const lines = Array.from(out.querySelectorAll('.line')).map(l => l.innerText);
+    apiFetch('/share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ label: t.label, content: lines })
+    }).then(r => r.json()).then(data => {
+      const url = `${location.origin}${data.url}`;
+      navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard'));
+    }).catch(() => showToast('Failed to create permalink'));
   }
 
   function showToast(msg) {

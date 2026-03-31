@@ -52,7 +52,7 @@ def db_connect():
 
 
 def db_init():
-    """Create the runs table if it doesn't exist."""
+    """Create the runs and snapshots tables if they don't exist."""
     with db_connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -63,6 +63,15 @@ def db_init():
                 finished   TEXT,
                 exit_code  INTEGER,
                 output     TEXT
+            )
+        """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS snapshots (
+                id         TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                label      TEXT NOT NULL,
+                created    TEXT NOT NULL,
+                content    TEXT NOT NULL
             )
         """)
         # Add session_id column to existing databases that predate this feature
@@ -212,14 +221,146 @@ def get_history():
 
 @app.route("/history/<run_id>")
 def get_run(run_id):
-    """Return the full output of a specific completed run by ID (permalink)."""
+    """Serve a styled HTML permalink page for a single run, or JSON if ?json is passed."""
     with db_connect() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
-        return jsonify({"error": "Run not found"}), 404
+        return "Run not found", 404
     run = dict(row)
     run["output"] = json.loads(run["output"]) if run["output"] else []
-    return jsonify(run)
+
+    if "json" in request.args:
+        return jsonify(run)
+
+    output_html = "\n".join(run["output"])
+    return _permalink_page(
+        title=f"$ {run['command']}",
+        label=run["command"],
+        created=run["started"],
+        content_lines=run["output"],
+        json_url=f"/history/{run_id}?json",
+    )
+
+
+@app.route("/share", methods=["POST"])
+def save_share():
+    """Save a tab snapshot (all output from a tab) for sharing via permalink."""
+    data = request.get_json()
+    label = data.get("label", "untitled").strip()
+    content = data.get("content", [])  # list of plain-text lines
+    session_id = get_session_id()
+    share_id = str(uuid.uuid4())
+    created = datetime.now(timezone.utc).isoformat()
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+            (share_id, session_id, label, created, json.dumps(content))
+        )
+        conn.commit()
+    return jsonify({"id": share_id, "url": f"/share/{share_id}"})
+
+
+@app.route("/share/<share_id>")
+def get_share(share_id):
+    """Serve a styled HTML permalink page for a full tab snapshot."""
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM snapshots WHERE id = ?", (share_id,)).fetchone()
+    if not row:
+        return "Snapshot not found", 404
+    snap = dict(row)
+    content_lines = json.loads(snap["content"]) if snap["content"] else []
+
+    if "json" in request.args:
+        snap["content"] = content_lines
+        return jsonify(snap)
+
+    return _permalink_page(
+        title=snap["label"],
+        label=snap["label"],
+        created=snap["created"],
+        content_lines=content_lines,
+        json_url=f"/share/{share_id}?json",
+    )
+
+
+def _permalink_page(title, label, created, content_lines, json_url):
+    """Render a self-contained HTML page for a permalink."""
+    # Escape for embedding in a JS string
+    lines_json = json.dumps(content_lines)
+    created_fmt = created[:19].replace("T", " ") + " UTC"
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>shell.darklab.sh — {title}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js"></script>
+<style>
+  :root {{
+    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e;
+    --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
+    --amber: #ffb800; --red: #ff3c3c; --muted: #606060; --text: #e0e0e0;
+    --font: 'JetBrains Mono', monospace;
+  }}
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: var(--bg); color: var(--text); font-family: var(--font);
+          font-size: 13px; display: flex; flex-direction: column; min-height: 100vh; }}
+  header {{ display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+            border-bottom: 1px solid var(--border); background: #111; flex-wrap: wrap; }}
+  header h1 {{ font-size: 14px; font-weight: 300; letter-spacing: 3px; color: var(--green);
+               text-shadow: 0 0 16px var(--green-glow); }}
+  .meta {{ font-size: 11px; color: var(--muted); }}
+  .actions {{ margin-left: auto; display: flex; gap: 8px; }}
+  .btn {{ background: transparent; border: 1px solid var(--border); color: var(--muted);
+          font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
+          cursor: pointer; text-decoration: none; transition: border-color .2s, color .2s; }}
+  .btn:hover {{ border-color: var(--green-dim); color: var(--green); }}
+  #output {{ flex: 1; padding: 20px; line-height: 1.65; white-space: pre-wrap;
+             word-break: break-all; overflow-y: auto; }}
+  .line {{ display: block; }}
+  .line.exit-ok   {{ color: var(--green); font-weight: 700; margin-top: 8px; }}
+  .line.exit-fail {{ color: var(--red);   font-weight: 700; margin-top: 8px; }}
+  .line.notice    {{ color: #6ab0f5; font-style: italic; }}
+  a {{ color: var(--green); }}
+</style>
+</head>
+<body>
+<header>
+  <h1>shell.darklab.sh</h1>
+  <div class="meta">{created_fmt}</div>
+  <div class="actions">
+    <a class="btn" href="{json_url}">view json</a>
+    <button class="btn" onclick="saveTxt()">save .txt</button>
+    <a class="btn" href="/">← back to shell</a>
+  </div>
+</header>
+<div id="output"></div>
+<script>
+  const lines = {lines_json};
+  const ansi_up = new AnsiUp();
+  ansi_up.use_classes = false;
+  const out = document.getElementById('output');
+  lines.forEach(text => {{
+    const span = document.createElement('span');
+    span.className = 'line';
+    span.innerHTML = ansi_up.ansi_to_html(text);
+    out.appendChild(span);
+  }});
+
+  function saveTxt() {{
+    const text = lines.join('\\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([text], {{type: 'text/plain'}}));
+    a.download = 'shell.darklab.sh-export.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }}
+</script>
+</body>
+</html>"""
+    return Response(html, mimetype="text/html")
 
 
 @app.route("/run", methods=["POST"])
