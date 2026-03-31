@@ -1500,6 +1500,13 @@
       return;
     }
 
+    if (/(?<![\w:\/])\/data\b/.test(cmd) || /(?<![\w:\/])\/tmp\b/.test(cmd)) {
+      appendLine('\n$ ' + cmd + '\n', '');
+      appendLine('[denied] Access to /data and /tmp is not permitted.', 'denied');
+      setStatus('fail');
+      return;
+    }
+
     addToHistory(cmd);
     setTabLabel(activeTabId, cmd);
     appendLine('\n$ ' + cmd + '\n', '');

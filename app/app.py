@@ -163,7 +163,7 @@ def split_chained_commands(command: str) -> list[str]:
 
 def is_command_allowed(command: str) -> tuple[bool, str]:
     """Return (allowed, reason). Blocks if any chained segment isn't on the allowlist,
-    or if the raw input contains shell operators when restrictions are active."""
+    or if the raw input contains shell operators or references to protected paths."""
     allowed = load_allowed_commands()
     if allowed is None:
         return True, ""  # no file or empty file = unrestricted
@@ -171,6 +171,14 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
     # Block shell chaining/redirection operators outright when restrictions are active
     if SHELL_CHAIN_RE.search(command):
         return False, "Shell operators (&&, |, ;, >, etc.) are not permitted."
+
+    # Block any attempt to reference /data or /tmp as filesystem path arguments.
+    # Uses negative lookbehind to avoid blocking URLs containing these as path segments
+    # (e.g. https://example.com/data/ or https://example.com/tmp/)
+    if re.search(r'(?<![\w:/])/data\b', command):
+        return False, "Access to /data is not permitted."
+    if re.search(r'(?<![\w:/])/tmp\b', command):
+        return False, "Access to /tmp is not permitted."
 
     cmd_lower = command.strip().lower()
     if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")
