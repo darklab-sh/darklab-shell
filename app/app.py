@@ -29,7 +29,10 @@ app = Flask(__name__)
 SCANNER_PREFIX = []
 try:
     pwd.getpwnam("scanner")
-    SCANNER_PREFIX = ["sudo", "-u", "scanner", "--"]
+    # Pass HOME=/tmp explicitly so nuclei (and other tools) use the tmpfs mount
+    # for config/cache instead of /home/scanner which doesn't exist on the
+    # read-only filesystem
+    SCANNER_PREFIX = ["sudo", "-u", "scanner", "env", "HOME=/tmp", "--"]
 except KeyError:
     pass  # scanner user doesn't exist — local dev, run directly
 
