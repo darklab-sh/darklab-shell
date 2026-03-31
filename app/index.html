@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>darklab.sh - shell</title>
+<title>shell.darklab.sh</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
@@ -474,7 +474,7 @@
 <body>
 
 <header>
-  <h1>darklab.sh — shell</h1>
+  <h1>shell.darklab.sh</h1>
   <span class="version">v1.0 · real-time</span>
   <button id="faq-btn" onclick="openFaq()">? FAQ</button>
 </header>
@@ -521,7 +521,7 @@
 
       <div class="faq-item">
         <div class="faq-q">What is this?</div>
-        <div class="faq-a">darklab.sh — shell is a lightweight web interface for running network diagnostic and vulnerability scanning commands against remote endpoints, with output streamed in real time. It's designed for testing and troubleshooting remote hosts — things like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability scans — without needing SSH access to a server. For more detailed information, see the <a href="https://gitlab.com/darklab.sh/shell.darklab.sh" target="_blank" rel="noopener" style="color:var(--green)">README on GitLab</a>.</div>
+        <div class="faq-a">shell.darklab.sh is a lightweight web interface for running network diagnostic and vulnerability scanning commands against remote endpoints, with output streamed in real time. It's designed for testing and troubleshooting remote hosts — things like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability scans — without needing SSH access to a server. For more detailed information, see the <a href="https://gitlab.com/darklab.sh/shell.darklab.sh" target="_blank" rel="noopener" style="color:var(--green)">README on GitLab</a>.</div>
       </div>
 
       <div class="faq-item">
@@ -735,7 +735,7 @@
     // innerText gives the visible text content, stripping any HTML spans ansi_up injected
     const text = Array.from(lines).map(l => l.innerText).join('\n');
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    const filename = `darklab-shell-${ts}.txt`;
+    const filename = `shell.darklab.sh-${ts}.txt`;
     const blob = new Blob([text], { type: 'text/plain' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
