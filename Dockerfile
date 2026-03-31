@@ -1,8 +1,12 @@
 FROM python:3.12-slim
 
-# Install dependencies and tools
+# Ensure all packages are up to date and install dependencies and tools
 RUN apt-get update
-RUN apt-get install -y procps net-tools curl wget iputils-ping nmap dnsutils traceroute mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl libxml-writer-perl libjson-perl golang-go
+RUN apt-get upgrade -y
+
+RUN apt-get install -y  procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
+                        mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl build-essential \
+                        libxml-writer-perl libjson-perl golang-go rubygems ruby-dev
 
 # Install nuclei via Go and create symlink
 RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
@@ -23,6 +27,9 @@ RUN pip install --upgrade pip
 
 # Install wapiti3 via pip
 RUN pip install wapiti3
+
+# Install wpscan via ruby gems
+RUN gem install wpscan
 
 # Install required Python dependencies from requirements.txt
 WORKDIR /app

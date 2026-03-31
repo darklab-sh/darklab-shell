@@ -1,0 +1,138 @@
+# Auto-complete Suggestions
+# --------------------------
+# One suggestion per line. Lines starting with # are ignored.
+# These appear as you type in the command box.
+# Tab completes the highlighted suggestion. Arrow keys navigate the list.
+
+# ping
+ping -c 4
+ping -c 10
+ping -i 0.5 -c 20
+
+# dig
+dig A
+dig MX
+dig TXT
+dig NS
+dig AAAA
+dig ANY
+dig +short A
+dig +short MX
+dig @8.8.8.8 A
+dig +trace A
+dig AXFR @
+
+# nslookup
+nslookup -type=A
+nslookup -type=MX
+nslookup -type=TXT
+nslookup -type=NS
+
+# host
+host -t A
+host -t MX
+host -t TXT
+host -t NS
+
+# whois
+whois
+
+# traceroute
+traceroute
+traceroute -n
+traceroute -m 30
+
+# tcptraceroute
+tcptraceroute
+tcptraceroute -n
+
+# mtr (auto-rewritten to --report-wide if no report flag given)
+mtr
+mtr -c 20
+mtr -n
+mtr -n -c 20
+
+# curl
+curl -I
+curl -v
+curl -L
+curl -o /dev/null -s -w "%{http_code}"
+curl --resolve : :
+curl -H "User-Agent: Mozilla/5.0"
+curl -k
+curl --max-time 10
+
+# wget
+wget -q -O /dev/null --server-response
+wget --spider
+
+# nmap
+nmap -sT
+nmap -sT -p 80,443
+nmap -sT -p 1-1000
+nmap -sT -p-
+nmap -sV -sT
+nmap -A -sT
+nmap -sT --script http-headers
+nmap -sT --script ssl-cert
+nmap -sT --script ssl-enum-ciphers
+nmap -sT --script vuln
+nmap -sT --script http-title
+nmap -Pn -sT
+nmap -6 -sT
+
+# testssl
+testssl
+testssl --fast
+testssl --severity HIGH
+testssl --full
+testssl --sneaky
+testssl -p
+testssl --heartbleed
+testssl --poodle
+testssl --beast
+
+# dnsrecon
+dnsrecon -d
+dnsrecon -d -t std
+dnsrecon -d -t axfr
+dnsrecon -d -t brt
+dnsrecon -d -t srv
+dnsrecon -d -t zonewalk
+dnsrecon -d -t mx
+
+# nikto
+nikto -h
+nikto -h -p 443 -ssl
+nikto -h -p 8080
+nikto -h -Tuning 1
+nikto -h -Tuning 4
+nikto -h -maxtime 120
+
+# wapiti
+wapiti -u
+wapiti -u --scope url
+wapiti -u --scope domain
+wapiti -u -m xss,sql
+wapiti -u --max-scan-time 120
+
+# wpscan
+wpscan --url
+wpscan --url --enumerate p
+wpscan --url --enumerate u
+wpscan --url --enumerate t
+wpscan --url --enumerate vp
+wpscan --url --enumerate ap
+wpscan --url --detection-mode aggressive
+wpscan --url --force
+
+# nuclei (auto-uses /tmp/nuclei-templates via -ud flag)
+nuclei -u
+nuclei -u -t http/
+nuclei -u -t ssl/
+nuclei -u -t dns/
+nuclei -u -t network/
+nuclei -u -severity low,medium,high,critical
+nuclei -u -severity high,critical
+nuclei -u -as
+nuclei -list

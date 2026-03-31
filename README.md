@@ -1,6 +1,6 @@
-# darklab.sh — shell
+# shell.darklab.sh
 
-A lightweight web interface for running network diagnostic commands against remote endpoints, with output streamed in real time. Designed for testing and troubleshooting remote hosts — DNS lookups, port scans, traceroutes, HTTP checks, and more — without needing SSH access to a server. Built with Python and Flask, designed to run in Docker.
+A lightweight web interface for running network diagnostic and vulnerability scanning commands against remote endpoints, with output streamed in real time. Designed for testing and troubleshooting remote hosts — DNS lookups, port scans, traceroutes, HTTP checks, web app scanning, and more — without needing SSH access to a server. Built with Python and Flask, designed to run in Docker.
 
 ---
 
@@ -10,6 +10,7 @@ A lightweight web interface for running network diagnostic commands against remo
 - **Kill running processes** — stop any command mid-execution with the Kill button; terminates the entire process group
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), both client-side and server-side
+- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
 - **Command history** — recent commands shown as clickable chips for quick re-runs
 - **Save output** — download the terminal output as a timestamped `.txt` file
 - **FAQ modal** — built-in help including allowed commands and usage notes
@@ -123,6 +124,7 @@ The following tools are installed in the Docker image and available for use:
 | `dnsrecon` | DNS enumeration and zone transfer testing |
 | `nikto` | Web server vulnerability scanning |
 | `wapiti` | Web application vulnerability scanning |
+| `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Fast CVE/misconfiguration scanner using community templates (templates stored in `/tmp` via tmpfs) |
 
 ---

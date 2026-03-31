@@ -98,11 +98,49 @@
     border-radius: 4px;
     padding: 0 14px;
     transition: border-color 0.2s, box-shadow 0.2s;
+    position: relative;
   }
 
   .prompt-wrap:focus-within {
     border-color: var(--green-dim);
     box-shadow: 0 0 0 3px var(--green-glow);
+  }
+
+  /* Autocomplete dropdown */
+  .ac-dropdown {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: #111;
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    z-index: 150;
+    max-height: 220px;
+    overflow-y: auto;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+  }
+
+  .ac-item {
+    padding: 7px 14px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: #aaa;
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    transition: background 0.1s, color 0.1s;
+  }
+
+  .ac-item:hover, .ac-item.ac-active {
+    background: var(--green-glow);
+    color: var(--green);
+  }
+
+  .ac-item .ac-match {
+    color: var(--green);
+    font-weight: 700;
   }
 
   .prompt-prefix {
@@ -444,7 +482,8 @@
 <div class="input-row">
   <div class="prompt-wrap">
     <span class="prompt-prefix">$</span>
-    <input id="cmd" type="text" placeholder="Enter bash command…" autocomplete="off" spellcheck="false">
+    <input id="cmd" type="text" placeholder="Enter bash command…" autocomplete="off" spellcheck="false" autofocus>
+    <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
   </div>
   <button id="run-btn">Run</button>
   <button id="kill-btn">■ Kill</button>
@@ -482,7 +521,7 @@
 
       <div class="faq-item">
         <div class="faq-q">What is this?</div>
-        <div class="faq-a">darklab.sh — shell is a lightweight web interface for running network diagnostic and reachability commands against remote endpoints, with output streamed in real time. It's designed for testing and troubleshooting remote hosts — things like DNS lookups, port scans, traceroutes, and HTTP checks — without needing SSH access to a server.</div>
+        <div class="faq-a">darklab.sh — shell is a lightweight web interface for running network diagnostic and vulnerability scanning commands against remote endpoints, with output streamed in real time. It's designed for testing and troubleshooting remote hosts — things like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability scans — without needing SSH access to a server. For more detailed information, see the <a href="https://gitlab.com/darklab.sh/shell.darklab.sh" target="_blank" rel="noopener" style="color:var(--green)">README on GitLab</a>.</div>
       </div>
 
       <div class="faq-item">
@@ -493,11 +532,13 @@
       <div class="faq-item">
         <div class="faq-q">Why does mtr look different here?</div>
         <div class="faq-a">
-          <code>mtr</code> normally runs as a live, full-screen interactive display that continuously updates in place. This requires a real terminal (TTY), which is not available in a web-based shell.<br><br>
-          To work around this, <code>mtr</code> is automatically run in <code>--report-wide</code> mode, which performs 10 probe cycles and then prints a clean summary table. You'll see a blue notice in the output whenever this rewrite happens.<br><br>
-          You can control the number of cycles with <code>-c</code>:<br>
-          <code class="faq-example">mtr -c 20 google.com</code>
+          <code>mtr</code> requires a real terminal (TTY) for its live interactive display, which isn't available in a web shell. It's automatically run in <code>--report-wide</code> mode instead, which runs 10 probe cycles and prints a summary table. You can control the cycle count with <code>-c</code>, e.g. <code class="faq-example">mtr -c 20 google.com</code>
         </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Can I request a new tool?</div>
+        <div class="faq-a">Yes! If there's a tool you'd like added, send a request to <strong>admin [at] darklab [dot] sh</strong> and we'll consider it for a future update.</div>
       </div>
 
       <div class="faq-item">
@@ -551,8 +592,111 @@
     }
   });
 
+  // --- Autocomplete ---
+  let acSuggestions = [];
+  let acFiltered = [];
+  let acIndex = -1;
+  const acDropdown = document.getElementById('ac-dropdown');
+
+  fetch('/autocomplete').then(r => r.json()).then(data => {
+    acSuggestions = data.suggestions || [];
+  });
+
+  function acShow(items) {
+    acDropdown.innerHTML = '';
+    if (!items.length) { acDropdown.style.display = 'none'; return; }
+    items.forEach((s, i) => {
+      const div = document.createElement('div');
+      div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '');
+      // Bold the matched portion
+      const val = cmdInput.value;
+      const idx = s.toLowerCase().indexOf(val.toLowerCase());
+      if (idx >= 0 && val) {
+        div.innerHTML = escapeHtml(s.slice(0, idx))
+          + '<span class="ac-match">' + escapeHtml(s.slice(idx, idx + val.length)) + '</span>'
+          + escapeHtml(s.slice(idx + val.length));
+      } else {
+        div.textContent = s;
+      }
+      div.addEventListener('mousedown', e => {
+        e.preventDefault();
+        acAccept(s);
+      });
+      acDropdown.appendChild(div);
+    });
+    acDropdown.style.display = 'block';
+  }
+
+  function acHide() {
+    acDropdown.style.display = 'none';
+    acIndex = -1;
+  }
+
+  function acAccept(s) {
+    cmdInput.value = s;
+    acHide();
+    cmdInput.focus();
+  }
+
+  function escapeHtml(t) {
+    return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  }
+
+  cmdInput.addEventListener('input', () => {
+    const val = cmdInput.value;
+    acIndex = -1;
+    if (!val.trim()) { acHide(); return; }
+    acFiltered = acSuggestions.filter(s =>
+      s.toLowerCase().includes(val.toLowerCase())
+    ).slice(0, 12);
+    acShow(acFiltered);
+  });
+
   cmdInput.addEventListener('keydown', e => {
-    if (e.key === 'Enter') runCommand();
+    if (e.key === 'Enter') {
+      if (acIndex >= 0 && acFiltered[acIndex]) {
+        e.preventDefault();
+        acAccept(acFiltered[acIndex]);
+      } else {
+        acHide();
+        runCommand();
+      }
+      return;
+    }
+    if (e.key === 'Tab') {
+      e.preventDefault();
+      if (acFiltered.length === 1) {
+        acAccept(acFiltered[0]);
+      } else if (acIndex >= 0 && acFiltered[acIndex]) {
+        acAccept(acFiltered[acIndex]);
+      } else if (acFiltered.length > 0) {
+        acIndex = 0;
+        acShow(acFiltered);
+      }
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (!acFiltered.length) return;
+      acIndex = Math.min(acIndex + 1, acFiltered.length - 1);
+      acShow(acFiltered);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      if (!acFiltered.length) return;
+      acIndex = Math.max(acIndex - 1, -1);
+      acShow(acFiltered);
+      return;
+    }
+    if (e.key === 'Escape') {
+      acHide();
+      return;
+    }
+  });
+
+  document.addEventListener('click', e => {
+    if (!e.target.closest('.prompt-wrap')) acHide();
   });
 
   runBtn.addEventListener('click', runCommand);

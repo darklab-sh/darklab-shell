@@ -18,6 +18,7 @@ app = Flask(__name__)
 
 HTML = open(os.path.join(os.path.dirname(__file__), "index.html")).read()
 ALLOWED_COMMANDS_FILE = os.path.join(os.path.dirname(__file__), "allowed_commands.txt")
+AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "auto_complete.txt")
 
 # Active processes keyed by run ID
 active_procs = {}
@@ -108,6 +109,20 @@ def allowed_commands():
     if prefixes is None:
         return jsonify({"restricted": False, "commands": []})
     return jsonify({"restricted": True, "commands": prefixes})
+
+
+@app.route("/autocomplete")
+def autocomplete():
+    """Return the list of autocomplete suggestions from auto_complete.txt."""
+    if not os.path.exists(AUTOCOMPLETE_FILE):
+        return jsonify({"suggestions": []})
+    suggestions = []
+    with open(AUTOCOMPLETE_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                suggestions.append(line)
+    return jsonify({"suggestions": suggestions})
 
 
 @app.route("/run", methods=["POST"])
