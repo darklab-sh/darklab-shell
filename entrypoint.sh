@@ -9,4 +9,10 @@ chmod 700 /data 2>/dev/null || true
 # (nuclei templates, wapiti sessions, etc.) to the tmpfs mount
 chmod 1777 /tmp 2>/dev/null || true
 
+# Pre-create config/cache dirs owned by scanner so tools don't try to create
+# them as root. Covers nuclei, uncover, and other tools that write to ~/.config
+mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
+chown -R scanner:scanner /tmp/.config /tmp/.cache
+chmod -R 755 /tmp/.config /tmp/.cache
+
 exec gosu appuser gunicorn --bind 0.0.0.0:8888 --workers 4 --threads 4 --timeout 3600 --control-socket /tmp/.gunicorn app:app
