@@ -17,15 +17,8 @@ import signal
 import sqlite3
 import uuid
 from datetime import datetime, timezone
-from multiprocessing import Manager
 
 app = Flask(__name__)
-
-# Shared dict across all Gunicorn workers — stores run_id → pid so any worker
-# can kill a process it didn't start. Uses multiprocessing.Manager which runs
-# a small background server process to synchronise the dict across workers.
-_manager = Manager()
-active_pids = _manager.dict()  # run_id → pid (integer, safe to share)
 
 # Rate limiting — reads real client IP from X-Forwarded-For set by nginx-proxy
 def get_client_ip():
@@ -55,7 +48,7 @@ def db_connect():
 
 
 def db_init():
-    """Create the runs and snapshots tables if they don't exist."""
+    """Create the runs, snapshots, and active_procs tables if they don't exist."""
     with db_connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -77,23 +70,47 @@ def db_init():
                 content    TEXT NOT NULL
             )
         """)
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS active_procs (
+                run_id TEXT PRIMARY KEY,
+                pid    INTEGER NOT NULL
+            )
+        """)
         # Add session_id column to existing databases that predate this feature
         try:
             conn.execute("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass  # Column already exists
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
+        # Clear any stale PIDs left over from a previous crash/restart
+        conn.execute("DELETE FROM active_procs")
         conn.commit()
 
 
 db_init()
 
+
+def pid_register(run_id, pid):
+    """Register an active process PID — visible to all Gunicorn workers via SQLite."""
+    with db_connect() as conn:
+        conn.execute("INSERT OR REPLACE INTO active_procs (run_id, pid) VALUES (?, ?)", (run_id, pid))
+        conn.commit()
+
+
+def pid_pop(run_id):
+    """Remove and return the PID for a run_id, or None if not found."""
+    with db_connect() as conn:
+        row = conn.execute("SELECT pid FROM active_procs WHERE run_id = ?", (run_id,)).fetchone()
+        if row:
+            conn.execute("DELETE FROM active_procs WHERE run_id = ?", (run_id,))
+            conn.commit()
+            return row["pid"]
+    return None
+
+
 HTML = open(os.path.join(os.path.dirname(__file__), "index.html")).read()
 ALLOWED_COMMANDS_FILE = os.path.join(os.path.dirname(__file__), "allowed_commands.txt")
 AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "auto_complete.txt")
-
-# Active processes keyed by run ID
-active_procs = {}
 
 
 def load_allowed_commands():
@@ -413,7 +430,7 @@ def run_command():
                 # New process group so we can kill the whole tree
                 preexec_fn=os.setsid,
             )
-            active_pids[run_id] = proc.pid
+            pid_register(run_id, proc.pid)
 
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
@@ -465,7 +482,7 @@ def run_command():
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         finally:
-            active_pids.pop(run_id, None)
+            pid_pop(run_id)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -474,7 +491,7 @@ def run_command():
 def kill_command():
     data = request.get_json()
     run_id = data.get("run_id", "")
-    pid = active_pids.pop(run_id, None)
+    pid = pid_pop(run_id)
     if not pid:
         return jsonify({"error": "No such process"}), 404
     try:

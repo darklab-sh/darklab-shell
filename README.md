@@ -239,7 +239,7 @@ Both types persist across container restarts via the `./data` SQLite volume. The
 
 ## Database
 
-Run history and tab snapshots are stored in a SQLite database at `./data/history.db`. The database is created automatically on first run and persists across container restarts and recreations.
+Run history, tab snapshots, and active process tracking are stored in a SQLite database at `./data/history.db`. The database is created automatically on first run and persists across container restarts and recreations.
 
 ### Schema
 
@@ -265,6 +265,15 @@ Run history and tab snapshots are stored in a SQLite database at `./data/history
 | `created` | TEXT | ISO 8601 timestamp |
 | `content` | TEXT | JSON array of `{"text": "...", "cls": "..."}` objects representing every line visible in the tab, including ANSI escape codes for colour reproduction |
 
+**`active_procs` table** — transient table tracking currently running processes:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `run_id` | TEXT (UUID) | Primary key, matches the `run_id` sent to the browser via SSE |
+| `pid` | INTEGER | OS process group ID — used by the `/kill` endpoint to send SIGTERM |
+
+This table is cleared on every startup to remove any stale rows left by a previous crash. Rows are inserted when a command starts and deleted when it exits or is killed. See the Multi-Worker Kill section below for why this lives in SQLite rather than in memory.
+
 ### Retention
 
 The history panel UI shows the **50 most recent runs per session**, but the database itself has **no row limit** — every run and snapshot is kept indefinitely. Permalinks will work for as long as the database file exists regardless of how many newer runs have been added since.
@@ -275,12 +284,25 @@ To inspect or manage the database directly:
 # Row counts
 sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM snapshots;"
 
+# Check currently running processes
+sqlite3 data/history.db "SELECT * FROM active_procs;"
+
 # Delete runs older than 90 days
 sqlite3 data/history.db "DELETE FROM runs WHERE started < datetime('now', '-90 days');"
 
 # Delete all snapshots
 sqlite3 data/history.db "DELETE FROM snapshots;"
 ```
+
+---
+
+## Multi-Worker Setup & Process Killing
+
+Gunicorn runs multiple worker processes to handle concurrent requests. This introduces a challenge: if Worker A starts a command and stores its PID, a kill request might be routed to Worker B which has no knowledge of that process.
+
+The naive solution — an in-memory dict — fails because each worker has its own isolated memory space. Python's `multiprocessing.Manager` was tried but proved unreliable after Gunicorn forks workers, with intermittent failures under load due to broken IPC socket connections.
+
+The solution is to use the existing SQLite database as the PID registry via the `active_procs` table. Since SQLite is already shared across all workers for run history, it's a natural fit. Any worker can register a PID on process start, and any other worker can look it up and call `os.killpg()` on a kill request — the OS doesn't care which process sends the signal. SQLite's file-level locking makes concurrent reads and writes safe with no additional synchronisation needed.
 
 ---
 
