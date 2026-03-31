@@ -31,3 +31,9 @@ wapiti
 # nuclei uses /tmp for templates and cache (tmpfs mount via docker-compose)
 nuclei
 wpscan
+# ProjectDiscovery suite
+subfinder
+# pd-httpx is the ProjectDiscovery httpx tool (renamed to avoid conflict with Python httpx)
+pd-httpx
+dnsx
+gobuster

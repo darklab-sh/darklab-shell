@@ -11,8 +11,14 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
+- **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
+- **Run history** — side panel showing completed runs with timestamps and exit codes; load any past result into a new tab or copy a permalink. Persists across container restarts via SQLite
+- **Permalinks** — each completed run gets a shareable URL (`/history/<id>`) backed by SQLite; survives container restarts and recreations
+- **Output search** — search within the active tab's output with match highlighting and prev/next navigation
 - **Command history** — recent commands shown as clickable chips for quick re-runs
 - **Save output** — download the terminal output as a timestamped `.txt` file
+- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
+- **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header (compatible with nginx-proxy)
 - **FAQ modal** — built-in help including allowed commands and usage notes
 
 ---
@@ -23,13 +29,15 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 .
 ├── docker-compose.yml
 ├── Dockerfile
+├── data/                   # Writable volume — SQLite run history database (auto-created)
+│   └── history.db
 └── app/
     ├── app.py                  # Flask + Gunicorn backend
     ├── index.html              # Frontend (served by Flask)
     ├── allowed_commands.txt    # Command allowlist (one prefix per line)
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     ├── favicon.ico             # Site favicon
-    └── requirements.txt        # Python dependencies (Flask, Gunicorn)
+    └── requirements.txt        # Python dependencies (Flask, Gunicorn, Flask-Limiter)
 ```
 
 ---
@@ -115,6 +123,10 @@ The following tools are installed in the Docker image and available for use:
 | `wapiti` | Web application vulnerability scanning |
 | `wpscan` | WordPress vulnerability scanning |
 | `nuclei` | Fast CVE/misconfiguration scanner using community templates (templates stored in `/tmp` via tmpfs) |
+| `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
+| `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library pulled in by wapiti3 |
+| `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
+| `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
 
 ---
 
@@ -181,6 +193,10 @@ To work around this, the app automatically rewrites any `mtr` command to use `--
 | `mtr -c 20 google.com` | `mtr --report-wide -c 20 google.com` |
 | `mtr --report google.com` | unchanged — already in report mode |
 
+### wapiti
+
+By default wapiti writes its report to a file in `/tmp`, which isn't accessible from the browser. The app automatically appends `-f txt -o /dev/stdout` to any `wapiti` command that doesn't already specify an output path, redirecting the report to the terminal so results appear inline with the scan output. If you want to specify your own output format or path, include `-o` in your command and the rewrite won't fire.
+
 ### nuclei
 
 `nuclei` stores its template library and cache in `$HOME` by default, which conflicts with the read-only filesystem. The container sets `HOME=/tmp` and `NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates` so all nuclei writes go to the tmpfs mount. The app also automatically injects `-ud /tmp/nuclei-templates` if the flag isn't already present in the command.
@@ -197,7 +213,37 @@ The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND
 
 ---
 
-## API Endpoints
+## Tabs & Run History
+
+Each command runs in its own tab. Tabs are created automatically when you run a command, or manually with the **+** button. Each tab shows a coloured status dot (amber = running, green = success, red = failed) and is labelled with the command that was run.
+
+The **⧖ history** button opens a side panel showing the last 50 completed runs with timestamps and exit codes. From the panel you can load any past result into a new tab, or copy a permalink for sharing.
+
+---
+
+## Permalinks
+
+Every completed run is stored in a SQLite database (`./data/history.db`) and accessible at `/history/<run_id>` as a JSON response containing the command, timestamps, exit code, and full output. The **permalink** button on each tab and in the history panel copies the URL to your clipboard.
+
+Run history persists across container restarts and recreations since the database lives in the `./data` volume mount on the host. The `/history` endpoint returns the 50 most recent runs; the database itself is unbounded and grows over time — you can manage it directly with any SQLite client if needed.
+
+The `./data` directory is the only writable path in an otherwise read-only container. If the directory doesn't exist on the host, Docker will create it automatically on first run.
+
+---
+
+## Output Search
+
+Click **⌕ search** in the header (or press **Ctrl+F** equivalent) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
+
+---
+
+## Dark / Light Theme
+
+Click **◑ theme** in the header to toggle between dark and light mode. Your preference is saved in `localStorage` and persists across sessions.
+
+---
+
+
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
@@ -205,8 +251,16 @@ The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND
 | `GET` | `/favicon.ico` | Serves the site favicon |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
+| `GET` | `/history` | Returns last 50 completed runs as JSON |
+| `GET` | `/history/<run_id>` | Returns full output of a specific run (permalink) |
 | `POST` | `/run` | Runs a command, streams output via SSE |
 | `POST` | `/kill` | Kills a running process by `run_id` |
+
+---
+
+## Rate Limiting
+
+`/run` is rate limited to **30 requests per minute** and **5 per second** per client IP. Since the app runs behind nginx-proxy, the real client IP is read from the `X-Forwarded-For` header rather than `REMOTE_ADDR`. Rate limit responses return HTTP 429 and display an amber notice in the output box.
 
 ---
 

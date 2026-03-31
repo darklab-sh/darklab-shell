@@ -1,0 +1,14 @@
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.pyc
+*.pyo
+ 
+# Persistent data (SQLite run history — contains user data, should not be committed)
+data/
+ 
+# OS
+.DS_Store
+Thumbs.db

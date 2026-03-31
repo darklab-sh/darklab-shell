@@ -6,15 +6,75 @@ Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
 from flask import Flask, Response, request, jsonify, send_file
+from flask_limiter import Limiter
+from flask_limiter.util import get_remote_address
 import subprocess
 import json
 import os
 import select
 import re
 import signal
+import sqlite3
 import uuid
+from datetime import datetime, timezone
 
 app = Flask(__name__)
+
+# Rate limiting — reads real client IP from X-Forwarded-For set by nginx-proxy
+def get_client_ip():
+    forwarded_for = request.headers.get("X-Forwarded-For", "")
+    if forwarded_for:
+        return forwarded_for.split(",")[0].strip()
+    return get_remote_address()
+
+limiter = Limiter(
+    key_func=get_client_ip,
+    app=app,
+    default_limits=[],
+    storage_uri="memory://"
+)
+
+# In-memory rate limiting is fine — it resets on restart which is acceptable
+# Active processes keyed by run ID
+active_procs = {}
+
+# SQLite persistent run history
+# Database lives in /data which is a writable volume mount (see docker-compose.yml)
+# Falls back to /tmp if /data is not available (e.g. local dev without the volume)
+DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"
+DB_PATH = os.path.join(DATA_DIR, "history.db")
+
+
+def db_connect():
+    conn = sqlite3.connect(DB_PATH)
+    conn.row_factory = sqlite3.Row
+    return conn
+
+
+def db_init():
+    """Create the runs table if it doesn't exist."""
+    with db_connect() as conn:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS runs (
+                id         TEXT PRIMARY KEY,
+                session_id TEXT NOT NULL,
+                command    TEXT NOT NULL,
+                started    TEXT NOT NULL,
+                finished   TEXT,
+                exit_code  INTEGER,
+                output     TEXT
+            )
+        """)
+        # Add session_id column to existing databases that predate this feature
+        try:
+            conn.execute("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
+        except sqlite3.OperationalError:
+            pass  # Column already exists
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
+        conn.commit()
+
+
+db_init()
 
 HTML = open(os.path.join(os.path.dirname(__file__), "index.html")).read()
 ALLOWED_COMMANDS_FILE = os.path.join(os.path.dirname(__file__), "allowed_commands.txt")
@@ -88,7 +148,20 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
             notice = "Note: nuclei is using /tmp/nuclei-templates for template storage (tmpfs)."
             return rewritten, notice
 
+    # wapiti: force plain text output to stdout so results appear in the terminal
+    # instead of being written to a report file in /tmp that users can't easily access
+    if re.match(r'^wapiti\b', stripped, re.IGNORECASE):
+        if not re.search(r'\-o\b|--output\b', stripped):
+            rewritten = stripped + ' -f txt -o /dev/stdout'
+            notice = "Note: wapiti output is being redirected to the terminal (-f txt -o /dev/stdout)."
+            return rewritten, notice
+
     return stripped, None
+
+
+def get_session_id():
+    """Extract the anonymous session ID from the X-Session-ID request header."""
+    return request.headers.get("X-Session-ID", "").strip()
 
 
 @app.route("/favicon.ico")
@@ -125,10 +198,36 @@ def autocomplete():
     return jsonify({"suggestions": suggestions})
 
 
+@app.route("/history")
+def get_history():
+    """Return the 50 most recent completed runs for this session."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT 50",
+            (session_id,)
+        ).fetchall()
+    return jsonify({"runs": [dict(r) for r in rows]})
+
+
+@app.route("/history/<run_id>")
+def get_run(run_id):
+    """Return the full output of a specific completed run by ID (permalink)."""
+    with db_connect() as conn:
+        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+    if not row:
+        return jsonify({"error": "Run not found"}), 404
+    run = dict(row)
+    run["output"] = json.loads(run["output"]) if run["output"] else []
+    return jsonify(run)
+
+
 @app.route("/run", methods=["POST"])
+@limiter.limit("30 per minute; 5 per second")
 def run_command():
     data = request.get_json()
     command = data.get("command", "").strip()
+    session_id = get_session_id()
     if not command:
         return jsonify({"error": "No command provided"}), 400
 
@@ -138,6 +237,9 @@ def run_command():
 
     command, notice = rewrite_command(command)
     run_id = str(uuid.uuid4())
+    original_command = data.get("command", "").strip()
+    run_started = datetime.now(timezone.utc).isoformat()
+    captured_lines = []
 
     # Heartbeat interval in seconds — keeps the SSE connection alive through
     # nginx and browser idle timeouts when a command produces no output
@@ -163,6 +265,7 @@ def run_command():
 
             # If the command was rewritten, surface a notice to the user
             if notice:
+                captured_lines.append(f"[notice] {notice}")
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
             while True:
@@ -171,6 +274,7 @@ def run_command():
                 if ready:
                     line = proc.stdout.readline()
                     if line:
+                        captured_lines.append(line.rstrip("\n"))
                         yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
                     else:
                         # EOF — process has finished
@@ -186,6 +290,22 @@ def run_command():
             proc.wait()
             exit_code = proc.returncode
             yield f"data: {json.dumps({'type': 'exit', 'code': exit_code})}\n\n"
+
+            # Store completed run in SQLite for persistent permalink/history access
+            with db_connect() as conn:
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        session_id,
+                        original_command,
+                        run_started,
+                        datetime.now(timezone.utc).isoformat(),
+                        exit_code,
+                        json.dumps(captured_lines),
+                    )
+                )
+                conn.commit()
 
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
@@ -211,5 +331,5 @@ def kill_command():
 if __name__ == "__main__":
     # For local development only. In production, Gunicorn is used as the WSGI server
     # via the Dockerfile CMD. Run locally with: python3 app.py
-    print("darklab.sh — shell running at http://localhost:8888")
+    print("shell.darklab.sh running at http://localhost:8888")
     app.run(host="0.0.0.0", port=8888, threaded=True)

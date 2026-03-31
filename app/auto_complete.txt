@@ -109,12 +109,13 @@ nikto -h -Tuning 1
 nikto -h -Tuning 4
 nikto -h -maxtime 120
 
-# wapiti
+# wapiti (report automatically sent to terminal — no file needed)
 wapiti -u
 wapiti -u --scope url
 wapiti -u --scope domain
 wapiti -u -m xss,sql
 wapiti -u --max-scan-time 120
+wapiti -u -v 1
 
 # wpscan
 wpscan --url
@@ -136,3 +137,30 @@ nuclei -u -severity low,medium,high,critical
 nuclei -u -severity high,critical
 nuclei -u -as
 nuclei -list
+
+# subfinder
+subfinder -d
+subfinder -d -silent
+subfinder -d -o /dev/stdout
+subfinder -d -recursive
+
+# pd-httpx (ProjectDiscovery httpx — renamed to avoid Python httpx conflict)
+pd-httpx -u
+pd-httpx -u -title -status-code -tech-detect
+pd-httpx -u -status-code
+pd-httpx -u -follow-redirects
+
+# dnsx
+dnsx -d
+dnsx -d -resp
+dnsx -d -a -resp
+dnsx -d -cname -resp
+dnsx -d -mx -resp
+
+# gobuster
+gobuster dir -u -w /usr/share/wordlists/seclists/Web-Content/common.txt
+gobuster dir -u -w /usr/share/wordlists/seclists/Web-Content/directory-list-2.3-medium.txt
+gobuster dir -u -w /usr/share/wordlists/seclists/Web-Content/big.txt
+gobuster dns -d -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
+gobuster dns -d -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-20000.txt
+gobuster vhost -u -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
