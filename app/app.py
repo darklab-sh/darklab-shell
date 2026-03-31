@@ -9,6 +9,7 @@ from flask import Flask, Response, request, jsonify, send_file
 import subprocess
 import json
 import os
+import select
 import re
 import signal
 import uuid
@@ -123,6 +124,10 @@ def run_command():
     command, notice = rewrite_command(command)
     run_id = str(uuid.uuid4())
 
+    # Heartbeat interval in seconds — keeps the SSE connection alive through
+    # nginx and browser idle timeouts when a command produces no output
+    HEARTBEAT_INTERVAL = 20
+
     def generate():
         try:
             proc = subprocess.Popen(
@@ -145,8 +150,22 @@ def run_command():
             if notice:
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
-            for line in iter(proc.stdout.readline, ""):
-                yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
+            while True:
+                # Wait up to HEARTBEAT_INTERVAL seconds for output
+                ready, _, _ = select.select([proc.stdout], [], [], HEARTBEAT_INTERVAL)
+                if ready:
+                    line = proc.stdout.readline()
+                    if line:
+                        yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
+                    else:
+                        # EOF — process has finished
+                        break
+                else:
+                    # No output within the interval — send a heartbeat comment
+                    # to keep nginx and the browser from treating the connection as idle
+                    if proc.poll() is not None:
+                        break
+                    yield ": heartbeat\n\n"
 
             proc.stdout.close()
             proc.wait()
