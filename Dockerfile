@@ -63,4 +63,4 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
 EXPOSE 8888
 
-CMD ["gunicorn", "--bind", "0.0.0.0:8888", "--workers", "1", "--threads", "8", "--timeout", "3600", "--control-socket", "/tmp/.gunicorn", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:8888", "--workers", "4", "--threads", "4", "--timeout", "3600", "--control-socket", "/tmp/.gunicorn", "app:app"]

@@ -17,8 +17,15 @@ import signal
 import sqlite3
 import uuid
 from datetime import datetime, timezone
+from multiprocessing import Manager
 
 app = Flask(__name__)
+
+# Shared dict across all Gunicorn workers — stores run_id → pid so any worker
+# can kill a process it didn't start. Uses multiprocessing.Manager which runs
+# a small background server process to synchronise the dict across workers.
+_manager = Manager()
+active_pids = _manager.dict()  # run_id → pid (integer, safe to share)
 
 # Rate limiting — reads real client IP from X-Forwarded-For set by nginx-proxy
 def get_client_ip():
@@ -33,10 +40,6 @@ limiter = Limiter(
     default_limits=[],
     storage_uri="memory://"
 )
-
-# In-memory rate limiting is fine — it resets on restart which is acceptable
-# Active processes keyed by run ID
-active_procs = {}
 
 # SQLite persistent run history
 # Database lives in /data which is a writable volume mount (see docker-compose.yml)
@@ -410,7 +413,7 @@ def run_command():
                 # New process group so we can kill the whole tree
                 preexec_fn=os.setsid,
             )
-            active_procs[run_id] = proc
+            active_pids[run_id] = proc.pid
 
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
@@ -462,7 +465,7 @@ def run_command():
         except Exception as e:
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         finally:
-            active_procs.pop(run_id, None)
+            active_pids.pop(run_id, None)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -471,11 +474,11 @@ def run_command():
 def kill_command():
     data = request.get_json()
     run_id = data.get("run_id", "")
-    proc = active_procs.pop(run_id, None)
-    if not proc:
+    pid = active_pids.pop(run_id, None)
+    if not pid:
         return jsonify({"error": "No such process"}), 404
     try:
-        os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+        os.killpg(os.getpgid(pid), signal.SIGTERM)
     except ProcessLookupError:
         pass
     return jsonify({"killed": True})
