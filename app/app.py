@@ -526,8 +526,18 @@ def kill_command():
     if not pid:
         return jsonify({"error": "No such process"}), 404
     try:
-        os.killpg(os.getpgid(pid), signal.SIGTERM)
-    except ProcessLookupError:
+        pgid = os.getpgid(pid)
+        if SCANNER_PREFIX:
+            # Processes run as scanner — appuser can't signal them directly.
+            # Use sudo kill to send SIGTERM to the entire process group.
+            subprocess.run(
+                ["sudo", "-u", "scanner", "kill", "-TERM", f"-{pgid}"],
+                timeout=5
+            )
+        else:
+            # Local dev — same user, can kill directly
+            os.killpg(pgid, signal.SIGTERM)
+    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
         pass
     return jsonify({"killed": True})
 
