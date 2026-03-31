@@ -217,7 +217,7 @@ The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND
 
 ## Tabs & Run History
 
-Each command runs in its own tab. Tabs are created automatically when you run a command, or manually with the **+** button. Each tab shows a coloured status dot (amber = running, green = success, red = failed) and is labelled with the command that was run.
+Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed) and is labelled with the last command that was run in it.
 
 The **⧖ history** button opens a side panel showing the last 50 completed runs with timestamps and exit codes. From the panel you can load any past result into a new tab, or copy a permalink for sharing.
 

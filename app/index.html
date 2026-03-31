@@ -67,6 +67,13 @@
     border-bottom: 1px solid var(--border);
   }
 
+  .header-btns {
+    margin-left: auto;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+  }
+
   header h1 {
     font-family: var(--font-mono);
     font-size: 20px;
@@ -351,7 +358,6 @@
 
   /* FAQ button */
   #faq-btn {
-    margin-left: auto;
     background: transparent;
     border: 1px solid var(--border-bright);
     color: var(--muted);
@@ -911,7 +917,7 @@
       <div class="faq-item">
         <div class="faq-q">How do tabs and permalinks work?</div>
         <div class="faq-a">
-          Each command runs in its own tab. You can open additional tabs with the <strong>+</strong> button and run different commands simultaneously. Each tab tracks its own status independently.<br><br>
+          Each command runs in the currently active tab. You can open additional tabs with the <strong>+</strong> button to run commands side by side and keep results from different sessions visible at the same time. Each tab tracks its own status independently.<br><br>
           The <strong>permalink</strong> button on each tab captures everything currently visible in that tab — all commands and their output — and saves it as a shareable page. The link opens a styled HTML view with ANSI colour rendering and options to save as .txt or view raw JSON. Permalinks survive container restarts.<br><br>
           The <strong>⧖ history</strong> panel shows your last 50 runs. You can load any past result into a new tab, or copy a single-run permalink from there.
         </div>
