@@ -115,6 +115,22 @@ document.getElementById('history-close').addEventListener('click', () => {
   historyPanel.classList.remove('open');
 });
 
+// ── History delete modal ──
+document.getElementById('hist-clear-all-btn').addEventListener('click', () => {
+  confirmHistAction('clear');
+});
+document.getElementById('hist-del-cancel').addEventListener('click', () => {
+  histDelOverlay.style.display = 'none';
+  pendingHistAction = null;
+});
+document.getElementById('hist-del-confirm').addEventListener('click', () => {
+  histDelOverlay.style.display = 'none';
+  executeHistAction();
+});
+histDelOverlay.addEventListener('click', e => {
+  if (e.target === histDelOverlay) { histDelOverlay.style.display = 'none'; pendingHistAction = null; }
+});
+
 // ── Kill modal ──
 document.getElementById('kill-cancel').addEventListener('click', () => {
   killOverlay.style.display = 'none';

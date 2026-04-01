@@ -21,6 +21,30 @@ function renderHistory() {
 }
 
 // ── Run history panel ──
+let pendingHistAction = null;
+
+function confirmHistAction(type, id) {
+  pendingHistAction = { type, id };
+  const msg = document.getElementById('hist-del-msg');
+  if (type === 'clear') {
+    msg.innerHTML = 'Clear all run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+  } else {
+    msg.innerHTML = 'Remove this run from history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+  }
+  histDelOverlay.style.display = 'flex';
+}
+
+function executeHistAction() {
+  if (!pendingHistAction) return;
+  const { type, id } = pendingHistAction;
+  pendingHistAction = null;
+  if (type === 'delete') {
+    apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => refreshHistoryPanel());
+  } else {
+    apiFetch('/history', { method: 'DELETE' }).then(() => refreshHistoryPanel());
+  }
+}
+
 function refreshHistoryPanel() {
   apiFetch('/history').then(r => r.json()).then(data => {
     historyList.innerHTML = '';
@@ -42,6 +66,7 @@ function refreshHistoryPanel() {
         <div class="history-actions">
           <button class="history-action-btn" data-action="copy">copy command</button>
           <button class="history-action-btn" data-action="permalink">permalink</button>
+          <button class="history-action-btn" data-action="delete">delete</button>
         </div>`;
 
       // Click anywhere on the entry (except buttons) to load into a new tab
@@ -72,6 +97,10 @@ function refreshHistoryPanel() {
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
         const url = `${location.origin}/history/${run.id}`;
         navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard'));
+      });
+
+      entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
+        confirmHistAction('delete', run.id);
       });
 
       historyList.appendChild(entry);

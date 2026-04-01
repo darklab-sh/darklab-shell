@@ -39,7 +39,7 @@ function createTab(label) {
   });
   tabPanels.appendChild(panel);
 
-  tabs.push({ id, label, runId: null, exitCode: null, rawLines: [], killed: false });
+  tabs.push({ id, label, runId: null, exitCode: null, rawLines: [], killed: false, st: 'idle' });
   activateTab(id);
   return id;
 }
@@ -48,11 +48,22 @@ function activateTab(id) {
   activeTabId = id;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.id === id));
+  const t = tabs.find(t => t.id === id);
+  setStatus(t ? (t.st || 'idle') : 'idle');
   clearSearch();
 }
 
 function closeTab(id) {
-  if (tabs.length === 1) return; // keep at least one tab
+  if (tabs.length === 1) {
+    // Last tab: reset to blank instead of closing
+    clearTab(id);
+    setTabLabel(id, 'tab 1');
+    const t = tabs[0];
+    t.runId = null;
+    t.exitCode = null;
+    t.killed = false;
+    return;
+  }
   const idx = tabs.findIndex(t => t.id === id);
   tabs.splice(idx, 1);
   document.querySelector(`.tab[data-id="${id}"]`).remove();
@@ -65,6 +76,8 @@ function closeTab(id) {
 function setTabStatus(id, st) {
   const dot = document.querySelector(`.tab[data-id="${id}"] .tab-status`);
   if (dot) dot.className = `tab-status ${st}`;
+  const t = tabs.find(t => t.id === id);
+  if (t) t.st = st;
 }
 
 function setTabLabel(id, label) {

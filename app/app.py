@@ -385,6 +385,26 @@ def get_run(run_id):
     )
 
 
+@app.route("/history/<run_id>", methods=["DELETE"])
+def delete_run(run_id):
+    """Delete a specific run from history for this session."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        conn.execute("DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
+@app.route("/history", methods=["DELETE"])
+def clear_history():
+    """Delete all runs for this session."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
+        conn.commit()
+    return jsonify({"ok": True})
+
+
 @app.route("/share", methods=["POST"])
 def save_share():
     """Save a tab snapshot (all output from a tab) for sharing via permalink."""
@@ -444,12 +464,15 @@ def _permalink_error_page(noun: str) -> Response:
     retention = CFG.get("permalink_retention_days", 0)
     retention_str = _format_retention(retention)
     if retention == 0:
-        detail = f"The {noun} ID is invalid or the {noun} was never saved."
+        detail = (
+            f"The {noun} ID is invalid, the {noun} was never saved, "
+            f"or it was manually deleted."
+        )
     else:
         detail = (
-            f"Either the {noun} ID is invalid, or the {noun} was automatically "
-            f"deleted because it exceeded the configured retention period "
-            f"({retention_str})."
+            f"The {noun} ID is invalid, it was manually deleted, or it was "
+            f"automatically deleted after exceeding the configured retention "
+            f"period ({retention_str})."
         )
     app_name = CFG.get("app_name", "shell.darklab.sh")
     html = f"""<!DOCTYPE html>

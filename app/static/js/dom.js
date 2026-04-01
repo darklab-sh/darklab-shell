@@ -15,4 +15,5 @@ const historyPanel = document.getElementById('history-panel');
 const historyList  = document.getElementById('history-list');
 const acDropdown   = document.getElementById('ac-dropdown');
 const killOverlay  = document.getElementById('kill-overlay');
+const histDelOverlay = document.getElementById('hist-del-overlay');
 const runTimer     = document.getElementById('run-timer');
