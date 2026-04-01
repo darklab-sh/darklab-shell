@@ -1,0 +1,164 @@
+# Architecture & Decision Log
+
+This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of shell.darklab.sh. It is intended as a handoff document for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
+
+---
+
+## Project Overview
+
+A web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, real-time SSE streaming.
+
+---
+
+## Key Architectural Decisions
+
+### Real-time Output: SSE over WebSockets
+
+Server-Sent Events (SSE) were chosen over WebSockets for output streaming. SSE is simpler to implement with Flask, works correctly behind nginx-proxy without additional configuration, and is unidirectional (server → client) which is all that's needed for streaming command output. The frontend reads the SSE stream via `fetch()` + `ReadableStream` rather than the `EventSource` API, because `EventSource` doesn't support custom headers (needed for the session ID).
+
+### Multi-worker Process Killing via SQLite
+
+**Problem:** Gunicorn runs 4 workers, each with isolated memory. A kill request could hit a different worker than the one that started the process.
+
+**Approaches tried:**
+- In-memory dict — fails immediately (isolated memory per worker)
+- `multiprocessing.Manager` shared dict — tried and abandoned; unreliable after Gunicorn forks workers due to broken IPC socket connections under load
+
+**Solution:** SQLite `active_procs` table (`run_id TEXT, pid INTEGER`). Every worker can read and write it. Uses `DELETE ... RETURNING` for atomic pop to prevent race conditions between workers. Table is cleared on startup to remove stale PIDs from crashes.
+
+**Critical timing fix:** `Popen` and `pid_register` must happen *before* `return Response(generate(), ...)`. Flask generators are lazy — the generator body doesn't execute until Flask starts streaming. If `pid_register` is inside the generator, a kill request arriving before streaming starts finds nothing in the database and silently fails.
+
+### Cross-User Process Killing
+
+**Problem:** Gunicorn runs as `appuser`, commands run as `scanner`. Linux won't let `appuser` signal `scanner`-owned processes.
+
+**Solution:** `sudo -u scanner kill -TERM -<pgid>`. The sudoers rule `appuser ALL=(scanner) NOPASSWD: ALL` covers this. The kill sends to the entire process group (negative pgid) to catch child processes spawned by the shell.
+
+### Two-User Security Model
+
+- **`appuser`** — runs Gunicorn, owns `/data` (chmod 700), can write SQLite
+- **`scanner`** — runs all user-submitted commands via `sudo -u scanner env HOME=/tmp`, no write access to `/data`
+
+`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei, wapiti, and subfinder all write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
+
+### Startup Sequence (entrypoint.sh)
+
+Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (Docker volume mounts reset ownership to the host user) → sets `/tmp` to `1777` → pre-creates `/tmp/.config/nuclei`, `/tmp/.config/uncover`, `/tmp/.cache` owned by scanner → `gosu appuser gunicorn ...`
+
+**Why `gosu` instead of `su`?** `su` forks an extra process; `gosu` does `exec` which replaces the process, giving Gunicorn PID 1 semantics.
+
+**Why pre-create `/tmp/.config`?** Without this, the first tool that tries to create it (e.g. nuclei on startup) runs as `scanner`, but the directory doesn't exist yet. If anything root-level touches `$HOME` before the user switch completes, it creates `/tmp/.config` owned by root with `700`, and `scanner` can never write to it.
+
+### nmap Capabilities
+
+nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN scans. Rather than running the container privileged:
+
+```
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+```
+
+This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
+
+The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rewrite_command()` so users don't need to add it. Without it, nmap falls back to limited scan modes even with the capabilities set.
+
+### Go Binary Installation
+
+All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
+
+`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library that `wapiti3` pulls in as a dependency.
+
+### SQLite WAL Mode
+
+SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=NORMAL`. This allows concurrent reads during writes, which is important with 4 Gunicorn workers all reading/writing the same database simultaneously. The `db_connect()` function applies these pragmas on every connection.
+
+### Path Blocking (/data and /tmp)
+
+Commands referencing `/data` or `/tmp` as filesystem paths are blocked at validation time using the regex `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://example.com/data/` won't match because `/data` is preceded by `m`.
+
+Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
+
+---
+
+## Command Auto-Rewrites
+
+These happen in `rewrite_command()` silently (no user-visible notice unless specified):
+
+| Command | Rewrite | Reason |
+|---------|---------|--------|
+| `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
+| `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
+| `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
+| `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
+
+---
+
+## Frontend Architecture
+
+Single-file `index.html` — all CSS and JS inline, no build step, no external dependencies except fonts (Google Fonts) and `ansi_up` (CDN).
+
+### Tab State
+
+Each tab is an object: `{ id, label, runId, exitCode, rawLines, killed }`.
+
+- `runId` — the UUID from the SSE `started` message, used for kill requests
+- `rawLines` — array of `{text, cls}` objects storing the pre-`ansi_up` text with ANSI codes intact, used for permalink generation
+- `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
+
+### The KILLED Race Condition
+
+When a user clicks Kill:
+1. `doKill()` sets `tab.killed = true`, shows KILLED status
+2. Server receives SIGTERM, process exits with code -15
+3. SSE stream sends `exit` message with code -15
+4. Exit handler checks `tab.killed` — if true, skips status update and resets flag
+
+Without the `killed` flag, the `-15` exit code causes the exit handler to set status to ERROR, briefly flashing KILLED before reverting.
+
+### Config Loading
+
+The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, and `max_output_lines`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
+
+### Session Identity
+
+An anonymous UUID is generated in `localStorage` on first visit and sent as `X-Session-ID` header on every API call. History and run data is scoped to this session. It's not authentication — just isolation between browser sessions.
+
+---
+
+## Known Gotchas & Lessons Learned
+
+**Gunicorn generator laziness.** Any setup that must happen before a kill request can arrive (Popen, pid_register) must be outside the generator function passed to `Response()`. The generator only executes when Flask starts iterating it to stream bytes.
+
+**Docker volume mount ownership.** Bind-mounting `./data:/data` resets the directory's ownership to the host user who created it. The `entrypoint.sh` `chown -R appuser:appuser /data` corrects this on every start. The `-R` is important — `history.db` itself may also be root-owned if it was created by a previous run as root.
+
+**`multiprocessing.Manager` and fork.** Python's `multiprocessing.Manager` starts a background server process. When Gunicorn forks workers, the Manager proxy objects in the child processes can lose their connection to the Manager server under load. This manifested as intermittent kill failures — some processes couldn't be killed because their PIDs weren't visible to the worker handling the kill request. SQLite is more reliable here.
+
+**sudo resets HOME.** `sudo -u scanner` resets the `HOME` environment variable to the target user's home directory from `/etc/passwd`. For `scanner` (a no-login system user) this is `/home/scanner`, which doesn't exist on the read-only filesystem. All tools that write config/cache to `$HOME` fail. The fix is `sudo -u scanner env HOME=/tmp` to explicitly set HOME before the command runs.
+
+**nmap --privileged vs Docker --privileged.** These are different things. nmap's `--privileged` flag tells nmap to assume it has raw socket access. Docker's `--privileged` gives the container full host access. We use nmap's flag (auto-injected) combined with `setcap` on the binary and `cap_add` in compose — not Docker's privileged mode.
+
+**`env` doesn't use `--` as a terminator.** `sudo -u scanner env HOME=/tmp -- sh -c "..."` fails because `env` treats `--` as a literal command name. The correct form is `sudo -u scanner env HOME=/tmp sh -c "..."`.
+
+**ansi_up and permalink colours.** ansi_up converts ANSI escape codes to HTML spans, consuming the original codes. If you try to re-render from `element.innerText`, all colour information is lost. The `rawLines` array stores the original text before ansi_up processes it, enabling the permalink page to run ansi_up fresh and reproduce the exact same colours.
+
+**SSE via fetch vs EventSource.** `EventSource` doesn't support custom request headers. Since we need `X-Session-ID` on every request, we use `fetch()` with a `ReadableStream` reader instead. This requires manually parsing the SSE format (`data: ...\n\n`) from the raw byte stream.
+
+---
+
+## Database
+
+`./data/history.db` — SQLite, WAL mode. Three tables:
+
+- `runs` — one row per completed command. Persists across restarts. Pruned by `permalink_retention_days` config.
+- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls}` objects with raw ANSI codes.
+- `active_procs` — transient. Cleared on startup. One row per running process (`run_id → pid`).
+
+---
+
+## Infrastructure Notes (darklab.sh specific)
+
+The production `docker-compose.yml` includes:
+- `nginx-proxy` + `acme-companion` for SSL termination via `VIRTUAL_HOST` / `LETSENCRYPT_HOST`
+- GELF logging to Graylog via UDP
+- External Docker network `darklab-net`
+
+None of these are required to run the app. The `examples/docker-compose.standalone.yml` strips all of this out for a clean standalone deployment.
