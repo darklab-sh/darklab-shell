@@ -8,4 +8,4 @@
 #   answer: "This server is hosted in New York, USA on a 10 Gbps uplink via Cogent and Zayo."
 
 - question: "Where is this server located?"
-  answer: "This 10Gbps dedicated server is located in Tempe, Arizona, USA on multihomed 100 Gbps uplinks via NTT, Cogent, HE, GTT, and TATA"
+  answer: "This 10Gbps dedicated server is located in Tempe, Arizona, USA on multihomed 100 Gbps uplinks via NTT, Cogent, Hurricane Electric, GTT, and TATA"
