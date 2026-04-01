@@ -34,6 +34,8 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── docker-compose.yml
 ├── Dockerfile
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
+├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
+│                               #   tests that import app.py get correct static analysis in VS Code
 ├── requirements-dev.txt        # Dev-only dependencies (pytest)
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
@@ -68,7 +70,8 @@ A lightweight web interface for running network diagnostic and vulnerability sca
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
             ├── app.js          # Initialization and event wiring (loads last)
             └── vendor/
-                └── ansi_up.js  # ANSI-to-HTML library (downloaded at image build time)
+                └── ansi_up.js  # ANSI-to-HTML library — committed as a fallback for local/docker-compose
+                                #   runs; overwritten with the latest version at Docker image build time
 ```
 
 ---
@@ -174,12 +177,6 @@ python3 app.py
 
 Open [http://localhost:8888](http://localhost:8888). Note that without Docker, the installed security tooling (nmap, nuclei, etc.) and process isolation (`scanner` user, read-only filesystem) will not be in effect.
 
-**Important:** `ansi_up.js` is downloaded at Docker image build time into `static/js/vendor/`, which is not committed to the repo. Without it, commands appear to do nothing (the tab label updates but the fetch never fires). For local dev without Docker, download it once:
-
-```bash
-mkdir -p app/static/js/vendor
-curl -sSL https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js -o app/static/js/vendor/ansi_up.js
-```
 
 ---
 
