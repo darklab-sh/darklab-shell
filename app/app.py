@@ -212,22 +212,30 @@ AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "auto_complete.txt")
 
 
 def load_allowed_commands():
-    """Read allowed_commands.txt and return a flat list of allowed prefixes.
-    Returns None if the file doesn't exist or is empty, meaning all commands are allowed."""
+    """Read allowed_commands.txt and return (allow_prefixes, deny_prefixes).
+    allow_prefixes is None if the file doesn't exist or has no allow entries (= unrestricted).
+    deny_prefixes is always a list. Lines starting with ! are deny prefixes and take
+    priority over allow prefixes — use them to block specific flags on an allowed command."""
     if not os.path.exists(ALLOWED_COMMANDS_FILE):
-        return None
+        return None, []
     prefixes = []
+    denied = []
     with open(ALLOWED_COMMANDS_FILE) as f:
         for line in f:
             line = line.strip()
-            if line and not line.startswith("#"):
+            if not line or line.startswith("#"):
+                continue
+            if line.startswith("!"):
+                denied.append(line[1:].strip().lower())
+            else:
                 prefixes.append(line.lower())
-    return prefixes if prefixes else None
+    return (prefixes if prefixes else None), denied
 
 
 def load_allowed_commands_grouped():
     """Read allowed_commands.txt and return commands grouped by ## Category headers.
-    Returns a list of {name, commands} dicts, or None if file is empty/missing."""
+    Returns a list of {name, commands} dicts, or None if file is empty/missing.
+    Lines starting with ! (deny prefixes) are excluded from the display list."""
     if not os.path.exists(ALLOWED_COMMANDS_FILE):
         return None
     groups = []
@@ -238,7 +246,7 @@ def load_allowed_commands_grouped():
             if line.startswith("## "):
                 current = {"name": line[3:].strip(), "commands": []}
                 groups.append(current)
-            elif line and not line.startswith("#"):
+            elif line and not line.startswith("#") and not line.startswith("!"):
                 if current is None:
                     current = {"name": "", "commands": []}
                     groups.append(current)
@@ -280,8 +288,10 @@ def split_chained_commands(command: str) -> list[str]:
 
 def is_command_allowed(command: str) -> tuple[bool, str]:
     """Return (allowed, reason). Blocks if any chained segment isn't on the allowlist,
-    or if the raw input contains shell operators or references to protected paths."""
-    allowed = load_allowed_commands()
+    or if the raw input contains shell operators or references to protected paths.
+    Deny prefixes (lines starting with ! in allowed_commands.txt) take priority over
+    allow prefixes, letting operators block specific flags on an otherwise-allowed command."""
+    allowed, denied = load_allowed_commands()
     if allowed is None:
         return True, ""  # no file or empty file = unrestricted
 
@@ -298,6 +308,11 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
         return False, "Access to /tmp is not permitted."
 
     cmd_lower = command.strip().lower()
+
+    # Deny prefixes take priority — checked before allow list
+    if denied and any(cmd_lower == d or cmd_lower.startswith(d + " ") for d in denied):
+        return False, f"Command not allowed: '{command.strip()}'"
+
     if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")
                for prefix in allowed):
         return False, f"Command not allowed: '{command.strip()}'"
@@ -374,7 +389,7 @@ def get_config():
 @app.route("/allowed-commands")
 def allowed_commands():
     """Return the list of allowed command prefixes for display in the UI."""
-    prefixes = load_allowed_commands()
+    prefixes, _ = load_allowed_commands()
     if prefixes is None:
         return jsonify({"restricted": False, "commands": [], "groups": []})
     groups = load_allowed_commands_grouped() or []
@@ -588,7 +603,7 @@ def _permalink_page(title, label, created, content_lines, json_url):
 <title>shell.darklab.sh — {title}</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
-<script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js"></script>
+<script src="/static/js/vendor/ansi_up.js"></script>
 <style>
   :root {{
     --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e;

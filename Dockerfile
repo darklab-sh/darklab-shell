@@ -60,6 +60,11 @@ WORKDIR /app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
+# Download ansi_up at build time so the app works without CDN access
+RUN mkdir -p /app/static/js/vendor && \
+    curl -sSL https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js \
+         -o /app/static/js/vendor/ansi_up.js
+
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)
 #   scanner — runs all user-submitted commands, no write access to /data

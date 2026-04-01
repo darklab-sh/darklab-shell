@@ -1,6 +1,8 @@
 // ── Output search ──
 let searchMatches = [];
 let searchMatchIdx = -1;
+let searchCaseSensitive = false;
+let searchRegexMode = false;
 
 function runSearch() {
   clearHighlights();
@@ -11,7 +13,15 @@ function runSearch() {
   const out = getOutput(activeTabId);
   if (!out) return;
   const lines = out.querySelectorAll('.line');
-  const re = new RegExp(escapeRegex(q), 'gi');
+  const flags = searchCaseSensitive ? 'g' : 'gi';
+  const pattern = searchRegexMode ? q : escapeRegex(q);
+  let re;
+  try {
+    re = new RegExp(pattern, flags);
+  } catch(e) {
+    searchCount.textContent = 'invalid regex';
+    return;
+  }
   lines.forEach(line => {
     const tmp = document.createElement('div');
     tmp.innerHTML = line.innerHTML;

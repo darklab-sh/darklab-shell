@@ -8,7 +8,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/css/styles.css">
-<script src="https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js"></script>
+<script src="/static/js/vendor/ansi_up.js"></script>
 </head>
 <body>
 
@@ -63,6 +63,10 @@
   </div>
   <div class="search-bar" id="search-bar" style="display:none">
     <input id="search-input" type="text" placeholder="Search output…" autocomplete="off">
+    <div class="search-toggles">
+      <button id="search-case-btn" class="search-toggle" title="Case sensitive (Aa)">Aa</button>
+      <button id="search-regex-btn" class="search-toggle" title="Regular expression (.*)">.*</button>
+    </div>
     <span class="search-count" id="search-count"></span>
     <div class="search-nav">
       <button id="search-prev">↑</button>

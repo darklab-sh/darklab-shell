@@ -15,11 +15,11 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite
 - **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite
-- **Output search** — search within the active tab's output with match highlighting and prev/next navigation
+- **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar
 - **Command history** — recent commands shown as clickable chips for quick re-runs
 - **Save output** — download the terminal output as a timestamped `.txt` file
 - **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
-- **MOTD** — optional message of the day displayed at the top of the terminal on page load
+- **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
 - **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header, backed by Redis for accurate enforcement across all Gunicorn workers (compatible with nginx-proxy)
 - **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
@@ -33,12 +33,13 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 .
 ├── docker-compose.yml
 ├── Dockerfile
-├── entrypoint.sh           # Container startup script — fixes /data ownership, drops to appuser
+├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
+├── requirements-dev.txt        # Dev-only dependencies (pytest)
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
 │   └── run_local.sh                    # Script to run without Docker using Python directly
-├── data/                   # Writable volume — SQLite database (auto-created)
-│   └── history.db          #   stores run history and tab snapshots
+├── data/                       # Writable volume — SQLite database (auto-created)
+│   └── history.db              #   stores run history and tab snapshots
 └── app/
     ├── app.py                  # Flask + Gunicorn backend
     ├── index.html              # Frontend HTML shell (served by Flask)
@@ -47,22 +48,27 @@ A lightweight web interface for running network diagnostic and vulnerability sca
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     ├── favicon.ico             # Site favicon
-    ├── requirements.txt        # Python dependencies
+    ├── requirements.txt        # Python runtime dependencies
+    ├── tests/
+    │   ├── conftest.py         # pytest configuration (sets working directory)
+    │   └── test_validation.py  # Tests for command validation and rewrite logic
     └── static/
         ├── css/
         │   └── styles.css      # All application styles
         └── js/
             ├── session.js      # Session UUID + apiFetch wrapper (loads first)
-            ├── utils.js        # escapeHtml, escapeRegex, showToast
+            ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
             ├── config.js       # APP_CONFIG defaults
             ├── dom.js          # Shared DOM element references
             ├── tabs.js         # Tab lifecycle management
             ├── output.js       # ANSI rendering and line management
-            ├── search.js       # In-output search
+            ├── search.js       # In-output search (with case-sensitive and regex modes)
             ├── autocomplete.js # Command autocomplete dropdown
             ├── history.js      # Command history chips and drawer
-            ├── runner.js       # Command execution, SSE stream, kill
-            └── app.js          # Initialization and event wiring (loads last)
+            ├── runner.js       # Command execution, SSE stream, kill, stall detection
+            ├── app.js          # Initialization and event wiring (loads last)
+            └── vendor/
+                └── ansi_up.js  # ANSI-to-HTML library (downloaded at image build time)
 ```
 
 ---
@@ -107,6 +113,17 @@ For commands that produce little or no output for extended periods (e.g. slow sc
 
 The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND_TIMEOUT`, `PROXY_CONNECT_TIMEOUT`) in `docker-compose.yml` are set to 3600 seconds to match the Gunicorn worker timeout, giving commands up to an hour to complete. Commands can also be automatically killed after a configurable duration via `command_timeout_seconds` in `config.yaml`.
 
+#### SSE Stall Detection
+
+If no data arrives from the server for 45 seconds (more than twice the heartbeat interval), the client assumes the connection has silently died and shows a notice inline:
+
+```
+[connection stalled — command may still be running on the server]
+[check the history panel for the result once it completes]
+```
+
+The tab is reset to an error state so you can run another command. The original command continues running server-side and its result will appear in the history panel once it finishes.
+
 #### nginx-proxy & VIRTUAL_HOST
 
 The `VIRTUAL_HOST` and `LETSENCRYPT_HOST` environment variables in `docker-compose.yml` are specific to a [nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) + [acme-companion](https://github.com/nginx-proxy/acme-companion) setup for automatic reverse proxying and SSL. If you are not using nginx-proxy, remove these environment variables entirely.
@@ -150,12 +167,19 @@ Redis is configured as read-only (`read_only: true`) with a `tmpfs` at `/tmp` fo
 A convenience script is available in `examples/run_local.sh` that installs dependencies and starts the app. Or run manually:
 
 ```bash
-pip install flask gunicorn pyyaml "flask-limiter[redis]" redis
+pip install -r app/requirements.txt
 cd app
 python3 app.py
 ```
 
 Open [http://localhost:8888](http://localhost:8888). Note that without Docker, the installed security tooling (nmap, nuclei, etc.) and process isolation (`scanner` user, read-only filesystem) will not be in effect.
+
+**Important:** `ansi_up.js` is downloaded at Docker image build time into `static/js/vendor/`, which is not committed to the repo. Without it, commands appear to do nothing (the tab label updates but the fetch never fires). For local dev without Docker, download it once:
+
+```bash
+mkdir -p app/static/js/vendor
+curl -sSL https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js -o app/static/js/vendor/ansi_up.js
+```
 
 ---
 
@@ -166,7 +190,7 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `shell.darklab.sh` | Name shown in the browser tab, header, and permalink pages |
-| `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Leave empty to disable |
+| `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `dark` | Default colour theme for new visitors. Options: `dark`, `light`. Overridden by the user's saved preference |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
@@ -222,6 +246,7 @@ Allowed commands are controlled by `allowed_commands.txt`. The file is re-read o
 - One command prefix per line
 - Lines starting with `#` are comments and are ignored
 - Lines starting with `##` define a category group shown in the FAQ command list (e.g. `## Network Diagnostics`)
+- Lines starting with `!` are **deny prefixes** — they take priority over allow prefixes, letting you block specific flags on an otherwise-allowed command (see below)
 - Matching is prefix-based: a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc.
 - Be as specific or broad as you like — `nmap -sT` permits only TCP connect scans, while `nmap` permits any nmap invocation
 
@@ -234,11 +259,25 @@ dig
 
 ## Vulnerability Scanning
 nmap
+!nmap -sU
+!nmap --script
 ```
 
-Commands in the FAQ are displayed grouped by their `##` category, with each chip clickable to load the command into the input bar. Commands before any `##` header are shown in an unnamed group.
+Commands in the FAQ are displayed grouped by their `##` category, with each chip clickable to load the command into the input bar. Commands before any `##` header are shown in an unnamed group. Deny prefixes (`!` lines) are not shown to users.
 
 To **disable restrictions entirely**, delete `allowed_commands.txt` or leave it empty — all commands will be permitted.
+
+### Deny Prefixes
+
+Lines starting with `!` are deny prefixes and take priority over allow prefixes. They let you block specific flags or subcommands on an otherwise-allowed tool:
+
+```
+nmap
+!nmap -sU
+!nmap --script
+```
+
+This allows all `nmap` invocations except those starting with `nmap -sU` (UDP scan) or `nmap --script`. Matching is the same prefix-based logic as allow entries — `!nmap -sU` blocks `nmap -sU` and `nmap -sU 10.0.0.1 -p 80`, but not `nmap -sT`.
 
 ### Shell Operator Blocking
 
@@ -371,6 +410,15 @@ Both types persist across container restarts via the `./data` SQLite volume. The
 
 Click **⌕ search** in the header to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
 
+Two toggle buttons sit between the input and the match counter:
+
+| Button | Default | Behaviour |
+|--------|---------|-----------|
+| **Aa** | off | Case-sensitive matching — when off, search is case-insensitive |
+| **.**__*__ | off | Regular expression mode — when on, the search term is treated as a JavaScript regex; an invalid pattern shows `invalid regex` instead of throwing |
+
+Both toggles re-run the search immediately when clicked.
+
 ---
 
 ## Dark / Light Theme
@@ -497,6 +545,21 @@ docker compose logs -f
 | `POST` | `/run` | Runs a command, streams output via SSE |
 | `POST` | `/kill` | Kills a running process by `run_id` |
 | `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
+
+---
+
+## Development & Testing
+
+### Running Tests
+
+The test suite covers the security-critical validation and rewrite logic in `app.py`. Install dev dependencies and run with pytest:
+
+```bash
+python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
+python3 -m pytest app/tests/ -v
+```
+
+Tests are structured as five classes covering: shell operator blocking, path blocking, allowlist prefix matching, deny prefix (`!`) logic, and all four command rewrites (mtr, nmap, nuclei, wapiti). No running server or Docker required — file I/O is mocked where needed.
 
 ---
 

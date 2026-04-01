@@ -7,6 +7,14 @@
 # Be as specific or broad as you like — "nmap -sT" only allows TCP-connect scans,
 # while "nmap" would allow any nmap invocation.
 #
+# Lines starting with ! are deny prefixes and take priority over allow prefixes.
+# Use them to block specific flags on an otherwise-allowed command. For example:
+#   nmap
+#   !nmap -sU
+#   !nmap --script
+# This allows all nmap commands except those starting with "nmap -sU" or "nmap --script".
+# Deny prefixes are not shown to users in the FAQ command list.
+#
 # Note on mtr: mtr's interactive full-screen mode requires a real TTY which is not
 # available here. The app automatically rewrites "mtr <target>" to
 # "mtr --report-wide <target>" so it runs in non-interactive report mode instead.
@@ -15,8 +23,16 @@
 
 ## Network Diagnostics
 ping
+# Deny flood mode
+!ping -f
 fping
+# Deny range generation (flood potential against large subnets)
+!fping -g
+!fping --generate
 hping3
+# Deny flood modes
+!hping3 --flood
+!hping3 -f
 traceroute
 tcptraceroute
 # mtr is auto-rewritten to --report-wide mode when no report flag is present
@@ -26,29 +42,103 @@ nslookup
 host
 whois
 curl
+# Deny file write/upload flags
+!curl -o
+!curl --output
+!curl -O
+!curl --remote-name
+!curl --upload-file
+!curl -T
+# Deny reading config/input from filesystem
+!curl -K
+!curl --config
 wget
+# Deny file write flags
+!wget -O
+!wget --output-document
+# Deny reading URL lists from filesystem
+!wget --input-file
+!wget -i
 
 ## Network Reconnaissance
 dnsrecon
+# Deny file output flags
+!dnsrecon -x
+!dnsrecon --xml
+!dnsrecon -c
+!dnsrecon --csv
 # ProjectDiscovery suite
 subfinder
+!subfinder -o
+!subfinder --output
 dnsx
+!dnsx -o
+!dnsx --output
 # pd-httpx is the ProjectDiscovery httpx tool (renamed to avoid conflict with Python httpx)
 pd-httpx
 amass
+!amass enum -o
+!amass intel -o
 assetfinder
 fierce
 dnsenum
 masscan
+# Deny file output flags
+!masscan -oX
+!masscan -oJ
+!masscan -oG
+!masscan -oL
+!masscan -oB
+!masscan --output-filename
 gobuster
+# Deny file output flags
+!gobuster dir -o
+!gobuster dns -o
+!gobuster vhost -o
 # Web fuzzing
 ffuf
+# Deny file output flags
+!ffuf -o
+!ffuf --output
 
 ## Vulnerability Scanning
 nmap
+# Deny file output flags
+!nmap -oN
+!nmap -oX
+!nmap -oG
+!nmap -oA
+!nmap -oS
+!nmap --output
+# Deny reading target lists from filesystem
+!nmap -iL
+!nmap --script-args-file
 testssl
+# Deny file output flags
+!testssl --logfile
+!testssl --jsonfile
+!testssl --csvfile
+!testssl --htmlfile
+!testssl -oJ
+!testssl -oA
+!testssl -oj
+!testssl -oC
 nikto
+# Deny file output flags
+!nikto -o
+!nikto --output
+!nikto -Save
 wapiti
+# Deny file output flags
+!wapiti -o
+!wapiti --output
 wpscan
+# Deny file output flags
+!wpscan -o
+!wpscan --output
 # nuclei uses /tmp for templates and cache (tmpfs mount via docker-compose)
 nuclei
+# Deny file output flags
+!nuclei -o
+!nuclei --output
+!nuclei -me

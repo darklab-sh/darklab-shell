@@ -22,7 +22,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   if (cfg.motd) {
     const motd = document.getElementById('motd');
     const wrap = document.getElementById('motd-wrap');
-    if (motd && wrap) { motd.textContent = cfg.motd; wrap.style.display = 'block'; }
+    if (motd && wrap) { motd.innerHTML = renderMotd(cfg.motd); wrap.style.display = 'block'; }
   }
   updateNewTabBtn();
 }).catch(() => {});
@@ -155,6 +155,18 @@ document.getElementById('search-next').addEventListener('click', () => navigateS
 searchInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') navigateSearch(e.shiftKey ? -1 : 1);
   if (e.key === 'Escape') { searchBar.style.display = 'none'; clearSearch(); cmdInput.focus(); }
+});
+
+searchCaseBtn.addEventListener('click', () => {
+  searchCaseSensitive = !searchCaseSensitive;
+  searchCaseBtn.classList.toggle('active', searchCaseSensitive);
+  runSearch();
+});
+
+searchRegexBtn.addEventListener('click', () => {
+  searchRegexMode = !searchRegexMode;
+  searchRegexBtn.classList.toggle('active', searchRegexMode);
+  runSearch();
 });
 
 // ── Run history panel ──

@@ -226,7 +226,7 @@ body.light .terminal-bar { background: #e0e0e0; }
 .status-pill.running { color: var(--amber); border-color: var(--amber); animation: pulse 1s infinite; }
 .status-pill.ok      { color: var(--green);  border-color: var(--green); }
 .status-pill.fail    { color: var(--red);    border-color: var(--red); }
-.status-pill.killed  { color: var(--amber);  border-color: var(--amber); }
+.status-pill.killed  { color: var(--red);  border-color: var(--red); }
 
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
@@ -585,7 +585,7 @@ body.light .tabs-bar { background: #e0e0e0; }
 .tab .tab-status.running { background: var(--amber); animation: pulse 1s infinite; }
 .tab .tab-status.ok     { background: var(--green); }
 .tab .tab-status.fail   { background: var(--red); }
-.tab .tab-status.killed { background: var(--amber); }
+.tab .tab-status.killed { background: var(--red); }
 .tab .tab-status.idle { background: var(--muted); }
 
 #new-tab-btn {
@@ -650,6 +650,20 @@ body.light .tabs-bar { background: #e0e0e0; }
   transition: color 0.15s, border-color 0.15s;
 }
 .search-nav button:hover { color: var(--text); border-color: var(--text); }
+.search-toggles { display: flex; gap: 4px; }
+.search-toggle {
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 3px 7px;
+  border-radius: 3px;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s, background 0.15s;
+}
+.search-toggle:hover { color: var(--text); border-color: var(--text); }
+.search-toggle.active { color: var(--green); border-color: var(--green-dim); background: rgba(57,255,20,0.06); }
 mark.search-hl { background: rgba(255,184,0,0.35); color: inherit; border-radius: 2px; }
 mark.search-hl.current { background: rgba(255,184,0,0.7); }
 

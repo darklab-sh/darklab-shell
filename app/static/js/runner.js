@@ -1,3 +1,28 @@
+// ── SSE stall detection ──
+// If no chunk arrives from the SSE stream for 45 seconds (> 2× the 20s server heartbeat),
+// the connection has silently died. Surface a notice and reset the UI so the user isn't
+// left with a perpetually-spinning tab. The command may still be running server-side;
+// the result will appear in the history panel once it completes.
+let _stalledTimeout = null;
+
+function _resetStalledTimeout(tabId) {
+  clearTimeout(_stalledTimeout);
+  _stalledTimeout = setTimeout(() => {
+    const t = tabs.find(t => t.id === tabId);
+    if (!t || t.killed) return;  // already handled
+    appendLine('\n[connection stalled — command may still be running on the server]', 'notice', tabId);
+    appendLine('[check the history panel for the result once it completes]', 'notice', tabId);
+    if (tabId === activeTabId) setStatus('fail');
+    setTabStatus(tabId, 'fail');
+    stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+  }, 45000);
+}
+
+function _clearStalledTimeout() {
+  clearTimeout(_stalledTimeout);
+  _stalledTimeout = null;
+}
+
 // ── Status pill ──
 function setStatus(s) {
   status.className = 'status-pill ' + s;
@@ -54,14 +79,21 @@ function confirmKill(tabId) {
 
 function doKill(tabId) {
   const t = tabs.find(t => t.id === tabId);
-  if (!t || !t.runId) return;
+  if (!t || t.st !== 'running') return;
   const secs = elapsedSeconds();
-  apiFetch('/kill', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ run_id: t.runId })
-  });
-  t.runId = null;
+  if (t.runId) {
+    // runId already available — send kill immediately
+    apiFetch('/kill', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ run_id: t.runId })
+    });
+    t.runId = null;
+  } else {
+    // runId not yet available (SSE 'started' hasn't arrived) — flag it so the
+    // started handler sends the kill request as soon as the run_id is known
+    t.pendingKill = true;
+  }
   t.killed = true;
   stopTimer();
   appendLine(`\n[killed by user${secs ? ' after ' + secs + 's' : ''}]`, 'exit-fail', tabId);
@@ -77,6 +109,18 @@ function doKill(tabId) {
 function runCommand() {
   const cmd = cmdInput.value.trim();
   if (!cmd) return;
+
+  // If the active tab is currently running a command, open a new tab automatically
+  // rather than streaming two commands' output on top of each other.
+  // Use tab.st (set synchronously by setTabStatus) rather than tab.runId (set
+  // asynchronously via SSE) to avoid a race condition where rapid Enter presses
+  // fire before the server's 'started' message arrives.
+  const activeTab = tabs.find(t => t.id === activeTabId);
+  if (activeTab && activeTab.st === 'running') {
+    const newId = createTab('tab ' + (tabs.length + 1));
+    if (!newId) return; // tab limit reached — createTab already showed a toast
+    // createTab calls activateTab internally, so activeTabId now points to the new tab
+  }
 
   // Client-side validation mirrors server-side checks for immediate feedback
   const shellOps = /&&|\|\|?|;;?|`|\$\(|>>?|</;
@@ -128,9 +172,12 @@ function runCommand() {
     const decoder = new TextDecoder();
     let buffer = '';
 
+    _resetStalledTimeout(tabId);
+
     function read() {
       reader.read().then(({ done, value }) => {
-        if (done) { stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
+        if (done) { _clearStalledTimeout(); stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
+        _resetStalledTimeout(tabId);
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
         buffer = parts.pop();
@@ -140,7 +187,21 @@ function runCommand() {
               const msg = JSON.parse(part.slice(6));
               if (msg.type === 'started') {
                 const t = tabs.find(t => t.id === tabId);
-                if (t) { t.runId = msg.run_id; t.killed = false; }
+                if (t) {
+                  t.runId = msg.run_id;
+                  if (t.pendingKill) {
+                    // Kill was requested before runId was available — send it now
+                    t.pendingKill = false;
+                    apiFetch('/kill', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ run_id: t.runId })
+                    });
+                    t.runId = null;
+                  } else {
+                    t.killed = false;
+                  }
+                }
               } else if (msg.type === 'notice') {
                 appendLine(msg.text, 'notice', tabId);
               } else if (msg.type === 'output') {
@@ -148,6 +209,7 @@ function runCommand() {
                   if (i < arr.length - 1 || line) appendLine(line, '', tabId);
                 });
               } else if (msg.type === 'exit') {
+                _clearStalledTimeout();
                 const t = tabs.find(t => t.id === tabId);
                 if (t) { t.exitCode = msg.code; t.runId = null; }
                 // If already killed by user, ignore the subsequent -15 exit code
@@ -172,6 +234,7 @@ function runCommand() {
                 runBtn.disabled = false; hideTabKillBtn(tabId);
                 if (historyPanel.classList.contains('open')) refreshHistoryPanel();
               } else if (msg.type === 'error') {
+                _clearStalledTimeout();
                 appendLine('\n[error] ' + msg.text, 'exit-fail', tabId);
                 if (tabId === activeTabId) setStatus('fail');
                 setTabStatus(tabId, 'fail');
@@ -185,6 +248,7 @@ function runCommand() {
     }
     read();
   }).catch(err => {
+    _clearStalledTimeout();
     appendLine('\n[fetch error] ' + err.message, 'exit-fail', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');

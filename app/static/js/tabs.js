@@ -51,7 +51,7 @@ function createTab(label) {
   });
   tabPanels.appendChild(panel);
 
-  tabs.push({ id, label, runId: null, exitCode: null, rawLines: [], killed: false, st: 'idle' });
+  tabs.push({ id, label, runId: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle' });
   activateTab(id);
   updateNewTabBtn();
   return id;
@@ -75,6 +75,7 @@ function closeTab(id) {
     t.runId = null;
     t.exitCode = null;
     t.killed = false;
+    t.pendingKill = false;
     return;
   }
   const idx = tabs.findIndex(t => t.id === id);

@@ -5,6 +5,10 @@ venv/
 __pycache__/
 *.pyc
 *.pyo
+.pytest_cache/
+
+# Build artifacts (downloaded at Docker image build time)
+app/static/js/vendor/
  
 # Persistent data (SQLite run history — contains user data, should not be committed)
 data/
