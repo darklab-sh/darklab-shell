@@ -21,7 +21,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
-- **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header (compatible with nginx-proxy)
+- **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header, backed by Redis for accurate enforcement across all Gunicorn workers (compatible with nginx-proxy)
 - **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
 - **FAQ modal** — built-in help including allowed commands and usage notes
 
@@ -41,12 +41,27 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 │   └── history.db          #   stores run history and tab snapshots
 └── app/
     ├── app.py                  # Flask + Gunicorn backend
-    ├── index.html              # Frontend (served by Flask)
+    ├── index.html              # Frontend HTML shell (served by Flask)
     ├── config.yaml             # Application configuration (see Configuration section)
     ├── allowed_commands.txt    # Command allowlist (one prefix per line)
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     ├── favicon.ico             # Site favicon
-    └── requirements.txt        # Python dependencies
+    ├── requirements.txt        # Python dependencies
+    └── static/
+        ├── css/
+        │   └── styles.css      # All application styles
+        └── js/
+            ├── session.js      # Session UUID + apiFetch wrapper (loads first)
+            ├── utils.js        # escapeHtml, escapeRegex, showToast
+            ├── config.js       # APP_CONFIG defaults
+            ├── dom.js          # Shared DOM element references
+            ├── tabs.js         # Tab lifecycle management
+            ├── output.js       # ANSI rendering and line management
+            ├── search.js       # In-output search
+            ├── autocomplete.js # Command autocomplete dropdown
+            ├── history.js      # Command history chips and drawer
+            ├── runner.js       # Command execution, SSE stream, kill
+            └── app.js          # Initialization and event wiring (loads last)
 ```
 
 ---
@@ -113,12 +128,21 @@ Without this block, Docker will use its default `json-file` log driver.
 
 The `networks` block attaches the container to an external Docker network called `darklab-net`. This is required for the container to be reachable by nginx-proxy when both are on the same network. If you are not using a shared Docker network, remove the entire `networks` section and Docker will create a default bridge network automatically.
 
+#### Redis
+
+The `docker-compose.yml` includes a `redis:7-alpine` service used for two purposes:
+
+- **Rate limiting** — Flask-Limiter uses Redis as its shared counter store so the configured per-IP limits are enforced accurately across all Gunicorn workers. Without Redis, each of the 4 workers maintains its own independent counter, effectively multiplying the limit by 4.
+- **Active process tracking** — running process IDs (`run_id → pid`) are stored in Redis with a 4-hour TTL so any worker can look up a PID to handle a kill request, regardless of which worker started the command.
+
+Redis is configured as read-only (`read_only: true`) with a `tmpfs` at `/tmp` for scratch space. The app connects via the `REDIS_URL` environment variable (`redis://redis:6379/0`). If Redis is unavailable (e.g. local dev without Docker), the app falls back to in-process state — correct for single-process use but not for multi-worker Gunicorn.
+
 ### Running Without Docker
 
 A convenience script is available in `examples/run_local.sh` that installs dependencies and starts the app. Or run manually:
 
 ```bash
-pip install flask gunicorn pyyaml
+pip install flask gunicorn pyyaml "flask-limiter[redis]" redis
 cd app
 python3 app.py
 ```
@@ -288,7 +312,7 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 
 ## Database
 
-Run history, tab snapshots, and active process tracking are stored in a SQLite database at `./data/history.db`. The database is created automatically on first run and persists across container restarts and recreations.
+Run history and tab snapshots are stored in a SQLite database at `./data/history.db`. Active process tracking (running PIDs) is handled by Redis — see the Redis section above. The database is created automatically on first run and persists across container restarts and recreations.
 
 ### Schema
 
@@ -314,15 +338,6 @@ Run history, tab snapshots, and active process tracking are stored in a SQLite d
 | `created` | TEXT | ISO 8601 timestamp |
 | `content` | TEXT | JSON array of `{"text": "...", "cls": "..."}` objects representing every line visible in the tab, including ANSI escape codes for colour reproduction |
 
-**`active_procs` table** — transient table tracking currently running processes:
-
-| Column | Type | Description |
-|--------|------|-------------|
-| `run_id` | TEXT (UUID) | Primary key, matches the `run_id` sent to the browser via SSE |
-| `pid` | INTEGER | OS process group ID — used by the `/kill` endpoint to send SIGTERM |
-
-This table is cleared on every startup to remove any stale rows left by a previous crash. Rows are inserted when a command starts and deleted when it exits or is killed.
-
 ### Retention
 
 The history drawer shows the most recent runs per session up to the `history_panel_limit` config setting, but the database stores everything until pruned. Retention is controlled by `permalink_retention_days` in `config.yaml` — on startup, runs and snapshots older than the configured number of days are deleted. The default is `0` (unlimited). Permalinks will work for as long as the database file exists and the records haven't been pruned.
@@ -332,9 +347,6 @@ To inspect or manage the database directly:
 ```bash
 # Row counts
 sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM snapshots;"
-
-# Check currently running processes
-sqlite3 data/history.db "SELECT * FROM active_procs;"
 
 # Delete runs older than 90 days
 sqlite3 data/history.db "DELETE FROM runs WHERE started < datetime('now', '-90 days');"
@@ -374,13 +386,11 @@ Any user who executes nmap — including the unprivileged `scanner` user — aut
 
 The `docker-compose.yml` adds `NET_RAW` and `NET_ADMIN` to `cap_add` so the host kernel makes these capabilities available to the container.
 
-### Multi-Worker Kill via SQLite
+### Multi-Worker Kill via Redis
 
 Gunicorn runs multiple worker processes to handle concurrent requests. This introduces a challenge: if Worker A starts a command and stores its PID, a kill request might be routed to Worker B which has no knowledge of that process.
 
-The naive solution — an in-memory dict — fails because each worker has its own isolated memory space. Python's `multiprocessing.Manager` was tried but proved unreliable after Gunicorn forks workers, with intermittent failures under load due to broken IPC socket connections.
-
-The solution is to use the existing SQLite database as the PID registry via the `active_procs` table. Since SQLite is already shared across all workers for run history, it's a natural fit. Any worker can register a PID on process start, and any other worker can look it up and issue the `sudo kill` on a kill request. SQLite's file-level locking makes concurrent reads and writes safe with no additional synchronisation needed.
+An in-memory dict fails because each worker has its own isolated memory space. The solution is Redis: when a command starts, `pid_register(run_id, pid)` writes `SET proc:<run_id> <pid> EX 14400` to Redis. When a kill request arrives at any worker, `pid_pop(run_id)` uses `GETDEL` (atomic get-and-delete) to retrieve and remove the PID in one operation. The 4-hour TTL ensures orphaned entries from crashes clean themselves up without requiring a startup purge.
 
 ---
 
@@ -422,5 +432,6 @@ docker compose logs -f
 
 ## Requirements
 
-- Docker + Docker Compose, **or** Python 3.12+ with Flask ≥ 2.0, Gunicorn, PyYAML, and Flask-Limiter
+- Docker + Docker Compose (Redis is included as a service), **or** Python 3.12+ with Flask ≥ 2.0, Gunicorn, PyYAML, Flask-Limiter[redis], and redis-py
 - Linux host (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
+- Redis 6.2+ (for `GETDEL` support) — provided by the Docker Compose service; optional in local dev (app falls back to in-process mode)

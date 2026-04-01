@@ -16,17 +16,28 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 
 Server-Sent Events (SSE) were chosen over WebSockets for output streaming. SSE is simpler to implement with Flask, works correctly behind nginx-proxy without additional configuration, and is unidirectional (server → client) which is all that's needed for streaming command output. The frontend reads the SSE stream via `fetch()` + `ReadableStream` rather than the `EventSource` API, because `EventSource` doesn't support custom headers (needed for the session ID).
 
-### Multi-worker Process Killing via SQLite
+### Multi-worker Process Killing via Redis
 
 **Problem:** Gunicorn runs 4 workers, each with isolated memory. A kill request could hit a different worker than the one that started the process.
 
 **Approaches tried:**
 - In-memory dict — fails immediately (isolated memory per worker)
 - `multiprocessing.Manager` shared dict — tried and abandoned; unreliable after Gunicorn forks workers due to broken IPC socket connections under load
+- SQLite `active_procs` table — worked correctly but was a misuse of a relational database for ephemeral process state; required a `DELETE FROM active_procs` purge on every startup to clear stale rows from crashes
 
-**Solution:** SQLite `active_procs` table (`run_id TEXT, pid INTEGER`). Every worker can read and write it. Uses `DELETE ... RETURNING` for atomic pop to prevent race conditions between workers. Table is cleared on startup to remove stale PIDs from crashes.
+**Solution:** Redis keys — `SET proc:<run_id> <pid> EX 14400`. Every worker reads and writes the same Redis instance. `GETDEL` (Redis 6.2+) provides an atomic get-and-delete, preventing race conditions between workers. The 4-hour TTL (`EX 14400`) replaces the startup purge — orphaned entries self-expire rather than requiring cleanup on init.
 
-**Critical timing fix:** `Popen` and `pid_register` must happen *before* `return Response(generate(), ...)`. Flask generators are lazy — the generator body doesn't execute until Flask starts streaming. If `pid_register` is inside the generator, a kill request arriving before streaming starts finds nothing in the database and silently fails.
+**Fallback for local dev:** If `REDIS_URL` is not set, the app falls back to `memory://` for rate limiting and a `threading.Lock` + in-process dict for PID tracking. This is correct for single-process development (`python3 app.py`) but breaks under Gunicorn multi-worker mode — use Docker Compose for multi-worker testing.
+
+**Critical timing fix:** `Popen` and `pid_register` must happen *before* `return Response(generate(), ...)`. Flask generators are lazy — the generator body doesn't execute until Flask starts streaming. If `pid_register` is inside the generator, a kill request arriving before streaming starts finds nothing in Redis and silently fails.
+
+### Rate Limiting via Redis
+
+**Problem:** Flask-Limiter with its default `memory://` backend gives each Gunicorn worker its own independent counter. With 4 workers, a user effectively gets 4× the configured limit before being rate-limited — the `rate_limit_per_minute` setting in config.yaml becomes meaningless under load.
+
+**Solution:** Redis as the shared backend via `storage_uri=REDIS_URL` in the `Limiter` constructor. All workers increment the same counter in Redis, so the configured limit is enforced accurately across the entire process pool.
+
+This is what motivated the Redis addition in the first place. Once Redis was a dependency for rate limiting, it became the natural fit for PID tracking too (replacing the SQLite `active_procs` workaround).
 
 ### Cross-User Process Killing
 
@@ -94,7 +105,13 @@ These happen in `rewrite_command()` silently (no user-visible notice unless spec
 
 ## Frontend Architecture
 
-Single-file `index.html` — all CSS and JS inline, no build step, no external dependencies except fonts (Google Fonts) and `ansi_up` (CDN).
+Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: each module file defines functions and state only; `app.js` loads last and performs all initialization and event wiring. No bundler, no transpilation.
+
+External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 (CDN) for ANSI-to-HTML rendering.
+
+**JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones.
+
+**Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
 
 ### Tab State
 
@@ -142,15 +159,18 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 **SSE via fetch vs EventSource.** `EventSource` doesn't support custom request headers. Since we need `X-Session-ID` on every request, we use `fetch()` with a `ReadableStream` reader instead. This requires manually parsing the SSE format (`data: ...\n\n`) from the raw byte stream.
 
+**HTTP/1.1 browser connection limit (local dev only).** Browsers cap concurrent HTTP/1.1 connections per origin at 6. Each running command holds one persistent SSE connection. With multiple app UI tabs each running a command, it's possible to saturate the limit, causing new page loads (JS files etc.) to stall. In production this is a non-issue — nginx-proxy terminates HTTPS, and HTTP/2 multiplexes all requests over a single connection with no per-origin cap. In local dev (bare Gunicorn, no proxy, HTTP/1.1), you can hit this limit with enough concurrent tabs. A local Caddy proxy (`brew install caddy`) resolves it if needed.
+
 ---
 
 ## Database
 
-`./data/history.db` — SQLite, WAL mode. Three tables:
+`./data/history.db` — SQLite, WAL mode. Two persistent tables:
 
 - `runs` — one row per completed command. Persists across restarts. Pruned by `permalink_retention_days` config.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls}` objects with raw ANSI codes.
-- `active_procs` — transient. Cleared on startup. One row per running process (`run_id → pid`).
+
+Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Multi-worker Process Killing above).
 
 ---
 
