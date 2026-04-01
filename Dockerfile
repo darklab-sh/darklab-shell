@@ -60,10 +60,12 @@ WORKDIR /app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Download ansi_up at build time so the app works without CDN access
+# Download the latest ansi_up at build time, overwriting the bundled fallback.
+# The || true ensures a build failure here doesn't abort the image build —
+# the committed copy in the repo is used by docker-compose via the bind mount.
 RUN mkdir -p /app/static/js/vendor && \
-    curl -sSL https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js \
-         -o /app/static/js/vendor/ansi_up.js
+    curl -sSL https://cdn.jsdelivr.net/npm/ansi_up/ansi_up.js \
+         -o /app/static/js/vendor/ansi_up.js || true
 
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)

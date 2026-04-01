@@ -7,8 +7,11 @@ __pycache__/
 *.pyo
 .pytest_cache/
 
-# Build artifacts (downloaded at Docker image build time)
-app/static/js/vendor/
+# Vendor JS files are committed as a fallback for local/docker-compose runs.
+# The Dockerfile overwrites them with the latest version at image build time.
+# Ignore any other files that may accumulate in the vendor directory.
+app/static/js/vendor/*
+!app/static/js/vendor/ansi_up.js
  
 # Persistent data (SQLite run history — contains user data, should not be committed)
 data/
