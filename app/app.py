@@ -344,6 +344,7 @@ def _permalink_page(title, label, created, content_lines, json_url):
     content_lines can be a list of strings (single-run history) or
     a list of {text, cls} objects (tab snapshots with class info)."""
     lines_json = json.dumps(content_lines)
+    label_json = json.dumps(label)
     created_fmt = created[:19].replace("T", " ") + " UTC"
     html = f"""<!DOCTYPE html>
 <html lang="en">
@@ -401,6 +402,19 @@ def _permalink_page(title, label, created, content_lines, json_url):
   ansi_up.use_classes = false;
   const out = document.getElementById('output');
   const plainClasses = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
+
+  // Show the command as the first line
+  const cmdSpan = document.createElement('span');
+  cmdSpan.className = 'line';
+  cmdSpan.style.color = 'var(--green)';
+  cmdSpan.style.marginBottom = '4px';
+  cmdSpan.style.display = 'block';
+  cmdSpan.textContent = '$ ' + {label_json};
+  out.appendChild(cmdSpan);
+  const gapSpan = document.createElement('span');
+  gapSpan.className = 'line';
+  gapSpan.textContent = '';
+  out.appendChild(gapSpan);
 
   lines.forEach(entry => {{
     const span = document.createElement('span');
