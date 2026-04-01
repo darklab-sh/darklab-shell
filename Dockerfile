@@ -30,13 +30,9 @@ RUN go install github.com/tomnomnom/assetfinder@latest
 RUN go install github.com/OJ/gobuster/v3@latest
 RUN go install github.com/ffuf/ffuf/v2@latest
 
-# Install wordlists for gobuster (selective clone — web content and DNS only, ~50MB vs 1.8GB for full SecLists)
-RUN mkdir -p /usr/share/wordlists && \
-    git clone --depth 1 --filter=blob:none --sparse https://github.com/danielmiessler/SecLists.git /tmp/seclists && \
-    cd /tmp/seclists && \
-    git sparse-checkout set Discovery/Web-Content Discovery/DNS && \
-    cp -r Discovery /usr/share/wordlists/seclists && \
-    rm -rf /tmp/seclists
+# Install the full SecLists wordlist collection
+RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/wordlists/seclists && \
+    rm -rf /usr/share/wordlists/seclists/.git
 
 # Point nuclei at /tmp so it works with read_only: true (tmpfs is mounted there)
 ENV NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates

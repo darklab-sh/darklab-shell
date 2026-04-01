@@ -316,6 +316,35 @@ By default wapiti writes its report to a file in `/tmp`, which isn't accessible 
 
 ---
 
+## Wordlists
+
+The full [SecLists](https://github.com/danielmiessler/SecLists) collection is installed at `/usr/share/wordlists/seclists/` and available to any tool that accepts a `-w` flag (gobuster, ffuf, dnsenum, fierce, etc.).
+
+```
+/usr/share/wordlists/seclists/
+├── Discovery/
+│   ├── Web-Content/        — directory and file names (common.txt, big.txt, DirBuster-2007_*, raft-*, etc.)
+│   ├── DNS/                — subdomain names (subdomains-top1million-5000.txt, -20000.txt, -110000.txt, etc.)
+│   └── Infrastructure/     — infrastructure and service discovery
+├── Fuzzing/                — fuzzing payloads (XSS, SQLi, path traversal, format strings, etc.)
+├── Passwords/              — password lists and common credentials
+├── Usernames/              — username lists
+├── Payloads/               — attack and injection payloads
+└── Miscellaneous/          — other lists
+```
+
+**Commonly used lists:**
+
+| Path | Use with |
+|------|----------|
+| `Discovery/Web-Content/common.txt` | Fast directory scan |
+| `Discovery/Web-Content/big.txt` | Broader directory scan |
+| `Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt` | Thorough directory scan |
+| `Discovery/DNS/subdomains-top1million-5000.txt` | Fast subdomain brute-force |
+| `Discovery/DNS/subdomains-top1million-20000.txt` | Broader subdomain brute-force |
+
+---
+
 ## Tabs & Run History
 
 Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.

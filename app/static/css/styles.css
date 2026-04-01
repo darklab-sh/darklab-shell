@@ -421,6 +421,27 @@ body.light .terminal-bar { background: #e0e0e0; }
   font-size: 13px;
 }
 
+.faq-a ul {
+  margin: 8px 0 0 4px;
+  padding-left: 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.faq-a li {
+  list-style: none;
+  padding-left: 10px;
+  position: relative;
+}
+
+.faq-a li::before {
+  content: '—';
+  position: absolute;
+  left: -8px;
+  color: var(--muted);
+}
+
 .faq-a code {
   background: #1a1a1a;
   border: 1px solid var(--border-bright);
