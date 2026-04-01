@@ -15,6 +15,7 @@ import select
 import re
 import signal
 import sqlite3
+import threading
 import pwd
 import uuid
 import yaml
@@ -73,7 +74,28 @@ try:
 except KeyError:
     pass  # scanner user doesn't exist — local dev, run directly
 
-# Rate limiting — reads real client IP from X-Forwarded-For set by nginx-proxy
+# ── Redis ─────────────────────────────────────────────────────────────────────
+
+# REDIS_URL can be set via environment variable or config.yaml redis_url key.
+# Environment variable takes priority. If neither is set, falls back to
+# in-process mode (memory rate limiting, threading.Lock pid map) which is
+# only appropriate for local dev or single-worker deployments.
+REDIS_URL = os.environ.get("REDIS_URL") or CFG.get("redis_url", "")
+
+redis_client = None
+if REDIS_URL:
+    try:
+        import redis as redis_lib
+        redis_client = redis_lib.from_url(REDIS_URL, decode_responses=True)
+        redis_client.ping()
+        log.info("Redis connected: %s", REDIS_URL)
+    except Exception as e:
+        log.warning("Redis unavailable (%s) — falling back to in-process mode", e)
+        redis_client = None
+
+# ── Rate limiting ─────────────────────────────────────────────────────────────
+
+# Reads real client IP from X-Forwarded-For set by nginx-proxy
 def get_client_ip():
     forwarded_for = request.headers.get("X-Forwarded-For", "")
     if forwarded_for:
@@ -84,8 +106,43 @@ limiter = Limiter(
     key_func=get_client_ip,
     app=app,
     default_limits=[],
-    storage_uri="memory://"
-)# SQLite persistent run history
+    storage_uri=REDIS_URL if redis_client else "memory://"
+)
+
+# ── Process tracking ──────────────────────────────────────────────────────────
+
+# When Redis is available, PIDs are stored in Redis so any Gunicorn worker can
+# kill a process started by a different worker. When Redis is unavailable
+# (local dev), an in-process dict with a threading.Lock is used instead.
+_pid_map: dict[str, int] = {}
+_pid_lock = threading.Lock()
+
+# PID entries expire after 4 hours as a safety net for orphaned entries
+# left behind if a worker crashes mid-stream.
+_PID_TTL = 14400
+
+
+def pid_register(run_id: str, pid: int) -> None:
+    """Register an active process PID — visible to all Gunicorn workers."""
+    if redis_client:
+        redis_client.set(f"proc:{run_id}", pid, ex=_PID_TTL)
+    else:
+        with _pid_lock:
+            _pid_map[run_id] = pid
+
+
+def pid_pop(run_id: str) -> int | None:
+    """Atomically remove and return the PID for a run_id, or None if not found.
+    GETDEL is atomic in Redis, preventing race conditions between workers."""
+    if redis_client:
+        val = redis_client.getdel(f"proc:{run_id}")
+        return int(val) if val is not None else None
+    else:
+        with _pid_lock:
+            return _pid_map.pop(run_id, None)
+
+
+# ── SQLite persistent run history ─────────────────────────────────────────────
 # Database lives in /data which is a writable volume mount (see docker-compose.yml)
 # Falls back to /tmp if /data is not available (e.g. local dev without the volume)
 DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"
@@ -101,7 +158,7 @@ def db_connect():
 
 
 def db_init():
-    """Create the runs, snapshots, and active_procs tables if they don't exist."""
+    """Create the runs and snapshots tables if they don't exist."""
     with db_connect() as conn:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS runs (
@@ -123,20 +180,12 @@ def db_init():
                 content    TEXT NOT NULL
             )
         """)
-        conn.execute("""
-            CREATE TABLE IF NOT EXISTS active_procs (
-                run_id TEXT PRIMARY KEY,
-                pid    INTEGER NOT NULL
-            )
-        """)
         # Add session_id column to existing databases that predate this feature
         try:
             conn.execute("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
         except sqlite3.OperationalError:
             pass  # Column already exists
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
-        # Clear any stale PIDs left over from a previous crash/restart
-        conn.execute("DELETE FROM active_procs")
 
         # Prune old runs and snapshots if retention is configured
         days = CFG.get("permalink_retention_days", 0)
@@ -154,28 +203,6 @@ def db_init():
 
 
 db_init()
-
-
-def pid_register(run_id, pid):
-    """Register an active process PID — visible to all Gunicorn workers via SQLite."""
-    with db_connect() as conn:
-        conn.execute(
-            "INSERT OR REPLACE INTO active_procs (run_id, pid) VALUES (?, ?)",
-            (run_id, pid)
-        )
-        conn.commit()
-
-
-def pid_pop(run_id):
-    """Atomically remove and return the PID for a run_id, or None if not found.
-    Uses a single atomic DELETE...RETURNING to prevent race conditions between workers."""
-    with db_connect() as conn:
-        row = conn.execute(
-            "DELETE FROM active_procs WHERE run_id = ? RETURNING pid",
-            (run_id,)
-        ).fetchone()
-        conn.commit()
-        return row["pid"] if row else None
 
 
 HTML = open(os.path.join(os.path.dirname(__file__), "index.html")).read()
@@ -349,7 +376,6 @@ def get_run(run_id):
     if "json" in request.args:
         return jsonify(run)
 
-    output_html = "\n".join(run["output"])
     return _permalink_page(
         title=f"$ {run['command']}",
         label=run["command"],
@@ -525,7 +551,7 @@ def run_command():
     captured_lines = []
 
     # Start the process immediately — before the generator runs — so the PID
-    # is registered in SQLite before any kill request could arrive
+    # is registered before any kill request could arrive
     try:
         proc = subprocess.Popen(
             SCANNER_PREFIX + ["sh", "-c", command] if SCANNER_PREFIX else command,

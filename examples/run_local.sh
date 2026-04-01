@@ -12,7 +12,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 APP_DIR="$SCRIPT_DIR/../app"
 
 echo "Installing Python dependencies..."
-pip install flask gunicorn pyyaml flask-limiter --quiet
+pip install flask gunicorn pyyaml "flask-limiter[redis]" redis --quiet
 
 echo "Starting shell.darklab.sh on http://localhost:8888"
 cd "$APP_DIR"

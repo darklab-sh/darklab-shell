@@ -1,4 +1,11 @@
 services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    read_only: true
+    tmpfs:
+      - /tmp
+
   shell:
     build:
       context: ..
@@ -17,3 +24,7 @@ services:
       - NET_ADMIN
     read_only: true
     restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis

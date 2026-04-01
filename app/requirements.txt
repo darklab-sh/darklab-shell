@@ -1,4 +1,5 @@
 flask>=2.0
 gunicorn
-flask-limiter
+flask-limiter[redis]
 pyyaml
+redis>=4.0

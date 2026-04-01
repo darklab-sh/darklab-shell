@@ -1,4 +1,12 @@
 services:
+  redis:
+    image: redis:7-alpine
+    container_name: shell.darklab.sh-redis
+    restart: always
+    read_only: true
+    tmpfs:
+      - /tmp
+
   shell.darklab.sh:
     build: .
     container_name: shell.darklab.sh
@@ -15,12 +23,15 @@ services:
       - NET_RAW
       - NET_ADMIN
     environment:
+      - REDIS_URL=redis://redis:6379/0
       - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
       - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
       # Keep SSE connections alive through nginx-proxy for long-running commands
       - PROXY_READ_TIMEOUT=3600
       - PROXY_SEND_TIMEOUT=3600
       - PROXY_CONNECT_TIMEOUT=3600
+    depends_on:
+      - redis
     logging:
       driver: "gelf"
       options:
