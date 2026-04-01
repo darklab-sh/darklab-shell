@@ -47,6 +47,7 @@ def load_config():
         "rate_limit_per_minute":     30,
         "rate_limit_per_second":     5,
         "max_output_lines":          2000,
+        "max_tabs":                  8,
         "command_timeout_seconds":   0,
         "heartbeat_interval_seconds": 20,
     }
@@ -211,7 +212,7 @@ AUTOCOMPLETE_FILE = os.path.join(os.path.dirname(__file__), "auto_complete.txt")
 
 
 def load_allowed_commands():
-    """Read allowed_commands.txt and return a list of allowed prefixes.
+    """Read allowed_commands.txt and return a flat list of allowed prefixes.
     Returns None if the file doesn't exist or is empty, meaning all commands are allowed."""
     if not os.path.exists(ALLOWED_COMMANDS_FILE):
         return None
@@ -222,6 +223,47 @@ def load_allowed_commands():
             if line and not line.startswith("#"):
                 prefixes.append(line.lower())
     return prefixes if prefixes else None
+
+
+def load_allowed_commands_grouped():
+    """Read allowed_commands.txt and return commands grouped by ## Category headers.
+    Returns a list of {name, commands} dicts, or None if file is empty/missing."""
+    if not os.path.exists(ALLOWED_COMMANDS_FILE):
+        return None
+    groups = []
+    current = None
+    with open(ALLOWED_COMMANDS_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line.startswith("## "):
+                current = {"name": line[3:].strip(), "commands": []}
+                groups.append(current)
+            elif line and not line.startswith("#"):
+                if current is None:
+                    current = {"name": "", "commands": []}
+                    groups.append(current)
+                current["commands"].append(line.lower())
+    groups = [g for g in groups if g["commands"]]
+    return groups if groups else None
+
+
+FAQ_FILE = os.path.join(os.path.dirname(__file__), "faq.yaml")
+
+
+def load_faq():
+    """Read faq.yaml and return a list of {question, answer} dicts.
+    Returns an empty list if the file doesn't exist or contains no valid entries."""
+    if not os.path.exists(FAQ_FILE):
+        return []
+    with open(FAQ_FILE) as f:
+        data = yaml.safe_load(f) or []
+    if not isinstance(data, list):
+        return []
+    return [
+        {"question": str(item["question"]), "answer": str(item["answer"])}
+        for item in data
+        if isinstance(item, dict) and item.get("question") and item.get("answer")
+    ]
 
 
 # Shell metacharacters that can chain or redirect commands
@@ -324,6 +366,7 @@ def get_config():
         "motd":                 CFG["motd"],
         "recent_commands_limit": CFG["recent_commands_limit"],
         "max_output_lines":     CFG["max_output_lines"],
+        "max_tabs":             CFG["max_tabs"],
         "history_panel_limit":  CFG["history_panel_limit"],
     })
 
@@ -333,8 +376,15 @@ def allowed_commands():
     """Return the list of allowed command prefixes for display in the UI."""
     prefixes = load_allowed_commands()
     if prefixes is None:
-        return jsonify({"restricted": False, "commands": []})
-    return jsonify({"restricted": True, "commands": prefixes})
+        return jsonify({"restricted": False, "commands": [], "groups": []})
+    groups = load_allowed_commands_grouped() or []
+    return jsonify({"restricted": True, "commands": prefixes, "groups": groups})
+
+
+@app.route("/faq")
+def faq():
+    """Return custom FAQ entries from faq.yaml."""
+    return jsonify({"items": load_faq()})
 
 
 @app.route("/autocomplete")

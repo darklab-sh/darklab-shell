@@ -24,6 +24,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
     const wrap = document.getElementById('motd-wrap');
     if (motd && wrap) { motd.textContent = cfg.motd; wrap.style.display = 'block'; }
   }
+  updateNewTabBtn();
 }).catch(() => {});
 
 // ── Hamburger menu (mobile) ──
@@ -70,19 +71,69 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   const el = document.getElementById('faq-allowed-text');
   if (!data.restricted) {
     el.textContent = 'No restrictions are configured — all commands are permitted.';
+    return;
+  }
+
+  function makeChip(cmd) {
+    const chip = document.createElement('span');
+    chip.className = 'allowed-chip';
+    chip.textContent = cmd;
+    chip.title = 'Click to load into command bar';
+    chip.addEventListener('click', () => {
+      cmdInput.value = cmd + ' ';
+      closeFaq();
+      cmdInput.focus();
+      // Defer the input event so it fires after the click finishes bubbling
+      // to document (which calls acHide). Without this, autocomplete opens
+      // then immediately closes.
+      setTimeout(() => cmdInput.dispatchEvent(new Event('input')), 0);
+    });
+    return chip;
+  }
+
+  if (data.groups && data.groups.length > 0) {
+    el.innerHTML = 'Click any command to load it into the command bar:';
+    data.groups.forEach(group => {
+      const groupEl = document.createElement('div');
+      groupEl.className = 'allowed-group';
+      if (group.name) {
+        const header = document.createElement('div');
+        header.className = 'allowed-group-header';
+        header.textContent = group.name;
+        groupEl.appendChild(header);
+      }
+      const list = document.createElement('div');
+      list.className = 'allowed-list';
+      group.commands.forEach(cmd => list.appendChild(makeChip(cmd)));
+      groupEl.appendChild(list);
+      el.appendChild(groupEl);
+    });
   } else {
-    el.innerHTML = 'Only the following command prefixes are permitted. Any command not starting with one of these will be blocked:';
+    el.innerHTML = 'Click any command to load it into the command bar:';
     const list = document.createElement('div');
     list.className = 'allowed-list';
-    data.commands.forEach(cmd => {
-      const chip = document.createElement('span');
-      chip.className = 'allowed-chip';
-      chip.textContent = cmd;
-      list.appendChild(chip);
-    });
+    data.commands.forEach(cmd => list.appendChild(makeChip(cmd)));
     el.appendChild(list);
   }
 });
+
+apiFetch('/faq').then(r => r.json()).then(data => {
+  if (!data.items || !data.items.length) return;
+  const faqBody = document.querySelector('.faq-body');
+  data.items.forEach(item => {
+    const div = document.createElement('div');
+    div.className = 'faq-item';
+    const q = document.createElement('div');
+    q.className = 'faq-q';
+    q.textContent = item.question;
+    const a = document.createElement('div');
+    a.className = 'faq-a';
+    a.textContent = item.answer;
+    div.appendChild(q);
+    div.appendChild(a);
+    faqBody.appendChild(div);
+  });
+}).catch(() => {});
 
 // ── Tabs ──
 createTab('tab 1');

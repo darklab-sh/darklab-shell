@@ -2,7 +2,19 @@
 let tabs = [];
 let activeTabId = null;
 
+function updateNewTabBtn() {
+  const btn = document.getElementById('new-tab-btn');
+  if (!btn) return;
+  const atLimit = APP_CONFIG.max_tabs > 0 && tabs.length >= APP_CONFIG.max_tabs;
+  btn.disabled = atLimit;
+  btn.title = atLimit ? `Tab limit reached (max ${APP_CONFIG.max_tabs})` : '';
+}
+
 function createTab(label) {
+  if (APP_CONFIG.max_tabs > 0 && tabs.length >= APP_CONFIG.max_tabs) {
+    showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
+    return null;
+  }
   const id = 'tab-' + Date.now();
 
   const tab = document.createElement('div');
@@ -41,6 +53,7 @@ function createTab(label) {
 
   tabs.push({ id, label, runId: null, exitCode: null, rawLines: [], killed: false, st: 'idle' });
   activateTab(id);
+  updateNewTabBtn();
   return id;
 }
 
@@ -71,6 +84,7 @@ function closeTab(id) {
   if (activeTabId === id) {
     activateTab(tabs[Math.min(idx, tabs.length - 1)].id);
   }
+  updateNewTabBtn();
 }
 
 function setTabStatus(id, st) {

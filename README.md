@@ -23,7 +23,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
 - **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header, backed by Redis for accurate enforcement across all Gunicorn workers (compatible with nginx-proxy)
 - **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
-- **FAQ modal** — built-in help including allowed commands and usage notes
+- **FAQ modal** — built-in help with allowed commands grouped by category; click any command chip to load it into the command bar with autocomplete. Extend with instance-specific entries via `faq.yaml`
 
 ---
 
@@ -43,8 +43,9 @@ A lightweight web interface for running network diagnostic and vulnerability sca
     ├── app.py                  # Flask + Gunicorn backend
     ├── index.html              # Frontend HTML shell (served by Flask)
     ├── config.yaml             # Application configuration (see Configuration section)
-    ├── allowed_commands.txt    # Command allowlist (one prefix per line)
+    ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
+    ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     ├── favicon.ico             # Site favicon
     ├── requirements.txt        # Python dependencies
     └── static/
@@ -76,7 +77,14 @@ docker compose up --build
 
 Open [http://localhost:8888](http://localhost:8888).
 
-All app files live in the `./app/` subdirectory and are mounted as a read-only volume — edits to `config.yaml`, `allowed_commands.txt`, and `auto_complete.txt` take effect after a restart with no rebuild needed:
+All app files live in the `./app/` subdirectory and are mounted as a read-only volume. Different files have different reload behaviour:
+
+| File | When changes take effect |
+|------|--------------------------|
+| `allowed_commands.txt` | Immediately — re-read on every request |
+| `faq.yaml` | Immediately — re-read on every request |
+| `auto_complete.txt` | On next page load — fetched once by the browser |
+| `config.yaml` | After `docker compose restart` (no rebuild needed) |
 
 ```bash
 docker compose restart
@@ -165,6 +173,7 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 | `permalink_retention_days` | `0` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
 | `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
+| `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
 | `max_output_lines` | `2000` | Max lines retained per tab. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
 | `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
@@ -194,6 +203,14 @@ The following tools are installed in the Docker image and available for use:
 | `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library pulled in by wapiti3 |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
 | `gobuster` | Directory, file, DNS, and vhost brute-forcing. Wordlists installed at `/usr/share/wordlists/seclists/` |
+| `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
+| `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
+| `masscan` | High-speed TCP port scanner; requires raw sockets (container has `NET_RAW`/`NET_ADMIN`) |
+| `amass` | In-depth attack surface mapping and subdomain enumeration (OWASP project) |
+| `assetfinder` | Fast passive subdomain discovery using public sources |
+| `fierce` | DNS reconnaissance and subdomain brute-forcing |
+| `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
+| `ffuf` | Fast web fuzzer for directory, file, and vhost discovery. Wordlists at `/usr/share/wordlists/seclists/` |
 
 ---
 
@@ -204,17 +221,22 @@ Allowed commands are controlled by `allowed_commands.txt`. The file is re-read o
 **Format:**
 - One command prefix per line
 - Lines starting with `#` are comments and are ignored
+- Lines starting with `##` define a category group shown in the FAQ command list (e.g. `## Network Diagnostics`)
 - Matching is prefix-based: a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc.
 - Be as specific or broad as you like — `nmap -sT` permits only TCP connect scans, while `nmap` permits any nmap invocation
 
 **Example:**
 ```
+## Network Diagnostics
 ping
 curl
 dig
+
+## Vulnerability Scanning
 nmap
-whois
 ```
+
+Commands in the FAQ are displayed grouped by their `##` category, with each chip clickable to load the command into the input bar. Commands before any `##` header are shown in an unnamed group.
 
 To **disable restrictions entirely**, delete `allowed_commands.txt` or leave it empty — all commands will be permitted.
 
@@ -223,6 +245,24 @@ To **disable restrictions entirely**, delete `allowed_commands.txt` or leave it 
 When the allowlist is active, the following operators are blocked outright, both in the browser and on the server, to prevent chaining disallowed commands:
 
 `&&` `||` `|` `;` `;;` `` ` `` `$()` `>` `>>` `<`
+
+---
+
+## Custom FAQ
+
+Instance-specific FAQ entries can be added to `app/faq.yaml`. Entries are appended after the built-in FAQ items in the FAQ modal and are re-read on every request — no restart needed.
+
+**Format:**
+
+```yaml
+- question: "Where is this server located?"
+  answer: "This server is hosted in New York, USA on a 10 Gbps uplink via Cogent and Zayo."
+
+- question: "What is the outbound bandwidth?"
+  answer: "Outbound traffic is limited to 1 Gbps sustained."
+```
+
+The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Answers are rendered as plain text.
 
 ---
 
@@ -278,7 +318,7 @@ By default wapiti writes its report to a file in `/tmp`, which isn't accessible 
 
 ## Tabs & Run History
 
-Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it.
+Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.
 
 The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has two buttons: **copy command** copies the command text to the clipboard for quick re-use or modification, and **permalink** copies a shareable link to that run's output.
 
@@ -421,6 +461,7 @@ docker compose logs -f
 | `GET` | `/config` | Returns frontend-relevant config values as JSON |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
+| `GET` | `/faq` | Returns custom FAQ entries from `faq.yaml` as JSON |
 | `GET` | `/history` | Returns last N completed runs for the current session as JSON |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run (`?json` for raw JSON) |
 | `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |

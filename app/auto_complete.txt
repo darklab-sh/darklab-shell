@@ -174,10 +174,67 @@ dnsx -d example.com -a -resp
 dnsx -d example.com -cname -resp
 dnsx -d example.com -mx -resp
 
+# fping
+fping -h
+fping example.com
+fping -c 4 example.com
+fping -s example.com
+fping -e example.com
+fping -a -g 192.168.1.0/24
+
+# hping3
+hping3 --help
+hping3 example.com
+hping3 -S -p 80 example.com
+hping3 -S -p 443 example.com
+hping3 -c 4 example.com
+hping3 --traceroute -V -S -p 80 example.com
+
+# masscan
+masscan --help
+masscan example.com -p 80,443
+masscan example.com -p 1-1000
+masscan example.com -p 80,443,8080,8443 --rate 500
+masscan example.com -p 0-65535 --rate 1000
+
+# amass
+amass -h
+amass enum -d example.com
+amass enum -passive -d example.com
+amass enum -active -d example.com
+amass enum -d example.com -brute
+amass intel -d example.com
+
+# assetfinder
+assetfinder --help
+assetfinder example.com
+assetfinder --subs-only example.com
+
+# fierce
+fierce --help
+fierce --domain example.com
+fierce --domain example.com --dns-servers 8.8.8.8
+fierce --domain example.com --traverse 5
+
+# dnsenum
+dnsenum --help
+dnsenum example.com
+dnsenum --noreverse example.com
+dnsenum --enum example.com
+dnsenum --dnsserver 8.8.8.8 example.com
+
+# ffuf
+ffuf -h
+ffuf -u https://example.com/FUZZ -w /usr/share/wordlists/seclists/Web-Content/common.txt
+ffuf -u https://example.com/FUZZ -w /usr/share/wordlists/seclists/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
+ffuf -u https://example.com/FUZZ -w /usr/share/wordlists/seclists/Web-Content/big.txt -mc 200,301,302
+ffuf -u https://example.com/FUZZ -w /usr/share/wordlists/seclists/Web-Content/common.txt -e .php,.html,.txt
+ffuf -u https://FUZZ.example.com -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt -H "Host: FUZZ.example.com"
+
 # gobuster
 gobuster -h
 gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/common.txt
-gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/directory-list-2.3-medium.txt
+gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
 gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Web-Content/big.txt
 gobuster dns -d example.com -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-5000.txt
 gobuster dns -d example.com -w /usr/share/wordlists/seclists/DNS/subdomains-top1million-20000.txt

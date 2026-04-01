@@ -7,5 +7,6 @@ let APP_CONFIG = {
   motd: '',
   recent_commands_limit: 8,
   max_output_lines: 2000,
+  max_tabs: 8,
   history_panel_limit: 50,
 };

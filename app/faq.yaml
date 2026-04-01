@@ -1,0 +1,11 @@
+# Custom FAQ entries for this instance.
+# Each entry requires a 'question' and an 'answer' field.
+# Entries are appended after the built-in FAQ items in the FAQ modal.
+# Changes take effect immediately — no restart needed.
+#
+# Example:
+# - question: "Where is this server located?"
+#   answer: "This server is hosted in New York, USA on a 10 Gbps uplink via Cogent and Zayo."
+
+- question: "Where is this server located?"
+  answer: "This dedicated server is located in Tempe, Arizona, USA on a 10 Gbps uplink via NTT, Cogent, HE, GTT, and TATA"

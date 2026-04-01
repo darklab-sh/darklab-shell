@@ -2,6 +2,7 @@
 # -----------------
 # One allowed command prefix per line.
 # Lines starting with # are comments and are ignored, as are blank lines.
+# Lines starting with ## define a category group shown in the FAQ command list.
 # Matching is prefix-based: "ping" allows "ping google.com", "ping -c 4 1.1.1.1", etc.
 # Be as specific or broad as you like — "nmap -sT" only allows TCP-connect scans,
 # while "nmap" would allow any nmap invocation.
@@ -12,28 +13,42 @@
 # If you include "mtr --report" or "mtr -r" as a prefix here, users must pass
 # report flags themselves — the auto-rewrite only fires when they are absent.
 
+## Network Diagnostics
 ping
-dig
-nslookup
-whois
-host
+fping
+hping3
 traceroute
 tcptraceroute
 # mtr is auto-rewritten to --report-wide mode when no report flag is present
 mtr
+dig
+nslookup
+host
+whois
 curl
 wget
-nmap
-testssl
+
+## Network Reconnaissance
 dnsrecon
-nikto
-wapiti
-# nuclei uses /tmp for templates and cache (tmpfs mount via docker-compose)
-nuclei
-wpscan
 # ProjectDiscovery suite
 subfinder
+dnsx
 # pd-httpx is the ProjectDiscovery httpx tool (renamed to avoid conflict with Python httpx)
 pd-httpx
-dnsx
+amass
+assetfinder
+fierce
+dnsenum
+masscan
 gobuster
+# Web fuzzing
+ffuf
+
+## Vulnerability Scanning
+nmap
+testssl
+nikto
+wapiti
+wpscan
+# nuclei uses /tmp for templates and cache (tmpfs mount via docker-compose)
+nuclei

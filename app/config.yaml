@@ -40,6 +40,10 @@ rate_limit_per_second: 5
 
 # ── Terminal ──────────────────────────────────────────────────────────────────
 
+# Maximum number of tabs a user can have open at once.
+# Set to 0 for unlimited.
+max_tabs: 8
+
 # Maximum number of output lines retained per tab. Older lines are dropped
 # from the top to prevent the browser slowing down on verbose commands.
 # Set to 0 for unlimited.
