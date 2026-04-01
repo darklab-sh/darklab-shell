@@ -1098,7 +1098,7 @@
     });
     tabPanels.appendChild(panel);
 
-    tabs.push({ id, label, runId: null, exitCode: null, rawLines: [] });
+    tabs.push({ id, label, runId: null, exitCode: null, rawLines: [], killed: false });
     activateTab(id);
     return id;
   }
@@ -1540,6 +1540,7 @@
       body: JSON.stringify({ run_id: t.runId })
     });
     t.runId = null;
+    t.killed = true;
     stopTimer();
     appendLine(`\n[killed by user${secs ? ' after ' + secs + 's' : ''}]`, 'exit-fail', tabId);
     setTabStatus(tabId, 'killed');
@@ -1643,7 +1644,7 @@
                 const msg = JSON.parse(part.slice(6));
                 if (msg.type === 'started') {
                   const t = tabs.find(t => t.id === tabId);
-                  if (t) t.runId = msg.run_id;
+                  if (t) { t.runId = msg.run_id; t.killed = false; }
                 } else if (msg.type === 'notice') {
                   appendLine(msg.text, 'notice', tabId);
                 } else if (msg.type === 'output') {
@@ -1653,6 +1654,14 @@
                 } else if (msg.type === 'exit') {
                   const t = tabs.find(t => t.id === tabId);
                   if (t) { t.exitCode = msg.code; t.runId = null; }
+                  // If already killed by user, ignore the subsequent -15 exit
+                  if (t && t.killed) {
+                    t.killed = false;
+                    stopTimer();
+                    runBtn.disabled = false; hideTabKillBtn(tabId);
+                    if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+                    return;
+                  }
                   const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
                   stopTimer();
                   if (msg.code === 0) {
