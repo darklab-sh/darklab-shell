@@ -422,5 +422,5 @@ docker compose logs -f
 
 ## Requirements
 
-- Docker + Docker Compose, **or** Python 3.12+ with Flask, Gunicorn, and PyYAML
+- Docker + Docker Compose, **or** Python 3.12+ with Flask ≥ 2.0, Gunicorn, PyYAML, and Flask-Limiter
 - Linux host (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
