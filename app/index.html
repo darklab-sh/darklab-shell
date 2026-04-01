@@ -823,7 +823,9 @@
   <button data-action="faq">? FAQ</button>
 </div>
 
-<div id="motd" style="display:none;padding:8px 16px;background:rgba(57,255,20,0.06);border-bottom:1px solid var(--green-dim);color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></div>
+<div style="display:none;padding:6px 0" id="motd-wrap">
+  <span id="motd" style="display:inline-block;padding:5px 14px;background:rgba(57,255,20,0.06);border:1px solid var(--green-dim);border-radius:4px;color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></span>
+</div>
 
 <div class="input-row">
   <div class="prompt-wrap">
@@ -1044,7 +1046,8 @@
     // MOTD
     if (cfg.motd) {
       const motd = document.getElementById('motd');
-      if (motd) { motd.textContent = cfg.motd; motd.style.display = 'block'; }
+      const wrap = document.getElementById('motd-wrap');
+      if (motd && wrap) { motd.textContent = cfg.motd; wrap.style.display = 'block'; }
     }
   }).catch(() => {});
 

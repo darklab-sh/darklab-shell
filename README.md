@@ -9,18 +9,20 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
 - **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group. Killed processes show a **KILLED** status (amber) distinct from ERROR
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; the final duration is shown in the exit line when the process finishes or is killed
-- **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
-- **Run history drawer** — slide-out panel showing the last 50 completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite
-- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history panel link to individual run results. Both persist via SQLite
+- **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite
+- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation
 - **Command history** — recent commands shown as clickable chips for quick re-runs
 - **Save output** — download the terminal output as a timestamped `.txt` file
 - **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
+- **MOTD** — optional message of the day displayed at the top of the terminal on page load
+- **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
 - **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header (compatible with nginx-proxy)
+- **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
 - **FAQ modal** — built-in help including allowed commands and usage notes
 
 ---
@@ -32,6 +34,9 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── docker-compose.yml
 ├── Dockerfile
 ├── entrypoint.sh           # Container startup script — fixes /data ownership, drops to appuser
+├── examples/
+│   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
+│   └── run_local.sh                    # Script to run without Docker using Python directly
 ├── data/                   # Writable volume — SQLite database (auto-created)
 │   └── history.db          #   stores run history and tab snapshots
 └── app/
@@ -41,14 +46,14 @@ A lightweight web interface for running network diagnostic and vulnerability sca
     ├── allowed_commands.txt    # Command allowlist (one prefix per line)
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     ├── favicon.ico             # Site favicon
-    └── requirements.txt        # Python dependencies (Flask, Gunicorn, Flask-Limiter)
+    └── requirements.txt        # Python dependencies
 ```
 
 ---
 
 ## Quick Start
 
-### With Docker (recommended)
+### Running with Docker
 
 ```bash
 docker compose up --build
@@ -56,11 +61,13 @@ docker compose up --build
 
 Open [http://localhost:8888](http://localhost:8888).
 
-All app files live in the `./app/` subdirectory and are mounted as a read-only volume — edits to any file (including `allowed_commands.txt` and `auto_complete.txt`) take effect after a restart with no rebuild needed:
+All app files live in the `./app/` subdirectory and are mounted as a read-only volume — edits to `config.yaml`, `allowed_commands.txt`, and `auto_complete.txt` take effect after a restart with no rebuild needed:
 
 ```bash
 docker compose restart
 ```
+
+A minimal standalone `docker-compose.yml` with no infrastructure-specific configuration is available in the `examples/` folder.
 
 #### Read-only filesystem
 
@@ -71,9 +78,15 @@ The container filesystem is set to read-only (`read_only: true`) and the app vol
 
 To prevent commands from writing to either path directly, the app blocks any command that references `/data` or `/tmp` as a filesystem argument (using a negative lookbehind so URLs containing `/data` or `/tmp` as path segments are still permitted).
 
-#### expose vs ports
+#### Keep-Alive & Long-Running Commands
 
-The `docker-compose.yml` uses `expose` rather than `ports`, which makes port 8888 available to other containers on the same Docker network but does **not** publish it to the host. This is intentional for use behind an nginx-proxy setup (see below).
+For commands that produce little or no output for extended periods (e.g. slow scans, nuclei running against a large target), the SSE connection is kept alive by a server-sent heartbeat comment sent every `heartbeat_interval_seconds` (default 20s) when no output is being produced. This prevents nginx and the browser from treating the idle connection as stale and dropping it.
+
+The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND_TIMEOUT`, `PROXY_CONNECT_TIMEOUT`) in `docker-compose.yml` are set to 3600 seconds to match the Gunicorn worker timeout, giving commands up to an hour to complete. Commands can also be automatically killed after a configurable duration via `command_timeout_seconds` in `config.yaml`.
+
+#### nginx-proxy & VIRTUAL_HOST
+
+The `VIRTUAL_HOST` and `LETSENCRYPT_HOST` environment variables in `docker-compose.yml` are specific to a [nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) + [acme-companion](https://github.com/nginx-proxy/acme-companion) setup for automatic reverse proxying and SSL. If you are not using nginx-proxy, remove these environment variables entirely.
 
 If you are running this as a standalone Docker app without a reverse proxy, replace the `expose` section with a `ports` mapping:
 
@@ -82,13 +95,9 @@ ports:
   - "8888:8888"
 ```
 
-#### nginx-proxy & VIRTUAL_HOST
+#### GELF Logging
 
-The `VIRTUAL_HOST` and `LETSENCRYPT_HOST` environment variables are specific to a [nginx-proxy](https://github.com/nginx-proxy/nginx-proxy) + [acme-companion](https://github.com/nginx-proxy/acme-companion) setup for automatic reverse proxying and SSL. If you are not using nginx-proxy, remove these environment variables entirely.
-
-#### Logging
-
-The `logging` block ships container logs to a Graylog instance via GELF UDP. This is specific to a self-hosted logging infrastructure and can be safely removed if you don't have a GELF-compatible log aggregator:
+The `logging` block in `docker-compose.yml` ships container logs to a Graylog instance via GELF UDP. This is specific to a self-hosted logging infrastructure and can be safely removed if you don't have a GELF-compatible log aggregator:
 
 ```yaml
 # Remove this block if not using GELF logging
@@ -100,16 +109,21 @@ logging:
 
 Without this block, Docker will use its default `json-file` log driver.
 
-#### Networks
+#### Docker Networks
 
 The `networks` block attaches the container to an external Docker network called `darklab-net`. This is required for the container to be reachable by nginx-proxy when both are on the same network. If you are not using a shared Docker network, remove the entire `networks` section and Docker will create a default bridge network automatically.
 
-### Without Docker
+### Running Without Docker
+
+A convenience script is available in `examples/run_local.sh` that installs dependencies and starts the app. Or run manually:
 
 ```bash
-pip install flask gunicorn
+pip install flask gunicorn pyyaml
+cd app
 python3 app.py
 ```
+
+Open [http://localhost:8888](http://localhost:8888). Note that without Docker, the installed security tooling (nmap, nuclei, etc.) and process isolation (`scanner` user, read-only filesystem) will not be in effect.
 
 ---
 
@@ -135,6 +149,8 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 
 ## Installed Tools
 
+The following tools are installed in the Docker image and available for use:
+
 | Tool | Purpose |
 |------|---------|
 | `ping` | ICMP reachability |
@@ -142,7 +158,7 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 | `dig` / `nslookup` / `host` | DNS lookups |
 | `whois` | Domain & IP registration info |
 | `traceroute` / `tcptraceroute` | Route tracing (ICMP and TCP) |
-| `mtr` | Combined ping + traceroute (auto-rewritten to report mode, see below) |
+| `mtr` | Combined ping + traceroute (auto-rewritten to report mode, see Tool Notes) |
 | `nmap` | Port scanning and service detection |
 | `testssl.sh` | TLS/SSL vulnerability scanning |
 | `dnsrecon` | DNS enumeration and zone transfer testing |
@@ -236,17 +252,9 @@ By default wapiti writes its report to a file in `/tmp`, which isn't accessible 
 
 ---
 
-## Keep-Alive & Long-Running Commands
-
-For commands that produce little or no output for extended periods (e.g. slow scans, nuclei running against a large target), the SSE connection is kept alive by a server-sent heartbeat — a comment line sent every 20 seconds when no output is being produced. This prevents nginx and the browser from treating the idle connection as stale and dropping it.
-
-The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND_TIMEOUT`, `PROXY_CONNECT_TIMEOUT`) in `docker-compose.yml` are set to 3600 seconds to match the Gunicorn worker timeout, giving commands up to an hour to complete.
-
----
-
 ## Tabs & Run History
 
-Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed) and is labelled with the last command that was run in it.
+Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it.
 
 The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has two buttons: **copy command** copies the command text to the clipboard for quick re-use or modification, and **permalink** copies a shareable link to that run's output.
 
@@ -260,9 +268,21 @@ There are two types of permalink:
 
 **Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI colour rendering, a "save .txt" button, a "view json" option, and a link back to the shell. This is the recommended way to share results.
 
-**Single run** (`/history/<run_id>`) — the permalink button in the run history panel links to an individual run's output, also served as a styled HTML page.
+**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run's output, also served as a styled HTML page.
 
 Both types persist across container restarts via the `./data` SQLite volume. The `./data` directory is the only writable path in an otherwise read-only container and is created automatically on first run.
+
+---
+
+## Output Search
+
+Click **⌕ search** in the header to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
+
+---
+
+## Dark / Light Theme
+
+Click **◑ theme** in the header to toggle between dark and light mode. Your preference is saved in `localStorage` and persists across sessions.
 
 ---
 
@@ -301,7 +321,7 @@ Run history, tab snapshots, and active process tracking are stored in a SQLite d
 | `run_id` | TEXT (UUID) | Primary key, matches the `run_id` sent to the browser via SSE |
 | `pid` | INTEGER | OS process group ID — used by the `/kill` endpoint to send SIGTERM |
 
-This table is cleared on every startup to remove any stale rows left by a previous crash. Rows are inserted when a command starts and deleted when it exits or is killed. See the Multi-Worker Kill section below for why this lives in SQLite rather than in memory.
+This table is cleared on every startup to remove any stale rows left by a previous crash. Rows are inserted when a command starts and deleted when it exits or is killed.
 
 ### Retention
 
@@ -338,11 +358,11 @@ As a second layer of defence, the application also blocks any command that refer
 
 The container starts as root only long enough for `entrypoint.sh` to: fix `/data` ownership after the volume mount resets it, set `/tmp` to `1777` (world-writable with sticky bit), and pre-create `/tmp/.config` and `/tmp/.cache` owned by `scanner` so tools don't try to create them as root. It then drops to `appuser` via `gosu` before starting Gunicorn. Neither `appuser` nor `scanner` has a login shell or password.
 
-### Kill and cross-user signalling
+### Kill and Cross-User Signalling
 
 Because commands run as `scanner` and Gunicorn runs as `appuser`, `appuser` cannot directly signal `scanner`-owned processes — Linux only allows signalling processes owned by the same user (unless root). The kill endpoint therefore uses `sudo -u scanner kill -TERM -<pgid>` to send SIGTERM to the process group as `scanner`, who owns the processes and has permission to signal them. The `appuser ALL=(scanner) NOPASSWD: ALL` sudoers rule covers this.
 
-### nmap capabilities
+### nmap Capabilities
 
 nmap requires raw socket access (`CAP_NET_RAW`, `CAP_NET_ADMIN`) for OS fingerprinting, SYN scans, and other advanced scan types. These are applied directly to the nmap binary via Linux file capabilities:
 
@@ -350,11 +370,11 @@ nmap requires raw socket access (`CAP_NET_RAW`, `CAP_NET_ADMIN`) for OS fingerpr
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
-Any user who executes nmap — including the unprivileged `scanner` user — automatically receives those two capabilities for the duration of the nmap process only. The `--privileged` flag is automatically injected into every nmap command by the app (the same way `--report-wide` is injected for mtr) so that nmap uses its full capability set. Users don't need to add it manually.
+Any user who executes nmap — including the unprivileged `scanner` user — automatically receives those two capabilities for the duration of the nmap process only. The `--privileged` flag is automatically injected into every nmap command by the app so that nmap uses its full capability set. Users don't need to add it manually.
 
 The `docker-compose.yml` adds `NET_RAW` and `NET_ADMIN` to `cap_add` so the host kernel makes these capabilities available to the container.
 
-### Multi-worker kill via SQLite
+### Multi-Worker Kill via SQLite
 
 Gunicorn runs multiple worker processes to handle concurrent requests. This introduces a challenge: if Worker A starts a command and stores its PID, a kill request might be routed to Worker B which has no knowledge of that process.
 
@@ -364,15 +384,21 @@ The solution is to use the existing SQLite database as the PID registry via the 
 
 ---
 
-## Output Search
+## Logging
 
-Click **⌕ search** in the header (or press **Ctrl+F** equivalent) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
+The app logs three structured events per command run using Python's standard `logging` module, written to stdout (captured by Docker's log driver):
 
----
+| Event | Fields |
+|-------|--------|
+| `RUN START` | `run_id`, `session_id`, `pid`, `cmd` |
+| `RUN END` | `run_id`, `session_id`, `exit`, `elapsed`, `cmd` |
+| `RUN KILL` | `run_id`, `pid`, `pgid` |
 
-## Dark / Light Theme
+View live logs with:
 
-Click **◑ theme** in the header to toggle between dark and light mode. Your preference is saved in `localStorage` and persists across sessions.
+```bash
+docker compose logs -f
+```
 
 ---
 
@@ -385,7 +411,7 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 | `GET` | `/config` | Returns frontend-relevant config values as JSON |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
-| `GET` | `/history` | Returns last 50 completed runs for the current session as JSON |
+| `GET` | `/history` | Returns last N completed runs for the current session as JSON |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run (`?json` for raw JSON) |
 | `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
 | `POST` | `/run` | Runs a command, streams output via SSE |
@@ -394,21 +420,7 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 
 ---
 
-## Rate Limiting
-
-`/run` is rate limited per client IP, defaulting to **30 requests per minute** and **5 per second**. Both limits are configurable via `rate_limit_per_minute` and `rate_limit_per_second` in `config.yaml`. Since the app runs behind nginx-proxy, the real client IP is read from the `X-Forwarded-For` header rather than `REMOTE_ADDR`. Rate limit responses return HTTP 429 and display an amber notice in the output box.
-
----
-
-## Keep-Alive & Long-Running Commands
-
-For commands that produce little or no output for extended periods (e.g. slow scans, nuclei running against a large target), the SSE connection is kept alive by a server-sent heartbeat comment sent every `heartbeat_interval_seconds` (default 20s) when no output is being produced. This prevents nginx and the browser from treating the idle connection as stale and dropping it.
-
-The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND_TIMEOUT`, `PROXY_CONNECT_TIMEOUT`) in `docker-compose.yml` are set to 3600 seconds to match the Gunicorn worker timeout, giving commands up to an hour to complete. Commands can also be automatically killed after a configurable duration via `command_timeout_seconds` in `config.yaml`.
-
----
-
 ## Requirements
 
-- Docker + Docker Compose, **or** Python 3.12+ with Flask and Gunicorn
+- Docker + Docker Compose, **or** Python 3.12+ with Flask, Gunicorn, and PyYAML
 - Linux host (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
