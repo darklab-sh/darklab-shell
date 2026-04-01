@@ -37,6 +37,9 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── requirements-dev.txt        # Dev-only dependencies (pytest)
+├── tests/
+│   ├── conftest.py             # pytest configuration (sets working directory to app/)
+│   └── test_validation.py      # Tests for command validation and rewrite logic
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
 │   └── run_local.sh                    # Script to run without Docker using Python directly
@@ -51,9 +54,6 @@ A lightweight web interface for running network diagnostic and vulnerability sca
     ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     ├── favicon.ico             # Site favicon
     ├── requirements.txt        # Python runtime dependencies
-    ├── tests/
-    │   ├── conftest.py         # pytest configuration (sets working directory)
-    │   └── test_validation.py  # Tests for command validation and rewrite logic
     └── static/
         ├── css/
         │   └── styles.css      # All application styles
@@ -553,7 +553,7 @@ The test suite covers the security-critical validation and rewrite logic in `app
 
 ```bash
 python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
-python3 -m pytest app/tests/ -v
+python3 -m pytest tests/ -v
 ```
 
 Tests are structured as five classes covering: shell operator blocking, path blocking, allowlist prefix matching, deny prefix (`!`) logic, and all four command rewrites (mtr, nmap, nuclei, wapiti). No running server or Docker required — file I/O is mocked where needed.

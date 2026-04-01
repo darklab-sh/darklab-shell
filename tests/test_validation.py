@@ -3,7 +3,7 @@ Tests for command validation and rewrite logic in app.py.
 
 These tests cover the security-critical path: shell operator blocking, path
 blocking, allowlist prefix matching, deny prefix (!), and command rewrites.
-Run with: pytest app/tests/ (from the repo root)
+Run with: pytest tests/ (from the repo root)
 """
 
 import sys
@@ -11,7 +11,7 @@ import os
 import unittest.mock as mock
 
 # conftest.py chdirs to app/ before this runs, so app.py can be imported cleanly
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import app as shell_app
 
 
