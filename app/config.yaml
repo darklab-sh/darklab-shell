@@ -1,0 +1,54 @@
+# shell.darklab.sh — Configuration
+# ----------------------------------
+# Changes to this file take effect after a container restart (docker compose restart).
+# No rebuild is needed.
+
+# ── Branding ──────────────────────────────────────────────────────────────────
+
+# Name displayed in the browser tab, header, and permalink pages
+app_name: "shell.darklab.sh"
+
+# Optional message shown at the top of the terminal on page load.
+# Leave empty to disable.
+motd: ""
+
+# ── Appearance ────────────────────────────────────────────────────────────────
+
+# Default colour theme. Options: dark, light
+default_theme: dark
+
+# ── History & Retention ───────────────────────────────────────────────────────
+
+# Number of runs shown in the history drawer per session (UI display limit only —
+# the database always stores everything until purged by the retention policy below)
+history_panel_limit: 50
+
+# Number of recent commands shown as clickable chips below the input box
+recent_commands_limit: 8
+
+# Permalink retention in days. Runs and snapshots older than this will be
+# deleted from the database on startup. Set to 0 for unlimited retention.
+permalink_retention_days: 0
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────────
+
+# Maximum number of /run requests per minute per IP
+rate_limit_per_minute: 30
+
+# Maximum number of /run requests per second per IP
+rate_limit_per_second: 5
+
+# ── Terminal ──────────────────────────────────────────────────────────────────
+
+# Maximum number of output lines retained per tab. Older lines are dropped
+# from the top to prevent the browser slowing down on verbose commands.
+# Set to 0 for unlimited.
+max_output_lines: 2000
+
+# Automatically kill a running command after this many seconds.
+# Set to 0 to disable (commands run until they finish or are killed manually).
+command_timeout_seconds: 0
+
+# How often (in seconds) to send a heartbeat comment on idle SSE connections
+# to prevent nginx and the browser from dropping the connection.
+heartbeat_interval_seconds: 20

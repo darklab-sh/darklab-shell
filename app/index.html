@@ -821,6 +821,8 @@
   <button data-action="faq">? FAQ</button>
 </div>
 
+<div id="motd" style="display:none;padding:8px 16px;background:rgba(57,255,20,0.06);border-bottom:1px solid var(--green-dim);color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></div>
+
 <div class="input-row">
   <div class="prompt-wrap">
     <span class="prompt-prefix">$</span>
@@ -1013,6 +1015,36 @@
     });
   });
 
+  // ── Load config from server ──
+  let APP_CONFIG = {
+    app_name: 'shell.darklab.sh',
+    default_theme: 'dark',
+    motd: '',
+    recent_commands_limit: 8,
+    max_output_lines: 2000,
+    history_panel_limit: 50,
+  };
+
+  apiFetch('/config').then(r => r.json()).then(cfg => {
+    APP_CONFIG = cfg;
+
+    // App name
+    document.title = cfg.app_name;
+    document.querySelector('header h1').textContent = cfg.app_name;
+
+    // Default theme — only apply if user hasn't saved a preference
+    const savedTheme = localStorage.getItem('theme');
+    if (!savedTheme) {
+      if (cfg.default_theme === 'light') document.body.classList.add('light');
+    }
+
+    // MOTD
+    if (cfg.motd) {
+      const motd = document.getElementById('motd');
+      if (motd) { motd.textContent = cfg.motd; motd.style.display = 'block'; }
+    }
+  }).catch(() => {});
+
   const savedTheme = localStorage.getItem('theme');
   if (savedTheme === 'light') document.body.classList.add('light');
   document.getElementById('theme-btn').addEventListener('click', () => {
@@ -1174,10 +1206,24 @@
       span.innerHTML = ansi_up.ansi_to_html(text);
     }
     out.appendChild(span);
+
+    // Enforce max output lines — drop oldest lines from the top
+    const max = APP_CONFIG.max_output_lines;
+    if (max > 0) {
+      const lines = out.querySelectorAll('.line');
+      if (lines.length > max) {
+        for (let i = 0; i < lines.length - max; i++) lines[i].remove();
+      }
+    }
+
     out.scrollTop = out.scrollHeight;
     // Store raw text (with original ANSI codes) for permalink colour preservation
     const t = tabs.find(t => t.id === (tabId || activeTabId));
-    if (t) t.rawLines.push({ text, cls: cls || '' });
+    if (t) {
+      t.rawLines.push({ text, cls: cls || '' });
+      // Keep rawLines in sync with max_output_lines
+      if (max > 0 && t.rawLines.length > max) t.rawLines.splice(0, t.rawLines.length - max);
+    }
   }
 
   // ── Output Search ──
@@ -1419,7 +1465,7 @@
   runBtn.addEventListener('click', runCommand);
 
   function addToHistory(cmd) {
-    cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, 8);
+    cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, APP_CONFIG.recent_commands_limit);
     renderHistory();
   }
 

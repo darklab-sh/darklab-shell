@@ -17,9 +17,36 @@ import signal
 import sqlite3
 import pwd
 import uuid
+import yaml
 from datetime import datetime, timezone
 
 app = Flask(__name__)
+
+# ── Config ────────────────────────────────────────────────────────────────────
+
+def load_config():
+    """Load config.yaml, falling back to defaults for any missing keys."""
+    defaults = {
+        "app_name":                  "shell.darklab.sh",
+        "motd":                      "",
+        "default_theme":             "dark",
+        "history_panel_limit":       50,
+        "recent_commands_limit":     8,
+        "permalink_retention_days":  0,
+        "rate_limit_per_minute":     30,
+        "rate_limit_per_second":     5,
+        "max_output_lines":          2000,
+        "command_timeout_seconds":   0,
+        "heartbeat_interval_seconds": 20,
+    }
+    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    if os.path.exists(config_path):
+        with open(config_path) as f:
+            user_config = yaml.safe_load(f) or {}
+        defaults.update(user_config)
+    return defaults
+
+CFG = load_config()
 
 
 # Scanner user wrapping — prepend sudo -u scanner to run commands as the
@@ -48,9 +75,7 @@ limiter = Limiter(
     app=app,
     default_limits=[],
     storage_uri="memory://"
-)
-
-# SQLite persistent run history
+)# SQLite persistent run history
 # Database lives in /data which is a writable volume mount (see docker-compose.yml)
 # Falls back to /tmp if /data is not available (e.g. local dev without the volume)
 DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"
@@ -102,6 +127,19 @@ def db_init():
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
         # Clear any stale PIDs left over from a previous crash/restart
         conn.execute("DELETE FROM active_procs")
+
+        # Prune old runs and snapshots if retention is configured
+        days = CFG.get("permalink_retention_days", 0)
+        if days and days > 0:
+            conn.execute(
+                "DELETE FROM runs WHERE started < datetime('now', ?)",
+                (f"-{days} days",)
+            )
+            conn.execute(
+                "DELETE FROM snapshots WHERE created < datetime('now', ?)",
+                (f"-{days} days",)
+            )
+
         conn.commit()
 
 
@@ -240,6 +278,19 @@ def index():
     return HTML
 
 
+@app.route("/config")
+def get_config():
+    """Return frontend-relevant config values."""
+    return jsonify({
+        "app_name":             CFG["app_name"],
+        "default_theme":        CFG["default_theme"],
+        "motd":                 CFG["motd"],
+        "recent_commands_limit": CFG["recent_commands_limit"],
+        "max_output_lines":     CFG["max_output_lines"],
+        "history_panel_limit":  CFG["history_panel_limit"],
+    })
+
+
 @app.route("/allowed-commands")
 def allowed_commands():
     """Return the list of allowed command prefixes for display in the UI."""
@@ -269,8 +320,8 @@ def get_history():
     session_id = get_session_id()
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT 50",
-            (session_id,)
+            "SELECT id, command, started, finished, exit_code FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT ?",
+            (session_id, CFG["history_panel_limit"])
         ).fetchall()
     return jsonify({"runs": [dict(r) for r in rows]})
 
@@ -445,7 +496,7 @@ def _permalink_page(title, label, created, content_lines, json_url):
 
 
 @app.route("/run", methods=["POST"])
-@limiter.limit("30 per minute; 5 per second")
+@limiter.limit(lambda: f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second")
 def run_command():
     data = request.get_json()
     command = data.get("command", "").strip()
@@ -483,7 +534,8 @@ def run_command():
 
     # Heartbeat interval in seconds — keeps the SSE connection alive through
     # nginx and browser idle timeouts when a command produces no output
-    HEARTBEAT_INTERVAL = 20
+    HEARTBEAT_INTERVAL = CFG["heartbeat_interval_seconds"]
+    COMMAND_TIMEOUT    = CFG["command_timeout_seconds"] or None  # None = no timeout
 
     def generate():
         try:
@@ -511,6 +563,17 @@ def run_command():
                     # to keep nginx and the browser from treating the connection as idle
                     if proc.poll() is not None:
                         break
+                    # Check command timeout
+                    if COMMAND_TIMEOUT:
+                        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(run_started)).total_seconds()
+                        if elapsed >= COMMAND_TIMEOUT:
+                            pgid = os.getpgid(proc.pid)
+                            if SCANNER_PREFIX:
+                                subprocess.run(["sudo", "-u", "scanner", "kill", "-TERM", f"-{pgid}"], timeout=5)
+                            else:
+                                os.killpg(pgid, signal.SIGTERM)
+                            yield f"data: {json.dumps({'type': 'notice', 'text': f'[timeout] Command exceeded {COMMAND_TIMEOUT}s limit and was killed.'})}\n\n"
+                            break
                     yield ": heartbeat\n\n"
 
             proc.stdout.close()

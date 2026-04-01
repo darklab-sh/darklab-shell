@@ -35,6 +35,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 └── app/
     ├── app.py                  # Flask + Gunicorn backend
     ├── index.html              # Frontend (served by Flask)
+    ├── config.yaml             # Application configuration (see Configuration section)
     ├── allowed_commands.txt    # Command allowlist (one prefix per line)
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     ├── favicon.ico             # Site favicon
@@ -110,7 +111,23 @@ python3 app.py
 
 ---
 
-## Installed Tools
+## Configuration
+
+All application settings live in `app/config.yaml`. The file is read at startup — changes take effect after `docker compose restart` with no rebuild needed. If a setting is omitted, the default value is used.
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `app_name` | `shell.darklab.sh` | Name shown in the browser tab, header, and permalink pages |
+| `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Leave empty to disable |
+| `default_theme` | `dark` | Default colour theme for new visitors. Options: `dark`, `light`. Overridden by the user's saved preference |
+| `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
+| `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
+| `permalink_retention_days` | `0` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
+| `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
+| `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
+| `max_output_lines` | `2000` | Max lines retained per tab. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
+| `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
+| `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 
 The following tools are installed in the Docker image and available for use:
 
@@ -361,6 +378,7 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 |--------|----------|-------------|
 | `GET` | `/` | Serves the web UI |
 | `GET` | `/favicon.ico` | Serves the site favicon |
+| `GET` | `/config` | Returns frontend-relevant config values as JSON |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
 | `GET` | `/history` | Returns last 50 completed runs for the current session as JSON |
