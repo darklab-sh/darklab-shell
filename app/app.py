@@ -369,7 +369,7 @@ def get_run(run_id):
     with db_connect() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
-        return "Run not found", 404
+        return _permalink_error_page("run")
     run = dict(row)
     run["output"] = json.loads(run["output"]) if run["output"] else []
 
@@ -409,7 +409,7 @@ def get_share(share_id):
     with db_connect() as conn:
         row = conn.execute("SELECT * FROM snapshots WHERE id = ?", (share_id,)).fetchone()
     if not row:
-        return "Snapshot not found", 404
+        return _permalink_error_page("snapshot")
     snap = dict(row)
     content_lines = json.loads(snap["content"]) if snap["content"] else []
 
@@ -424,6 +424,80 @@ def get_share(share_id):
         content_lines=content_lines,
         json_url=f"/share/{share_id}?json",
     )
+
+
+def _format_retention(days: int) -> str:
+    """Return a human-friendly retention description for use in error messages."""
+    if days == 0:
+        return "unlimited — snapshots are never automatically deleted"
+    if days % 365 == 0:
+        n = days // 365
+        return f"{n} year{'s' if n != 1 else ''}"
+    if days % 30 == 0:
+        n = days // 30
+        return f"{n} month{'s' if n != 1 else ''}"
+    return f"{days} day{'s' if days != 1 else ''}"
+
+
+def _permalink_error_page(noun: str) -> Response:
+    """Render a themed 404 page for a missing permalink (snapshot or run)."""
+    retention = CFG.get("permalink_retention_days", 0)
+    retention_str = _format_retention(retention)
+    if retention == 0:
+        detail = f"The {noun} ID is invalid or the {noun} was never saved."
+    else:
+        detail = (
+            f"Either the {noun} ID is invalid, or the {noun} was automatically "
+            f"deleted because it exceeded the configured retention period "
+            f"({retention_str})."
+        )
+    app_name = CFG.get("app_name", "shell.darklab.sh")
+    html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{app_name} — {noun} not found</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+<style>
+  :root {{
+    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e;
+    --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
+    --amber: #ffb800; --muted: #606060; --text: #e0e0e0;
+    --font: 'JetBrains Mono', monospace;
+  }}
+  *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: var(--bg); color: var(--text); font-family: var(--font);
+          font-size: 13px; display: flex; flex-direction: column; min-height: 100vh; }}
+  header {{ display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+            border-bottom: 1px solid var(--border); background: #111; flex-wrap: wrap; }}
+  header h1 {{ font-size: 14px; font-weight: 300; letter-spacing: 3px; color: var(--green);
+               text-shadow: 0 0 16px var(--green-glow); }}
+  .actions {{ margin-left: auto; display: flex; gap: 8px; }}
+  .btn {{ background: transparent; border: 1px solid var(--border); color: var(--muted);
+          font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
+          cursor: pointer; text-decoration: none; transition: border-color .2s, color .2s; }}
+  .btn:hover {{ border-color: var(--green-dim); color: var(--green); }}
+  #output {{ flex: 1; padding: 20px; line-height: 1.65; }}
+  .error-heading {{ color: var(--amber); font-weight: 700; margin-bottom: 12px; }}
+  .error-detail {{ color: var(--muted); }}
+</style>
+</head>
+<body>
+<header>
+  <h1>{app_name}</h1>
+  <div class="actions">
+    <a class="btn" href="/">← back to shell</a>
+  </div>
+</header>
+<div id="output">
+  <div class="error-heading">{noun} not found</div>
+  <div class="error-detail">{detail}</div>
+</div>
+</body>
+</html>"""
+    return Response(html, status=404, mimetype="text/html")
 
 
 def _permalink_page(title, label, created, content_lines, json_url):
