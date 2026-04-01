@@ -18,9 +18,19 @@ import sqlite3
 import pwd
 import uuid
 import yaml
+import logging
 from datetime import datetime, timezone
 
 app = Flask(__name__)
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    datefmt="%Y-%m-%dT%H:%M:%SZ",
+)
+log = logging.getLogger("shell")
 
 # ── Config ────────────────────────────────────────────────────────────────────
 
@@ -531,6 +541,7 @@ def run_command():
         return jsonify({"error": str(e)}), 500
 
     pid_register(run_id, proc.pid)
+    log.info("RUN START  run_id=%s session=%s pid=%d cmd=%r", run_id, session_id, proc.pid, original_command)
 
     # Heartbeat interval in seconds — keeps the SSE connection alive through
     # nginx and browser idle timeouts when a command produces no output
@@ -579,7 +590,10 @@ def run_command():
             proc.stdout.close()
             proc.wait()
             exit_code = proc.returncode
-            yield f"data: {json.dumps({'type': 'exit', 'code': exit_code})}\n\n"
+            finished = datetime.now(timezone.utc)
+            elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
+            log.info("RUN END    run_id=%s session=%s exit=%d elapsed=%.1fs cmd=%r", run_id, session_id, exit_code, elapsed, original_command)
+            yield f"data: {json.dumps({'type': 'exit', 'code': exit_code, 'elapsed': elapsed})}\n\n"
 
             # Store completed run in SQLite for persistent permalink/history access
             with db_connect() as conn:
@@ -590,7 +604,7 @@ def run_command():
                         session_id,
                         original_command,
                         run_started,
-                        datetime.now(timezone.utc).isoformat(),
+                        finished.isoformat(),
                         exit_code,
                         json.dumps(captured_lines),
                     )
@@ -624,6 +638,7 @@ def kill_command():
         else:
             # Local dev — same user, can kill directly
             os.killpg(pgid, signal.SIGTERM)
+        log.info("RUN KILL   run_id=%s pid=%d pgid=%d", run_id, pid, pgid)
     except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
         pass
     return jsonify({"killed": True})

@@ -235,8 +235,9 @@
 
   .status-pill.idle    { color: var(--muted); border-color: var(--muted); }
   .status-pill.running { color: var(--amber); border-color: var(--amber); animation: pulse 1s infinite; }
-  .status-pill.ok      { color: var(--green); border-color: var(--green); }
-  .status-pill.fail    { color: var(--red);   border-color: var(--red); }
+  .status-pill.ok      { color: var(--green);  border-color: var(--green); }
+  .status-pill.fail    { color: var(--red);    border-color: var(--red); }
+  .status-pill.killed  { color: var(--amber);  border-color: var(--amber); }
 
   @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
@@ -546,8 +547,9 @@
   .tab .tab-close:hover { opacity: 1; background: rgba(255,60,60,0.2); }
   .tab .tab-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
   .tab .tab-status.running { background: var(--amber); animation: pulse 1s infinite; }
-  .tab .tab-status.ok { background: var(--green); }
-  .tab .tab-status.fail { background: var(--red); }
+  .tab .tab-status.ok     { background: var(--green); }
+  .tab .tab-status.fail   { background: var(--red); }
+  .tab .tab-status.killed { background: var(--amber); }
   .tab .tab-status.idle { background: var(--muted); }
 
   #new-tab-btn {
@@ -846,6 +848,7 @@
     </div>
     <button id="new-tab-btn" title="New tab">+</button>
     <span id="status" class="status-pill idle">IDLE</span>
+    <span id="run-timer" style="font-size:11px;color:var(--muted);font-family:var(--font-mono);display:none"></span>
   </div>
   <div class="search-bar" id="search-bar" style="display:none">
     <input id="search-input" type="text" placeholder="Search output…" autocomplete="off">
@@ -1189,7 +1192,7 @@
   // ── Status ──
   function setStatus(s) {
     status.className = 'status-pill ' + s;
-    const labels = { idle:'IDLE', running:'RUNNING', ok:'EXIT 0', fail:'ERROR' };
+    const labels = { idle:'IDLE', running:'RUNNING', ok:'EXIT 0', fail:'ERROR', killed:'KILLED' };
     status.textContent = labels[s] || s;
   }
 
@@ -1530,22 +1533,47 @@
   function doKill(tabId) {
     const t = tabs.find(t => t.id === tabId);
     if (!t || !t.runId) return;
+    const secs = elapsedSeconds();
     apiFetch('/kill', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ run_id: t.runId })
     });
     t.runId = null;
-    appendLine('\n[killed by user]', 'exit-fail', tabId);
-    setTabStatus(tabId, 'fail');
+    stopTimer();
+    appendLine(`\n[killed by user${secs ? ' after ' + secs + 's' : ''}]`, 'exit-fail', tabId);
+    setTabStatus(tabId, 'killed');
     hideTabKillBtn(tabId);
     if (tabId === activeTabId) {
-      setStatus('fail');
+      setStatus('killed');
       runBtn.disabled = false;
     }
   }
 
-  // ── Helpers ──
+  // ── Run timer ──
+  const runTimer = document.getElementById('run-timer');
+  let timerInterval = null;
+  let timerStart = null;
+
+  function startTimer() {
+    timerStart = Date.now();
+    runTimer.style.display = 'inline';
+    timerInterval = setInterval(() => {
+      const s = ((Date.now() - timerStart) / 1000).toFixed(1);
+      runTimer.textContent = `${s}s`;
+    }, 100);
+  }
+
+  function stopTimer() {
+    clearInterval(timerInterval);
+    timerInterval = null;
+    runTimer.style.display = 'none';
+    runTimer.textContent = '';
+  }
+
+  function elapsedSeconds() {
+    return timerStart ? ((Date.now() - timerStart) / 1000).toFixed(1) : null;
+  }
   function escapeHtml(t) { return t.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
   function escapeRegex(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
 
@@ -1576,6 +1604,7 @@
     setTabStatus(activeTabId, 'running');
     runBtn.disabled = true;
     showTabKillBtn(activeTabId);
+    startTimer();
 
     const tabId = activeTabId;
 
@@ -1588,13 +1617,13 @@
         return res.json().then(data => {
           appendLine('[denied] ' + (data.error || 'Command not allowed.'), 'denied', tabId);
           setStatus('fail'); setTabStatus(tabId, 'fail');
-          runBtn.disabled = false; hideTabKillBtn(tabId);
+          stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
         });
       }
       if (res.status === 429) {
         appendLine('[rate limited] Too many requests. Please wait a moment.', 'denied', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
-        runBtn.disabled = false; hideTabKillBtn(tabId);
+        stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
         return;
       }
 
@@ -1604,7 +1633,7 @@
 
       function read() {
         reader.read().then(({ done, value }) => {
-          if (done) { runBtn.disabled = false; hideTabKillBtn(tabId); return; }
+          if (done) { stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
           buffer += decoder.decode(value, { stream: true });
           const parts = buffer.split('\n\n');
           buffer = parts.pop();
@@ -1624,12 +1653,14 @@
                 } else if (msg.type === 'exit') {
                   const t = tabs.find(t => t.id === tabId);
                   if (t) { t.exitCode = msg.code; t.runId = null; }
+                  const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
+                  stopTimer();
                   if (msg.code === 0) {
-                    appendLine('\n[process exited with code 0]', 'exit-ok', tabId);
+                    appendLine(`\n[process exited with code 0${dur}]`, 'exit-ok', tabId);
                     if (tabId === activeTabId) setStatus('ok');
                     setTabStatus(tabId, 'ok');
                   } else {
-                    appendLine('\n[process exited with code ' + msg.code + ']', 'exit-fail', tabId);
+                    appendLine(`\n[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
                     if (tabId === activeTabId) setStatus('fail');
                     setTabStatus(tabId, 'fail');
                   }
@@ -1639,7 +1670,7 @@
                   appendLine('\n[error] ' + msg.text, 'exit-fail', tabId);
                   if (tabId === activeTabId) setStatus('fail');
                   setTabStatus(tabId, 'fail');
-                  runBtn.disabled = false; hideTabKillBtn(tabId);
+                  stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
                 }
               } catch(e) {}
             }
@@ -1652,7 +1683,7 @@
       appendLine('\n[fetch error] ' + err.message, 'exit-fail', tabId);
       if (tabId === activeTabId) setStatus('fail');
       setTabStatus(tabId, 'fail');
-      runBtn.disabled = false; hideTabKillBtn(tabId);
+      stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
     });
   }
 </script>
