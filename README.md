@@ -7,7 +7,9 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ## Features
 
 - **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
-- **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group
+- **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group. Killed processes show a **KILLED** status (amber) distinct from ERROR
+- **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; the final duration is shown in the exit line when the process finishes or is killed
+- **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
@@ -129,7 +131,9 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 | `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 
-The following tools are installed in the Docker image and available for use:
+---
+
+## Installed Tools
 
 | Tool | Purpose |
 |------|---------|
@@ -301,7 +305,7 @@ This table is cleared on every startup to remove any stale rows left by a previo
 
 ### Retention
 
-The history panel UI shows the **50 most recent runs per session**, but the database itself has **no row limit** — every run and snapshot is kept indefinitely. Permalinks will work for as long as the database file exists regardless of how many newer runs have been added since.
+The history drawer shows the most recent runs per session up to the `history_panel_limit` config setting, but the database stores everything until pruned. Retention is controlled by `permalink_retention_days` in `config.yaml` — on startup, runs and snapshots older than the configured number of days are deleted. The default is `0` (unlimited). Permalinks will work for as long as the database file exists and the records haven't been pruned.
 
 To inspect or manage the database directly:
 
@@ -392,7 +396,15 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 
 ## Rate Limiting
 
-`/run` is rate limited to **30 requests per minute** and **5 per second** per client IP. Since the app runs behind nginx-proxy, the real client IP is read from the `X-Forwarded-For` header rather than `REMOTE_ADDR`. Rate limit responses return HTTP 429 and display an amber notice in the output box.
+`/run` is rate limited per client IP, defaulting to **30 requests per minute** and **5 per second**. Both limits are configurable via `rate_limit_per_minute` and `rate_limit_per_second` in `config.yaml`. Since the app runs behind nginx-proxy, the real client IP is read from the `X-Forwarded-For` header rather than `REMOTE_ADDR`. Rate limit responses return HTTP 429 and display an amber notice in the output box.
+
+---
+
+## Keep-Alive & Long-Running Commands
+
+For commands that produce little or no output for extended periods (e.g. slow scans, nuclei running against a large target), the SSE connection is kept alive by a server-sent heartbeat comment sent every `heartbeat_interval_seconds` (default 20s) when no output is being produced. This prevents nginx and the browser from treating the idle connection as stale and dropping it.
+
+The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND_TIMEOUT`, `PROXY_CONNECT_TIMEOUT`) in `docker-compose.yml` are set to 3600 seconds to match the Gunicorn worker timeout, giving commands up to an hour to complete. Commands can also be automatically killed after a configurable duration via `command_timeout_seconds` in `config.yaml`.
 
 ---
 
