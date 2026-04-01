@@ -9,10 +9,10 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
 - **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
-- **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), both client-side and server-side
+- **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
-- **Run history** — side panel showing completed runs with timestamps and exit codes; load any past result into a new tab or copy a permalink. Persists across container restarts via SQLite
+- **Run history drawer** — slide-out panel showing the last 50 completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite
 - **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history panel link to individual run results. Both persist via SQLite
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation
 - **Command history** — recent commands shown as clickable chips for quick re-runs
@@ -61,7 +61,12 @@ docker compose restart
 
 #### Read-only filesystem
 
-The container and volume mount are both set to read-only (`read_only: true`, `./app:/app:ro`). This prevents any command run through the shell from writing files to the container filesystem or filling up the disk. If a command needs a writable temp directory you can add a `tmpfs` mount, but for network tooling this shouldn't be necessary.
+The container filesystem is set to read-only (`read_only: true`) and the app volume is mounted read-only (`./app:/app:ro`). There are two intentional exceptions:
+
+- **`/data`** — a writable bind mount for the SQLite database, owned by `appuser` with `chmod 700`. Only Gunicorn can write here; the `scanner` user that runs commands has no access
+- **`/tmp`** — a `tmpfs` mount (in-memory, wiped on restart) used by tools that need scratch space for templates, sessions, and cache files
+
+To prevent commands from writing to either path directly, the app blocks any command that references `/data` or `/tmp` as a filesystem argument (using a negative lookbehind so URLs containing `/data` or `/tmp` as path segments are still permitted).
 
 #### expose vs ports
 
@@ -123,7 +128,7 @@ The following tools are installed in the Docker image and available for use:
 | `nikto` | Web server vulnerability scanning |
 | `wapiti` | Web application vulnerability scanning |
 | `wpscan` | WordPress vulnerability scanning |
-| `nuclei` | Fast CVE/misconfiguration scanner using community templates (templates stored in `/tmp` via tmpfs) |
+| `nuclei` | Fast CVE/misconfiguration scanner using community templates |
 | `subfinder` | Passive subdomain enumeration (ProjectDiscovery) |
 | `pd-httpx` | HTTP/HTTPS probing — status codes, titles, tech detection (ProjectDiscovery). Renamed from `httpx` to avoid conflict with the Python `httpx` library pulled in by wapiti3 |
 | `dnsx` | Fast DNS resolution and record querying (ProjectDiscovery) |
@@ -196,15 +201,17 @@ To work around this, the app automatically rewrites any `mtr` command to use `--
 | `mtr -c 20 google.com` | `mtr --report-wide -c 20 google.com` |
 | `mtr --report google.com` | unchanged — already in report mode |
 
+### nmap
+
+nmap's `--privileged` flag is automatically injected into every nmap command, telling nmap to use raw socket access (which it has via file capabilities set in the Dockerfile). This enables OS fingerprinting, SYN scans, and other features that would otherwise require running as root. Users do not need to add `--privileged` manually.
+
 ### wapiti
 
 By default wapiti writes its report to a file in `/tmp`, which isn't accessible from the browser. The app automatically appends `-f txt -o /dev/stdout` to any `wapiti` command that doesn't already specify an output path, redirecting the report to the terminal so results appear inline with the scan output. If you want to specify your own output format or path, include `-o` in your command and the rewrite won't fire.
 
 ### nuclei
 
-`nuclei` stores its template library and cache in `$HOME` by default, which conflicts with the read-only filesystem. The container sets `HOME=/tmp` and `NUCLEI_TEMPLATES_DIR=/tmp/nuclei-templates` so all nuclei writes go to the tmpfs mount. The app also automatically injects `-ud /tmp/nuclei-templates` if the flag isn't already present in the command.
-
-Note that templates are downloaded to tmpfs on first use each container session and are lost on restart — this means the first nuclei run after a restart will take 30–60 seconds to download the template library before scanning begins.
+`nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so all nuclei writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
 
 ---
 
@@ -220,7 +227,7 @@ The nginx-proxy timeout environment variables (`PROXY_READ_TIMEOUT`, `PROXY_SEND
 
 Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed) and is labelled with the last command that was run in it.
 
-The **⧖ history** button opens a side panel showing the last 50 completed runs with timestamps and exit codes. From the panel you can load any past result into a new tab, or copy a permalink for sharing.
+The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has two buttons: **copy command** copies the command text to the clipboard for quick re-use or modification, and **permalink** copies a shareable link to that run's output.
 
 On mobile, the search, history, theme, and FAQ buttons are accessible via the **☰** menu in the top-right corner of the header.
 
@@ -304,9 +311,11 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 The container uses two unprivileged system users:
 
 - **`appuser`** — Gunicorn runs as this user. Owns `/data` with `chmod 700`, so it can read and write the SQLite database. Cannot write anywhere else in the read-only container
-- **`scanner`** — all user-submitted commands run as this user, enforced by prepending `sudo -u scanner --` to every `subprocess.Popen` call. Has no write access to `/data`, so commands cannot write files to persistent storage regardless of what flags are passed
+- **`scanner`** — all user-submitted commands run as this user, enforced by prepending `sudo -u scanner env HOME=/tmp` to every `subprocess.Popen` call. Has no write access to `/data`. `HOME` is explicitly set to `/tmp` (the tmpfs mount) so tools like nuclei that write config and cache to `$HOME` use the in-memory filesystem rather than trying to access a non-existent home directory
 
-The container starts as root only long enough for `entrypoint.sh` to run `chown -R appuser:appuser /data` (correcting ownership after the Docker volume mount resets it), then immediately drops to `appuser` via `gosu` before starting Gunicorn. Neither `appuser` nor `scanner` has a login shell or password.
+As a second layer of defence, the application also blocks any command that references `/data` or `/tmp` as a filesystem path argument at validation time, before the command ever reaches the subprocess layer.
+
+The container starts as root only long enough for `entrypoint.sh` to: fix `/data` ownership after the volume mount resets it, set `/tmp` to `1777` (world-writable with sticky bit), and pre-create `/tmp/.config` and `/tmp/.cache` owned by `scanner` so tools don't try to create them as root. It then drops to `appuser` via `gosu` before starting Gunicorn. Neither `appuser` nor `scanner` has a login shell or password.
 
 ### Kill and cross-user signalling
 
@@ -343,10 +352,6 @@ Click **⌕ search** in the header (or press **Ctrl+F** equivalent) to open the 
 ## Dark / Light Theme
 
 Click **◑ theme** in the header to toggle between dark and light mode. Your preference is saved in `localStorage` and persists across sessions.
-
-### nmap
-
-nmap's `--privileged` flag is automatically injected into every nmap command, telling nmap to use raw socket access (which it has via file capabilities set in the Dockerfile). This enables OS fingerprinting, SYN scans, and other features that would otherwise require running as root. Users do not need to add `--privileged` manually.
 
 ---
 
