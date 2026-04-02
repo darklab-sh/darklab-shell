@@ -159,6 +159,22 @@ class TestDenyPrefix:
         ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
         assert ok
 
+    def test_devnull_exception_prefix(self):
+        # curl -o /dev/null ... is a common pattern for checking HTTP status — should be allowed
+        ok, _ = _check("curl -o /dev/null -s -w \"%{http_code}\" https://example.com",
+                        allow=["curl"], deny=["curl -o"])
+        assert ok
+
+    def test_devnull_exception_anywhere(self):
+        # Flag anywhere in command pointing to /dev/null should also be allowed
+        ok, _ = _check("wget -q -o /dev/null --server-response https://example.com",
+                        allow=["wget"], deny=["wget -o"])
+        assert ok
+
+    def test_devnull_exception_does_not_allow_real_paths(self):
+        ok, _ = _check("curl -o /tmp/out https://example.com", allow=["curl"], deny=["curl -o"])
+        assert not ok
+
 
 # ── Command rewrites ──────────────────────────────────────────────────────────
 

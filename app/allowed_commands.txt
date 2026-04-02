@@ -15,6 +15,8 @@
 # This allows all nmap commands except those containing -sU or --script as a flag.
 # Unlike allow entries, deny flags are matched anywhere in the command (not just
 # immediately after the tool name), so "nmap -sT -sU 10.0.0.1" is also blocked.
+# Exception: a denied output flag is allowed when its argument is /dev/null, so
+# patterns like "curl -o /dev/null -w "%{http_code}" <url>" still work.
 # Deny prefixes are not shown to users in the FAQ command list.
 #
 # Note on mtr: mtr's interactive full-screen mode requires a real TTY which is not

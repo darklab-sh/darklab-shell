@@ -276,6 +276,13 @@ nmap
 
 This allows all `nmap` invocations except those containing `-sU` or `--script` as a flag. Unlike allow entries, deny matching is not purely prefix-based — the flag is matched anywhere in the command as a space-separated token, so `nmap -sT -sU 10.0.0.1` is caught as well as `nmap -sU 10.0.0.1`. The tool prefix must still match (`!nmap -sU` only applies to `nmap` commands).
 
+**`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
+
+```
+curl -o /dev/null -s -w "%{http_code}" https://example.com
+wget -q -O /dev/null --server-response https://example.com
+```
+
 ### Shell Operator Blocking
 
 When the allowlist is active, the following operators are blocked outright, both in the browser and on the server, to prevent chaining disallowed commands:

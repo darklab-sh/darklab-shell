@@ -292,9 +292,14 @@ def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
       - the command starts with the deny prefix (existing behaviour), OR
       - the tool prefix matches AND the flag appears anywhere as a space-separated
         token in the command, so 'curl -s -o file' is caught as well as 'curl -o file'.
+    Exception: a denied output flag is allowed when its argument is /dev/null,
+    permitting common patterns like 'curl -o /dev/null -w "%{http_code}" <url>'.
     """
     for d in deny_entries:
         if cmd_lower == d or cmd_lower.startswith(d + " "):
+            # Exception: flag argument is /dev/null (discard output, not writing to filesystem)
+            if cmd_lower.startswith(d + " /dev/null"):
+                continue
             return True
         # Split deny entry at first flag (" -") to allow flag-anywhere matching.
         # e.g. "curl -o" → tool="curl", flag="-o"
@@ -306,6 +311,9 @@ def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
         flag = d[space_flag + 1:]
         if cmd_lower == tool_prefix or cmd_lower.startswith(tool_prefix + " "):
             if re.search(r'(?<= )' + re.escape(flag) + r'(?= |$)', cmd_lower):
+                # Exception: flag argument is /dev/null
+                if re.search(r'(?<= )' + re.escape(flag) + r' /dev/null\b', cmd_lower):
+                    continue
                 return True
     return False
 
