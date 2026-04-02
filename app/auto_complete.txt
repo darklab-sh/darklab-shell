@@ -10,6 +10,11 @@ ping -c 4 example.com
 ping -c 10 example.com
 ping -i 0.5 -c 20 example.com
 
+# nc
+nc -zv example.com 80
+nc -zv example.com 443 80
+nc -zv 8.8.8.8 53 80
+
 # dig
 dig -h
 dig A example.com
