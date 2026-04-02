@@ -104,6 +104,7 @@ class TestLoadAllowedCommands:
             path = self._write("ping\n!NMAP -SU\n!curl -o\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 allow, deny = load_allowed_commands()
+        assert allow is not None
         assert "ping" in allow
         assert "nmap -su" in deny
         assert "curl -o" in deny
@@ -129,6 +130,7 @@ class TestLoadAllowedCommands:
             path = self._write("PING\nNMAP\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 allow, _ = load_allowed_commands()
+        assert allow is not None
         assert "ping" in allow
         assert "nmap" in allow
 
