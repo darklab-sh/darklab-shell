@@ -8,15 +8,21 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 
 - **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
 - **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group. Killed processes show a **KILLED** status (amber) distinct from ERROR
-- **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; the final duration is shown in the exit line when the process finishes or is killed
+- **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
+- **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered via CSS with no DOM rebuild
+- **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
+- **Welcome animation** — on first page load, a configurable typeout animation runs in the terminal, showing example commands and their purpose character by character. Cancels immediately when the user runs a command. Controlled by `welcome.yaml`
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
-- **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite
-- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite
-- **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar
-- **Command history** — recent commands shown as clickable chips for quick re-runs
+- **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
+- **Starred / favourites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starred state is stored in `localStorage` and applied by command text across all runs
+- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI colour) buttons
+- **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
+- **HTML export** — download a tab's output as a self-contained HTML file with ANSI colour rendering preserved, via the **save .html** button in each tab's action bar
+- **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
+- **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
 - **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
@@ -62,6 +68,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
     ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
     ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
+    ├── welcome.yaml            # Welcome animation blocks {cmd, out}; loaded on page start (optional)
     ├── favicon.ico             # Site favicon
     ├── requirements.txt        # Python runtime dependencies
     └── static/
@@ -76,7 +83,8 @@ A lightweight web interface for running network diagnostic and vulnerability sca
             ├── output.js       # ANSI rendering and line management
             ├── search.js       # In-output search (with case-sensitive and regex modes)
             ├── autocomplete.js # Command autocomplete dropdown
-            ├── history.js      # Command history chips and drawer
+            ├── history.js      # Command history chips and drawer (with starring)
+            ├── welcome.js      # Welcome typeout animation
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
             ├── app.js          # Initialization and event wiring (loads last)
             └── vendor/
@@ -102,6 +110,7 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 |------|--------------------------|
 | `allowed_commands.txt` | Immediately — re-read on every request |
 | `faq.yaml` | Immediately — re-read on every request |
+| `welcome.yaml` | On next page load — fetched once by the browser on load |
 | `auto_complete.txt` | On next page load — fetched once by the browser |
 | `config.yaml` | After `docker compose restart` (no rebuild needed) |
 
@@ -208,6 +217,10 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 | `max_output_lines` | `2000` | Max lines retained per tab. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
 | `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
+| `welcome_char_ms` | `10` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
+| `welcome_jitter_ms` | `10` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
+| `welcome_post_cmd_ms` | `700` | How long the cursor blinks on the command line after typing finishes, before output appears (ms) |
+| `welcome_inter_block_ms` | `1500` | Pause between finishing one block and the next command starting to type (ms) |
 
 ---
 
@@ -319,6 +332,28 @@ The file is optional — if it doesn't exist or contains no valid entries, the F
 
 ---
 
+## Welcome Animation
+
+When the page first loads, a typeout animation runs in the terminal showing example commands and their output character by character, simulating a live session. This is controlled by `app/welcome.yaml`. If the file is absent or empty, no animation plays.
+
+**Format:**
+
+```yaml
+- cmd: "ping -c 3 google.com"
+  out: |
+    PING google.com: 56 data bytes
+    64 bytes from 142.250.80.46: icmp_seq=0 ttl=116 time=8.4 ms
+    ...
+
+- cmd: "# Just a comment with no output"
+```
+
+Each entry must have a `cmd` field (the command shown after `$`). The `out` field is optional — if omitted, only the command prompt line is shown. Leading whitespace in `out` is preserved for visual indentation; trailing whitespace is stripped.
+
+The animation plays at approximately 15–25 characters per second with natural jitter. If the user runs a command before the animation completes, it stops immediately and clears the partial output. The file is fetched once on page load — edit `welcome.yaml` and reload the page to see changes without restarting the server.
+
+---
+
 ## Autocomplete
 
 Autocomplete suggestions are loaded from `auto_complete.txt` at page load and matched against what you type. The matched portion of each suggestion is highlighted in green.
@@ -402,7 +437,7 @@ The full [SecLists](https://github.com/danielmiessler/SecLists) collection is in
 
 Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.
 
-The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has two buttons: **copy command** copies the command text to the clipboard for quick re-use or modification, and **permalink** copies a shareable link to that run's output.
+The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies a shareable link to that run's output), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions.
 
 On mobile, the search, history, theme, and FAQ buttons are accessible via the **☰** menu in the top-right corner of the header.
 
@@ -412,7 +447,7 @@ On mobile, the search, history, theme, and FAQ buttons are accessible via the **
 
 There are two types of permalink:
 
-**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI colour rendering, a "save .txt" button, a "view json" option, and a link back to the shell. This is the recommended way to share results.
+**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI colour rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colours preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. This is the recommended way to share results.
 
 **Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run's output, also served as a styled HTML page.
 
@@ -422,7 +457,7 @@ Both types persist across container restarts via the `./data` SQLite volume. The
 
 ## Output Search
 
-Click **⌕ search** in the header to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
+Click **⌕ search** in the terminal bar (next to the tabs) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
 
 Two toggle buttons sit between the input and the match counter:
 
@@ -553,6 +588,7 @@ docker compose logs -f
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
 | `GET` | `/faq` | Returns custom FAQ entries from `faq.yaml` as JSON |
+| `GET` | `/welcome` | Returns welcome animation blocks from `welcome.yaml` as JSON |
 | `GET` | `/history` | Returns last N completed runs for the current session as JSON |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run (`?json` for raw JSON) |
 | `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
@@ -574,7 +610,7 @@ python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
 python3 -m pytest tests/ -v
 ```
 
-Tests are split across three files covering 120 test cases: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_faq`, PID map, retention formatting), and Flask route integration (all HTTP endpoints via `app.test_client()`). No running server or Docker required — file I/O and Redis are mocked where needed.
+Tests are split across three files covering 196 test cases: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), and Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views). No running server or Docker required — file I/O and Redis are mocked where needed.
 
 ### Linting & Security Scanning
 

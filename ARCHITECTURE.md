@@ -133,17 +133,45 @@ Modular frontend with no build step. `index.html` is a 169-line HTML shell — n
 
 External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the file is committed to the repo at `static/js/vendor/ansi_up.js` as a reliable fallback for local dev and docker-compose runs. The Dockerfile also fetches the latest version at image build time (`curl ... || true`), overwriting the committed copy. If the CDN fetch fails the build continues with the committed version. The `vendor/` directory pattern is in `.gitignore` with a negation rule (`!app/static/js/vendor/ansi_up.js`) so only this one file is tracked.
 
-**JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones.
+**JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
 
 ### Tab State
 
-Each tab is an object: `{ id, label, runId, exitCode, rawLines, killed }`.
+Each tab is an object: `{ id, label, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
 
 - `runId` — the UUID from the SSE `started` message, used for kill requests
-- `rawLines` — array of `{text, cls}` objects storing the pre-`ansi_up` text with ANSI codes intact, used for permalink generation
+- `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
+- `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
 - `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
+- `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
+- `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
+
+### Timestamps: CSS-Driven Display
+
+Elapsed and clock timestamps are shown on output lines without any JavaScript DOM re-render. Each `<span>` in the output is given two `data-` attributes at append time:
+
+- `data-ts-e` — elapsed offset from `tab.runStart` (e.g. `+12.3s`)
+- `data-ts-c` — wall-clock time (e.g. `14:32:01`)
+
+The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `content: attr(data-ts-c)`, hidden by default. Adding `body.ts-elapsed` or `body.ts-clock` makes the corresponding pseudo-element visible across all lines instantly with zero JavaScript. `_setTsMode()` in `app.js` toggles the body classes and cycles through `['off', 'elapsed', 'clock']`.
+
+`tab.runStart` is set *after* the `$ cmd` prompt line is appended so the prompt itself has no `data-ts-e` attribute and shows no elapsed stamp.
+
+### Welcome Typeout Animation
+
+`welcome.js` exposes two functions: `runWelcome()` and `cancelWelcome()`. `runWelcome()` is called once from `app.js` after the initial tab is created. It sets `_welcomeActive = true` before the fetch so cancellation works even during the async load, then types each block character-by-character with `setTimeout(38 + 0–18ms jitter)` for a natural feel. `appendLine()` is called per completed line (not per character) — a temporary DOM cursor element simulates the in-progress character stream.
+
+`cancelWelcome()` flips `_welcomeActive = false`. Because every `setTimeout` callback checks this flag before continuing, the animation stops within one character's delay. `runCommand()` calls `cancelWelcome()` followed by `clearTab(activeTabId)` to wipe the partial output before streaming real results.
+
+The `welcome.yaml` format is `{cmd, out}` blocks. `load_welcome()` uses `.rstrip()` on `out` (not `.strip()`) to preserve intentional leading-whitespace indentation in displayed output while stripping trailing newlines.
+
+### Starring / Favourites
+
+Starred commands are stored in `localStorage['starred']` as a JSON array of command strings treated as a Set. Star state is keyed by command text (not run ID) so starring "nmap -sV google.com" applies to every run of that command in both the history chips row and the full history drawer.
+
+`_toggleStar(cmd)` loads the set, adds or removes the entry, and saves it back. `renderHistory()` (chips) and `refreshHistoryPanel()` (drawer) both sort starred entries to the top before rendering. The `☆` / `★` icons in chips and the `☆ star` / `★ starred` buttons in the drawer update optimistically without a full re-render.
 
 ### The KILLED Race Condition
 
@@ -197,11 +225,11 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` before import so `app.py` can find its relative-path assets (`allowed_commands.txt`, `faq.yaml`, etc.). `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
-Three test files, ~120 tests total:
+Three test files, 196 tests total:
 
 - **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `allowed_commands.txt` file.
-- **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_faq`, path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity, `pid_register`/`pid_pop` in-process mode, `_format_retention`.
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, error cases (`/run` with missing/empty/disallowed command), history CRUD, share create/retrieve, health degradation when DB fails.
+- **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_allowed_commands_grouped` (category headers, deny entry exclusion), `load_faq`, `load_welcome` (cmd/out parsing, rstrip behaviour), `load_autocomplete` (comment/blank filtering), path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity and idempotency, `pid_register`/`pid_pop` in-process mode, `_format_retention`, `_expiry_note` (active/today/expired/invalid date branches), `_permalink_error_page` (status, body, retention message), database init and retention pruning (tables created, idempotent re-init, old records pruned, recent records kept).
+- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types (`application/json` / `text/html`), error cases (`/run` with missing/empty/disallowed command), history CRUD, session isolation (runs and deletes scoped by `X-Session-ID`), run permalink HTML and JSON views, share create/retrieve/HTML label and content type, health degradation when DB fails, `/welcome` and `/autocomplete` routes.
 
 Rate limiting is disabled in tests via `app.config["RATELIMIT_ENABLED"] = False`. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
 
@@ -214,7 +242,7 @@ Rate limiting is disabled in tests via `app.config["RATELIMIT_ENABLED"] = False`
 `./data/history.db` — SQLite, WAL mode. Two persistent tables:
 
 - `runs` — one row per completed command. Persists across restarts. Pruned by `permalink_retention_days` config.
-- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls}` objects with raw ANSI codes.
+- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
 
 Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Multi-worker Process Killing above).
 
