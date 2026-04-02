@@ -18,9 +18,8 @@ import textwrap
 import unittest.mock as mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
-import commands
 import process
-import permalinks
+import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_faq,
     is_command_allowed, rewrite_command,

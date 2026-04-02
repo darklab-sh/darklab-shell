@@ -194,6 +194,7 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
     # instead of being written to a report file in /tmp that users can't easily access
     if re.match(r'^wapiti\b', stripped, re.IGNORECASE):
         if not re.search(r'\-o\b|--output\b', stripped):
-            return stripped + ' -f txt -o /dev/stdout', "Note: wapiti output is being redirected to the terminal (-f txt -o /dev/stdout)."
+            notice = "Note: wapiti output is being redirected to the terminal (-f txt -o /dev/stdout)."
+            return stripped + ' -f txt -o /dev/stdout', notice
 
     return stripped, None

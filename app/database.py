@@ -8,7 +8,7 @@ import sqlite3
 
 from config import CFG
 
-# nosec B108 — /tmp is the intended tmpfs fallback for local dev without the volume
+# /tmp (tmpfs) is the intended fallback for local dev without the volume mount
 DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
 
