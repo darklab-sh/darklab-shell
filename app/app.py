@@ -27,6 +27,8 @@ from commands   import (
 )
 from permalinks import _permalink_error_page, _permalink_page
 
+APP_VERSION = "1.1"
+
 app = Flask(__name__)
 
 # ── Logging ───────────────────────────────────────────────────────────────────
@@ -81,6 +83,7 @@ def index():
 def get_config():
     """Return frontend-relevant config values."""
     return jsonify({
+        "version":               APP_VERSION,
         "app_name":              CFG["app_name"],
         "default_theme":         CFG["default_theme"],
         "motd":                  CFG["motd"],

@@ -35,6 +35,8 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   APP_CONFIG = cfg;
   document.title = cfg.app_name;
   document.querySelector('header h1').textContent = cfg.app_name;
+  const verEl = document.getElementById('version-label');
+  if (verEl && cfg.version) verEl.textContent = 'v' + cfg.version + ' · real-time';
   // Only apply server default theme if the user hasn't saved a local preference
   if (!localStorage.getItem('theme') && cfg.default_theme === 'light') {
     document.body.classList.add('light');

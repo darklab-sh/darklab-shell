@@ -2,6 +2,7 @@
 // Default values used until the /config endpoint responds.
 // app.js overwrites APP_CONFIG with the server response on page load.
 let APP_CONFIG = {
+  version: '1.1',
   app_name: 'shell.darklab.sh',
   default_theme: 'dark',
   motd: '',
