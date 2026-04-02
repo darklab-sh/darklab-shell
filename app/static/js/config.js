@@ -9,4 +9,9 @@ let APP_CONFIG = {
   max_output_lines: 2000,
   max_tabs: 8,
   history_panel_limit: 50,
+  command_timeout_seconds: 0,
+  welcome_char_ms: 10,
+  welcome_jitter_ms: 10,
+  welcome_post_cmd_ms: 700,
+  welcome_inter_block_ms: 1500,
 };

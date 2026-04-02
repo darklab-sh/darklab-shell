@@ -16,7 +16,6 @@
   <h1>shell.darklab.sh</h1>
   <span class="version">v1.0 · real-time</span>
   <div class="header-btns" id="header-btns">
-    <button id="search-toggle-btn" title="Search output">⌕ search</button>
     <button id="hist-btn" title="Run history">⧖ history</button>
     <button id="theme-btn" title="Toggle theme">◑ theme</button>
     <button id="faq-btn">? FAQ</button>
@@ -28,6 +27,7 @@
 <div id="mobile-menu">
   <button data-action="search">⌕ search</button>
   <button data-action="history">⧖ history</button>
+  <button data-action="ts">timestamps: off</button>
   <button data-action="theme">◑ theme</button>
   <button data-action="faq">? FAQ</button>
 </div>
@@ -58,6 +58,10 @@
       <!-- tabs injected here -->
     </div>
     <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+    <div class="terminal-bar-btns">
+      <button id="search-toggle-btn" title="Search output (Ctrl+F)">⌕ search</button>
+      <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
+    </div>
     <span id="status" class="status-pill idle">IDLE</span>
     <span id="run-timer" style="font-size:11px;color:var(--muted);font-family:var(--font-mono);display:none"></span>
   </div>
@@ -150,9 +154,9 @@
       <div class="faq-item">
         <div class="faq-q">How do tabs and permalinks work?</div>
         <div class="faq-a">
-          Each command runs in the currently active tab. You can open additional tabs with the <strong>+</strong> button to run commands side by side and keep results from different sessions visible at the same time. Each tab tracks its own status independently.<br><br>
-          The <strong>permalink</strong> button on each tab captures everything currently visible in that tab — all commands and their output — and saves it as a shareable page. The link opens a styled HTML view with ANSI colour rendering and options to save as .txt or view raw JSON. Permalinks survive container restarts.<br><br>
-          The <strong>⧖ history</strong> panel shows your last 50 runs. You can load any past result into a new tab, or copy a single-run permalink from there.
+          Each command runs in the currently active tab. You can open additional tabs with the <strong>+</strong> button to run commands side by side and keep results from different sessions visible at the same time. Each tab tracks its own status independently. Double-click a tab label to rename it.<br><br>
+          The <strong>permalink</strong> button on each tab captures everything currently visible in that tab — all commands and their output — and saves it as a shareable page. The link opens a styled HTML view with ANSI colour rendering and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. Permalinks survive container restarts.<br><br>
+          The <strong>⧖ history</strong> panel shows your last 50 runs. You can load any past result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> a command to pin it to the top of the list.
         </div>
       </div>
 
@@ -163,7 +167,44 @@
 
       <div class="faq-item">
         <div class="faq-q">How do I access search, history and theme on mobile?</div>
-        <div class="faq-a">On small screens the header buttons are replaced by a <strong>☰</strong> menu in the top-right corner. Tap it to access search, run history, theme toggle, and this FAQ.</div>
+        <div class="faq-a">On small screens the header buttons are replaced by a <strong>☰</strong> menu in the top-right corner. Tap it to access search, run history, timestamps toggle, theme toggle, and this FAQ.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">How do I save or share my results?</div>
+        <div class="faq-a">
+          There are several options from the action bar below each tab's output:<br><br>
+          <strong>permalink</strong> — saves a snapshot of everything visible in the tab and generates a shareable URL. The snapshot page lets the recipient copy, download, or view the raw data.<br>
+          <strong>copy</strong> — copies the full plain-text output to your clipboard.<br>
+          <strong>save .html</strong> — downloads a self-contained HTML file with ANSI colours preserved, suitable for archiving or sending to someone without a browser link.<br>
+          <strong>save .txt</strong> — downloads a plain-text version of the output.<br><br>
+          Single-run permalinks are also available from the <strong>⧖ history</strong> panel.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">How do I rename a tab?</div>
+        <div class="faq-a">Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click anywhere outside to confirm, or <strong>Escape</strong> to cancel. Once renamed, running a command won't overwrite the label — the tab keeps your chosen name.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">What do the timestamp options do?</div>
+        <div class="faq-a">
+          The <strong>timestamps</strong> button in the terminal bar cycles through three modes:<br><br>
+          <strong>off</strong> — no timestamps shown (default).<br>
+          <strong>elapsed</strong> — shows how many seconds after the command started each line appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different stages of a scan take.<br>
+          <strong>clock</strong> — shows the wall-clock time each line was received (e.g. <code>14:32:01</code>). Useful for correlating output with events elsewhere.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Are my commands visible to other users?</div>
+        <div class="faq-a">No. Each browser session is assigned an anonymous ID stored in your browser's local storage. Your run history, starred commands, and saved snapshots are only visible to sessions sharing that ID — in practice, just your own browser tabs. Commands are not broadcast or shared between users.</div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">Is there a time or output limit on commands?</div>
+        <div class="faq-a" id="faq-limits-text">Limits are set by the server operator and may vary by instance. By default there is no time limit and commands run until they finish or you click <strong style="color:var(--red)">■ Kill</strong>. A timeout can be configured server-side, in which case a notice will appear in the output when a command is automatically stopped. Output is also capped at a maximum number of lines per tab to keep the browser responsive — older lines are dropped from the top if this limit is reached.</div>
       </div>
 
       <div class="faq-item">
@@ -198,6 +239,7 @@
 <script src="/static/js/search.js"></script>
 <script src="/static/js/autocomplete.js"></script>
 <script src="/static/js/history.js"></script>
+<script src="/static/js/welcome.js"></script>
 <script src="/static/js/runner.js"></script>
 <script src="/static/js/app.js"></script>
 </body>

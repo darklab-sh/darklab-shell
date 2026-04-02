@@ -22,7 +22,7 @@ from database   import db_connect
 from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
-    load_faq, load_autocomplete,
+    load_faq, load_autocomplete, load_welcome,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _permalink_error_page, _permalink_page
@@ -87,7 +87,12 @@ def get_config():
         "recent_commands_limit": CFG["recent_commands_limit"],
         "max_output_lines":      CFG["max_output_lines"],
         "max_tabs":              CFG["max_tabs"],
-        "history_panel_limit":   CFG["history_panel_limit"],
+        "history_panel_limit":      CFG["history_panel_limit"],
+        "command_timeout_seconds":  CFG["command_timeout_seconds"],
+        "welcome_char_ms":          CFG["welcome_char_ms"],
+        "welcome_jitter_ms":      CFG["welcome_jitter_ms"],
+        "welcome_post_cmd_ms":    CFG["welcome_post_cmd_ms"],
+        "welcome_inter_block_ms": CFG["welcome_inter_block_ms"],
     })
 
 
@@ -111,6 +116,12 @@ def faq():
 def autocomplete():
     """Return the list of autocomplete suggestions from auto_complete.txt."""
     return jsonify({"suggestions": load_autocomplete()})
+
+
+@app.route("/welcome")
+def get_welcome():
+    """Return welcome message blocks for the startup typeout animation."""
+    return jsonify(load_welcome())
 
 
 @app.route("/history")

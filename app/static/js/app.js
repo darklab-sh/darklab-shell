@@ -5,6 +5,26 @@
 const savedTheme = localStorage.getItem('theme');
 if (savedTheme === 'light') document.body.classList.add('light');
 
+// ── Timestamps ──
+const _tsModes  = ['off', 'elapsed', 'clock'];
+const _tsLabels = { off: 'timestamps: off', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
+
+function _setTsMode(mode) {
+  tsMode = mode;
+  document.body.classList.remove('ts-elapsed', 'ts-clock');
+  if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
+  if (mode === 'clock')   document.body.classList.add('ts-clock');
+  const label = _tsLabels[mode];
+  const tsBtn = document.getElementById('ts-btn');
+  if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
+  const mobileTs = document.querySelector('#mobile-menu [data-action="ts"]');
+  if (mobileTs) mobileTs.textContent = label;
+}
+
+document.getElementById('ts-btn').addEventListener('click', () => {
+  _setTsMode(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
+});
+
 document.getElementById('theme-btn').addEventListener('click', () => {
   document.body.classList.toggle('light');
   localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
@@ -25,6 +45,28 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
     if (motd && wrap) { motd.innerHTML = renderMotd(cfg.motd); wrap.style.display = 'block'; }
   }
   updateNewTabBtn();
+
+  // ── Populate the limits FAQ entry with live config values ──
+  const limitsEl = document.getElementById('faq-limits-text');
+  if (limitsEl) {
+    function _fmtDuration(s) {
+      if (s >= 3600 && s % 3600 === 0) return (s / 3600) + (s / 3600 === 1 ? ' hour' : ' hours');
+      if (s >= 60   && s % 60   === 0) return (s / 60)   + (s / 60   === 1 ? ' minute' : ' minutes');
+      return s + (s === 1 ? ' second' : ' seconds');
+    }
+    const timeout  = cfg.command_timeout_seconds || 0;
+    const maxLines = cfg.max_output_lines || 0;
+    const timeoutStr = timeout > 0
+      ? `allows commands to run for up to <strong>${_fmtDuration(timeout)}</strong>`
+      : `has no command time limit`;
+    const linesStr = maxLines > 0
+      ? `retains up to <strong>${maxLines.toLocaleString()} lines</strong> of output per tab`
+      : `has no output line limit`;
+    limitsEl.innerHTML =
+      `This server ${timeoutStr} and ${linesStr}. ` +
+      `When a command is automatically stopped due to a timeout, a notice appears inline in the output. ` +
+      `When the line limit is reached, older lines are dropped from the top of the tab to keep the browser responsive.`;
+  }
 }).catch(() => {});
 
 // ── Hamburger menu (mobile) ──
@@ -48,6 +90,9 @@ mobileMenu.querySelectorAll('button[data-action]').forEach(btn => {
     if (action === 'history') {
       historyPanel.classList.toggle('open');
       if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+    }
+    if (action === 'ts') {
+      _setTsMode(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
     }
     if (action === 'theme') {
       document.body.classList.toggle('light');
@@ -137,6 +182,7 @@ apiFetch('/faq').then(r => r.json()).then(data => {
 
 // ── Tabs ──
 createTab('tab 1');
+runWelcome();
 
 document.getElementById('new-tab-btn').addEventListener('click', () => {
   createTab('tab ' + (tabs.length + 1));

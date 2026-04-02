@@ -23,6 +23,10 @@ def load_config():
         "max_tabs":                   8,
         "command_timeout_seconds":    0,
         "heartbeat_interval_seconds": 20,
+        "welcome_char_ms":            10,
+        "welcome_jitter_ms":          10,
+        "welcome_post_cmd_ms":        700,
+        "welcome_inter_block_ms":     1500,
     }
     config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
     if os.path.exists(config_path):

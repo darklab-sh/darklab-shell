@@ -3,6 +3,7 @@ Permalink page rendering — styled HTML pages for run history and tab snapshots
 """
 
 import json
+from datetime import datetime, timedelta, timezone
 
 from flask import Response
 
@@ -10,16 +11,27 @@ from config import CFG
 
 
 def _format_retention(days: int) -> str:
-    """Return a human-friendly retention description for use in error messages."""
+    """Return a human-friendly retention description for use in error messages.
+    Decomposes any number of days into years (365), months (30), and remainder days,
+    joining non-zero parts with commas and 'and', e.g. '1 year, 2 months and 5 days'."""
     if days == 0:
         return "unlimited — snapshots are never automatically deleted"
-    if days % 365 == 0:
-        n = days // 365
-        return f"{n} year{'s' if n != 1 else ''}"
-    if days % 30 == 0:
-        n = days // 30
-        return f"{n} month{'s' if n != 1 else ''}"
-    return f"{days} day{'s' if days != 1 else ''}"
+
+    def _unit(n: int, singular: str) -> str:
+        return f"{n} {singular}{'s' if n != 1 else ''}"
+
+    years,   r     = divmod(days, 365)
+    months,  rem   = divmod(r,    30)
+    parts = []
+    if years:  parts.append(_unit(years,  "year"))
+    if months: parts.append(_unit(months, "month"))
+    if rem:    parts.append(_unit(rem,    "day"))
+    if not parts:
+        parts = [_unit(days, "day")]  # days=0 already returned above; unreachable
+
+    if len(parts) == 1:
+        return parts[0]
+    return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
 def _permalink_error_page(noun: str) -> Response:
@@ -86,6 +98,35 @@ def _permalink_error_page(noun: str) -> Response:
     return Response(html, status=404, mimetype="text/html")
 
 
+def _expiry_note(created: str) -> str:
+    """Return an HTML snippet showing how long until this permalink expires,
+    or an empty string if retention is unlimited or the date can't be parsed."""
+    retention = CFG.get("permalink_retention_days", 0)
+    if not retention:
+        return ""
+    try:
+        created_dt = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        if created_dt.tzinfo is None:
+            created_dt = created_dt.replace(tzinfo=timezone.utc)
+        expiry_dt  = created_dt + timedelta(days=retention)
+        remaining  = expiry_dt - datetime.now(timezone.utc)
+        days_left  = remaining.days  # integer floor; 0 means < 24 h remaining
+        if remaining.total_seconds() <= 0:
+            return ""  # already pruned / about to be; 404 page would have shown instead
+        expiry_date = expiry_dt.strftime("%Y-%m-%d")
+        if days_left == 0:
+            label = "expires today"
+        else:
+            label = f"expires in {_format_retention(days_left)}"
+        return (
+            f'<div class="meta expiry" title="Expires {expiry_date}">'
+            f'{label} &nbsp;·&nbsp; {expiry_date}'
+            f'</div>'
+        )
+    except Exception:
+        return ""
+
+
 def _permalink_page(title, label, created, content_lines, json_url) -> Response:
     """Render a self-contained HTML page for a permalink.
     content_lines can be a list of strings (single-run history) or
@@ -94,6 +135,7 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
     lines_json = json.dumps(content_lines)
     label_json = json.dumps(label)
     created_fmt = created[:19].replace("T", " ") + " UTC"
+    expiry_html = _expiry_note(created)
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -118,6 +160,7 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
   header h1 {{ font-size: 14px; font-weight: 300; letter-spacing: 3px; color: var(--green);
                text-shadow: 0 0 16px var(--green-glow); }}
   .meta {{ font-size: 11px; color: var(--muted); }}
+  .meta.expiry {{ color: var(--amber); }}
   .actions {{ margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }}
   .btn {{ background: transparent; border: 1px solid var(--border); color: var(--muted);
           font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
@@ -137,13 +180,17 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
 <header>
   <h1>{app_name}</h1>
   <div class="meta">{created_fmt}</div>
+  {expiry_html}
   <div class="actions">
     <a class="btn" href="{json_url}">view json</a>
+    <button class="btn" onclick="copyTxt()">copy</button>
     <button class="btn" onclick="saveTxt()">save .txt</button>
+    <button class="btn" onclick="saveHtml()">save .html</button>
     <a class="btn" href="/">← back to shell</a>
   </div>
 </header>
 <div id="output"></div>
+<div id="copy-toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#1a1a1a;border:1px solid #1a7a08;color:#39ff14;font-family:'JetBrains Mono',monospace;font-size:12px;padding:10px 18px;border-radius:4px;z-index:300;transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
 <script>
   const lines = {lines_json};
   const ansi_up = new AnsiUp();
@@ -178,11 +225,95 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
     out.appendChild(span);
   }});
 
+  function _showToast() {{
+    const t = document.getElementById('copy-toast');
+    t.style.transform = 'translateX(-50%) translateY(0)';
+    setTimeout(() => {{ t.style.transform = 'translateX(-50%) translateY(60px)'; }}, 2500);
+  }}
+
+  function copyTxt() {{
+    const text = lines.map(e => typeof e === 'string' ? e : e.text).join('\\n');
+    navigator.clipboard.writeText(text).then(_showToast);
+  }}
+
   function saveTxt() {{
     const text = lines.map(e => typeof e === 'string' ? e : e.text).join('\\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], {{type: 'text/plain'}}));
     a.download = 'shell.darklab.sh-export.txt';
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }}
+
+  function escHtml(t) {{
+    return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  }}
+
+  function saveHtml() {{
+    const plainClsSet = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
+    const appName = {json.dumps(app_name)};
+    const label   = {label_json};
+    const created = {json.dumps(created_fmt)};
+
+    const linesHtml = lines.map(entry => {{
+      const text = typeof entry === 'string' ? entry : entry.text;
+      const cls  = typeof entry === 'string' ? '' : (entry.cls || '');
+      const tsC  = (entry && entry.tsC) ? entry.tsC : '';
+      const tsSpan = tsC ? '<span class="ts">' + escHtml(tsC) + '</span>' : '';
+      const content = plainClsSet.has(cls)
+        ? escHtml(text)
+        : ansi_up.ansi_to_html(text);
+      return '<span class="line' + (cls ? ' ' + cls : '') + '">' + tsSpan + content + '</span>';
+    }}).join('\\n');
+
+    const html = `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>${{escHtml(label)}} \u2014 ${{escHtml(appName)}}</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  body {{
+    background: #0d0d0d; color: #e0e0e0;
+    font-family: 'JetBrains Mono', monospace; font-size: 13px;
+    padding: 28px 32px; margin: 0; line-height: 1.65;
+  }}
+  .header {{
+    margin-bottom: 20px; padding-bottom: 14px;
+    border-bottom: 1px solid #1f1f1f;
+  }}
+  .app-name {{ color: #39ff14; font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }}
+  .meta {{ color: #606060; font-size: 11px; }}
+  .output {{ white-space: pre-wrap; word-break: break-all; }}
+  .line {{ display: block; }}
+  .line.exit-ok   {{ color: #39ff14; font-weight: 700; margin-top: 8px; }}
+  .line.exit-fail {{ color: #ff3c3c; font-weight: 700; margin-top: 8px; }}
+  .line.denied    {{ color: #ffb800; font-weight: 700; }}
+  .line.notice    {{ color: #6ab0f5; font-style: italic; }}
+  .ts {{
+    display: inline-block; min-width: 58px; text-align: right;
+    color: #505050; font-size: 10px; user-select: none;
+    padding-right: 8px; margin-right: 6px;
+    border-right: 1px solid #1f1f1f;
+    font-variant-numeric: tabular-nums;
+  }}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="app-name">${{escHtml(appName)}}</div>
+  <div class="meta">${{escHtml(label)}} &nbsp;&middot;&nbsp; ${{escHtml(created)}}</div>
+</div>
+<div class="output">
+${{linesHtml}}
+</div>
+</body>
+</html>`;
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([html], {{type: 'text/html'}}));
+    a.download = appName + '-' + ts + '.html';
     a.click();
     URL.revokeObjectURL(a.href);
   }}
