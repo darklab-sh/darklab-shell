@@ -154,10 +154,11 @@ class TestDenyPrefix:
         ok, _ = _check("nmap -sT 10.0.0.1 --script", allow=["nmap"], deny=["nmap --script"])
         assert not ok
 
-    def test_deny_flag_not_matched_as_substring(self):
-        # "-oN" should not be blocked by a deny entry for "-o"
+    def test_deny_single_char_matches_combined_group(self):
+        # Single-char deny "-o" matches "-oN" — treat as combined flag group
+        # (useful for blocking all nmap file output with a single !nmap -o entry)
         ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
-        assert ok
+        assert not ok
 
     def test_devnull_exception_prefix(self):
         # curl -o /dev/null ... is a common pattern for checking HTTP status — should be allowed
@@ -174,6 +175,42 @@ class TestDenyPrefix:
     def test_devnull_exception_does_not_allow_real_paths(self):
         ok, _ = _check("curl -o /tmp/out https://example.com", allow=["curl"], deny=["curl -o"])
         assert not ok
+
+    # Single-char combined flag matching
+    def test_deny_single_char_flag_combined_at_end(self):
+        # -ve contains denied -e
+        ok, _ = _check("nc -ve 127.0.0.1 80", allow=["nc"], deny=["nc -e"])
+        assert not ok
+
+    def test_deny_single_char_flag_combined_at_start(self):
+        # -ev contains denied -e
+        ok, _ = _check("nc -ev 127.0.0.1 80", allow=["nc"], deny=["nc -e"])
+        assert not ok
+
+    def test_deny_single_char_flag_combined_in_middle(self):
+        # -zve contains denied -e
+        ok, _ = _check("nc -zve 127.0.0.1 80", allow=["nc"], deny=["nc -e"])
+        assert not ok
+
+    def test_deny_single_char_flag_combined_c_flag(self):
+        # -vc contains denied -c
+        ok, _ = _check("nc -vc /bin/sh 127.0.0.1 80", allow=["nc"], deny=["nc -c"])
+        assert not ok
+
+    def test_deny_single_char_flag_standalone_still_caught(self):
+        # Plain -e still caught as before
+        ok, _ = _check("nc -e /bin/sh 127.0.0.1 80", allow=["nc"], deny=["nc -e"])
+        assert not ok
+
+    def test_deny_single_char_flag_unrelated_combined_allowed(self):
+        # -zv does not contain -e or -c, should be allowed
+        ok, _ = _check("nc -zv 127.0.0.1 80", allow=["nc"], deny=["nc -e", "nc -c"])
+        assert ok
+
+    def test_deny_single_char_does_not_affect_multi_char_matching(self):
+        # Multi-char flag --script should still use exact-token matching, not char search
+        ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap --script"])
+        assert ok
 
 
 # ── Command rewrites ──────────────────────────────────────────────────────────

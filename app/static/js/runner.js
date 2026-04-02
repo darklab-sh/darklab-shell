@@ -35,12 +35,21 @@ function setStatus(s) {
 let timerInterval = null;
 let timerStart = null;
 
+// Format a duration in seconds as a compact human-readable string.
+// Examples: 32.6 → "32.6s", 125.0 → "2m 5.0s", 3812.3 → "1h 3m 32.3s"
+function _formatElapsed(totalSecs) {
+  if (totalSecs < 60) return totalSecs.toFixed(1) + 's';
+  const h = Math.floor(totalSecs / 3600);
+  const m = Math.floor((totalSecs % 3600) / 60);
+  const s = (totalSecs % 60).toFixed(1);
+  return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
+}
+
 function startTimer() {
   timerStart = Date.now();
   runTimer.style.display = 'inline';
   timerInterval = setInterval(() => {
-    const s = ((Date.now() - timerStart) / 1000).toFixed(1);
-    runTimer.textContent = `${s}s`;
+    runTimer.textContent = _formatElapsed((Date.now() - timerStart) / 1000);
   }, 100);
 }
 
@@ -52,7 +61,7 @@ function stopTimer() {
 }
 
 function elapsedSeconds() {
-  return timerStart ? ((Date.now() - timerStart) / 1000).toFixed(1) : null;
+  return timerStart ? (Date.now() - timerStart) / 1000 : null;
 }
 
 // ── Kill button ──
@@ -97,7 +106,7 @@ function doKill(tabId) {
   }
   t.killed = true;
   stopTimer();
-  appendLine(`\n[killed by user${secs ? ' after ' + secs + 's' : ''}]`, 'exit-fail', tabId);
+  appendLine(`\n[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
@@ -116,6 +125,12 @@ function runCommand() {
   // Use tab.st (set synchronously by setTabStatus) rather than tab.runId (set
   // asynchronously via SSE) to avoid a race condition where rapid Enter presses
   // fire before the server's 'started' message arrives.
+  // If the welcome typeout is still running, cancel it and clear partial output
+  if (_welcomeActive || _welcomeDone) {
+    cancelWelcome();
+    clearTab(activeTabId);
+  }
+
   const activeTab = tabs.find(t => t.id === activeTabId);
   if (activeTab && activeTab.st === 'running') {
     const newId = createTab('tab ' + (tabs.length + 1));
@@ -140,8 +155,11 @@ function runCommand() {
   }
 
   addToHistory(cmd);
-  setTabLabel(activeTabId, cmd);
+  if (!activeTab || !activeTab.renamed) setTabLabel(activeTabId, cmd);
   appendLine('\n$ ' + cmd + '\n', '');
+  // Set runStart after the prompt line so it doesn't receive an elapsed stamp
+  const _runTab = tabs.find(t => t.id === activeTabId);
+  if (_runTab) _runTab.runStart = Date.now();
   setStatus('running');
   setTabStatus(activeTabId, 'running');
   runBtn.disabled = true;

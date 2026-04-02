@@ -28,7 +28,7 @@ recent_commands_limit: 8
 
 # Permalink retention in days. Runs and snapshots older than this will be
 # deleted from the database on startup. Set to 0 for unlimited retention.
-permalink_retention_days: 0
+permalink_retention_days: 365
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
@@ -56,3 +56,23 @@ command_timeout_seconds: 0
 # How often (in seconds) to send a heartbeat comment on idle SSE connections
 # to prevent nginx and the browser from dropping the connection.
 heartbeat_interval_seconds: 20
+
+# ── Welcome Animation ─────────────────────────────────────────────────────────
+
+# Base delay between each typed character in the welcome animation (milliseconds).
+# Lower values make the typing appear faster.
+welcome_char_ms: 10
+
+# Random jitter added on top of welcome_char_ms per character (milliseconds).
+# Adds a human feel — each character takes between welcome_char_ms and
+# welcome_char_ms + welcome_jitter_ms. Set to 0 for perfectly even typing.
+welcome_jitter_ms: 25
+
+# How long the cursor blinks on the command line after typing finishes,
+# before the command's output lines appear (milliseconds).
+# Simulates the pause between pressing Enter and seeing results.
+welcome_post_cmd_ms: 500
+
+# How long a blinking cursor sits on an empty line between animation blocks
+# before the next command starts typing (milliseconds).
+welcome_inter_block_ms: 1200

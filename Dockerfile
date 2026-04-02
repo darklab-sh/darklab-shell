@@ -4,10 +4,10 @@ FROM python:3.12-slim
 RUN apt-get update
 RUN apt-get upgrade -y
 
-RUN apt-get install -y  procps net-tools curl wget iputils-ping nmap dnsutils traceroute \
-                        mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl \
-                        libxml-writer-perl libjson-perl golang-go rubygems ruby-dev build-essential \
-                        fping hping3 masscan python3-requests fierce dnsenum libcap2-bin sudo gosu
+RUN apt-get install -y  procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
+                        mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl golang-go \
+                        libxml-writer-perl libjson-perl rubygems ruby-dev build-essential fping hping3 \
+                        masscan python3-requests fierce dnsenum libcap2-bin sudo gosu
 
 # Set GOBIN so all Go binaries install directly into /usr/local/bin,
 # world-executable and not owned by root's home directory

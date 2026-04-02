@@ -13,6 +13,7 @@ _HERE = os.path.dirname(__file__)
 ALLOWED_COMMANDS_FILE = os.path.join(_HERE, "allowed_commands.txt")
 AUTOCOMPLETE_FILE     = os.path.join(_HERE, "auto_complete.txt")
 FAQ_FILE              = os.path.join(_HERE, "faq.yaml")
+WELCOME_FILE          = os.path.join(_HERE, "welcome.yaml")
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -85,6 +86,25 @@ def load_faq():
     ]
 
 
+def load_welcome():
+    """Read welcome.yaml and return a list of {cmd, out} blocks for the startup typeout.
+    Returns an empty list if the file is missing or empty, disabling the welcome animation."""
+    if not os.path.exists(WELCOME_FILE):
+        return []
+    with open(WELCOME_FILE) as f:
+        data = yaml.safe_load(f) or []
+    if not isinstance(data, list):
+        return []
+    return [
+        {
+            "cmd": str(item.get("cmd", "")).strip(),
+            "out": str(item.get("out", "")).rstrip() if item.get("out") else "",
+        }
+        for item in data
+        if isinstance(item, dict) and item.get("cmd")
+    ]
+
+
 def load_autocomplete():
     """Read auto_complete.txt and return a list of suggestion strings."""
     if not os.path.exists(AUTOCOMPLETE_FILE):
@@ -111,6 +131,10 @@ def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
       - the command starts with the deny prefix, OR
       - the tool prefix matches AND the flag appears anywhere as a space-separated
         token in the command, so 'curl -s -o file' is caught as well as 'curl -o file'.
+    For single-character flags (e.g. -e, -c), the flag is also matched when combined
+    with other single-char flags in a group: 'nc -ve' is caught by '!nc -e', and
+    'nc -vc' is caught by '!nc -c'. Multi-char flags (--script, -oN) use exact-token
+    matching only.
     Exception: a denied output flag is allowed when its argument is /dev/null,
     permitting common patterns like 'curl -o /dev/null -w "%{http_code}" <url>'.
     """
@@ -128,12 +152,20 @@ def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
             continue
         tool_prefix = d[:space_flag]
         flag = d[space_flag + 1:]
-        if cmd_lower == tool_prefix or cmd_lower.startswith(tool_prefix + " "):
-            if re.search(r'(?<= )' + re.escape(flag) + r'(?= |$)', cmd_lower):
-                # Exception: flag argument is /dev/null
-                if re.search(r'(?<= )' + re.escape(flag) + r' /dev/null\b', cmd_lower):
-                    continue
-                return True
+        if not (cmd_lower == tool_prefix or cmd_lower.startswith(tool_prefix + " ")):
+            continue
+        # Single-char flag (e.g. -e): also match when combined with other flags
+        # in a group, such as -ve or -zve. Multi-char flags use exact-token match only.
+        if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
+            char = re.escape(flag[1])
+            pattern = r'(?<= )-[a-z]*' + char + r'[a-z]*(?= |$)'
+        else:
+            pattern = r'(?<= )' + re.escape(flag) + r'(?= |$)'
+        if re.search(pattern, cmd_lower):
+            # Exception: flag argument is /dev/null
+            if re.search(r'(?<= )' + re.escape(flag) + r' /dev/null\b', cmd_lower):
+                continue
+            return True
     return False
 
 

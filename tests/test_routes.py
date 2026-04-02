@@ -7,10 +7,12 @@ Run with: pytest tests/ (from the repo root)
 import sys
 import os
 import json
+import sqlite3
 import unittest.mock as mock
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import app as shell_app
+from database import DB_PATH
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
@@ -92,6 +94,48 @@ class TestConfigRoute:
         client = get_client()
         data = json.loads(client.get("/config").data)
         assert isinstance(data["max_tabs"], int)
+
+    def test_contains_timeout_and_welcome_keys(self):
+        client = get_client()
+        data = json.loads(client.get("/config").data)
+        for key in ("command_timeout_seconds",
+                    "welcome_char_ms", "welcome_jitter_ms",
+                    "welcome_post_cmd_ms", "welcome_inter_block_ms"):
+            assert key in data, f"missing key: {key}"
+
+    def test_all_new_keys_are_ints(self):
+        client = get_client()
+        data = json.loads(client.get("/config").data)
+        for key in ("command_timeout_seconds",
+                    "welcome_char_ms", "welcome_jitter_ms",
+                    "welcome_post_cmd_ms", "welcome_inter_block_ms"):
+            assert isinstance(data[key], int), f"{key} should be int, got {type(data[key])}"
+
+    def test_command_timeout_reflects_cfg(self):
+        client = get_client()
+        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 300}):
+            data = json.loads(client.get("/config").data)
+        assert data["command_timeout_seconds"] == 300
+
+    def test_welcome_timing_reflects_cfg(self):
+        client = get_client()
+        overrides = {
+            "welcome_char_ms": 25,
+            "welcome_jitter_ms": 5,
+            "welcome_post_cmd_ms": 400,
+            "welcome_inter_block_ms": 1000,
+        }
+        with mock.patch("app.CFG", {**shell_app.CFG, **overrides}):
+            data = json.loads(client.get("/config").data)
+        for key, val in overrides.items():
+            assert data[key] == val, f"{key}: expected {val}, got {data[key]}"
+
+    def test_command_timeout_zero_by_default(self):
+        # Default config has timeout disabled
+        client = get_client()
+        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 0}):
+            data = json.loads(client.get("/config").data)
+        assert data["command_timeout_seconds"] == 0
 
 
 # ── /allowed-commands ─────────────────────────────────────────────────────────
@@ -258,3 +302,229 @@ class TestShareRoute:
         resp = client.get(f"/share/{share_id}")
         assert resp.status_code == 200
         assert b"<html" in resp.data.lower()
+
+    def test_get_share_html_contains_label(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "unique-label-xyz", "content": []},
+            headers={"X-Session-ID": "test-session"}
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        resp = client.get(f"/share/{share_id}")
+        assert b"unique-label-xyz" in resp.data
+
+    def test_get_share_html_content_type(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "ct-test", "content": []},
+            headers={"X-Session-ID": "test-session"}
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        resp = client.get(f"/share/{share_id}")
+        assert "text/html" in resp.content_type
+
+
+# ── /welcome ──────────────────────────────────────────────────────────────────
+
+class TestWelcomeRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome")
+        assert resp.status_code == 200
+
+    def test_returns_list(self):
+        client = get_client()
+        data = json.loads(client.get("/welcome").data)
+        assert isinstance(data, list)
+
+    def test_returns_cmd_and_out_fields_when_configured(self):
+        client = get_client()
+        mock_blocks = [{"cmd": "ping google.com", "out": "64 bytes"}]
+        with mock.patch("app.load_welcome", return_value=mock_blocks):
+            data = json.loads(client.get("/welcome").data)
+        assert len(data) == 1
+        assert data[0]["cmd"] == "ping google.com"
+        assert data[0]["out"] == "64 bytes"
+
+    def test_returns_empty_list_when_no_welcome_file(self):
+        client = get_client()
+        with mock.patch("app.load_welcome", return_value=[]):
+            data = json.loads(client.get("/welcome").data)
+        assert data == []
+
+
+# ── /autocomplete ─────────────────────────────────────────────────────────────
+
+class TestAutocompleteRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/autocomplete")
+        assert resp.status_code == 200
+
+    def test_has_suggestions_key(self):
+        client = get_client()
+        data = json.loads(client.get("/autocomplete").data)
+        assert "suggestions" in data
+        assert isinstance(data["suggestions"], list)
+
+    def test_returns_configured_suggestions(self):
+        client = get_client()
+        with mock.patch("app.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
+            data = json.loads(client.get("/autocomplete").data)
+        assert "nmap -sV" in data["suggestions"]
+        assert "ping -c 4" in data["suggestions"]
+
+
+# ── /history session isolation ────────────────────────────────────────────────
+
+class TestHistorySessionIsolation:
+    def test_empty_history_for_fresh_session(self):
+        client = get_client()
+        data = json.loads(client.get(
+            "/history", headers={"X-Session-ID": "fresh-session-no-runs-xyz"}
+        ).data)
+        assert data["runs"] == []
+
+    def test_history_scoped_to_session(self):
+        session_a = "isolation-test-session-A"
+        session_b = "isolation-test-session-B"
+        run_id = "isolation-test-run-id-001"
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started) "
+            "VALUES (?, ?, ?, datetime('now'))",
+            (run_id, session_a, "ping isolation-test")
+        )
+        conn.commit()
+        conn.close()
+        try:
+            client = get_client()
+            runs_a = json.loads(client.get(
+                "/history", headers={"X-Session-ID": session_a}
+            ).data)["runs"]
+            runs_b = json.loads(client.get(
+                "/history", headers={"X-Session-ID": session_b}
+            ).data)["runs"]
+            assert any(r["id"] == run_id for r in runs_a)
+            assert not any(r["id"] == run_id for r in runs_b)
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+            conn.commit()
+            conn.close()
+
+    def test_delete_only_affects_own_session(self):
+        session_a = "delete-test-session-A"
+        session_b = "delete-test-session-B"
+        run_a = "delete-test-run-A"
+        run_b = "delete-test-run-B"
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+            (run_a, session_a, "ping a")
+        )
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+            (run_b, session_b, "ping b")
+        )
+        conn.commit()
+        conn.close()
+        try:
+            client = get_client()
+            client.delete("/history", headers={"X-Session-ID": session_a})
+            # Session B's run should be unaffected
+            conn = sqlite3.connect(DB_PATH)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE id=?", (run_b,)
+            ).fetchone()[0]
+            conn.close()
+            assert count == 1
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE id IN (?, ?)", (run_a, run_b))
+            conn.commit()
+            conn.close()
+
+
+# ── /history/<run_id> permalink ───────────────────────────────────────────────
+
+class TestRunPermalinkRoute:
+    def _insert_run(self, run_id, command, output=None):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, output) "
+            "VALUES (?, 'test-session', ?, datetime('now'), ?)",
+            (run_id, command, json.dumps(output or []))
+        )
+        conn.commit()
+        conn.close()
+
+    def _delete_run(self, run_id):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
+        conn.commit()
+        conn.close()
+
+    def test_html_view_returns_200(self):
+        run_id = "permalink-html-test-run"
+        self._insert_run(run_id, "ping google.com", ["64 bytes"])
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert resp.status_code == 200
+            assert b"<html" in resp.data.lower()
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_contains_command(self):
+        run_id = "permalink-cmd-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1")
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert b"nmap -sV 10.0.0.1" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_view_returns_command(self):
+        run_id = "permalink-json-test-run"
+        self._insert_run(run_id, "dig google.com", ["answer section"])
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            assert data["command"] == "dig google.com"
+            assert "answer section" in data["output"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_content_type(self):
+        run_id = "permalink-ct-test-run"
+        self._insert_run(run_id, "ping test")
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert "text/html" in resp.content_type
+        finally:
+            self._delete_run(run_id)
+
+
+# ── Response content types ────────────────────────────────────────────────────
+
+class TestContentTypes:
+    def test_config_returns_json(self):
+        resp = get_client().get("/config")
+        assert "application/json" in resp.content_type
+
+    def test_health_returns_json(self):
+        resp = get_client().get("/health")
+        assert "application/json" in resp.content_type
+
+    def test_faq_returns_json(self):
+        resp = get_client().get("/faq")
+        assert "application/json" in resp.content_type
+
+    def test_autocomplete_returns_json(self):
+        resp = get_client().get("/autocomplete")
+        assert "application/json" in resp.content_type
+
+    def test_index_returns_html(self):
+        resp = get_client().get("/")
+        assert "text/html" in resp.content_type

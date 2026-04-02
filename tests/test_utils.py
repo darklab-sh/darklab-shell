@@ -13,18 +13,22 @@ Run with: pytest tests/ (from the repo root)
 
 import sys
 import os
+import sqlite3
 import tempfile
 import textwrap
 import unittest.mock as mock
+from datetime import datetime, timedelta, timezone
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import process
+import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_faq,
+    load_welcome, load_autocomplete, load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
-from permalinks import _format_retention
+from permalinks import _format_retention, _expiry_note, _permalink_error_page
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -347,3 +351,411 @@ class TestFormatRetention:
 
     def test_1_returns_singular_day(self):
         assert _format_retention(1) == "1 day"
+
+    # Compound cases — arbitrary durations decomposed into years/months/days
+    def test_35_days_is_one_month_and_5_days(self):
+        assert _format_retention(35) == "1 month and 5 days"
+
+    def test_400_days_is_one_year_one_month_and_5_days(self):
+        assert _format_retention(400) == "1 year, 1 month and 5 days"
+
+    def test_366_days_is_one_year_and_1_day(self):
+        assert _format_retention(366) == "1 year and 1 day"
+
+    def test_395_days_is_one_year_and_1_month(self):
+        assert _format_retention(395) == "1 year and 1 month"
+
+    def test_singular_month_no_s(self):
+        assert _format_retention(31) == "1 month and 1 day"
+
+
+# ── load_welcome ──────────────────────────────────────────────────────────────
+
+class TestLoadWelcome:
+    def _write(self, content):
+        f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
+        f.write(content)
+        f.close()
+        return f.name
+
+    def test_missing_file_returns_empty_list(self):
+        with mock.patch("commands.WELCOME_FILE", "/nonexistent/welcome.yaml"):
+            result = load_welcome()
+        assert result == []
+
+    def test_valid_entry_with_cmd_and_out(self):
+        path = self._write("- cmd: ping google.com\n  out: \"64 bytes\"\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert len(result) == 1
+        assert result[0]["cmd"] == "ping google.com"
+        assert result[0]["out"] == "64 bytes"
+
+    def test_entry_without_out_gets_empty_string(self):
+        path = self._write("- cmd: ping google.com\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert result[0]["out"] == ""
+
+    def test_entry_missing_cmd_filtered_out(self):
+        path = self._write("- out: \"some output\"\n- cmd: nmap\n  out: \"scan\"\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert len(result) == 1
+        assert result[0]["cmd"] == "nmap"
+
+    def test_out_trailing_whitespace_stripped_but_leading_preserved(self):
+        # rstrip (not strip) preserves leading indentation in output blocks
+        path = self._write("- cmd: ping\n  out: \"  indented output   \"\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert result[0]["out"] == "  indented output"
+
+    def test_non_list_yaml_returns_empty(self):
+        path = self._write("key: value\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert result == []
+
+
+# ── load_autocomplete ─────────────────────────────────────────────────────────
+
+class TestLoadAutocomplete:
+    def test_missing_file_returns_empty_list(self):
+        with mock.patch("commands.AUTOCOMPLETE_FILE", "/nonexistent/auto_complete.txt"):
+            result = load_autocomplete()
+        assert result == []
+
+    def test_valid_entries_returned(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("nmap -sV\nping -c 4\ndig @1.1.1.1\n")
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
+                result = load_autocomplete()
+        finally:
+            os.unlink(path)
+        assert result == ["nmap -sV", "ping -c 4", "dig @1.1.1.1"]
+
+    def test_comment_lines_filtered(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# this is a comment\nnmap -sV\n# another comment\n")
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
+                result = load_autocomplete()
+        finally:
+            os.unlink(path)
+        assert result == ["nmap -sV"]
+
+    def test_blank_lines_filtered(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("ping -c 4\n\n\ndig google.com\n")
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
+                result = load_autocomplete()
+        finally:
+            os.unlink(path)
+        assert result == ["ping -c 4", "dig google.com"]
+
+
+# ── load_allowed_commands_grouped ─────────────────────────────────────────────
+
+class TestLoadAllowedCommandsGrouped:
+    def _write(self, content, tmp_path):
+        path = os.path.join(tmp_path, "allowed_commands.txt")
+        with open(path, "w") as f:
+            f.write(textwrap.dedent(content))
+        return path
+
+    def test_missing_file_returns_none(self):
+        with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/nonexistent/path.txt"):
+            result = load_allowed_commands_grouped()
+        assert result is None
+
+    def test_commands_grouped_by_header(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write(
+                "## Network\nping\ncurl\n## Scanning\nnmap\n", tmp
+            )
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
+                result = load_allowed_commands_grouped()
+        assert len(result) == 2
+        assert result[0]["name"] == "Network"
+        assert result[0]["commands"] == ["ping", "curl"]
+        assert result[1]["name"] == "Scanning"
+        assert result[1]["commands"] == ["nmap"]
+
+    def test_commands_without_header_get_empty_name(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write("ping\nnmap\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
+                result = load_allowed_commands_grouped()
+        assert len(result) == 1
+        assert result[0]["name"] == ""
+        assert "ping" in result[0]["commands"]
+
+    def test_deny_entries_excluded_from_groups(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write("## Scanning\nnmap\n!nmap -sU\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
+                result = load_allowed_commands_grouped()
+        commands_list = result[0]["commands"]
+        assert "nmap" in commands_list
+        assert "!nmap -su" not in commands_list
+        assert all(not c.startswith("!") for c in commands_list)
+
+    def test_empty_groups_filtered_out(self):
+        # A header with only deny entries under it produces no commands → excluded
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write("## Empty\n!nmap -sU\n## Real\nping\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
+                result = load_allowed_commands_grouped()
+        names = [g["name"] for g in result]
+        assert "Empty" not in names
+        assert "Real" in names
+
+    def test_empty_file_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path = self._write("", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
+                result = load_allowed_commands_grouped()
+        assert result is None
+
+
+# ── rewrite_command idempotency ───────────────────────────────────────────────
+
+class TestRewriteIdempotent:
+    def test_mtr_already_report_wide_unchanged(self):
+        cmd, notice = rewrite_command("mtr --report-wide google.com")
+        assert "--report-wide --report-wide" not in cmd
+        assert notice is None
+
+    def test_mtr_report_flag_unchanged(self):
+        cmd, notice = rewrite_command("mtr --report google.com")
+        assert "--report-wide" not in cmd
+        assert notice is None
+
+    def test_nmap_already_privileged_unchanged(self):
+        cmd, _ = rewrite_command("nmap --privileged -sV 10.0.0.1")
+        assert cmd.count("--privileged") == 1
+
+    def test_nuclei_already_ud_unchanged(self):
+        cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://example.com")
+        assert cmd.count("-ud") == 1
+
+    def test_wapiti_already_output_unchanged(self):
+        cmd, notice = rewrite_command("wapiti -u http://example.com -o /tmp/report")
+        assert "/dev/stdout" not in cmd
+        assert notice is None
+
+
+# ── _expiry_note ──────────────────────────────────────────────────────────────
+
+class TestExpiryNote:
+    def test_returns_empty_when_retention_zero(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0}):
+            result = _expiry_note("2024-01-01T00:00:00+00:00")
+        assert result == ""
+
+    def test_returns_expiry_text_when_not_expired(self):
+        # Created 5 days ago, retention 30 days → ~25 days remaining
+        created = (datetime.now(timezone.utc) - timedelta(days=5)).isoformat()
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+            result = _expiry_note(created)
+        assert "expires in" in result
+        assert "days" in result
+
+    def test_returns_expires_today_when_less_than_24h(self):
+        # Created just under retention_days ago so < 24 h remains
+        created = (datetime.now(timezone.utc) - timedelta(days=6, hours=23)).isoformat()
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 7}):
+            result = _expiry_note(created)
+        assert "expires today" in result
+
+    def test_returns_empty_when_already_expired(self):
+        # Created longer ago than retention
+        created = (datetime.now(timezone.utc) - timedelta(days=40)).isoformat()
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+            result = _expiry_note(created)
+        assert result == ""
+
+    def test_returns_empty_on_invalid_date(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+            result = _expiry_note("not-a-date")
+        assert result == ""
+
+    def test_includes_expiry_date(self):
+        created = (datetime.now(timezone.utc) - timedelta(days=1)).isoformat()
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30}):
+            result = _expiry_note(created)
+        # Should include a YYYY-MM-DD formatted date
+        import re
+        assert re.search(r'\d{4}-\d{2}-\d{2}', result)
+
+
+# ── _permalink_error_page ─────────────────────────────────────────────────────
+
+class TestPermalinkErrorPage:
+    def test_returns_404_status(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+            resp = _permalink_error_page("snapshot")
+        assert resp.status_code == 404
+
+    def test_includes_noun_in_body(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+            resp = _permalink_error_page("run")
+        assert b"run" in resp.data
+
+    def test_includes_app_name(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
+            resp = _permalink_error_page("snapshot")
+        assert b"my-shell" in resp.data
+
+    def test_mentions_retention_when_configured(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
+            resp = _permalink_error_page("snapshot")
+        assert b"30 days" in resp.data or b"1 month" in resp.data
+
+    def test_no_retention_mention_when_unlimited(self):
+        with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
+            resp = _permalink_error_page("snapshot")
+        # Unlimited mode should not mention an automatic deletion period
+        assert b"retention" not in resp.data.lower()
+
+
+# ── database init and pruning ─────────────────────────────────────────────────
+
+class TestDatabaseInit:
+    def _fresh_db(self, tmp):
+        """Return a path to a new empty DB file in tmp."""
+        return os.path.join(tmp, "test.db")
+
+    def _create_tables(self, db_path):
+        with mock.patch("database.DB_PATH", db_path):
+            with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                database.db_init()
+
+    def test_creates_runs_and_snapshots_tables(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            tables = {r[0] for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()}
+            conn.close()
+        assert "runs" in tables
+        assert "snapshots" in tables
+
+    def test_init_is_idempotent(self):
+        # Calling db_init() twice on the same DB must not raise
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()  # second call
+
+    def test_retention_prunes_old_runs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            # Insert a run timestamped 100 days ago
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) "
+                "VALUES ('old-run', 'sess', 'ping', datetime('now', '-100 days'))"
+            )
+            conn.commit()
+            conn.close()
+            # Re-init with 30-day retention — old run should be pruned
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE id='old-run'"
+            ).fetchone()[0]
+            conn.close()
+        assert count == 0
+
+    def test_retention_prunes_old_snapshots(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) "
+                "VALUES ('old-snap', 'sess', 'lbl', datetime('now', '-50 days'), '[]')"
+            )
+            conn.commit()
+            conn.close()
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM snapshots WHERE id='old-snap'"
+            ).fetchone()[0]
+            conn.close()
+        assert count == 0
+
+    def test_zero_retention_does_not_prune(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) "
+                "VALUES ('keep-run', 'sess', 'ping', datetime('now', '-100 days'))"
+            )
+            conn.commit()
+            conn.close()
+            # Re-init with retention=0 — nothing should be pruned
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE id='keep-run'"
+            ).fetchone()[0]
+            conn.close()
+        assert count == 1
+
+    def test_recent_runs_not_pruned(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) "
+                "VALUES ('recent-run', 'sess', 'ping', datetime('now', '-5 days'))"
+            )
+            conn.commit()
+            conn.close()
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 30}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            count = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE id='recent-run'"
+            ).fetchone()[0]
+            conn.close()
+        assert count == 1

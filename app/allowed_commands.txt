@@ -39,6 +39,11 @@ hping3
 !hping3 -f
 traceroute
 tcptraceroute
+# Only allow netcat to do scanning/port checking
+nc -zv
+# Deny command execution flags — also caught when combined with other flags (e.g. -ve, -vc)
+!nc -e
+!nc -c
 # mtr is auto-rewritten to --report-wide mode when no report flag is present
 mtr
 dig
