@@ -37,7 +37,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
-├── .gitlab-ci.yml              # GitLab CI pipeline — runs tests, flake8, bandit, and pip-audit on push
+├── .gitlab-ci.yml              # GitLab CI pipeline — test, lint (flake8 + bandit), dependency audit, and Docker build
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit)
 ├── tests/
 │   ├── conftest.py             # pytest configuration (sets working directory to app/)
@@ -584,7 +584,7 @@ bandit -r app/app.py -ll -q
 pip-audit -r app/requirements.txt
 ```
 
-These three checks also run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`).
+These three checks plus a Docker image build verification run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`.
 
 ---
 
