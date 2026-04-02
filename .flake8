@@ -1,0 +1,10 @@
+[flake8]
+max-line-length = 130
+# E302/E305: single blank lines between functions — intentional in this codebase,
+#             visual separation is provided by section header comments.
+# E221/E272: extra whitespace used deliberately for column alignment.
+# E127:      continuation line indent — style choice.
+extend-ignore = E302, E305, E221, E272, E127
+per-file-ignores =
+    # E402: sys.path manipulation must precede app import in tests/conftest.py
+    tests/test_validation.py: E402

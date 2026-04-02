@@ -14,21 +14,21 @@ RUN apt-get install -y  procps net-tools curl wget iputils-ping nmap dnsutils tr
 ENV GOBIN=/usr/local/bin
 
 # Install nuclei
-RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.7.1
 
 # Install ProjectDiscovery suite via Go
 # Note: httpx binary is renamed to pd-httpx to avoid collision with the Python
 # httpx library (pulled in by wapiti3) which would otherwise shadow the Go binary
-RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@latest
-RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@latest && \
+RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.13.0
+RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@v1.9.0 && \
     mv /usr/local/bin/httpx /usr/local/bin/pd-httpx
-RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@latest
+RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@v1.2.3
 
 # Install amass, assetfinder, gobuster and ffuf via Go
-RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@main
-RUN go install github.com/tomnomnom/assetfinder@latest
-RUN go install github.com/OJ/gobuster/v3@latest
-RUN go install github.com/ffuf/ffuf/v2@latest
+RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@v5.0.1
+RUN go install github.com/tomnomnom/assetfinder@v0.1.1
+RUN go install github.com/OJ/gobuster/v3@v3.8.2
+RUN go install github.com/ffuf/ffuf/v2@v2.1.0
 
 # Install the full SecLists wordlist collection
 RUN git clone --depth 1 https://github.com/danielmiessler/SecLists.git /usr/share/wordlists/seclists && \
@@ -48,11 +48,11 @@ RUN ln -s /opt/Nikto/program/nikto.pl /usr/local/bin/nikto
 RUN pip install --upgrade pip
 
 # Install wapiti3, dirsearch, and wafw00f via pip
-RUN pip install wapiti3
-RUN pip install wafw00f
+RUN pip install wapiti3==3.2.2
+RUN pip install wafw00f==2.4.2
 
 # Install wpscan via ruby gems
-RUN gem install wpscan
+RUN gem install wpscan -v 3.8.28
 
 # Install required Python dependencies from requirements.txt
 WORKDIR /app

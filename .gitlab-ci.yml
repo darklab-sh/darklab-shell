@@ -1,0 +1,47 @@
+image: python:3.12-slim
+
+stages:
+  - test
+  - lint
+  - audit
+  - build
+
+variables:
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+cache:
+  key: "$CI_COMMIT_REF_SLUG"
+  paths:
+    - .cache/pip/
+
+before_script:
+  - pip install -q -r app/requirements.txt -r requirements-dev.txt
+
+test:
+  stage: test
+  script:
+    - pytest tests/ -v
+
+lint:
+  stage: lint
+  script:
+    - flake8 app/app.py tests/
+    - bandit -r app/app.py -ll -q
+
+audit:
+  stage: audit
+  script:
+    - pip install -q pip-audit
+    - pip-audit -r app/requirements.txt
+
+docker-build:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_BUILDKIT: "1"
+  before_script: []
+  script:
+    - docker build -t shell.darklab.sh:$CI_COMMIT_SHA .

@@ -3,11 +3,12 @@
 // the connection has silently died. Surface a notice and reset the UI so the user isn't
 // left with a perpetually-spinning tab. The command may still be running server-side;
 // the result will appear in the history panel once it completes.
-let _stalledTimeout = null;
+// Keyed by tabId so multiple concurrent tabs each have their own independent timer.
+const _stalledTimeouts = new Map();
 
 function _resetStalledTimeout(tabId) {
-  clearTimeout(_stalledTimeout);
-  _stalledTimeout = setTimeout(() => {
+  clearTimeout(_stalledTimeouts.get(tabId));
+  _stalledTimeouts.set(tabId, setTimeout(() => {
     const t = tabs.find(t => t.id === tabId);
     if (!t || t.killed) return;  // already handled
     appendLine('\n[connection stalled — command may still be running on the server]', 'notice', tabId);
@@ -15,12 +16,12 @@ function _resetStalledTimeout(tabId) {
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
     stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
-  }, 45000);
+  }, 45000));
 }
 
-function _clearStalledTimeout() {
-  clearTimeout(_stalledTimeout);
-  _stalledTimeout = null;
+function _clearStalledTimeout(tabId) {
+  clearTimeout(_stalledTimeouts.get(tabId));
+  _stalledTimeouts.delete(tabId);
 }
 
 // ── Status pill ──
@@ -176,7 +177,7 @@ function runCommand() {
 
     function read() {
       reader.read().then(({ done, value }) => {
-        if (done) { _clearStalledTimeout(); stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
+        if (done) { _clearStalledTimeout(tabId); stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
         _resetStalledTimeout(tabId);
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
@@ -209,7 +210,7 @@ function runCommand() {
                   if (i < arr.length - 1 || line) appendLine(line, '', tabId);
                 });
               } else if (msg.type === 'exit') {
-                _clearStalledTimeout();
+                _clearStalledTimeout(tabId);
                 const t = tabs.find(t => t.id === tabId);
                 if (t) { t.exitCode = msg.code; t.runId = null; }
                 // If already killed by user, ignore the subsequent -15 exit code
@@ -234,7 +235,7 @@ function runCommand() {
                 runBtn.disabled = false; hideTabKillBtn(tabId);
                 if (historyPanel.classList.contains('open')) refreshHistoryPanel();
               } else if (msg.type === 'error') {
-                _clearStalledTimeout();
+                _clearStalledTimeout(tabId);
                 appendLine('\n[error] ' + msg.text, 'exit-fail', tabId);
                 if (tabId === activeTabId) setStatus('fail');
                 setTabStatus(tabId, 'fail');
@@ -248,7 +249,7 @@ function runCommand() {
     }
     read();
   }).catch(err => {
-    _clearStalledTimeout();
+    _clearStalledTimeout(tabId);
     appendLine('\n[fetch error] ' + err.message, 'exit-fail', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');

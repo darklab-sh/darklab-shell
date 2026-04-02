@@ -36,10 +36,15 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 │                               #   tests that import app.py get correct static analysis in VS Code
-├── requirements-dev.txt        # Dev-only dependencies (pytest)
+├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
+├── .gitlab-ci.yml              # GitLab CI pipeline — runs tests, flake8, bandit, and pip-audit on push
+├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit)
 ├── tests/
 │   ├── conftest.py             # pytest configuration (sets working directory to app/)
-│   └── test_validation.py      # Tests for command validation and rewrite logic
+│   ├── test_validation.py      # Tests for command validation and rewrite logic
+│   ├── test_utils.py           # Tests for utility functions (split_chained_commands, load_allowed_commands,
+│   │                           #   load_faq, path blocking edge cases, pid map, _format_retention, rewrites)
+│   └── test_routes.py          # Flask integration tests via test client (all HTTP routes)
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
 │   └── run_local.sh                    # Script to run without Docker using Python directly
@@ -549,6 +554,7 @@ docker compose logs -f
 | `POST` | `/run` | Runs a command, streams output via SSE |
 | `POST` | `/kill` | Kills a running process by `run_id` |
 | `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
+| `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}` — 200 if healthy, 503 if degraded. `redis` is `null` when Redis is not configured |
 
 ---
 
@@ -563,7 +569,22 @@ python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
 python3 -m pytest tests/ -v
 ```
 
-Tests are structured as five classes covering: shell operator blocking, path blocking, allowlist prefix matching, deny prefix (`!`) logic, and all four command rewrites (mtr, nmap, nuclei, wapiti). No running server or Docker required — file I/O is mocked where needed.
+Tests are split across three files covering 120 test cases: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_faq`, PID map, retention formatting), and Flask route integration (all HTTP endpoints via `app.test_client()`). No running server or Docker required — file I/O and Redis are mocked where needed.
+
+### Linting & Security Scanning
+
+```bash
+# Style and syntax
+flake8 app/app.py tests/
+
+# Security scan (medium severity and above)
+bandit -r app/app.py -ll -q
+
+# Dependency vulnerability audit
+pip-audit -r app/requirements.txt
+```
+
+These three checks also run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`).
 
 ---
 

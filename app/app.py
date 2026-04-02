@@ -94,6 +94,17 @@ if REDIS_URL:
         log.warning("Redis unavailable (%s) — falling back to in-process mode", e)
         redis_client = None
 
+if not redis_client:
+    _workers = int(os.environ.get("WEB_CONCURRENCY", 0))
+    if _workers > 1:
+        log.warning(
+            "Redis unavailable with WEB_CONCURRENCY=%d — PID tracking and rate limiting "
+            "use per-worker in-process state. Kill requests routed to a different worker "
+            "than the one that started the command will silently fail. "
+            "Configure Redis or set workers=1.",
+            _workers
+        )
+
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
 # Reads real client IP from X-Forwarded-For set by nginx-proxy
@@ -146,7 +157,7 @@ def pid_pop(run_id: str) -> int | None:
 # ── SQLite persistent run history ─────────────────────────────────────────────
 # Database lives in /data which is a writable volume mount (see docker-compose.yml)
 # Falls back to /tmp if /data is not available (e.g. local dev without the volume)
-DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"
+DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
 DB_PATH = os.path.join(DATA_DIR, "history.db")
 
 
@@ -187,6 +198,7 @@ def db_init():
         except sqlite3.OperationalError:
             pass  # Column already exists
         conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
 
         # Prune old runs and snapshots if retention is configured
         days = CFG.get("permalink_retention_days", 0)
@@ -748,8 +760,8 @@ def run_command():
     # is registered before any kill request could arrive
     try:
         proc = subprocess.Popen(
-            SCANNER_PREFIX + ["sh", "-c", command] if SCANNER_PREFIX else command,
-            shell=not bool(SCANNER_PREFIX),
+            SCANNER_PREFIX + ["sh", "-c", command] if SCANNER_PREFIX else ["sh", "-c", command],
+            shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
             text=True,
@@ -778,7 +790,21 @@ def run_command():
                 captured_lines.append(f"[notice] {notice}")
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
+            run_started_dt = datetime.fromisoformat(run_started)
             while True:
+                # Check timeout at the top of every iteration so it fires even
+                # during continuous output, not only during idle heartbeat periods.
+                if COMMAND_TIMEOUT:
+                    elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
+                    if elapsed >= COMMAND_TIMEOUT:
+                        pgid = os.getpgid(proc.pid)
+                        if SCANNER_PREFIX:
+                            subprocess.run(["sudo", "-u", "scanner", "kill", "-TERM", f"-{pgid}"], timeout=5)
+                        else:
+                            os.killpg(pgid, signal.SIGTERM)
+                        timeout_msg = f"[timeout] Command exceeded {COMMAND_TIMEOUT}s limit and was killed."
+                        yield f"data: {json.dumps({'type': 'notice', 'text': timeout_msg})}\n\n"
+                        break
                 # Wait up to HEARTBEAT_INTERVAL seconds for output
                 ready, _, _ = select.select([proc.stdout], [], [], HEARTBEAT_INTERVAL)
                 if ready:
@@ -794,17 +820,6 @@ def run_command():
                     # to keep nginx and the browser from treating the connection as idle
                     if proc.poll() is not None:
                         break
-                    # Check command timeout
-                    if COMMAND_TIMEOUT:
-                        elapsed = (datetime.now(timezone.utc) - datetime.fromisoformat(run_started)).total_seconds()
-                        if elapsed >= COMMAND_TIMEOUT:
-                            pgid = os.getpgid(proc.pid)
-                            if SCANNER_PREFIX:
-                                subprocess.run(["sudo", "-u", "scanner", "kill", "-TERM", f"-{pgid}"], timeout=5)
-                            else:
-                                os.killpg(pgid, signal.SIGTERM)
-                            yield f"data: {json.dumps({'type': 'notice', 'text': f'[timeout] Command exceeded {COMMAND_TIMEOUT}s limit and was killed.'})}\n\n"
-                            break
                     yield ": heartbeat\n\n"
 
             proc.stdout.close()
@@ -812,13 +827,16 @@ def run_command():
             exit_code = proc.returncode
             finished = datetime.now(timezone.utc)
             elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
-            log.info("RUN END    run_id=%s session=%s exit=%d elapsed=%.1fs cmd=%r", run_id, session_id, exit_code, elapsed, original_command)
+            log.info("RUN END    run_id=%s session=%s exit=%d elapsed=%.1fs cmd=%r",
+                     run_id, session_id, exit_code, elapsed, original_command)
             yield f"data: {json.dumps({'type': 'exit', 'code': exit_code, 'elapsed': elapsed})}\n\n"
 
             # Store completed run in SQLite for persistent permalink/history access
             with db_connect() as conn:
                 conn.execute(
-                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    "INSERT INTO runs "
+                    "(id, session_id, command, started, finished, exit_code, output) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
                     (
                         run_id,
                         session_id,
@@ -863,8 +881,35 @@ def kill_command():
         pass
     return jsonify({"killed": True})
 
+@app.route("/health")
+def health():
+    """Health check endpoint for Docker HEALTHCHECK and load balancer probes.
+    Returns 200 if all critical dependencies are reachable, 503 otherwise."""
+    result = {"status": "ok", "db": False, "redis": None}
+
+    # SQLite — critical: app cannot store or serve history without it
+    try:
+        with db_connect() as conn:
+            conn.execute("SELECT 1")
+        result["db"] = True
+    except Exception:
+        result["status"] = "degraded"
+
+    # Redis — checked only if configured; absence is acceptable (falls back to in-process)
+    if redis_client:
+        try:
+            redis_client.ping()
+            result["redis"] = True
+        except Exception:
+            result["redis"] = False
+            result["status"] = "degraded"
+
+    http_status = 200 if result["status"] == "ok" else 503
+    return jsonify(result), http_status
+
+
 if __name__ == "__main__":
     # For local development only. In production, Gunicorn is used as the WSGI server
     # via the Dockerfile CMD. Run locally with: python3 app.py
     print("shell.darklab.sh running at http://localhost:8888")
-    app.run(host="0.0.0.0", port=8888, threaded=True)
+    app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec B104
