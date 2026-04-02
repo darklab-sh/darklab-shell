@@ -404,8 +404,6 @@ body.light .terminal-bar { background: #e0e0e0; }
   gap: 24px;
 }
 
-.faq-item {}
-
 .faq-q {
   font-family: var(--font-display);
   font-size: 13px;
