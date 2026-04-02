@@ -145,6 +145,20 @@ class TestDenyPrefix:
         ok, _ = _check("nmap -sV 10.0.0.1", allow=["nmap"], deny=[])
         assert ok
 
+    def test_deny_flag_anywhere_in_command(self):
+        # Flag should be denied even when other flags precede it
+        ok, _ = _check("curl -s -o /tmp/out https://example.com", allow=["curl"], deny=["curl -o"])
+        assert not ok
+
+    def test_deny_flag_at_end(self):
+        ok, _ = _check("nmap -sT 10.0.0.1 --script", allow=["nmap"], deny=["nmap --script"])
+        assert not ok
+
+    def test_deny_flag_not_matched_as_substring(self):
+        # "-oN" should not be blocked by a deny entry for "-o"
+        ok, _ = _check("nmap -oN output.txt", allow=["nmap"], deny=["nmap -o"])
+        assert ok
+
 
 # ── Command rewrites ──────────────────────────────────────────────────────────
 

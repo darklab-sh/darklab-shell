@@ -286,6 +286,30 @@ def split_chained_commands(command: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
+def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
+    """Return True if cmd_lower matches any deny entry.
+    A deny entry like '!curl -o' is matched if:
+      - the command starts with the deny prefix (existing behaviour), OR
+      - the tool prefix matches AND the flag appears anywhere as a space-separated
+        token in the command, so 'curl -s -o file' is caught as well as 'curl -o file'.
+    """
+    for d in deny_entries:
+        if cmd_lower == d or cmd_lower.startswith(d + " "):
+            return True
+        # Split deny entry at first flag (" -") to allow flag-anywhere matching.
+        # e.g. "curl -o" → tool="curl", flag="-o"
+        #      "gobuster dir -o" → tool="gobuster dir", flag="-o"
+        space_flag = d.find(" -")
+        if space_flag == -1:
+            continue
+        tool_prefix = d[:space_flag]
+        flag = d[space_flag + 1:]
+        if cmd_lower == tool_prefix or cmd_lower.startswith(tool_prefix + " "):
+            if re.search(r'(?<= )' + re.escape(flag) + r'(?= |$)', cmd_lower):
+                return True
+    return False
+
+
 def is_command_allowed(command: str) -> tuple[bool, str]:
     """Return (allowed, reason). Blocks if any chained segment isn't on the allowlist,
     or if the raw input contains shell operators or references to protected paths.
@@ -310,7 +334,7 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
     cmd_lower = command.strip().lower()
 
     # Deny prefixes take priority — checked before allow list
-    if denied and any(cmd_lower == d or cmd_lower.startswith(d + " ") for d in denied):
+    if denied and _is_denied(cmd_lower, denied):
         return False, f"Command not allowed: '{command.strip()}'"
 
     if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")

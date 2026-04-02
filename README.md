@@ -274,7 +274,7 @@ nmap
 !nmap --script
 ```
 
-This allows all `nmap` invocations except those starting with `nmap -sU` (UDP scan) or `nmap --script`. Matching is the same prefix-based logic as allow entries — `!nmap -sU` blocks `nmap -sU` and `nmap -sU 10.0.0.1 -p 80`, but not `nmap -sT`.
+This allows all `nmap` invocations except those containing `-sU` or `--script` as a flag. Unlike allow entries, deny matching is not purely prefix-based — the flag is matched anywhere in the command as a space-separated token, so `nmap -sT -sU 10.0.0.1` is caught as well as `nmap -sU 10.0.0.1`. The tool prefix must still match (`!nmap -sU` only applies to `nmap` commands).
 
 ### Shell Operator Blocking
 

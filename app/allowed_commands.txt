@@ -12,7 +12,9 @@
 #   nmap
 #   !nmap -sU
 #   !nmap --script
-# This allows all nmap commands except those starting with "nmap -sU" or "nmap --script".
+# This allows all nmap commands except those containing -sU or --script as a flag.
+# Unlike allow entries, deny flags are matched anywhere in the command (not just
+# immediately after the tool name), so "nmap -sT -sU 10.0.0.1" is also blocked.
 # Deny prefixes are not shown to users in the FAQ command list.
 #
 # Note on mtr: mtr's interactive full-screen mode requires a real TTY which is not
