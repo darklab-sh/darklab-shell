@@ -8,6 +8,22 @@ This document captures the key architectural decisions, bugs encountered, and re
 
 A web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, real-time SSE streaming.
 
+The Python backend is split into focused modules with acyclic dependencies:
+
+```
+config.py      — CFG defaults, SCANNER_PREFIX (no app dependencies)
+    ↑
+database.py    — SQLite connect/init/prune
+process.py     — Redis setup, pid_register/pid_pop
+permalinks.py  — HTML rendering for permalink pages
+    ↑
+app.py         — Flask app, rate limiter, all route handlers
+
+commands.py    — Command validation and rewrites (no CFG dependency, standalone)
+```
+
+`commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. `app.py` imports by name from each module (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
+
 ---
 
 ## Key Architectural Decisions
@@ -188,6 +204,8 @@ Three test files, ~120 tests total:
 - **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, error cases (`/run` with missing/empty/disallowed command), history CRUD, share create/retrieve, health degradation when DB fails.
 
 Rate limiting is disabled in tests via `app.config["RATELIMIT_ENABLED"] = False`. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
+
+**Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
 
 ---
 

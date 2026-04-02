@@ -25,8 +25,8 @@ test:
 lint:
   stage: lint
   script:
-    - flake8 app/app.py tests/
-    - bandit -r app/app.py -ll -q
+    - flake8 app/ tests/
+    - bandit -r app/ -ll -q
 
 audit:
   stage: audit
