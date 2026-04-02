@@ -496,6 +496,7 @@ class TestLoadAllowedCommandsGrouped:
             )
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         assert len(result) == 2
         assert result[0]["name"] == "Network"
         assert result[0]["commands"] == ["ping", "curl"]
@@ -507,6 +508,7 @@ class TestLoadAllowedCommandsGrouped:
             path = self._write("ping\nnmap\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         assert len(result) == 1
         assert result[0]["name"] == ""
         assert "ping" in result[0]["commands"]
@@ -516,6 +518,7 @@ class TestLoadAllowedCommandsGrouped:
             path = self._write("## Scanning\nnmap\n!nmap -sU\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         commands_list = result[0]["commands"]
         assert "nmap" in commands_list
         assert "!nmap -su" not in commands_list
@@ -527,6 +530,7 @@ class TestLoadAllowedCommandsGrouped:
             path = self._write("## Empty\n!nmap -sU\n## Real\nping\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         names = [g["name"] for g in result]
         assert "Empty" not in names
         assert "Real" in names

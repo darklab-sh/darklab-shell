@@ -64,7 +64,7 @@ def pid_pop(run_id: str) -> int | None:
     GETDEL is atomic in Redis, preventing race conditions between workers."""
     if redis_client:
         val = redis_client.getdel(f"proc:{run_id}")
-        return int(val) if val is not None else None
+        return int(str(val)) if val is not None else None
     else:
         with _pid_lock:
             return _pid_map.pop(run_id, None)
