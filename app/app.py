@@ -262,6 +262,7 @@ def run_command():
                 captured_lines.append(f"[notice] {notice}")
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
+            assert proc.stdout is not None  # guaranteed by stdout=PIPE in Popen
             run_started_dt = datetime.fromisoformat(run_started)
             while True:
                 # Check timeout at the top of every iteration so it fires even
