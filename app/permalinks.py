@@ -23,9 +23,12 @@ def _format_retention(days: int) -> str:
     years,   r     = divmod(days, 365)
     months,  rem   = divmod(r,    30)
     parts = []
-    if years:  parts.append(_unit(years,  "year"))
-    if months: parts.append(_unit(months, "month"))
-    if rem:    parts.append(_unit(rem,    "day"))
+    if years:
+        parts.append(_unit(years, "year"))
+    if months:
+        parts.append(_unit(months, "month"))
+    if rem:
+        parts.append(_unit(rem, "day"))
     if not parts:
         parts = [_unit(days, "day")]  # days=0 already returned above; unreachable
 
@@ -190,7 +193,10 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
   </div>
 </header>
 <div id="output"></div>
-<div id="copy-toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);background:#1a1a1a;border:1px solid #1a7a08;color:#39ff14;font-family:'JetBrains Mono',monospace;font-size:12px;padding:10px 18px;border-radius:4px;z-index:300;transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
+<div id="copy-toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
+background:#1a1a1a;border:1px solid #1a7a08;color:#39ff14;font-family:'JetBrains Mono',monospace;
+font-size:12px;padding:10px 18px;border-radius:4px;z-index:300;
+transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
 <script>
   const lines = {lines_json};
   const ansi_up = new AnsiUp();
