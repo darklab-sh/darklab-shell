@@ -144,7 +144,12 @@ function refreshHistoryPanel() {
       });
 
       entry.querySelector('[data-action="star"]').addEventListener('click', () => {
+        const wasStarred = _getStarred().has(run.command);
         _toggleStar(run.command);
+        // If the command is being starred and isn't in the chips list, add it
+        if (!wasStarred && !cmdHistory.includes(run.command)) {
+          cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
+        }
         refreshHistoryPanel();
         renderHistory(); // keep chips in sync
       });

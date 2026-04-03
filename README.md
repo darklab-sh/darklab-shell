@@ -17,19 +17,19 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
-- **Starred / favourites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starred state is stored in `localStorage` and applied by command text across all runs
-- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI colour) buttons
+- **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
+- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
-- **HTML export** — download a tab's output as a self-contained HTML file with ANSI colour rendering preserved, via the **save .html** button in each tab's action bar
+- **HTML export** — download a tab's output as a self-contained HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
 - **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
-- **Rate limiting** — per-IP request limiting via `X-Forwarded-For` header, backed by Redis for accurate enforcement across all Gunicorn workers (compatible with nginx-proxy)
-- **Logging** — each command start, finish, and kill is logged with run ID, session ID, PID, command, exit code, and elapsed time
-- **FAQ modal** — built-in help with allowed commands grouped by category; click any command chip to load it into the command bar with autocomplete. Extend with instance-specific entries via `faq.yaml`
+- **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
+- **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
+- **FAQ modal** — built-in help with allowed commands grouped by category; click any command chip to load it into the command bar with autocomplete. The retention/limits entry shows live values for command timeout, output line limit, and permalink retention with a note that they are configurable by the operator. Extend with instance-specific entries via `faq.yaml`
 
 ---
 
@@ -64,12 +64,13 @@ A lightweight web interface for running network diagnostic and vulnerability sca
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
     ├── permalinks.py           # HTML rendering for /history/<id> and /share/<id> pages
     ├── index.html              # Frontend HTML shell (served by Flask)
-    ├── config.yaml             # Application configuration (see Configuration section)
-    ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
-    ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
-    ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
-    ├── welcome.yaml            # Welcome animation blocks {cmd, out}; loaded on page start (optional)
     ├── favicon.ico             # Site favicon
+    ├── conf/                   # Operator-configurable files — edit these to customise the instance
+    │   ├── config.yaml         # Application configuration (see Configuration section)
+    │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
+    │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
+    │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
+    │   └── welcome.yaml            # Welcome animation blocks {cmd, out}; loaded on page start (optional)
     ├── requirements.txt        # Python runtime dependencies
     └── static/
         ├── css/
@@ -108,11 +109,11 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 
 | File | When changes take effect |
 |------|--------------------------|
-| `allowed_commands.txt` | Immediately — re-read on every request |
-| `faq.yaml` | Immediately — re-read on every request |
-| `welcome.yaml` | On next page load — fetched once by the browser on load |
-| `auto_complete.txt` | On next page load — fetched once by the browser |
-| `config.yaml` | After `docker compose restart` (no rebuild needed) |
+| `conf/allowed_commands.txt` | Immediately — re-read on every request |
+| `conf/faq.yaml` | Immediately — re-read on every request |
+| `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
+| `conf/auto_complete.txt` | On next page load — fetched once by the browser |
+| `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
 
 ```bash
 docker compose restart
@@ -201,13 +202,13 @@ Open [http://localhost:8888](http://localhost:8888). Note that without Docker, t
 
 ## Configuration
 
-All application settings live in `app/config.yaml`. The file is read at startup — changes take effect after `docker compose restart` with no rebuild needed. If a setting is omitted, the default value is used.
+All application settings live in `app/conf/config.yaml`. The file is read at startup — changes take effect after `docker compose restart` with no rebuild needed. If a setting is omitted, the default value is used.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `shell.darklab.sh` | Name shown in the browser tab, header, and permalink pages |
 | `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
-| `default_theme` | `dark` | Default colour theme for new visitors. Options: `dark`, `light`. Overridden by the user's saved preference |
+| `default_theme` | `dark` | Default color theme for new visitors. Options: `dark`, `light`. Overridden by the user's saved preference |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
 | `permalink_retention_days` | `0` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
@@ -221,6 +222,43 @@ All application settings live in `app/config.yaml`. The file is read at startup 
 | `welcome_jitter_ms` | `10` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
 | `welcome_post_cmd_ms` | `700` | How long the cursor blinks on the command line after typing finishes, before output appears (ms) |
 | `welcome_inter_block_ms` | `1500` | Pause between finishing one block and the next command starting to type (ms) |
+| `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG`. See [Logging](#logging) |
+| `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog). See [Logging](#logging) |
+
+---
+
+## Logging
+
+Log level and format are configured in `config.yaml` and take effect after `docker compose restart`.
+
+### Log levels
+
+| Level | What is logged |
+|-------|----------------|
+| `ERROR` | Application errors — subprocess spawn failures (`RUN_SPAWN_ERROR`), SSE stream errors (`RUN_STREAM_ERROR`), DB save failures (`RUN_SAVED_ERROR`), health check failures (`HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL`) |
+| `WARN` | Warnings — commands blocked by the allowlist (`CMD_DENIED`), rate limit hits (`RATE_LIMIT`), commands killed by the server timeout (`CMD_TIMEOUT`), kill signal delivery failures (`KILL_FAILED`), health degradation aggregate (`HEALTH_DEGRADED`) |
+| `INFO` | Operational events — command start (`RUN_START`), command end (`RUN_END`), process kill (`RUN_KILL`), startup DB pruning (`DB_PRUNED`), logging startup confirmation (`LOGGING_CONFIGURED`). All INFO events include the client IP |
+| `DEBUG` | Everything above, plus every HTTP request (`REQUEST`) and response (`RESPONSE`), command rewrites (`CMD_REWRITE`), share creation (`SHARE_CREATED`), kill misses (`KILL_MISS`), health check pass (`HEALTH_OK`) |
+
+### Log formats
+
+**`text`** (default) — one line per event, suitable for `docker compose logs`:
+
+```
+2026-04-02T10:00:00Z [INFO ] RUN_START  cmd='nmap -sV 1.2.3.4'  ip=5.6.7.8  pid=12345  run_id=abc123  session=xyz
+2026-04-02T10:00:05Z [INFO ] RUN_END    cmd='nmap -sV 1.2.3.4'  elapsed=5.1  exit_code=0  ip=5.6.7.8  run_id=abc123  session=xyz
+2026-04-02T10:00:06Z [WARN ] CMD_DENIED  cmd='cat /etc/passwd'  ip=5.6.7.8  reason='Command not allowed: ...'  session=xyz
+```
+
+**`gelf`** — newline-delimited GELF 1.1 JSON. `short_message` is the bare event name; all context is in `_`-prefixed additional fields for direct Graylog indexing:
+
+```json
+{"version":"1.1","host":"shell.darklab.sh","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"shell.darklab.sh","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
+```
+
+### GELF back-end integration
+
+The `docker-compose.yml` already ships container logs to Graylog via the Docker GELF log driver. Setting `log_format: gelf` in `config.yaml` additionally formats the application-level log records as GELF JSON so that structured fields (`_ip`, `_run_id`, `_cmd`, etc.) are available as first-class Graylog message fields rather than embedded in a plain string.
 
 ---
 
@@ -260,7 +298,7 @@ The following tools are installed in the Docker image and available for use:
 
 ## Command Allowlist
 
-Allowed commands are controlled by `allowed_commands.txt`. The file is re-read on every request, so changes take effect immediately without restarting the server.
+Allowed commands are controlled by `conf/allowed_commands.txt`. The file is re-read on every request, so changes take effect immediately without restarting the server.
 
 **Format:**
 - One command prefix per line
@@ -285,7 +323,7 @@ nmap
 
 Commands in the FAQ are displayed grouped by their `##` category, with each chip clickable to load the command into the input bar. Commands before any `##` header are shown in an unnamed group. Deny prefixes (`!` lines) are not shown to users.
 
-To **disable restrictions entirely**, delete `allowed_commands.txt` or leave it empty — all commands will be permitted.
+To **disable restrictions entirely**, delete `conf/allowed_commands.txt` or leave it empty — all commands will be permitted.
 
 ### Deny Prefixes
 
@@ -316,7 +354,7 @@ When the allowlist is active, the following operators are blocked outright, both
 
 ## Custom FAQ
 
-Instance-specific FAQ entries can be added to `app/faq.yaml`. Entries are appended after the built-in FAQ items in the FAQ modal and are re-read on every request — no restart needed.
+Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are appended after the built-in FAQ items in the FAQ modal and are re-read on every request — no restart needed.
 
 **Format:**
 
@@ -334,7 +372,7 @@ The file is optional — if it doesn't exist or contains no valid entries, the F
 
 ## Welcome Animation
 
-When the page first loads, a typeout animation runs in the terminal showing example commands and their output character by character, simulating a live session. This is controlled by `app/welcome.yaml`. If the file is absent or empty, no animation plays.
+When the page first loads, a typeout animation runs in the terminal showing example commands and their output character by character, simulating a live session. This is controlled by `app/conf/welcome.yaml`. If the file is absent or empty, no animation plays.
 
 **Format:**
 
@@ -350,13 +388,13 @@ When the page first loads, a typeout animation runs in the terminal showing exam
 
 Each entry must have a `cmd` field (the command shown after `$`). The `out` field is optional — if omitted, only the command prompt line is shown. Leading whitespace in `out` is preserved for visual indentation; trailing whitespace is stripped.
 
-The animation plays at approximately 15–25 characters per second with natural jitter. If the user runs a command before the animation completes, it stops immediately and clears the partial output. The file is fetched once on page load — edit `welcome.yaml` and reload the page to see changes without restarting the server.
+The animation plays at approximately 15–25 characters per second with natural jitter. If the user runs a command before the animation completes, it stops immediately and clears the partial output. The file is fetched once on page load — edit `conf/welcome.yaml` and reload the page to see changes without restarting the server.
 
 ---
 
 ## Autocomplete
 
-Autocomplete suggestions are loaded from `auto_complete.txt` at page load and matched against what you type. The matched portion of each suggestion is highlighted in green.
+Autocomplete suggestions are loaded from `conf/auto_complete.txt` at page load and matched against what you type. The matched portion of each suggestion is highlighted in green.
 
 **Keyboard controls:**
 
@@ -367,12 +405,12 @@ Autocomplete suggestions are loaded from `auto_complete.txt` at page load and ma
 | **Enter** | Accept highlighted suggestion, or run the command if none selected |
 | **Escape** | Dismiss the dropdown |
 
-**Format** — same conventions as `allowed_commands.txt`:
+**Format** — same conventions as `conf/allowed_commands.txt`:
 - One suggestion per line
 - Lines starting with `#` are comments and are ignored
 - Suggestions can be full commands with flags, e.g. `nmap -sT --script vuln`
 
-The file is fetched once on page load. To update suggestions, edit `auto_complete.txt` and reload the page — no server restart needed.
+The file is fetched once on page load. To update suggestions, edit `conf/auto_complete.txt` and reload the page — no server restart needed.
 
 ---
 
@@ -401,6 +439,10 @@ By default wapiti writes its report to a file in `/tmp`, which isn't accessible 
 ### nuclei
 
 `nuclei` stores its template library and cache in `$HOME` by default. The app runs nuclei as the `scanner` user with `HOME=/tmp` so all nuclei writes go to the tmpfs mount. The `-ud /tmp/nuclei-templates` flag is automatically injected if not already present so templates are stored and reused across runs within the same container session. Templates are lost on container restart and re-downloaded on the first nuclei run, which takes 30–60 seconds.
+
+### Rewrite logging
+
+Whenever any command is rewritten before execution, a `CMD_REWRITE` event is logged at DEBUG level with `original` and `rewritten` fields. To see rewrite activity, set `log_level: DEBUG` in `config.yaml`.
 
 ---
 
@@ -435,7 +477,7 @@ The full [SecLists](https://github.com/danielmiessler/SecLists) collection is in
 
 ## Tabs & Run History
 
-Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a coloured status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.
+Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.
 
 The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies a shareable link to that run's output), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions.
 
@@ -447,7 +489,7 @@ On mobile, the search, history, theme, and FAQ buttons are accessible via the **
 
 There are two types of permalink:
 
-**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI colour rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colours preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. This is the recommended way to share results.
+**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. This is the recommended way to share results.
 
 **Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run's output, also served as a styled HTML page.
 
@@ -502,7 +544,7 @@ Run history and tab snapshots are stored in a SQLite database at `./data/history
 | `session_id` | TEXT | Anonymous browser session UUID |
 | `label` | TEXT | Tab label at the time the permalink was created (last command run) |
 | `created` | TEXT | ISO 8601 timestamp |
-| `content` | TEXT | JSON array of `{"text": "...", "cls": "..."}` objects representing every line visible in the tab, including ANSI escape codes for colour reproduction |
+| `content` | TEXT | JSON array of `{"text": "...", "cls": "..."}` objects representing every line visible in the tab, including ANSI escape codes for color reproduction |
 
 ### Retention
 
@@ -610,7 +652,7 @@ python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
 python3 -m pytest tests/ -v
 ```
 
-Tests are split across three files covering 196 test cases: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), and Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views). No running server or Docker required — file I/O and Redis are mocked where needed.
+Tests are split across four files covering 296 test cases: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views), and structured logging (`_extra_fields`, text/GELF formatters, `configure_logging`, and all log events emitted by the application). No running server or Docker required — file I/O and Redis are mocked where needed.
 
 ### Linting & Security Scanning
 

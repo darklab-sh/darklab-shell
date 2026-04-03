@@ -11,7 +11,9 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 The Python backend is split into focused modules with acyclic dependencies:
 
 ```
-config.py      — CFG defaults, SCANNER_PREFIX (no app dependencies)
+config.py        — CFG defaults, SCANNER_PREFIX (no app dependencies)
+    ↑
+logging_setup.py — GELFFormatter, _TextFormatter, configure_logging(cfg)
     ↑
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
@@ -23,6 +25,8 @@ commands.py    — Command validation and rewrites (no CFG dependency, standalon
 ```
 
 `commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. `app.py` imports by name from each module (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
+
+`logging_setup.py` depends only on `config.py` and the standard library. It must be imported and `configure_logging(CFG)` called before any other local import in `app.py` — `process.py` attempts a Redis connection at module-import time and emits log records then, so the logger must already be configured with the correct formatter and level when those calls fire.
 
 ---
 
@@ -46,6 +50,51 @@ Server-Sent Events (SSE) were chosen over WebSockets for output streaming. SSE i
 **Fallback for local dev:** If `REDIS_URL` is not set, the app falls back to `memory://` for rate limiting and a `threading.Lock` + in-process dict for PID tracking. This is correct for single-process development (`python3 app.py`) but breaks under Gunicorn multi-worker mode — use Docker Compose for multi-worker testing.
 
 **Critical timing fix:** `Popen` and `pid_register` must happen *before* `return Response(generate(), ...)`. Flask generators are lazy — the generator body doesn't execute until Flask starts streaming. If `pid_register` is inside the generator, a kill request arriving before streaming starts finds nothing in Redis and silently fails.
+
+### Structured Logging
+
+**Problem:** The original `logging.basicConfig(...)` in `app.py` had two issues:
+1. It was called after local imports, so `process.py`'s module-level Redis connection log fired before the formatter was installed, producing either no output (Python's lastResort suppresses INFO) or the wrong format.
+2. All log records were plain strings, incompatible with GELF structured log aggregation.
+
+**Solution:** `logging_setup.py` provides two formatters and a `configure_logging(cfg)` function. In `app.py`, `configure_logging` is called immediately after `from config import CFG` and before all other local imports. This guarantees the logger is ready before `process.py` (or any other module) imports and logs at module scope.
+
+The `shell` logger is configured with `propagate = False` so records don't double-emit to the root logger. Werkzeug's own request lines are suppressed (`logging.getLogger("werkzeug").setLevel(ERROR)`) because request logging is handled by `before_request` / `after_request` hooks instead.
+
+**Formatters:**
+
+- `GELFFormatter` — emits compact GELF 1.1 JSON. `short_message` is a bare event name (e.g. `RUN_START`); all context is in `_`-prefixed additional fields. This gives Graylog direct indexable fields (`_ip`, `_run_id`, `_cmd`) without any extraction rules.
+- `_TextFormatter` — human-readable `2026-04-02T10:00:00Z [INFO ] EVENT  key=value ...` lines. Extra fields are sorted alphabetically and appended after the event name. String values containing spaces are repr-quoted.
+
+Both formatters use a shared `_extra_fields(record)` helper that extracts caller-supplied fields from the LogRecord (anything not in `_STDLIB_ATTRS` and not underscore-prefixed).
+
+**Log event inventory:**
+
+| Level | Event | Where | Key extra fields |
+|-------|-------|-------|-----------------|
+| DEBUG | `REQUEST` | before_request | ip, method, path, qs |
+| DEBUG | `RESPONSE` | after_request | ip, method, path, status, size |
+| DEBUG | `CMD_REWRITE` | run_command | ip, original, rewritten |
+| DEBUG | `SHARE_CREATED` | save_share | ip, share_id, label |
+| DEBUG | `KILL_MISS` | kill_command | ip, run_id |
+| DEBUG | `HEALTH_OK` | health() | — |
+| INFO  | `LOGGING_CONFIGURED` | configure_logging | level, format |
+| INFO  | `RUN_START` | run_command | ip, run_id, session, pid, cmd |
+| INFO  | `RUN_END` | generate() | ip, run_id, session, exit_code, elapsed, cmd |
+| INFO  | `RUN_KILL` | kill_command | ip, run_id, pid, pgid |
+| INFO  | `DB_PRUNED` | db_init | runs, snapshots, retention_days |
+| WARN  | `CMD_DENIED` | run_command | ip, session, cmd, reason |
+| WARN  | `RATE_LIMIT` | errorhandler(429) | ip, path, limit |
+| WARN  | `CMD_TIMEOUT` | generate() | ip, run_id, session, timeout, cmd |
+| WARN  | `KILL_FAILED` | kill_command | ip, run_id, pid, error |
+| WARN  | `HEALTH_DEGRADED` | health() | db, redis |
+| ERROR | `RUN_SPAWN_ERROR` | run_command | ip, session, cmd (+ traceback) |
+| ERROR | `RUN_STREAM_ERROR` | generate() | ip, run_id, session, cmd (+ traceback) |
+| ERROR | `RUN_SAVED_ERROR` | generate() | run_id, session, cmd (+ traceback) |
+| ERROR | `HEALTH_DB_FAIL` | health() | (+ traceback) |
+| ERROR | `HEALTH_REDIS_FAIL` | health() | (+ traceback) |
+
+**Timing note:** `client_ip` is captured once at the top of `run_command()` as a local variable before the `generate()` closure is defined. This avoids a hidden dependency on Flask's request context being active when the generator body runs during streaming. The same `client_ip` local is closed over in `generate()`.
 
 ### Rate Limiting via Redis
 
@@ -106,7 +155,7 @@ Blocking happens at two layers: client-side (immediate feedback) and server-side
 
 ### Deny Flag Matching (anywhere in command)
 
-Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
+Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `conf/allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
 
 The `_is_denied()` helper splits each deny entry at the first ` -` to separate the tool prefix from the flag (`curl -o` → tool=`curl`, flag=`-o`), then uses `re.search()` with `(?<= )flag(?= |$)` to match the flag as a space-separated token anywhere in the command. The tool prefix must still match first, so `gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
 
@@ -165,13 +214,15 @@ The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `conte
 
 `cancelWelcome()` flips `_welcomeActive = false`. Because every `setTimeout` callback checks this flag before continuing, the animation stops within one character's delay. `runCommand()` calls `cancelWelcome()` followed by `clearTab(activeTabId)` to wipe the partial output before streaming real results.
 
-The `welcome.yaml` format is `{cmd, out}` blocks. `load_welcome()` uses `.rstrip()` on `out` (not `.strip()`) to preserve intentional leading-whitespace indentation in displayed output while stripping trailing newlines.
+The `conf/welcome.yaml` format is `{cmd, out}` blocks. `load_welcome()` uses `.rstrip()` on `out` (not `.strip()`) to preserve intentional leading-whitespace indentation in displayed output while stripping trailing newlines.
 
-### Starring / Favourites
+### Starring / Favorites
 
 Starred commands are stored in `localStorage['starred']` as a JSON array of command strings treated as a Set. Star state is keyed by command text (not run ID) so starring "nmap -sV google.com" applies to every run of that command in both the history chips row and the full history drawer.
 
 `_toggleStar(cmd)` loads the set, adds or removes the entry, and saves it back. `renderHistory()` (chips) and `refreshHistoryPanel()` (drawer) both sort starred entries to the top before rendering. The `☆` / `★` icons in chips and the `☆ star` / `★ starred` buttons in the drawer update optimistically without a full re-render.
+
+When starring a command from the history drawer, if the command is not already in `cmdHistory` (the in-memory chips list), it is prepended and the list is trimmed to `recent_commands_limit`. This means a command that was never run in the current session — e.g. one from a previous container session that only appears in the SQLite history — becomes immediately accessible as a chip after being starred, without requiring the user to run it first.
 
 ### The KILLED Race Condition
 
@@ -207,7 +258,7 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 **`env` doesn't use `--` as a terminator.** `sudo -u scanner env HOME=/tmp -- sh -c "..."` fails because `env` treats `--` as a literal command name. The correct form is `sudo -u scanner env HOME=/tmp sh -c "..."`.
 
-**ansi_up and permalink colours.** ansi_up converts ANSI escape codes to HTML spans, consuming the original codes. If you try to re-render from `element.innerText`, all colour information is lost. The `rawLines` array stores the original text before ansi_up processes it, enabling the permalink page to run ansi_up fresh and reproduce the exact same colours.
+**ansi_up and permalink colors.** ansi_up converts ANSI escape codes to HTML spans, consuming the original codes. If you try to re-render from `element.innerText`, all color information is lost. The `rawLines` array stores the original text before ansi_up processes it, enabling the permalink page to run ansi_up fresh and reproduce the exact same colors.
 
 **`vendor/` directory must exist for local dev.** `ansi_up.js` lives in `static/js/vendor/` which is created by the Dockerfile at build time and is gitignored. If you run the app locally without Docker and the directory doesn't exist, the script tag 404s, `AnsiUp` is undefined, and `appendLine()` crashes before the fetch to `/run` fires. The symptom is: tab label updates (it runs before `appendLine`) but no command output and nothing in the server logs — the fetch never happens. Fix: `mkdir -p app/static/js/vendor && curl -sSL https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js -o app/static/js/vendor/ansi_up.js`.
 
@@ -223,13 +274,14 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 ## Test Suite
 
-Tests live in `tests/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` before import so `app.py` can find its relative-path assets (`allowed_commands.txt`, `faq.yaml`, etc.). `test_validation.py` imports `app.py` directly via `sys.path.insert`.
+Tests live in `tests/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` before import so `app.py` can find its relative-path assets (`index.html`, etc.). `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
-Three test files, 196 tests total:
+Four test files, 296 tests total:
 
-- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `allowed_commands.txt` file.
+- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `conf/allowed_commands.txt` file.
 - **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_allowed_commands_grouped` (category headers, deny entry exclusion), `load_faq`, `load_welcome` (cmd/out parsing, rstrip behaviour), `load_autocomplete` (comment/blank filtering), path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity and idempotency, `pid_register`/`pid_pop` in-process mode, `_format_retention`, `_expiry_note` (active/today/expired/invalid date branches), `_permalink_error_page` (status, body, retention message), database init and retention pruning (tables created, idempotent re-init, old records pruned, recent records kept).
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types (`application/json` / `text/html`), error cases (`/run` with missing/empty/disallowed command), history CRUD, session isolation (runs and deletes scoped by `X-Session-ID`), run permalink HTML and JSON views, share create/retrieve/HTML label and content type, health degradation when DB fails, `/welcome` and `/autocomplete` routes.
+- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types (`application/json` / `text/html`), error cases (`/run` with missing/empty/disallowed command), history CRUD, session isolation (runs and deletes scoped by `X-Session-ID`), run permalink HTML and JSON views, share create/retrieve/HTML label and content type, health degradation when DB fails, `/welcome` and `/autocomplete` routes, `get_client_ip()` XFF validation (valid IPv4/IPv6, multi-value, absent, and non-IP fallback cases).
+- **`test_logging.py`** — structured logging: `_extra_fields` exclusion of stdlib and underscore-prefixed attrs; `_TextFormatter` timestamp format, level label padding, extra sorting and quoting, exception tracebacks; `GELFFormatter` JSON validity, GELF 1.1 version field, syslog level mapping, `_`-prefixed extras, special JSON character handling, no stdlib field leakage, `full_message` on exceptions; `configure_logging` format/level selection (including lowercase input), unknown-level fallback, `propagate=False`, werkzeug silencing, no duplicate handlers; all application log events (`CMD_DENIED`, `RATE_LIMIT`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL`, `HEALTH_OK`, `HEALTH_DEGRADED`, `SHARE_CREATED`, `CMD_REWRITE`, `REQUEST`/`RESPONSE`, `DB_PRUNED`, `LOGGING_CONFIGURED`, `KILL_FAILED`) verified at the correct level with expected extras.
 
 Rate limiting is disabled in tests via `app.config["RATELIMIT_ENABLED"] = False`. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
 

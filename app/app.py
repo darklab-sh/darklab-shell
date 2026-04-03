@@ -11,13 +11,21 @@ from flask_limiter.util import get_remote_address
 import subprocess
 import json
 import os
+import re
 import select
 import signal
 import uuid
 import logging
 from datetime import datetime, timezone
 
-from config     import CFG, SCANNER_PREFIX
+# Logging must be configured before other local imports — process.py
+# connects to Redis at module import time and emits log calls then.
+from config        import CFG, SCANNER_PREFIX
+from logging_setup import configure_logging
+configure_logging(CFG)
+
+log = logging.getLogger("shell")
+
 from database   import db_connect
 from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
@@ -27,26 +35,26 @@ from commands   import (
 )
 from permalinks import _permalink_error_page, _permalink_page
 
-APP_VERSION = "1.1"
+APP_VERSION = "1.2"
 
 app = Flask(__name__)
 
-# ── Logging ───────────────────────────────────────────────────────────────────
-
-logging.basicConfig(
-    level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(message)s",
-    datefmt="%Y-%m-%dT%H:%M:%SZ",
-)
-log = logging.getLogger("shell")
-
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
-# Reads real client IP from X-Forwarded-For set by nginx-proxy
+_IP_RE = re.compile(
+    r"^((\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$"
+)
+
+
 def get_client_ip():
-    forwarded_for = request.headers.get("X-Forwarded-For", "")
-    if forwarded_for:
-        return forwarded_for.split(",")[0].strip()
+    """Return the real client IP.
+
+    Uses X-Forwarded-For when it contains a valid IP address (set by a reverse
+    proxy such as nginx-proxy), otherwise falls back to the direct connection IP.
+    """
+    forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
+    if forwarded_for and _IP_RE.match(forwarded_for):
+        return forwarded_for
     return get_remote_address()
 
 limiter = Limiter(
@@ -55,6 +63,35 @@ limiter = Limiter(
     default_limits=[],
     storage_uri=REDIS_URL if redis_client else "memory://"
 )
+
+
+@app.errorhandler(429)
+def _rate_limit_handler(e):
+    ip = get_client_ip()
+    log.warning("RATE_LIMIT", extra={"ip": ip, "path": request.path, "limit": str(e.description)})
+    return jsonify({"error": "Rate limit exceeded. Please slow down."}), 429
+
+
+@app.before_request
+def _log_request():
+    if log.isEnabledFor(logging.DEBUG):
+        ip = get_client_ip()
+        extra: dict = {"ip": ip, "method": request.method, "path": request.path}
+        if request.query_string:
+            extra["qs"] = request.query_string.decode(errors="replace")
+        log.debug("REQUEST", extra=extra)
+
+
+@app.after_request
+def _log_response(response):
+    if log.isEnabledFor(logging.DEBUG):
+        ip    = get_client_ip()
+        extra = {"ip": ip, "method": request.method, "path": request.path, "status": response.status_code}
+        if response.content_length is not None:
+            extra["size"] = response.content_length
+        log.debug("RESPONSE", extra=extra)
+    return response
+
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
 
@@ -92,6 +129,7 @@ def get_config():
         "max_tabs":              CFG["max_tabs"],
         "history_panel_limit":      CFG["history_panel_limit"],
         "command_timeout_seconds":  CFG["command_timeout_seconds"],
+        "permalink_retention_days": CFG["permalink_retention_days"],
         "welcome_char_ms":          CFG["welcome_char_ms"],
         "welcome_jitter_ms":      CFG["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    CFG["welcome_post_cmd_ms"],
@@ -197,6 +235,7 @@ def save_share():
             (share_id, session_id, label, created, json.dumps(content))
         )
         conn.commit()
+    log.debug("SHARE_CREATED", extra={"ip": get_client_ip(), "share_id": share_id, "label": label})
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
 
 
@@ -226,17 +265,27 @@ def get_share(share_id):
 @app.route("/run", methods=["POST"])
 @limiter.limit(lambda: f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second")
 def run_command():
-    data = request.get_json() or {}
+    data             = request.get_json() or {}
     original_command = data.get("command", "").strip()
-    session_id = get_session_id()
+    session_id       = get_session_id()
+    client_ip        = get_client_ip()
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
 
     allowed, reason = is_command_allowed(original_command)
     if not allowed:
+        log.warning("CMD_DENIED", extra={
+            "ip": client_ip, "session": session_id,
+            "cmd": original_command, "reason": reason,
+        })
         return jsonify({"error": reason}), 403
 
     command, notice = rewrite_command(original_command)
+    if command != original_command:
+        log.debug("CMD_REWRITE", extra={
+            "ip": client_ip, "original": original_command, "rewritten": command,
+        })
+
     run_id      = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     captured_lines = []
@@ -255,11 +304,16 @@ def run_command():
             preexec_fn=os.setsid,
         )
     except Exception as e:
+        log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
+            "ip": client_ip, "session": session_id, "cmd": original_command,
+        })
         return jsonify({"error": str(e)}), 500
 
     pid_register(run_id, proc.pid)
-    log.info("RUN START  run_id=%s session=%s pid=%d cmd=%r",
-             run_id, session_id, proc.pid, original_command)
+    log.info("RUN_START", extra={
+        "run_id": run_id, "session": session_id, "ip": client_ip,
+        "pid": proc.pid, "cmd": original_command,
+    })
 
     # Heartbeat interval in seconds — keeps the SSE connection alive through
     # nginx and browser idle timeouts when a command produces no output
@@ -296,6 +350,10 @@ def run_command():
                         except (ProcessLookupError, OSError):
                             pass
                         timeout_msg = f"[timeout] Command exceeded {COMMAND_TIMEOUT}s limit and was killed."
+                        log.warning("CMD_TIMEOUT", extra={
+                            "run_id": run_id, "session": session_id, "ip": client_ip,
+                            "timeout": COMMAND_TIMEOUT, "cmd": original_command,
+                        })
                         yield f"data: {json.dumps({'type': 'notice', 'text': timeout_msg})}\n\n"
                         break
                 # Wait up to HEARTBEAT_INTERVAL seconds for output
@@ -320,29 +378,39 @@ def run_command():
             exit_code = proc.returncode
             finished  = datetime.now(timezone.utc)
             elapsed   = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
-            log.info("RUN END    run_id=%s session=%s exit=%d elapsed=%.1fs cmd=%r",
-                     run_id, session_id, exit_code, elapsed, original_command)
+            log.info("RUN_END", extra={
+                "run_id": run_id, "session": session_id, "ip": client_ip,
+                "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+            })
             yield f"data: {json.dumps({'type': 'exit', 'code': exit_code, 'elapsed': elapsed})}\n\n"
 
             # Store completed run in SQLite for persistent permalink/history access
-            with db_connect() as conn:
-                conn.execute(
-                    "INSERT INTO runs "
-                    "(id, session_id, command, started, finished, exit_code, output) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                    (
-                        run_id,
-                        session_id,
-                        original_command,
-                        run_started,
-                        finished.isoformat(),
-                        exit_code,
-                        json.dumps(captured_lines),
+            try:
+                with db_connect() as conn:
+                    conn.execute(
+                        "INSERT INTO runs "
+                        "(id, session_id, command, started, finished, exit_code, output) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                        (
+                            run_id,
+                            session_id,
+                            original_command,
+                            run_started,
+                            finished.isoformat(),
+                            exit_code,
+                            json.dumps(captured_lines),
+                        )
                     )
-                )
-                conn.commit()
+                    conn.commit()
+            except Exception:
+                log.error("RUN_SAVED_ERROR", exc_info=True, extra={
+                    "run_id": run_id, "session": session_id, "cmd": original_command,
+                })
 
         except Exception as e:
+            log.error("RUN_STREAM_ERROR", exc_info=True, extra={
+                "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
+            })
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         finally:
             pid_pop(run_id)
@@ -353,10 +421,12 @@ def run_command():
 
 @app.route("/kill", methods=["POST"])
 def kill_command():
-    data   = request.get_json() or {}
-    run_id = data.get("run_id", "")
-    pid    = pid_pop(run_id)
+    data      = request.get_json() or {}
+    run_id    = data.get("run_id", "")
+    client_ip = get_client_ip()
+    pid       = pid_pop(run_id)
     if not pid:
+        log.debug("KILL_MISS", extra={"ip": client_ip, "run_id": run_id})
         return jsonify({"error": "No such process"}), 404
     try:
         pgid = os.getpgid(pid)
@@ -370,9 +440,11 @@ def kill_command():
         else:
             # Local dev — same user, can kill directly
             os.killpg(pgid, signal.SIGTERM)
-        log.info("RUN KILL   run_id=%s pid=%d pgid=%d", run_id, pid, pgid)
-    except (ProcessLookupError, subprocess.TimeoutExpired, OSError):
-        pass
+        log.info("RUN_KILL", extra={"run_id": run_id, "ip": client_ip, "pid": pid, "pgid": pgid})
+    except (ProcessLookupError, subprocess.TimeoutExpired, OSError) as e:
+        log.warning("KILL_FAILED", extra={
+            "run_id": run_id, "ip": client_ip, "pid": pid, "error": str(e),
+        })
     return jsonify({"killed": True})
 
 
@@ -389,6 +461,7 @@ def health():
         result["db"] = True
     except Exception:
         result["status"] = "degraded"
+        log.error("HEALTH_DB_FAIL", exc_info=True)
 
     # Redis — checked only if configured; absence is acceptable (falls back to in-process)
     if redis_client:
@@ -398,8 +471,13 @@ def health():
         except Exception:
             result["redis"] = False
             result["status"] = "degraded"
+            log.error("HEALTH_REDIS_FAIL", exc_info=True)
 
     http_status = 200 if result["status"] == "ok" else 503
+    if result["status"] == "ok":
+        log.debug("HEALTH_OK")
+    else:
+        log.warning("HEALTH_DEGRADED", extra={"db": result["db"], "redis": result["redis"]})
     return jsonify(result), http_status
 
 

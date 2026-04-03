@@ -7,13 +7,39 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ## [1.2] — unreleased
 
+### Added
+- **Structured logging** — new `logging_setup.py` module providing four log levels (ERROR / WARN / INFO / DEBUG) and two output formats (`text` and `gelf`)
+  - `text` format: human-readable `2026-04-02T10:00:00Z [INFO ] EVENT  key=value ...` lines with structured context appended as sorted key=value pairs
+  - `gelf` format: newline-delimited GELF 1.1 JSON with `short_message` as the event name and all context in `_`-prefixed additional fields, compatible with Graylog / OpenSearch and other GELF back-ends
+  - Client IP (`_ip`) included on all INFO, WARN, and ERROR events; auto-detected from `X-Forwarded-For` when it contains a valid IP, otherwise falls back to the direct connection IP
+  - Full log event inventory: `REQUEST`, `RESPONSE`, `CMD_REWRITE`, `SHARE_CREATED`, `KILL_MISS` (DEBUG); `RUN_START`, `RUN_END`, `RUN_KILL`, `DB_PRUNED` (INFO); `CMD_DENIED`, `RATE_LIMIT`, `CMD_TIMEOUT` (WARN); `RUN_SPAWN_ERROR`, `RUN_STREAM_ERROR`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL` (ERROR)
+  - `log_level` and `log_format` keys added to `config.yaml` (default: `INFO` / `text`)
+- **`CMD_TIMEOUT` warning** — when the server kills a command that exceeds `command_timeout_seconds`, a WARN log is now emitted server-side (previously the timeout was only signalled to the client via the SSE stream)
+- **`HEALTH_DB_FAIL` / `HEALTH_REDIS_FAIL` errors** — `/health` endpoint now logs ERROR with traceback when the DB or Redis health check fails, making health degradation visible in log aggregators
+- **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
+- **`SHARE_CREATED` debug** — share (permalink snapshot) creation is logged at DEBUG with IP, share ID, and label
+- **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
+- **Retention FAQ entry** — the FAQ "Is there a time or output limit?" entry has been replaced with a live retention settings table showing command timeout, output line limit, and permalink retention with their actual configured values; a note clarifies that these are set by the operator of the instance. `permalink_retention_days` is now included in the `/config` API response
+- **`HEALTH_OK` debug** — `/health` now logs at DEBUG when all checks pass, making it easy to confirm health probe activity when running at DEBUG level
+- **`HEALTH_DEGRADED` warning** — `/health` logs at WARN (with `db` and `redis` status fields) when the aggregate status is degraded, complementing the per-component `HEALTH_DB_FAIL` / `HEALTH_REDIS_FAIL` ERROR events
+- **`KILL_FAILED` warning** — kill handler now logs at WARN with `pid`, `run_id`, and `error` when `os.getpgid` or `os.killpg` raises, replacing the previous silent `pass`
+- **`RUN_SAVED_ERROR` error** — the DB INSERT after a command completes is now wrapped in a try/except; failures are logged at ERROR with traceback instead of being silently swallowed inside the SSE generator
+- **`LOGGING_CONFIGURED` info** — `configure_logging()` now emits an INFO event with `level` and `format` fields immediately after setup, giving operators a confirmation line in startup logs
+
+- **Smart client IP detection** — `get_client_ip()` now validates the `X-Forwarded-For` value against a regex before trusting it; invalid or absent values fall back to the direct connection IP, making the app work correctly with or without a reverse proxy and without any config setting
+
 ### Fixed
 - `process.py` — `pid_pop` now wraps the Redis `getdel` return value with `str()` before passing to `int()`, resolving a Pylance type error caused by `ResponseT` being assignable to `Awaitable[Any]`
 - `tests/test_utils.py` — added `assert result is not None` before `len()` and index access on `load_allowed_commands_grouped()` results to satisfy Pylance's type narrowing (`list | None` is not `Sized`)
+- Logging timing fix — `configure_logging(CFG)` is now called before `from process import ...` so Redis connection log records emitted at module-import time are formatted correctly; previously they fired before `logging.basicConfig` and were silently dropped by Python's lastResort handler
+- `commands.py` — `split_chained_commands()` now uses the pre-compiled `SHELL_CHAIN_RE` object instead of duplicating the regex pattern string
 
 ### Changed
 - `.gitignore` — added `.vscode/` to excluded paths
-- `CHANGELOG.md` - Added `CHANGELOG.md` to track changes between versions
+- `CHANGELOG.md` — added `CHANGELOG.md` to track changes between versions
+- `app.py` — removed `logging.basicConfig(...)` block; logging is now fully managed by `logging_setup.configure_logging()`
+- `database.py` — uses the `shell` logger; retention pruning logs `DB_PRUNED` when records are deleted; `db_init()` refactored into three private helpers (`_create_schema`, `_migrate_schema`, `_prune_retention`) for clearer separation of concerns
+- `README.md` / `ARCHITECTURE.md` — updated to document the new logging system, all event names, GELF integration, and module dependency order
 
 ---
 
@@ -24,7 +50,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Timestamps** — terminal bar button cycles through three modes: off / elapsed (seconds since command started) / clock (wall-clock time); implemented via CSS body classes, no per-line overhead
 - **Tab rename** — double-click any tab label to edit it inline; renamed tabs are not overwritten when a new command runs
 - **Copy output** — one-click copy of the current tab's full plain-text output to clipboard
-- **HTML export** — saves a self-contained `.html` file with ANSI colour rendering, timestamps, and offline-ready styling
+- **HTML export** — saves a self-contained `.html` file with ANSI color rendering, timestamps, and offline-ready styling
 - **History starring** — star (★) any run in the history panel to pin it to the top of the list; stars persist across page reloads via localStorage
 - **Permalink expiry notes** — snapshot and run permalink pages now show how long until the link expires (based on `permalink_retention_days`) using a human-readable duration
 - **Version label** — `APP_VERSION` constant in `app.py` exposed via `/config`; displayed in the header as `vX.Y · real-time`
@@ -32,7 +58,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Welcome timing config** — four new `config.yaml` keys: `welcome_char_ms`, `welcome_jitter_ms`, `welcome_post_cmd_ms`, `welcome_inter_block_ms`
 - **`/welcome` API endpoint** — serves `welcome.yaml` blocks for the startup typeout animation
 - **Netcat** (`nc`) added to allowed commands and Dockerfile
-- **Expanded test suite** — 196 tests covering new route behaviour, session isolation, database pruning, permalink expiry, welcome/autocomplete loaders, and config endpoint fields
+- **Expanded test suite** — 296 tests (+100) covering new route behaviour, session isolation, database pruning, permalink expiry, welcome/autocomplete loaders, and config endpoint fields; new `test_logging.py` with 94 tests for the structured logging module
 
 ### Changed
 - **App modularisation** — `app.py` split into `commands.py`, `config.py`, `database.py`, `permalinks.py`, and `process.py` for cleaner separation of concerns
@@ -51,7 +77,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.0] — initial release
 
 ### Added
-- **Real-time command execution** — bash commands streamed to the browser over SSE; output rendered with ANSI colour support via `ansi_up`
+- **Real-time command execution** — bash commands streamed to the browser over SSE; output rendered with ANSI color support via `ansi_up`
 - **Multi-tab interface** — open multiple independent tabs, each with its own status, output, and kill button
 - **Command allow/deny rules** — `allowed_commands.txt` whitelist with group labels; deny-prefix rules block dangerous flags (e.g. `--output`, `-oN`); `/dev/null` output flag allowed explicitly
 - **Process kill** — per-tab ■ Kill button sends SIGTERM to the entire process group; confirmation modal prevents accidental kills; PID tracked in SQLite to avoid multi-worker race conditions
@@ -59,7 +85,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Permalinks** — share button saves a full tab snapshot to SQLite and returns a shareable URL; single-run permalinks also available from the history panel; styled HTML view with copy / save .txt options
 - **Output search** — in-terminal search with case-sensitive and regex toggle, prev/next navigation, match count
 - **Config YAML** — operator-configurable settings: `app_name`, `motd`, `default_theme`, `rate_limit_per_minute/second`, `command_timeout_seconds`, `max_output_lines`, `max_tabs`, `history_panel_limit`, `permalink_retention_days`, `heartbeat_interval_seconds`
-- **Rate limiting** — Flask-Limiter backed by Redis (multi-worker safe); falls back to in-process memory if Redis is unavailable; reads real client IP from `X-Forwarded-For`
+- **Rate limiting** — Flask-Limiter backed by Redis (multi-worker safe); falls back to in-process memory if Redis is unavailable; real client IP auto-detected from `X-Forwarded-For` when valid, otherwise direct connection IP
 - **Redis process tracking** — active PIDs stored in Redis (or in-process dict) so any Gunicorn worker can kill a process started by a different worker
 - **Security model** — two non-root users: `appuser` runs the Flask/Gunicorn process; `scanner` runs all user commands; filesystem mounted read-only except `/tmp`; `sudo kill` used for cross-user SIGTERM
 - **Gunicorn WSGI** — production server with configurable timeout (3600 s); heartbeat SSE comments prevent nginx/browser idle disconnects

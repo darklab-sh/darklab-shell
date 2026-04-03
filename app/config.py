@@ -17,6 +17,8 @@ def load_config():
         "history_panel_limit":        50,
         "recent_commands_limit":      8,
         "permalink_retention_days":   0,
+        "log_level":                  "INFO",
+        "log_format":                 "text",
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
         "max_output_lines":           2000,
@@ -28,7 +30,7 @@ def load_config():
         "welcome_post_cmd_ms":        700,
         "welcome_inter_block_ms":     1500,
     }
-    config_path = os.path.join(os.path.dirname(__file__), "config.yaml")
+    config_path = os.path.join(os.path.dirname(__file__), "conf", "config.yaml")
     if os.path.exists(config_path):
         with open(config_path) as f:
             user_config = yaml.safe_load(f) or {}

@@ -48,7 +48,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   }
   updateNewTabBtn();
 
-  // ── Populate the limits FAQ entry with live config values ──
+  // ── Populate the retention/limits FAQ entry with live config values ──
   const limitsEl = document.getElementById('faq-limits-text');
   if (limitsEl) {
     function _fmtDuration(s) {
@@ -56,18 +56,39 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
       if (s >= 60   && s % 60   === 0) return (s / 60)   + (s / 60   === 1 ? ' minute' : ' minutes');
       return s + (s === 1 ? ' second' : ' seconds');
     }
-    const timeout  = cfg.command_timeout_seconds || 0;
-    const maxLines = cfg.max_output_lines || 0;
-    const timeoutStr = timeout > 0
-      ? `allows commands to run for up to <strong>${_fmtDuration(timeout)}</strong>`
-      : `has no command time limit`;
-    const linesStr = maxLines > 0
-      ? `retains up to <strong>${maxLines.toLocaleString()} lines</strong> of output per tab`
-      : `has no output line limit`;
+    const timeout   = cfg.command_timeout_seconds  || 0;
+    const maxLines  = cfg.max_output_lines         || 0;
+    const retention = cfg.permalink_retention_days || 0;
+
+    const rows = [
+      {
+        label: 'Command timeout',
+        value: timeout > 0
+          ? `<strong>${_fmtDuration(timeout)}</strong> — commands are automatically killed after this time; a notice appears inline in the output`
+          : `<strong>None</strong> — commands run until they finish or you click ■ Kill`,
+      },
+      {
+        label: 'Output line limit',
+        value: maxLines > 0
+          ? `<strong>${maxLines.toLocaleString()} lines</strong> per tab — older lines are dropped from the top when this is reached`
+          : `<strong>Unlimited</strong>`,
+      },
+      {
+        label: 'Permalink &amp; history retention',
+        value: retention > 0
+          ? `<strong>${retention} day${retention === 1 ? '' : 's'}</strong> — run history and share links are deleted after this period`
+          : `<strong>Unlimited</strong> — run history and share links are kept indefinitely`,
+      },
+    ];
+
+    const tableRows = rows.map(r =>
+      `<tr><td style="padding:2px 12px 2px 0;white-space:nowrap;color:var(--muted)">${r.label}</td>` +
+      `<td style="padding:2px 0">${r.value}</td></tr>`
+    ).join('');
+
     limitsEl.innerHTML =
-      `This server ${timeoutStr} and ${linesStr}. ` +
-      `When a command is automatically stopped due to a timeout, a notice appears inline in the output. ` +
-      `When the line limit is reached, older lines are dropped from the top of the tab to keep the browser responsive.`;
+      `<table style="border-collapse:collapse;margin-bottom:6px">${tableRows}</table>` +
+      `<span style="color:var(--muted);font-size:11px">These limits are configured by the operator of this instance.</span>`;
   }
 }).catch(() => {});
 

@@ -79,6 +79,9 @@ class TestSplitChainedCommands:
         parts = split_chained_commands("a | ")
         assert all(p for p in parts)
 
+    def test_empty_string_returns_empty_list(self):
+        assert split_chained_commands("") == []
+
 
 # ── load_allowed_commands ─────────────────────────────────────────────────────
 
@@ -168,6 +171,19 @@ class TestLoadFaq:
         assert len(result) == 1
         assert result[0]["question"] == "What is this?"
         assert result[0]["answer"] == "A web shell."
+
+    def test_entries_missing_answer_filtered_out(self):
+        yaml_content = "- question: No answer here.\n- question: Has both.\n  answer: Yes.\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq()
+        finally:
+            os.unlink(path)
+        assert len(result) == 1
+        assert result[0]["question"] == "Has both."
 
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"

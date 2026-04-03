@@ -7,6 +7,7 @@ Run with: pytest tests/ (from the repo root)
 import sys
 import os
 import json
+import logging
 import sqlite3
 import unittest.mock as mock
 
@@ -528,3 +529,54 @@ class TestContentTypes:
     def test_index_returns_html(self):
         resp = get_client().get("/")
         assert "text/html" in resp.content_type
+
+
+# ── get_client_ip ─────────────────────────────────────────────────────────────
+
+class TestGetClientIp:
+    """get_client_ip() uses X-Forwarded-For when it contains a valid IP,
+    otherwise falls back to the direct connection IP (REMOTE_ADDR)."""
+
+    def setup_method(self, method):  # noqa: ARG002
+        self._original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.DEBUG)
+
+    def teardown_method(self, method):  # noqa: ARG002
+        shell_app.log.setLevel(self._original_level)
+
+    def test_valid_ipv4_in_xff_is_used(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "1.2.3.4"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "1.2.3.4"
+
+    def test_valid_ipv6_in_xff_is_used(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "2001:db8::1"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "2001:db8::1"
+
+    def test_first_ip_used_when_xff_has_multiple(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "5.6.7.8, 10.0.0.1"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "5.6.7.8"
+
+    def test_no_xff_falls_back_to_remote_addr(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health")
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        # Flask test client REMOTE_ADDR is 127.0.0.1
+        assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"
+
+    def test_non_ip_xff_falls_back_to_remote_addr(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "not-an-ip"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"
+
+    def test_empty_xff_falls_back_to_remote_addr(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": ""})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"

@@ -10,10 +10,11 @@ import re
 import yaml
 
 _HERE = os.path.dirname(__file__)
-ALLOWED_COMMANDS_FILE = os.path.join(_HERE, "allowed_commands.txt")
-AUTOCOMPLETE_FILE     = os.path.join(_HERE, "auto_complete.txt")
-FAQ_FILE              = os.path.join(_HERE, "faq.yaml")
-WELCOME_FILE          = os.path.join(_HERE, "welcome.yaml")
+_CONF = os.path.join(_HERE, "conf")
+ALLOWED_COMMANDS_FILE = os.path.join(_CONF, "allowed_commands.txt")
+AUTOCOMPLETE_FILE     = os.path.join(_CONF, "auto_complete.txt")
+FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
+WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -121,7 +122,7 @@ def load_autocomplete():
 def split_chained_commands(command: str) -> list[str]:
     """Split a command string on any shell chaining/piping/redirection operator
     and return the individual command tokens so each can be validated."""
-    parts = re.split(r'&&|\|\|?|;;?|`|\$\(|>>?|<', command)
+    parts = SHELL_CHAIN_RE.split(command)
     return [p.strip() for p in parts if p.strip()]
 
 

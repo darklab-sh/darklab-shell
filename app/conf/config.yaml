@@ -14,7 +14,7 @@ motd: ""
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 
-# Default colour theme. Options: dark, light
+# Default color theme. Options: dark, light
 default_theme: dark
 
 # ── History & Retention ───────────────────────────────────────────────────────
@@ -29,6 +29,21 @@ recent_commands_limit: 8
 # Permalink retention in days. Runs and snapshots older than this will be
 # deleted from the database on startup. Set to 0 for unlimited retention.
 permalink_retention_days: 365
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+# Log verbosity level. Options: ERROR, WARN, INFO, DEBUG
+# ERROR — application errors only (spawn failures, health check failures, stream errors)
+# WARN  — errors plus warnings: denied commands, rate limit hits, command timeouts
+# INFO  — warnings plus operational events: run start/end/kill with client IP (default)
+# DEBUG — everything: every HTTP request/response, command rewrites, share creation, kill misses
+log_level: INFO
+
+# Log output format. Options: text, gelf
+# text — human-readable key=value lines, suitable for Docker stdout / local dev
+# gelf — newline-delimited GELF 1.1 JSON for Graylog / GELF-compatible back-ends
+#         short_message contains the event name; all context is in _-prefixed fields
+log_format: text
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
@@ -51,7 +66,7 @@ max_output_lines: 2000
 
 # Automatically kill a running command after this many seconds.
 # Set to 0 to disable (commands run until they finish or are killed manually).
-command_timeout_seconds: 0
+command_timeout_seconds: 7200
 
 # How often (in seconds) to send a heartbeat comment on idle SSE connections
 # to prevent nginx and the browser from dropping the connection.

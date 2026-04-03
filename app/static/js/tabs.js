@@ -154,7 +154,7 @@ function saveTab(id) {
 }
 
 // ── HTML snapshot export ──
-// Generates a self-contained HTML file with terminal styling, ANSI colours
+// Generates a self-contained HTML file with terminal styling, ANSI colors
 // rendered as inline spans, and clock timestamps shown alongside each line.
 function exportTabHtml(id) {
   const t = tabs.find(t => t.id === id);
