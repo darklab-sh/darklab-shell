@@ -66,8 +66,8 @@ function renderHistory() {
 // ── Run history panel ──
 let pendingHistAction = null;
 
-function confirmHistAction(type, id) {
-  pendingHistAction = { type, id };
+function confirmHistAction(type, id, command) {
+  pendingHistAction = { type, id, command };
   const msg      = document.getElementById('hist-del-msg');
   const nonfav   = document.getElementById('hist-del-nonfav');
   const confirm  = document.getElementById('hist-del-confirm');
@@ -84,22 +84,41 @@ function confirmHistAction(type, id) {
 }
 
 function executeHistAction(type) {
-  const action = type || (pendingHistAction && pendingHistAction.type);
-  const id     = pendingHistAction && pendingHistAction.id;
+  const action  = type || (pendingHistAction && pendingHistAction.type);
+  const id      = pendingHistAction && pendingHistAction.id;
+  const command = pendingHistAction && pendingHistAction.command;
   pendingHistAction = null;
   if (action === 'delete') {
-    apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => refreshHistoryPanel());
+    apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => {
+      // Remove from starred set and chips — deleted history should not stay pinned
+      const s = _getStarred();
+      s.delete(command);
+      _saveStarred(s);
+      cmdHistory = cmdHistory.filter(c => c !== command);
+      renderHistory();
+      refreshHistoryPanel();
+    });
   } else if (action === 'clear-nonfav') {
     apiFetch('/history')
       .then(r => r.json())
       .then(data => {
-        const starred  = _getStarred();
-        const toDelete = data.runs.filter(r => !starred.has(r.command));
+        const starred   = _getStarred();
+        const toDelete  = data.runs.filter(r => !starred.has(r.command));
+        const deleteCmds = new Set(toDelete.map(r => r.command));
+        // Remove deleted commands from chips; starred commands remain
+        cmdHistory = cmdHistory.filter(c => !deleteCmds.has(c));
+        renderHistory();
         return Promise.all(toDelete.map(r => apiFetch(`/history/${r.id}`, { method: 'DELETE' })));
       })
       .then(() => refreshHistoryPanel());
   } else {
-    apiFetch('/history', { method: 'DELETE' }).then(() => refreshHistoryPanel());
+    apiFetch('/history', { method: 'DELETE' }).then(() => {
+      // Wipe all starred state and chips — nothing left in history to pin
+      _saveStarred(new Set());
+      cmdHistory = [];
+      renderHistory();
+      refreshHistoryPanel();
+    });
   }
 }
 
@@ -195,7 +214,7 @@ function refreshHistoryPanel() {
       });
 
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        confirmHistAction('delete', run.id);
+        confirmHistAction('delete', run.id, run.command);
       });
 
       historyList.appendChild(entry);
