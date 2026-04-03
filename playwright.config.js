@@ -20,6 +20,14 @@ export default defineConfig({
   use: {
     baseURL: 'http://localhost:5001',
     trace: 'on-first-retry',
+
+    // Uncomment the following 4 lines to disable headless mode and slow down operations for debugging.
+    
+    //     launchOptions: {
+    //   slowMo: 1000, 
+    // },
+    // headless: false,
+
   },
   projects: [
     { name: 'chromium', use: { ...devices['Desktop Chrome'] } },

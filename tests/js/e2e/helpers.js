@@ -26,6 +26,27 @@ export async function openHistory(page) {
 }
 
 /**
+ * Open the history panel and wait until at least one .history-entry is visible.
+ *
+ * The server writes a completed run to SQLite AFTER sending the SSE exit event,
+ * so a /history fetch that races with the DB write returns an empty list.  If
+ * the panel opens but shows "No runs yet.", close it and re-open it once to
+ * retry the fetch — by then the commit will have landed.
+ */
+export async function openHistoryWithEntries(page) {
+  await openHistory(page)
+
+  const hasEntries = await page.locator('#history-list .history-entry').count() > 0
+  if (!hasEntries) {
+    // Retry: close and re-open to trigger a fresh /history fetch
+    await page.locator('#history-close').click()
+    await page.locator('#history-panel').waitFor({ state: 'hidden' })
+    await openHistory(page)
+    await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible', timeout: 10_000 })
+  }
+}
+
+/**
  * Close the history panel using the in-panel close button (avoids pointer-event
  * conflicts when the panel overlays the toolbar #hist-btn).
  */

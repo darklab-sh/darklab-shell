@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistory, closeHistory } from './helpers.js'
+import { runCommand, openHistory, openHistoryWithEntries, closeHistory } from './helpers.js'
 
 // Use allowed commands that complete quickly and exit 0.
 // curl against the local test server is ideal — always available and fast.
@@ -22,7 +22,7 @@ test.describe('history drawer', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
 
     // Open history and click the entry
-    await openHistory(page)
+    await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
     // The input bar should now contain the command that was loaded
@@ -34,7 +34,7 @@ test.describe('history drawer', () => {
     const initialTabCount = await page.locator('.tab').count()
 
     // Open history and click the same entry
-    await openHistory(page)
+    await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
     // No new tab should have been created
@@ -47,7 +47,7 @@ test.describe('history drawer', () => {
     await runCommand(page, CMD_A)
 
     // Star the run from the history panel
-    await openHistory(page)
+    await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().locator('[data-action="star"]').click()
 
     // Confirm the chip is now starred
@@ -70,7 +70,7 @@ test.describe('history drawer', () => {
     await runCommand(page, CMD_B)
 
     // Star both runs
-    await openHistory(page)
+    await openHistoryWithEntries(page)
     const entries = page.locator('.history-entry')
     await entries.nth(0).locator('[data-action="star"]').click()
     await entries.nth(1).locator('[data-action="star"]').click()

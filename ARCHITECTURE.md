@@ -316,19 +316,30 @@ The browser JS files share a single global scope (by design — no ES modules, n
 
 Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
 
-### JS e2e tests (Playwright) — 7 tests
+### JS e2e tests (Playwright) — 42 tests
 
 Playwright tests exercise the full UI against a real Flask server. `playwright.config.js` starts Flask on port 5001 via `webServer` using the `.venv` Python interpreter run from the `app/` directory (matching `conftest.py`'s `chdir` logic).
 
-**What is tested (7 tests across 2 files):**
-- `tabs.spec.js` (3 tests) — input is empty on initial tab; switching back to a tab restores its last-run command; new tab starts empty
-- `history.spec.js` (4 tests) — loading a run from the history drawer populates the command input; clicking a history entry whose command is already open in a tab switches to that tab (no duplicate); deleting a starred entry removes it from the chip bar; clearing all history removes all chips including starred ones
+**What is tested (42 tests across 10 files):**
+- `commands.spec.js` (3 tests) — output appears after running a command; status pill shows EXIT 0 and `.exit-ok` line; shell-operator commands show `[denied]` and ERROR status
+- `history.spec.js` (4 tests) — loading a run from the history drawer populates the command input; clicking a history entry whose command is already open switches to that tab (no duplicate); deleting a starred entry removes it from the chip bar; clearing all history removes all chips including starred ones
+- `kill.spec.js` (2 tests) — kill button stops a running `ping` command and status becomes KILLED; kill button is hidden after the command is killed
+- `mobile.spec.js` (4 tests) — hamburger visible and desktop header buttons hidden at 375 px; clicking hamburger opens `#mobile-menu`; menu contains history and theme actions; clicking outside closes the menu
+- `output.spec.js` (6 tests) — copy button shows the "Copied" toast; clear button empties the output; status reverts to IDLE after clear; save-txt triggers a `.txt` download; save-html triggers a `.html` download; downloaded HTML contains the command text
+- `rate-limit.spec.js` (1 test) — 6 simultaneous POST `/run` requests yield at least one 429
+- `search.spec.js` (5 tests) — search bar hidden by default, opens on toggle; typing highlights `mark.search-hl` elements; counter shows `X / Y`; next/prev navigate matches; clearing input removes all highlights
+- `share.spec.js` (3 tests) — permalink button shows the "copied" toast; navigating to the share URL renders the command; fresh tab shows "No output" toast
+- `tabs.spec.js` (8 tests) — new-tab button disabled at `APP_CONFIG.max_tabs`; double-click renames a tab; Escape cancels rename; input is empty on initial tab; switching tab restores its last-run command; new tab starts empty
+- `timestamps.spec.js` (3 tests) — ts-btn cycles elapsed → clock → off; active class set when enabled; output lines carry `data-ts-c` (always) and `data-ts-e` (server-output lines only)
+- `ui.spec.js` (5 tests) — theme-btn toggles `body.light`; FAQ overlay opens; FAQ closes via button; FAQ closes via backdrop click
 
 **Implementation notes learned during setup:**
 - `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
-- `openHistory()` must wait for `#history-list > *` to appear after clicking the button — `refreshHistoryPanel()` fires an async `/history` fetch after the panel becomes visible, so entries aren't present until the fetch resolves.
-- The history panel must be closed with `#history-close` (the in-panel close button), not by re-clicking `#hist-btn`. When the panel is open it slides over the toolbar area, and the panel header intercepts pointer events on `#hist-btn`, causing Playwright to retry the click until timeout.
-- Test commands use `curl http://localhost:5001/health` and `curl http://localhost:5001/config`. These are in the allowlist, complete in under 50ms, always exit 0, and create real history entries. `echo` is not in the allowlist and cannot be used.
+- `openHistory()` must wait for `#history-list > *` to appear — `refreshHistoryPanel()` fires an async `/history` fetch after the panel becomes visible. Use `openHistoryWithEntries()` in tests that expect entries: the server writes the run to SQLite *after* sending the SSE exit event, so the first `/history` fetch may race with the DB commit; `openHistoryWithEntries()` retries by closing and re-opening the panel if no `.history-entry` is found.
+- The history panel must be closed with `#history-close` (the in-panel close button), not by re-clicking `#hist-btn`. When the panel is open it overlays the toolbar, and the panel header intercepts pointer events on `#hist-btn`, causing Playwright to retry the click until timeout.
+- Test commands use `curl http://localhost:5001/health` and `curl http://localhost:5001/config`. These are in the allowlist, complete in under 50 ms, always exit 0, and create real history entries. `echo` is not in the allowlist and cannot be used.
+- Search tests look for `localhost` (from the echoed command line) rather than for text in the actual command output; the echo line is always rendered before the run starts, making the assertion immune to rate-limit contamination from adjacent tests.
+- `data-ts-e` (elapsed) is only set on lines appended while a run is active; the initial command echo line has no elapsed value and must not be used to assert for that attribute.
 
 Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
 

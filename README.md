@@ -704,7 +704,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-7 tests. Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers tab command recall on tab switch, new-tab input state, history drawer command loading, duplicate-tab prevention, and star/chip cleanup on delete and clear-all. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+42 tests across 10 spec files. Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, permalink/share, rate limiting, search/highlight, output actions (copy, clear, save .txt/.html), tab rename, max-tabs limit, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 ### Linting & Security Scanning
 
