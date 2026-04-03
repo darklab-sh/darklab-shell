@@ -44,7 +44,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
 ├── .gitlab-ci.yml              # GitLab CI pipeline — test, lint (flake8 + bandit), dependency audit, and Docker build
-├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit)
+├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
 ├── tests/
 │   ├── conftest.py             # pytest configuration (sets working directory to app/)
 │   ├── test_validation.py      # Tests for command validation and rewrite logic
@@ -196,6 +196,20 @@ python3 app.py
 ```
 
 Open [http://localhost:8888](http://localhost:8888). Note that without Docker, the installed security tooling (nmap, nuclei, etc.) and process isolation (`scanner` user, read-only filesystem) will not be in effect.
+
+### First-Time Clone Setup
+
+After cloning, run the following once to activate the pre-commit hook (flake8, pytest, pip-audit):
+
+```bash
+git config core.hooksPath .githooks
+```
+
+Install dev dependencies for local testing:
+
+```bash
+pip install -r app/requirements.txt -r requirements-dev.txt
+```
 
 
 ---
@@ -645,10 +659,9 @@ docker compose logs -f
 
 ### Running Tests
 
-The test suite covers the security-critical validation and rewrite logic in `app.py`. Install dev dependencies and run with pytest:
+The test suite covers the security-critical validation and rewrite logic in `app.py`. Run with pytest (see [First-Time Clone Setup](#first-time-clone-setup) for installing dev dependencies):
 
 ```bash
-python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
 python3 -m pytest tests/ -v
 ```
 
@@ -664,7 +677,7 @@ flake8 app/app.py tests/
 bandit -r app/app.py -ll -q
 
 # Dependency vulnerability audit
-pip-audit -r app/requirements.txt
+pip-audit -r app/requirements.txt -r requirements-dev.txt
 ```
 
 These three checks plus a Docker image build verification run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`.

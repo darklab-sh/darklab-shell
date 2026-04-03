@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# Pre-commit checks: flake8, pytest, pip-audit
+# Install once with: git config core.hooksPath .githooks
+
+set -uo pipefail
+
+# Resolve the repo root (the directory containing .githooks/)
+REPO_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+
+# Use the .venv Python if present, otherwise fall back to whatever is on PATH
+if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+else
+    PYTHON="python"
+fi
+
+PASS=0
+FAIL=0
+FAILURES=()
+
+run_check() {
+    local name="$1"
+    shift
+    printf "\n\033[1m[pre-commit]\033[0m %s ... " "$name"
+    if "$@"; then
+        printf "\033[32mPASS\033[0m\n"
+        PASS=$((PASS + 1))
+    else
+        printf "\033[31mFAIL\033[0m\n"
+        FAIL=$((FAIL + 1))
+        FAILURES+=("$name")
+    fi
+}
+
+run_check "flake8"    "$PYTHON" -m flake8 app/ tests/
+run_check "pytest"    "$PYTHON" -m pytest tests/ -q --tb=short
+run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt
+
+printf "\n\033[1m[pre-commit]\033[0m %d passed" "$PASS"
+if [ "$FAIL" -gt 0 ]; then
+    printf ", \033[31m%d failed: %s\033[0m" "$FAIL" "${FAILURES[*]}"
+    printf "\n"
+    exit 1
+fi
+printf "\n"
