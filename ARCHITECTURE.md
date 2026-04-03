@@ -284,7 +284,7 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` before import so `app.py` can find its relative-path assets (`index.html`, etc.). `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
-Four test files, 323 tests total:
+### Python tests — four files, 323 tests total
 
 - **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `conf/allowed_commands.txt` file.
 - **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_allowed_commands_grouped` (category headers, deny entry exclusion), `load_faq`, `load_welcome` (cmd/out parsing, rstrip behaviour), `load_autocomplete` (comment/blank filtering), path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity and idempotency, `pid_register`/`pid_pop` in-process mode, `_format_retention`, `_expiry_note` (active/today/expired/invalid date branches), `_permalink_error_page` (status, body, retention message), database init and retention pruning (tables created, idempotent re-init, old records pruned, recent records kept).
@@ -294,6 +294,43 @@ Four test files, 323 tests total:
 **Rate limiting in tests.** `app.config["RATELIMIT_ENABLED"] = False` is set in every `get_client()` helper, but Flask-Limiter 4.x with `memory://` storage still increments counters even when this flag is set dynamically at runtime — it only truly disables the limit check, not the counter itself. Test classes that POST to `/run` multiple times (e.g. `TestCmdRewriteEvent`, `TestRunSpawnErrorEvent`) therefore use a dedicated `X-Forwarded-For` IP from the RFC 5737 TEST-NET-3 range (`203.0.113.x`) via the request headers. This gives each class its own isolated rate-limit bucket so accumulated hits from one class cannot exhaust the limit and cause spurious 429s in later classes within the same test run. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
 
 **Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
+
+### JS unit tests (Vitest) — 38 tests
+
+The browser JS files share a single global scope (by design — no ES modules, no bundler). This makes tree-shaking impossible but the functions themselves can still be unit-tested by loading each file's source into an isolated execution context via `new Function(src + '\nreturn {fn1, fn2}')(localStorage, APP_CONFIG)`.
+
+**How it works (`tests/js/unit/helpers/extract.js`):**
+1. Read the raw source of the browser JS file with `fs.readFileSync`
+2. Wrap it in `new Function('localStorage', 'APP_CONFIG', src + '\nreturn {...}')(...)`
+3. `new Function` executes in global scope — DOM-referencing functions (`renderHistory`, `showToast`, etc.) are *defined* but never *called*, so they don't throw even without a real DOM
+4. The requested function names are extracted and returned to the test
+
+`localStorage` is passed as a parameter (not captured from the outer scope) so the function bodies operate on a self-contained `MemoryStorage` instance defined in `extract.js`, rather than trying to access a browser global. This avoids a jsdom quirk: when jsdom is initialized without a non-opaque origin URL, the `localStorage` object exists but its methods (`getItem`, `setItem`, `removeItem`, `clear`) are all absent. Rather than fighting this with `environmentOptions`, `MemoryStorage` is a minimal but complete in-memory Storage implementation that's fully self-contained. `APP_CONFIG` is passed as a minimal stub `{ recent_commands_limit: 20 }` — it satisfies references inside function bodies without requiring the full `/config` API response.
+
+`fromScript` returns `{ ...fns, _storage }` so tests that need to pre-populate or inspect localStorage can do so via `_storage.setItem(...)` / `_storage.getItem(...)` instead of the jsdom global.
+
+**What is tested (38 tests across 3 files):**
+- `utils.test.js` (21 tests) — `escapeHtml` (plain text, `&`, `<`, `>`, multi-entity, empty string), `escapeRegex` (plain text, dot, star, parens, brackets, RegExp roundtrip), `renderMotd` (plain text, `**bold**`, `` `code` ``, `[text](https://url)`, http links, non-http scheme guard, `\n` → `<br>`, XSS prevention via escapeHtml-first ordering, multi-construct string)
+- `runner.test.js` (6 tests) — `_formatElapsed` (0s, sub-minute, exactly 60s, multi-minute, exactly 1h, h+m+s)
+- `history.test.js` (11 tests) — `_getStarred` (empty, populated, invalid JSON, empty array), `_saveStarred` (array content, empty set, roundtrip), `_toggleStar` (add, remove, other entries unaffected, double-toggle)
+
+Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
+
+### JS e2e tests (Playwright) — 7 tests
+
+Playwright tests exercise the full UI against a real Flask server. `playwright.config.js` starts Flask on port 5001 via `webServer` using the `.venv` Python interpreter run from the `app/` directory (matching `conftest.py`'s `chdir` logic).
+
+**What is tested (7 tests across 2 files):**
+- `tabs.spec.js` (3 tests) — input is empty on initial tab; switching back to a tab restores its last-run command; new tab starts empty
+- `history.spec.js` (4 tests) — loading a run from the history drawer populates the command input; clicking a history entry whose command is already open in a tab switches to that tab (no duplicate); deleting a starred entry removes it from the chip bar; clearing all history removes all chips including starred ones
+
+**Implementation notes learned during setup:**
+- `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
+- `openHistory()` must wait for `#history-list > *` to appear after clicking the button — `refreshHistoryPanel()` fires an async `/history` fetch after the panel becomes visible, so entries aren't present until the fetch resolves.
+- The history panel must be closed with `#history-close` (the in-panel close button), not by re-clicking `#hist-btn`. When the panel is open it slides over the toolbar area, and the panel header intercepts pointer events on `#hist-btn`, causing Playwright to retry the click until timeout.
+- Test commands use `curl http://localhost:5001/health` and `curl http://localhost:5001/config`. These are in the allowlist, complete in under 50ms, always exit 0, and create real history entries. `echo` is not in the allowlist and cannot be used.
+
+Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
 
 ---
 

@@ -22,6 +22,35 @@ test:
   script:
     - pytest tests/ -v
 
+test-js-unit:
+  stage: test
+  image: node:22-slim
+  before_script:
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run test:unit
+
+test-js-e2e:
+  stage: test
+  image: python:3.12
+  before_script:
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -q nodejs
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
+    - npm ci
+    - npx playwright install --with-deps chromium
+  script:
+    - npm run test:e2e
+  artifacts:
+    when: on_failure
+    paths:
+      - playwright-report/
+      - test-results/
+    expire_in: 1 week
+
 lint:
   stage: lint
   script:

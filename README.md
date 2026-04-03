@@ -43,14 +43,29 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
-├── .gitlab-ci.yml              # GitLab CI pipeline — test, lint (flake8 + bandit), dependency audit, and Docker build
+├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
+├── .nvmrc                      # Node version pin (22) for Vitest / Playwright
+├── package.json                # JS dev dependencies and test scripts
+├── vitest.config.js            # Vitest unit test config (jsdom environment)
+├── playwright.config.js        # Playwright e2e test config (starts Flask on port 5001)
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
 ├── tests/
 │   ├── conftest.py             # pytest configuration (sets working directory to app/)
 │   ├── test_validation.py      # Tests for command validation and rewrite logic
 │   ├── test_utils.py           # Tests for utility functions (split_chained_commands, load_allowed_commands,
 │   │                           #   load_faq, path blocking edge cases, pid map, _format_retention, rewrites)
-│   └── test_routes.py          # Flask integration tests via test client (all HTTP routes)
+│   ├── test_routes.py          # Flask integration tests via test client (all HTTP routes)
+│   └── js/
+│       ├── unit/               # Vitest unit tests for pure JS functions
+│       │   ├── helpers/
+│       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
+│       │   ├── utils.test.js   # escapeHtml, escapeRegex
+│       │   ├── runner.test.js  # _formatElapsed
+│       │   └── history.test.js # _getStarred, _saveStarred, _toggleStar
+│       └── e2e/                # Playwright end-to-end tests (require running Flask server)
+│           ├── helpers.js      # runCommand, openHistory, closeHistory helpers
+│           ├── tabs.spec.js    # Tab command recall and new-tab behaviour
+│           └── history.spec.js # History drawer: load command, dedup tab, star/chip cleanup
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
 │   └── run_local.sh                    # Script to run without Docker using Python directly
@@ -199,16 +214,22 @@ Open [http://localhost:8888](http://localhost:8888). Note that without Docker, t
 
 ### First-Time Clone Setup
 
-After cloning, run the following once to activate the pre-commit hook (flake8, pytest, pip-audit):
+After cloning, run the following once to activate the pre-commit hook (flake8, pytest, pip-audit, vitest):
 
 ```bash
 git config core.hooksPath .githooks
 ```
 
-Install dev dependencies for local testing:
+Install Python dev dependencies:
 
 ```bash
 pip install -r app/requirements.txt -r requirements-dev.txt
+```
+
+Install JS dev dependencies (Node 22 recommended — see `.nvmrc`):
+
+```bash
+npm install
 ```
 
 
@@ -661,13 +682,29 @@ docker compose logs -f
 
 ### Running Tests
 
-The test suite covers the security-critical validation and rewrite logic in `app.py`. Run with pytest (see [First-Time Clone Setup](#first-time-clone-setup) for installing dev dependencies):
+**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging (323 tests):
 
 ```bash
 python3 -m pytest tests/ -v
 ```
 
-Tests are split across four files covering 323 test cases: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views), and structured logging (`_extra_fields`, text/GELF formatters, `configure_logging`, and all log events emitted by the application). No running server or Docker required — file I/O and Redis are mocked where needed.
+Tests are split across four files: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views), and structured logging (`_extra_fields`, text/GELF formatters, `configure_logging`, and all log events emitted by the application). No running server or Docker required — file I/O and Redis are mocked where needed.
+
+**JS unit tests** (Vitest) — covers pure functions extracted from browser scripts:
+
+```bash
+npm run test:unit
+```
+
+38 tests covering `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js), `_formatElapsed` (runner.js), and the `_getStarred` / `_saveStarred` / `_toggleStar` localStorage helpers (history.js). Uses jsdom so no browser is required.
+
+**JS e2e tests** (Playwright) — exercises the full UI against a live Flask server:
+
+```bash
+npm run test:e2e
+```
+
+7 tests. Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers tab command recall on tab switch, new-tab input state, history drawer command loading, duplicate-tab prevention, and star/chip cleanup on delete and clear-all. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 ### Linting & Security Scanning
 
@@ -682,7 +719,7 @@ bandit -r app/app.py -ll -q
 pip-audit -r app/requirements.txt -r requirements-dev.txt
 ```
 
-These three checks plus a Docker image build verification run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`.
+These checks plus a Docker image build verification run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`. The `test` stage runs three parallel jobs: `test` (pytest), `test-js-unit` (Vitest, Node 22 image), and `test-js-e2e` (Playwright, Python 3.12 image with Node and Chromium installed).
 
 ---
 

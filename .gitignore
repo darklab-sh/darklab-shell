@@ -18,6 +18,11 @@ app/static/js/vendor/*
 # Persistent data (SQLite run history — contains user data, should not be committed)
 data/
  
+# Node / JS tooling
+node_modules/
+playwright-report/
+test-results/
+
 # OS
 .DS_Store
 Thumbs.db

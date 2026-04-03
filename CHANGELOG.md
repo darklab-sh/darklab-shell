@@ -18,6 +18,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`HEALTH_DB_FAIL` / `HEALTH_REDIS_FAIL` errors** — `/health` endpoint now logs ERROR with traceback when the DB or Redis health check fails, making health degradation visible in log aggregators
 - **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
 - **`SHARE_CREATED` info** — share (permalink snapshot) creation is logged at INFO with IP, share ID, and label
+- **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
+  - Vitest unit tests (`tests/js/unit/`) — 38 tests covering `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed` (runner.js), and `_getStarred` / `_saveStarred` / `_toggleStar` (history.js); no browser required
+  - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
+  - Playwright e2e tests (`tests/js/e2e/`) — 7 tests exercising the full UI against a live Flask server: tab command recall, new-tab input state, history drawer loading, duplicate-tab prevention, star/chip cleanup on delete and clear-all; `workers: 1` prevents rate-limit collisions between tests
+  - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
+  - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
 - **Command recall on tab switch** — each tab now remembers its last-run command; switching to a tab automatically restores that command in the input bar, making it easy to re-run or edit without copying from the output
 - **Delete Non-Favorites** — the "clear all history" confirmation modal now offers a third option alongside **Delete all** and **Cancel**: **Delete Non-Favorites** removes only runs that are not starred, leaving pinned commands untouched
