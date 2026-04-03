@@ -517,7 +517,7 @@ class TestShareCreatedEvent:
 
 
 class TestCmdRewriteEvent:
-    """CMD_REWRITE is emitted at DEBUG when a command is silently rewritten.
+    """CMD_REWRITE is emitted at INFO when a command is silently rewritten.
 
     Uses a dedicated X-Forwarded-For IP so these tests get a fresh rate-limit
     bucket. Flask-Limiter 4.x increments in-memory counters even when
@@ -534,42 +534,42 @@ class TestCmdRewriteEvent:
             headers={"X-Forwarded-For": self._IP},
         )
 
-    def test_nmap_rewrite_emits_debug(self):
+    def test_nmap_rewrite_emits_info(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
                 # Popen raises so we don't actually spawn — CMD_REWRITE fires before Popen
                 with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
-        rewrite_calls = [c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE"]
+        rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 1
 
     def test_nmap_rewrite_extra_has_original(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
                 with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
-        call = next(c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
         assert call.kwargs["extra"]["original"] == "nmap 8.8.8.8"
 
     def test_nmap_rewrite_extra_has_privileged_flag(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
                 with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "nmap 8.8.8.8")
-        call = next(c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE")
         assert "--privileged" in call.kwargs["extra"]["rewritten"]
 
     def test_unrewritten_command_does_not_emit_cmd_rewrite(self):
         # A plain allowed command (ping) is not rewritten — no CMD_REWRITE log
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
                 with mock.patch("subprocess.Popen", side_effect=OSError("no spawn")):
                     self._post_run(client, "ping google.com")
-        rewrite_calls = [c for c in mock_debug.call_args_list if c[0][0] == "CMD_REWRITE"]
+        rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 0
 
 

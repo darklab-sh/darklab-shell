@@ -74,10 +74,10 @@ Both formatters use a shared `_extra_fields(record)` helper that extracts caller
 |-------|-------|-------|-----------------|
 | DEBUG | `REQUEST` | before_request | ip, method, path, qs |
 | DEBUG | `RESPONSE` | after_request | ip, method, path, status, size |
-| DEBUG | `CMD_REWRITE` | run_command | ip, original, rewritten |
 | DEBUG | `KILL_MISS` | kill_command | ip, run_id |
 | DEBUG | `HEALTH_OK` | health() | — |
 | INFO  | `LOGGING_CONFIGURED` | configure_logging | level, format |
+| INFO  | `CMD_REWRITE` | run_command | ip, original, rewritten |
 | INFO  | `RUN_START` | run_command | ip, run_id, session, pid, cmd |
 | INFO  | `RUN_END` | generate() | ip, run_id, session, exit_code, elapsed, cmd |
 | INFO  | `RUN_KILL` | kill_command | ip, run_id, pid, pgid |

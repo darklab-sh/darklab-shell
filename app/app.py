@@ -290,7 +290,7 @@ def run_command():
 
     command, notice = rewrite_command(original_command)
     if command != original_command:
-        log.debug("CMD_REWRITE", extra={
+        log.info("CMD_REWRITE", extra={
             "ip": client_ip, "original": original_command, "rewritten": command,
         })
 
