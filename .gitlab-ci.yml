@@ -17,7 +17,7 @@ cache:
 before_script:
   - pip install -q -r app/requirements.txt -r requirements-dev.txt
 
-test:
+test-py-pytest:
   stage: test
   script:
     - pytest tests/ -v
