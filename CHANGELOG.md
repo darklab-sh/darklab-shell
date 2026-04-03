@@ -12,13 +12,15 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `text` format: human-readable `2026-04-02T10:00:00Z [INFO ] EVENT  key=value ...` lines with structured context appended as sorted key=value pairs
   - `gelf` format: newline-delimited GELF 1.1 JSON with `short_message` as the event name and all context in `_`-prefixed additional fields, compatible with Graylog / OpenSearch and other GELF back-ends
   - Client IP (`_ip`) included on all INFO, WARN, and ERROR events; auto-detected from `X-Forwarded-For` when it contains a valid IP, otherwise falls back to the direct connection IP
-  - Full log event inventory: `REQUEST`, `RESPONSE`, `CMD_REWRITE`, `SHARE_CREATED`, `KILL_MISS` (DEBUG); `RUN_START`, `RUN_END`, `RUN_KILL`, `DB_PRUNED` (INFO); `CMD_DENIED`, `RATE_LIMIT`, `CMD_TIMEOUT` (WARN); `RUN_SPAWN_ERROR`, `RUN_STREAM_ERROR`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL` (ERROR)
+  - Full log event inventory: `REQUEST`, `RESPONSE`, `CMD_REWRITE`, `KILL_MISS`, `HEALTH_OK` (DEBUG); `PAGE_LOAD`, `RUN_START`, `RUN_END`, `RUN_KILL`, `DB_PRUNED`, `LOGGING_CONFIGURED`, `SHARE_CREATED`, `SHARE_VIEWED`, `RUN_VIEWED`, `HISTORY_DELETED`, `HISTORY_CLEARED` (INFO); `CMD_DENIED`, `RATE_LIMIT`, `CMD_TIMEOUT`, `KILL_FAILED`, `HEALTH_DEGRADED`, `RUN_NOT_FOUND`, `SHARE_NOT_FOUND` (WARN); `RUN_SPAWN_ERROR`, `RUN_STREAM_ERROR`, `RUN_SAVED_ERROR`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL` (ERROR)
   - `log_level` and `log_format` keys added to `config.yaml` (default: `INFO` / `text`)
 - **`CMD_TIMEOUT` warning** — when the server kills a command that exceeds `command_timeout_seconds`, a WARN log is now emitted server-side (previously the timeout was only signalled to the client via the SSE stream)
 - **`HEALTH_DB_FAIL` / `HEALTH_REDIS_FAIL` errors** — `/health` endpoint now logs ERROR with traceback when the DB or Redis health check fails, making health degradation visible in log aggregators
 - **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
-- **`SHARE_CREATED` debug** — share (permalink snapshot) creation is logged at DEBUG with IP, share ID, and label
+- **`SHARE_CREATED` info** — share (permalink snapshot) creation is logged at INFO with IP, share ID, and label
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
+- **Command recall on tab switch** — each tab now remembers its last-run command; switching to a tab automatically restores that command in the input bar, making it easy to re-run or edit without copying from the output
+- **Delete Non-Favorites** — the "clear all history" confirmation modal now offers a third option alongside **Delete all** and **Cancel**: **Delete Non-Favorites** removes only runs that are not starred, leaving pinned commands untouched
 - **Retention FAQ entry** — the FAQ "Is there a time or output limit?" entry has been replaced with a live retention settings table showing command timeout, output line limit, and permalink retention with their actual configured values; a note clarifies that these are set by the operator of the instance. `permalink_retention_days` is now included in the `/config` API response
 - **`HEALTH_OK` debug** — `/health` now logs at DEBUG when all checks pass, making it easy to confirm health probe activity when running at DEBUG level
 - **`HEALTH_DEGRADED` warning** — `/health` logs at WARN (with `db` and `redis` status fields) when the aggregate status is degraded, complementing the per-component `HEALTH_DB_FAIL` / `HEALTH_REDIS_FAIL` ERROR events
@@ -26,6 +28,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`RUN_SAVED_ERROR` error** — the DB INSERT after a command completes is now wrapped in a try/except; failures are logged at ERROR with traceback instead of being silently swallowed inside the SSE generator
 - **`LOGGING_CONFIGURED` info** — `configure_logging()` now emits an INFO event with `level` and `format` fields immediately after setup, giving operators a confirmation line in startup logs
 
+- **`PAGE_LOAD` info** — every `GET /` now logs at INFO with the client IP, giving operators visibility into when the app is being accessed
+- **`RUN_NOT_FOUND` warn** — accessing an expired or invalid run permalink logs at WARN with IP and run ID
+- **`SHARE_NOT_FOUND` warn** — accessing an expired or invalid snapshot permalink logs at WARN with IP and share ID
+- **`SHARE_VIEWED` info** — retrieving a snapshot permalink (`GET /share/<id>`) now logs at INFO with IP, share ID, and label
+- **`RUN_VIEWED` info** — retrieving a run permalink (`GET /history/<id>`) now logs at INFO with IP, run ID, and command
+- **`HISTORY_DELETED` info** — deleting a single history entry logs at INFO with IP, run ID, and session (only emitted when a row is actually deleted)
+- **`HISTORY_CLEARED` info** — clearing all history for a session logs at INFO with IP, session, and count of deleted runs
 - **Smart client IP detection** — `get_client_ip()` now validates the `X-Forwarded-For` value against a regex before trusting it; invalid or absent values fall back to the direct connection IP, making the app work correctly with or without a reverse proxy and without any config setting
 
 ### Fixed
@@ -35,6 +44,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `commands.py` — `split_chained_commands()` now uses the pre-compiled `SHELL_CHAIN_RE` object instead of duplicating the regex pattern string
 
 ### Changed
+- `styles.css` — muted text color brightened for readability: dark theme `#606060` → `#7a7a7a`, light theme `#888` → `#666`
 - `.gitignore` — added `.vscode/` to excluded paths
 - `CHANGELOG.md` — added `CHANGELOG.md` to track changes between versions
 - `app.py` — removed `logging.basicConfig(...)` block; logging is now fully managed by `logging_setup.configure_logging()`

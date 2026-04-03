@@ -68,21 +68,36 @@ let pendingHistAction = null;
 
 function confirmHistAction(type, id) {
   pendingHistAction = { type, id };
-  const msg = document.getElementById('hist-del-msg');
+  const msg      = document.getElementById('hist-del-msg');
+  const nonfav   = document.getElementById('hist-del-nonfav');
+  const confirm  = document.getElementById('hist-del-confirm');
   if (type === 'clear') {
-    msg.innerHTML = 'Clear all run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    msg.innerHTML = 'Clear run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    nonfav.style.display  = 'inline-block';
+    confirm.textContent   = 'Delete all';
   } else {
     msg.innerHTML = 'Remove this run from history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    nonfav.style.display  = 'none';
+    confirm.textContent   = 'Delete';
   }
   histDelOverlay.style.display = 'flex';
 }
 
-function executeHistAction() {
-  if (!pendingHistAction) return;
-  const { type, id } = pendingHistAction;
+function executeHistAction(type) {
+  const action = type || (pendingHistAction && pendingHistAction.type);
+  const id     = pendingHistAction && pendingHistAction.id;
   pendingHistAction = null;
-  if (type === 'delete') {
+  if (action === 'delete') {
     apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => refreshHistoryPanel());
+  } else if (action === 'clear-nonfav') {
+    apiFetch('/history')
+      .then(r => r.json())
+      .then(data => {
+        const starred  = _getStarred();
+        const toDelete = data.runs.filter(r => !starred.has(r.command));
+        return Promise.all(toDelete.map(r => apiFetch(`/history/${r.id}`, { method: 'DELETE' })));
+      })
+      .then(() => refreshHistoryPanel());
   } else {
     apiFetch('/history', { method: 'DELETE' }).then(() => refreshHistoryPanel());
   }

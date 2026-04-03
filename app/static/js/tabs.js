@@ -63,7 +63,7 @@ function createTab(label) {
   });
   tabPanels.appendChild(panel);
 
-  tabs.push({ id, label, runId: null, runStart: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle', renamed: false });
+  tabs.push({ id, label, command: '', runId: null, runStart: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle', renamed: false });
   activateTab(id);
   updateNewTabBtn();
   return id;
@@ -76,6 +76,12 @@ function activateTab(id) {
   const t = tabs.find(t => t.id === id);
   setStatus(t ? (t.st || 'idle') : 'idle');
   clearSearch();
+  // Restore the last command run in this tab so it's easy to re-run or edit
+  const input = document.getElementById('cmd');
+  if (input && t) {
+    input.value = t.command;
+    input.dispatchEvent(new Event('input'));
+  }
 }
 
 function closeTab(id) {

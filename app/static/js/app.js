@@ -255,6 +255,10 @@ document.getElementById('hist-del-cancel').addEventListener('click', () => {
   histDelOverlay.style.display = 'none';
   pendingHistAction = null;
 });
+document.getElementById('hist-del-nonfav').addEventListener('click', () => {
+  histDelOverlay.style.display = 'none';
+  executeHistAction('clear-nonfav');
+});
 document.getElementById('hist-del-confirm').addEventListener('click', () => {
   histDelOverlay.style.display = 'none';
   executeHistAction();

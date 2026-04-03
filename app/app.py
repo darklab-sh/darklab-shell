@@ -113,6 +113,7 @@ def favicon():
 
 @app.route("/")
 def index():
+    log.info("PAGE_LOAD", extra={"ip": get_client_ip()})
     return HTML
 
 
@@ -184,9 +185,11 @@ def get_run(run_id):
     with db_connect() as conn:
         row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
     if not row:
+        log.warning("RUN_NOT_FOUND", extra={"ip": get_client_ip(), "run_id": run_id})
         return _permalink_error_page("run")
     run = dict(row)
     run["output"] = json.loads(run["output"]) if run["output"] else []
+    log.info("RUN_VIEWED", extra={"ip": get_client_ip(), "run_id": run_id, "cmd": run["command"]})
 
     if "json" in request.args:
         return jsonify(run)
@@ -205,8 +208,10 @@ def delete_run(run_id):
     """Delete a specific run from history for this session."""
     session_id = get_session_id()
     with db_connect() as conn:
-        conn.execute("DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id))
+        cur = conn.execute("DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id))
         conn.commit()
+    if cur.rowcount:
+        log.info("HISTORY_DELETED", extra={"ip": get_client_ip(), "run_id": run_id, "session": session_id})
     return jsonify({"ok": True})
 
 
@@ -215,8 +220,9 @@ def clear_history():
     """Delete all runs for this session."""
     session_id = get_session_id()
     with db_connect() as conn:
-        conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
+        cur = conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
         conn.commit()
+    log.info("HISTORY_CLEARED", extra={"ip": get_client_ip(), "session": session_id, "count": cur.rowcount})
     return jsonify({"ok": True})
 
 
@@ -235,7 +241,7 @@ def save_share():
             (share_id, session_id, label, created, json.dumps(content))
         )
         conn.commit()
-    log.debug("SHARE_CREATED", extra={"ip": get_client_ip(), "share_id": share_id, "label": label})
+    log.info("SHARE_CREATED", extra={"ip": get_client_ip(), "share_id": share_id, "label": label})
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
 
 
@@ -245,9 +251,11 @@ def get_share(share_id):
     with db_connect() as conn:
         row = conn.execute("SELECT * FROM snapshots WHERE id = ?", (share_id,)).fetchone()
     if not row:
+        log.warning("SHARE_NOT_FOUND", extra={"ip": get_client_ip(), "share_id": share_id})
         return _permalink_error_page("snapshot")
     snap = dict(row)
     content_lines = json.loads(snap["content"]) if snap["content"] else []
+    log.info("SHARE_VIEWED", extra={"ip": get_client_ip(), "share_id": share_id, "label": snap["label"]})
 
     if "json" in request.args:
         snap["content"] = content_lines

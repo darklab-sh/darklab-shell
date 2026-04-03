@@ -75,7 +75,6 @@ Both formatters use a shared `_extra_fields(record)` helper that extracts caller
 | DEBUG | `REQUEST` | before_request | ip, method, path, qs |
 | DEBUG | `RESPONSE` | after_request | ip, method, path, status, size |
 | DEBUG | `CMD_REWRITE` | run_command | ip, original, rewritten |
-| DEBUG | `SHARE_CREATED` | save_share | ip, share_id, label |
 | DEBUG | `KILL_MISS` | kill_command | ip, run_id |
 | DEBUG | `HEALTH_OK` | health() | — |
 | INFO  | `LOGGING_CONFIGURED` | configure_logging | level, format |
@@ -83,6 +82,14 @@ Both formatters use a shared `_extra_fields(record)` helper that extracts caller
 | INFO  | `RUN_END` | generate() | ip, run_id, session, exit_code, elapsed, cmd |
 | INFO  | `RUN_KILL` | kill_command | ip, run_id, pid, pgid |
 | INFO  | `DB_PRUNED` | db_init | runs, snapshots, retention_days |
+| INFO  | `PAGE_LOAD` | index | ip |
+| INFO  | `SHARE_CREATED` | save_share | ip, share_id, label |
+| INFO  | `SHARE_VIEWED` | get_share | ip, share_id, label |
+| INFO  | `RUN_VIEWED` | get_run | ip, run_id, cmd |
+| INFO  | `HISTORY_DELETED` | delete_run | ip, run_id, session |
+| INFO  | `HISTORY_CLEARED` | clear_history | ip, session, count |
+| WARN  | `RUN_NOT_FOUND` | get_run | ip, run_id |
+| WARN  | `SHARE_NOT_FOUND` | get_share | ip, share_id |
 | WARN  | `CMD_DENIED` | run_command | ip, session, cmd, reason |
 | WARN  | `RATE_LIMIT` | errorhandler(429) | ip, path, limit |
 | WARN  | `CMD_TIMEOUT` | generate() | ip, run_id, session, timeout, cmd |
@@ -188,8 +195,9 @@ External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 for ANSI-to-HTML 
 
 ### Tab State
 
-Each tab is an object: `{ id, label, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
+Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
 
+- `command` — the last command run in this tab; restored to the input bar when the tab is activated so the user can re-run or edit it without copying from the output
 - `runId` — the UUID from the SSE `started` message, used for kill requests
 - `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
 - `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
@@ -276,14 +284,14 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` before import so `app.py` can find its relative-path assets (`index.html`, etc.). `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
-Four test files, 296 tests total:
+Four test files, 323 tests total:
 
 - **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `conf/allowed_commands.txt` file.
 - **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_allowed_commands_grouped` (category headers, deny entry exclusion), `load_faq`, `load_welcome` (cmd/out parsing, rstrip behaviour), `load_autocomplete` (comment/blank filtering), path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity and idempotency, `pid_register`/`pid_pop` in-process mode, `_format_retention`, `_expiry_note` (active/today/expired/invalid date branches), `_permalink_error_page` (status, body, retention message), database init and retention pruning (tables created, idempotent re-init, old records pruned, recent records kept).
 - **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types (`application/json` / `text/html`), error cases (`/run` with missing/empty/disallowed command), history CRUD, session isolation (runs and deletes scoped by `X-Session-ID`), run permalink HTML and JSON views, share create/retrieve/HTML label and content type, health degradation when DB fails, `/welcome` and `/autocomplete` routes, `get_client_ip()` XFF validation (valid IPv4/IPv6, multi-value, absent, and non-IP fallback cases).
-- **`test_logging.py`** — structured logging: `_extra_fields` exclusion of stdlib and underscore-prefixed attrs; `_TextFormatter` timestamp format, level label padding, extra sorting and quoting, exception tracebacks; `GELFFormatter` JSON validity, GELF 1.1 version field, syslog level mapping, `_`-prefixed extras, special JSON character handling, no stdlib field leakage, `full_message` on exceptions; `configure_logging` format/level selection (including lowercase input), unknown-level fallback, `propagate=False`, werkzeug silencing, no duplicate handlers; all application log events (`CMD_DENIED`, `RATE_LIMIT`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL`, `HEALTH_OK`, `HEALTH_DEGRADED`, `SHARE_CREATED`, `CMD_REWRITE`, `REQUEST`/`RESPONSE`, `DB_PRUNED`, `LOGGING_CONFIGURED`, `KILL_FAILED`) verified at the correct level with expected extras.
+- **`test_logging.py`** — structured logging: `_extra_fields` exclusion of stdlib and underscore-prefixed attrs; `_TextFormatter` timestamp format, level label padding, extra sorting and quoting (including empty-string repr), exception tracebacks; `GELFFormatter` JSON validity, GELF 1.1 version field, syslog level mapping, `_`-prefixed extras, special JSON character handling, no stdlib field leakage, `full_message` on exceptions; `configure_logging` format/level selection (including lowercase input), unknown-level fallback, `propagate=False`, werkzeug silencing, no duplicate handlers; all application log events (`CMD_DENIED`, `RATE_LIMIT`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL`, `HEALTH_OK`, `HEALTH_DEGRADED`, `PAGE_LOAD`, `SHARE_CREATED`, `SHARE_VIEWED`, `RUN_VIEWED`, `RUN_NOT_FOUND`, `SHARE_NOT_FOUND`, `HISTORY_DELETED`, `HISTORY_CLEARED`, `CMD_REWRITE`, `REQUEST`/`RESPONSE`, `DB_PRUNED`, `LOGGING_CONFIGURED`, `KILL_FAILED`, `RUN_SPAWN_ERROR`) verified at the correct level with expected extras.
 
-Rate limiting is disabled in tests via `app.config["RATELIMIT_ENABLED"] = False`. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
+**Rate limiting in tests.** `app.config["RATELIMIT_ENABLED"] = False` is set in every `get_client()` helper, but Flask-Limiter 4.x with `memory://` storage still increments counters even when this flag is set dynamically at runtime — it only truly disables the limit check, not the counter itself. Test classes that POST to `/run` multiple times (e.g. `TestCmdRewriteEvent`, `TestRunSpawnErrorEvent`) therefore use a dedicated `X-Forwarded-For` IP from the RFC 5737 TEST-NET-3 range (`203.0.113.x`) via the request headers. This gives each class its own isolated rate-limit bucket so accumulated hits from one class cannot exhaust the limit and cause spurious 429s in later classes within the same test run. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
 
 **Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
 

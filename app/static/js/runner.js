@@ -156,6 +156,8 @@ function runCommand() {
 
   addToHistory(cmd);
   if (!activeTab || !activeTab.renamed) setTabLabel(activeTabId, cmd);
+  const _cmdTab = tabs.find(t => t.id === activeTabId);
+  if (_cmdTab) _cmdTab.command = cmd;
   appendLine('\n$ ' + cmd + '\n', '');
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
   const _runTab = tabs.find(t => t.id === activeTabId);

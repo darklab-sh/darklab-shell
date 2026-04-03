@@ -113,8 +113,9 @@
 <div id="hist-del-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
   <div style="background:#111;border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
     <div id="hist-del-msg" style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
+    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button id="hist-del-cancel" class="term-action-btn">Cancel</button>
+      <button id="hist-del-nonfav" style="display:none;background:transparent;color:var(--amber);border:1px solid var(--amber);border-radius:4px;padding:6px 18px;font-family:var(--font-mono);font-size:12px;cursor:pointer">Delete Non-Favorites</button>
       <button id="hist-del-confirm" style="background:var(--amber);color:#000;border:none;border-radius:4px;padding:6px 18px;font-family:var(--font-mono);font-size:12px;cursor:pointer">Delete</button>
     </div>
   </div>

@@ -8,7 +8,7 @@
   --green-glow: rgba(57,255,20,0.12);
   --amber: #ffb800;
   --red: #ff3c3c;
-  --muted: #606060;
+  --muted: #7a7a7a;
   --text: #e0e0e0;
   --font-mono: 'JetBrains Mono', monospace;
   --font-display: 'Syne', sans-serif;
@@ -516,7 +516,7 @@ body.light {
   --surface: #ffffff;
   --border: #ddd;
   --border-bright: #ccc;
-  --muted: #888;
+  --muted: #666;
   --text: #1a1a1a;
   --green: #1a7a08;
   --green-dim: #1a7a08;

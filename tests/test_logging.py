@@ -132,6 +132,10 @@ class TestTextFormatter:
         out = _emit(_TextFormatter(), logging.INFO, "CMD_DENIED", extra={"cmd": "nmap 8.8.8.8"})
         assert "cmd='nmap 8.8.8.8'" in out
 
+    def test_empty_string_extra_is_repr_quoted(self):
+        out = _emit(_TextFormatter(), logging.INFO, "TEST", extra={"label": ""})
+        assert "label=''" in out
+
     def test_string_without_spaces_not_quoted(self):
         out = _emit(_TextFormatter(), logging.INFO, "RUN_START", extra={"ip": "1.2.3.4"})
         assert "ip=1.2.3.4" in out
@@ -475,40 +479,40 @@ class TestHealthFailEvents:
 
 
 class TestShareCreatedEvent:
-    """SHARE_CREATED is emitted at DEBUG when POST /share succeeds."""
+    """SHARE_CREATED is emitted at INFO when POST /share succeeds."""
 
-    def test_share_created_emits_debug(self):
+    def test_share_created_emits_info(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             client.post(
                 "/share",
                 json={"label": "test label", "content": ["line1"]},
                 headers={"X-Session-ID": "test-session"},
             )
-        share_calls = [c for c in mock_debug.call_args_list if c[0][0] == "SHARE_CREATED"]
+        share_calls = [c for c in mock_info.call_args_list if c[0][0] == "SHARE_CREATED"]
         assert len(share_calls) == 1
 
     def test_share_created_extra_has_label(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             client.post(
                 "/share",
                 json={"label": "my-label", "content": []},
                 headers={"X-Session-ID": "test-session"},
             )
-        call = next(c for c in mock_debug.call_args_list if c[0][0] == "SHARE_CREATED")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_CREATED")
         assert call.kwargs["extra"]["label"] == "my-label"
 
     def test_share_created_extra_has_share_id(self):
         client = get_client()
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+        with mock.patch.object(shell_app.log, "info") as mock_info:
             resp = client.post(
                 "/share",
                 json={"label": "lbl", "content": []},
                 headers={"X-Session-ID": "test-session"},
             )
         share_id = json.loads(resp.data)["id"]
-        call = next(c for c in mock_debug.call_args_list if c[0][0] == "SHARE_CREATED")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_CREATED")
         assert call.kwargs["extra"]["share_id"] == share_id
 
 
@@ -827,3 +831,317 @@ class TestKillFailedEvent:
                     client.post("/kill", json={"run_id": "test-run-xyz"})
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "KILL_FAILED")
         assert call.kwargs["extra"]["run_id"] == "test-run-xyz"
+
+
+# ── SHARE_VIEWED ──────────────────────────────────────────────────────────────
+
+class TestShareViewedEvent:
+    """SHARE_VIEWED is emitted at INFO when a snapshot permalink is retrieved."""
+
+    def _create_share(self, client):
+        resp = client.post(
+            "/share",
+            json={"label": "test-snap", "content": []},
+            headers={"X-Session-ID": "sv-session"},
+        )
+        return json.loads(resp.data)["id"]
+
+    def test_share_viewed_emits_info(self):
+        client = get_client()
+        share_id = self._create_share(client)
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            client.get(f"/share/{share_id}")
+        viewed = [c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED"]
+        assert len(viewed) == 1
+
+    def test_share_viewed_extra_has_share_id(self):
+        client = get_client()
+        share_id = self._create_share(client)
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            client.get(f"/share/{share_id}")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED")
+        assert call.kwargs["extra"]["share_id"] == share_id
+
+    def test_share_viewed_extra_has_label(self):
+        client = get_client()
+        share_id = self._create_share(client)
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            client.get(f"/share/{share_id}")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED")
+        assert call.kwargs["extra"]["label"] == "test-snap"
+
+    def test_share_viewed_not_emitted_for_missing_share(self):
+        client = get_client()
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            client.get("/share/nonexistent-id")
+        viewed = [c for c in mock_info.call_args_list if c[0][0] == "SHARE_VIEWED"]
+        assert len(viewed) == 0
+
+
+# ── RUN_VIEWED ────────────────────────────────────────────────────────────────
+
+class TestRunViewedEvent:
+    """RUN_VIEWED is emitted at INFO when a run permalink is retrieved."""
+
+    def _insert_run(self, run_id, command):
+        with shell_app.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, "rv-session", command, "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
+            )
+            conn.commit()
+
+    def _delete_run(self, run_id):
+        with shell_app.db_connect() as conn:
+            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            conn.commit()
+
+    def test_run_viewed_emits_info(self):
+        run_id = "rv-test-run-1"
+        self._insert_run(run_id, "ping test")
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get(f"/history/{run_id}")
+            viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
+            assert len(viewed) == 1
+        finally:
+            self._delete_run(run_id)
+
+    def test_run_viewed_extra_has_run_id(self):
+        run_id = "rv-test-run-2"
+        self._insert_run(run_id, "ping test")
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get(f"/history/{run_id}")
+            call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
+            assert call.kwargs["extra"]["run_id"] == run_id
+        finally:
+            self._delete_run(run_id)
+
+    def test_run_viewed_extra_has_cmd(self):
+        run_id = "rv-test-run-3"
+        self._insert_run(run_id, "nmap 8.8.8.8")
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get(f"/history/{run_id}")
+            call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED")
+            assert call.kwargs["extra"]["cmd"] == "nmap 8.8.8.8"
+        finally:
+            self._delete_run(run_id)
+
+    def test_run_viewed_not_emitted_for_missing_run(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/history/nonexistent-run-id")
+        viewed = [c for c in mock_info.call_args_list if c[0][0] == "RUN_VIEWED"]
+        assert len(viewed) == 0
+
+
+# ── HISTORY_DELETED ───────────────────────────────────────────────────────────
+
+class TestHistoryDeletedEvent:
+    """HISTORY_DELETED is emitted at INFO when a run is deleted from history."""
+
+    def _insert_run(self, run_id, session_id="hd-session"):
+        with shell_app.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, session_id, "ping test", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
+            )
+            conn.commit()
+
+    def test_history_deleted_emits_info(self):
+        run_id = "hd-test-run-1"
+        self._insert_run(run_id)
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": "hd-session"})
+        deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
+        assert len(deleted) == 1
+
+    def test_history_deleted_extra_has_run_id(self):
+        run_id = "hd-test-run-2"
+        self._insert_run(run_id)
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": "hd-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED")
+        assert call.kwargs["extra"]["run_id"] == run_id
+
+    def test_history_deleted_not_emitted_for_wrong_session(self):
+        run_id = "hd-test-run-3"
+        self._insert_run(run_id, session_id="owner-session")
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().delete(f"/history/{run_id}", headers={"X-Session-ID": "other-session"})
+        deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
+        assert len(deleted) == 0
+        # clean up
+        with shell_app.db_connect() as conn:
+            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            conn.commit()
+
+
+# ── HISTORY_CLEARED ───────────────────────────────────────────────────────────
+
+class TestHistoryClearedEvent:
+    """HISTORY_CLEARED is emitted at INFO when all history for a session is deleted."""
+
+    def test_history_cleared_emits_info(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().delete("/history", headers={"X-Session-ID": "hc-session"})
+        cleared = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED"]
+        assert len(cleared) == 1
+
+    def test_history_cleared_extra_has_count(self):
+        # Insert two runs for this session then clear
+        session = "hc-count-session"
+        with shell_app.db_connect() as conn:
+            for i in range(2):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (f"hc-run-{i}", session, "ping test", "2026-01-01T00:00:00",
+                     "2026-01-01T00:00:01", 0, "[]"),
+                )
+            conn.commit()
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().delete("/history", headers={"X-Session-ID": session})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED")
+        assert call.kwargs["extra"]["count"] == 2
+
+    def test_history_cleared_count_is_zero_for_empty_session(self):
+        # Clearing a session with no history still emits HISTORY_CLEARED with count=0
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().delete("/history", headers={"X-Session-ID": "hc-empty-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_CLEARED")
+        assert call.kwargs["extra"]["count"] == 0
+
+
+# ── PAGE_LOAD ─────────────────────────────────────────────────────────────────
+
+class TestPageLoadEvent:
+    """PAGE_LOAD is emitted at INFO on every GET /."""
+
+    def test_page_load_emits_info(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/")
+        loaded = [c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD"]
+        assert len(loaded) == 1
+
+    def test_page_load_extra_has_ip(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/", headers={"X-Forwarded-For": "9.9.9.9"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
+        assert call.kwargs["extra"]["ip"] == "9.9.9.9"
+
+
+# ── RUN_NOT_FOUND / SHARE_NOT_FOUND ──────────────────────────────────────────
+
+class TestNotFoundEvents:
+    """RUN_NOT_FOUND and SHARE_NOT_FOUND are emitted at WARN for missing permalinks."""
+
+    def test_run_not_found_emits_warning(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            get_client().get("/history/no-such-run")
+        calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
+        assert len(calls) == 1
+
+    def test_run_not_found_extra_has_run_id(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            get_client().get("/history/missing-run-id")
+        call = next(c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND")
+        assert call.kwargs["extra"]["run_id"] == "missing-run-id"
+
+    def test_run_not_found_not_emitted_when_run_exists(self):
+        run_id = "pnf-test-run"
+        with shell_app.db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, "pnf-session", "ping test", "2026-01-01T00:00:00",
+                 "2026-01-01T00:00:01", 0, "[]"),
+            )
+            conn.commit()
+        try:
+            with mock.patch.object(shell_app.log, "warning") as mock_warn:
+                get_client().get(f"/history/{run_id}")
+            calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
+            assert len(calls) == 0
+        finally:
+            with shell_app.db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_share_not_found_emits_warning(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            get_client().get("/share/no-such-share")
+        calls = [c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND"]
+        assert len(calls) == 1
+
+    def test_share_not_found_extra_has_share_id(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            get_client().get("/share/missing-share-id")
+        call = next(c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND")
+        assert call.kwargs["extra"]["share_id"] == "missing-share-id"
+
+    def test_share_not_found_not_emitted_when_share_exists(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "exists", "content": []},
+            headers={"X-Session-ID": "pnf-share-session"},
+        )
+        share_id = json.loads(resp.data)["id"]
+        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            client.get(f"/share/{share_id}")
+        calls = [c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND"]
+        assert len(calls) == 0
+
+
+# ── RUN_SPAWN_ERROR ────────────────────────────────────────────────────────────
+
+class TestRunSpawnErrorEvent:
+    """RUN_SPAWN_ERROR is emitted at ERROR when subprocess.Popen raises."""
+
+    # RFC 5737 TEST-NET-3 — never routed, gives this class its own rate-limit bucket
+    _IP = "203.0.113.99"
+
+    def _post_run(self, client, cmd):
+        return client.post(
+            "/run",
+            json={"command": cmd},
+            headers={"X-Forwarded-For": self._IP, "X-Session-ID": "rse-session"},
+        )
+
+    def test_spawn_error_returns_500(self):
+        client = get_client()
+        with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+            with mock.patch("subprocess.Popen", side_effect=OSError("spawn failed")):
+                resp = self._post_run(client, "ping 8.8.8.8")
+        assert resp.status_code == 500
+
+    def test_spawn_error_emits_error_log(self):
+        client = get_client()
+        with mock.patch.object(shell_app.log, "error") as mock_error:
+            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+                with mock.patch("subprocess.Popen", side_effect=OSError("spawn failed")):
+                    self._post_run(client, "ping 8.8.8.8")
+        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR"]
+        assert len(calls) == 1
+
+    def test_spawn_error_extra_has_ip(self):
+        client = get_client()
+        with mock.patch.object(shell_app.log, "error") as mock_error:
+            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+                with mock.patch("subprocess.Popen", side_effect=OSError("spawn failed")):
+                    self._post_run(client, "ping 8.8.8.8")
+        call = next(c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR")
+        assert "ip" in call.kwargs["extra"]
+
+    def test_spawn_error_extra_has_cmd(self):
+        client = get_client()
+        with mock.patch.object(shell_app.log, "error") as mock_error:
+            with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+                with mock.patch("subprocess.Popen", side_effect=OSError("spawn failed")):
+                    self._post_run(client, "ping 8.8.8.8")
+        call = next(c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR")
+        assert call.kwargs["extra"]["cmd"] == "ping 8.8.8.8"
