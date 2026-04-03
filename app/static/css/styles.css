@@ -540,19 +540,19 @@ body.light body::before { opacity: 0; }
   padding: 0 14px;
   background: #0a0a0a;
   border-bottom: 1px solid var(--border);
-  overflow-x: auto;
+  overflow-x: scroll;
   scrollbar-width: thin;
-  scrollbar-color: #555 rgba(255,255,255,0.04);
+  scrollbar-color: #555 rgba(255,255,255,0.06);
   flex: 1;
   min-width: 0;
 }
 .tabs-bar::-webkit-scrollbar { height: 5px; }
-.tabs-bar::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); border-radius: 2px; }
+.tabs-bar::-webkit-scrollbar-track { background: rgba(255,255,255,0.06); border-radius: 2px; }
 .tabs-bar::-webkit-scrollbar-thumb { background: #555; border-radius: 2px; }
 .tabs-bar::-webkit-scrollbar-thumb:hover { background: #777; }
 
-body.light .tabs-bar { background: #e0e0e0; scrollbar-color: #999 rgba(0,0,0,0.06); }
-body.light .tabs-bar::-webkit-scrollbar-track { background: rgba(0,0,0,0.06); }
+body.light .tabs-bar { background: #e0e0e0; scrollbar-color: #999 rgba(0,0,0,0.08); }
+body.light .tabs-bar::-webkit-scrollbar-track { background: rgba(0,0,0,0.08); }
 body.light .tabs-bar::-webkit-scrollbar-thumb { background: #999; }
 body.light .tabs-bar::-webkit-scrollbar-thumb:hover { background: #777; }
 
