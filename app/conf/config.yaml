@@ -43,7 +43,7 @@ log_level: INFO
 # text — human-readable key=value lines, suitable for Docker stdout / local dev
 # gelf — newline-delimited GELF 1.1 JSON for Graylog / GELF-compatible back-ends
 #         short_message contains the event name; all context is in _-prefixed fields
-log_format: text
+log_format: gelf
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
