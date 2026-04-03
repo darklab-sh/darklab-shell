@@ -197,7 +197,7 @@ External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 for ANSI-to-HTML 
 
 Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
 
-- `command` — the last command run in this tab; restored to the input bar when the tab is activated so the user can re-run or edit it without copying from the output
+- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; restored to the input bar when the tab is activated so the user can re-run or edit it without copying from the output. If a history entry is clicked and an existing tab already has a matching `command`, that tab is activated instead of opening a duplicate
 - `runId` — the UUID from the SSE `started` message, used for kill requests
 - `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
 - `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export

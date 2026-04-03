@@ -137,15 +137,27 @@ function refreshHistoryPanel() {
           <button class="history-action-btn" data-action="delete">delete</button>
         </div>`;
 
-      // Click anywhere on the entry (except buttons) to load into a new tab
+      // Click anywhere on the entry (except buttons) to load into a new tab,
+      // or switch to the existing tab if this command is already loaded there.
       entry.addEventListener('click', e => {
         if (e.target.closest('.history-action-btn')) return;
+
+        // If a tab already has this command, switch to it instead of duplicating
+        const existing = tabs.find(t => t.command === run.command);
+        if (existing) {
+          activateTab(existing.id);
+          historyPanel.classList.remove('open');
+          return;
+        }
+
         const cmdEl = entry.querySelector('.history-entry-cmd');
         cmdEl.textContent = 'loading…';
         apiFetch(`/history/${run.id}?json`)
           .then(r => r.json())
           .then(fullRun => {
             const newId = createTab(fullRun.command);
+            const t = tabs.find(t => t.id === newId);
+            if (t) t.command = fullRun.command;
             appendLine(`$ ${fullRun.command}`, '', newId);
             appendLine('', '', newId);
             (fullRun.output || []).forEach(line => appendLine(line, '', newId));

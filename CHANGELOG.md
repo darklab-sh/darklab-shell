@@ -38,6 +38,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Smart client IP detection** — `get_client_ip()` now validates the `X-Forwarded-For` value against a regex before trusting it; invalid or absent values fall back to the direct connection IP, making the app work correctly with or without a reverse proxy and without any config setting
 
 ### Fixed
+- `history.js` — loading a run from the history drawer now sets `tab.command` on the newly created tab, so switching away and back correctly restores the command in the input bar (previously only tabs created by running a command directly had their command recalled)
+- `history.js` — clicking a history entry whose command is already loaded in another tab now switches to that existing tab instead of opening a duplicate; the history panel closes as normal
 - `process.py` — `pid_pop` now wraps the Redis `getdel` return value with `str()` before passing to `int()`, resolving a Pylance type error caused by `ResponseT` being assignable to `Awaitable[Any]`
 - `tests/test_utils.py` — added `assert result is not None` before `len()` and index access on `load_allowed_commands_grouped()` results to satisfy Pylance's type narrowing (`list | None` is not `Sized`)
 - Logging timing fix — `configure_logging(CFG)` is now called before `from process import ...` so Redis connection log records emitted at module-import time are formatted correctly; previously they fired before `logging.basicConfig` and were silently dropped by Python's lastResort handler
