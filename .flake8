@@ -7,10 +7,10 @@ max-line-length = 130
 extend-ignore = E302, E305, E221, E272, E127
 per-file-ignores =
     # E402: sys.path manipulation must precede app import in all test files
-    tests/test_validation.py: E402
-    tests/test_utils.py: E402
-    tests/test_routes.py: E402
-    tests/test_logging.py: E402
+    tests/py/test_validation.py: E402
+    tests/py/test_utils.py: E402
+    tests/py/test_routes.py: E402
+    tests/py/test_logging.py: E402
     # E402: configure_logging(CFG) must run before local imports that connect
     #       to Redis at module-import time (process.py), so those imports follow it
     app/app.py: E402

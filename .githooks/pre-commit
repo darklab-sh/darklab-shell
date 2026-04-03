@@ -32,8 +32,8 @@ run_check() {
     fi
 }
 
-run_check "flake8"    "$PYTHON" -m flake8 app/ tests/
-run_check "pytest"    "$PYTHON" -m pytest tests/ -q --tb=short
+run_check "flake8"    "$PYTHON" -m flake8 app/ tests/py/
+run_check "pytest"    "$PYTHON" -m pytest tests/py/ -q --tb=short
 run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt
 
 # JS unit tests (Vitest) — run if npm is available and node_modules exist

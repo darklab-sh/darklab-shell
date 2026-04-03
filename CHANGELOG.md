@@ -49,7 +49,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `history.js` — deleting a history entry now removes the command from the starred set and chip bar; previously the star persisted in localStorage so the command would reappear as a favourite the next time it was run
 - `history.js` — deleting all history now clears the entire starred set and chip bar; deleting non-favourites removes only the unstarred commands from the chip bar while leaving starred chips intact
 - `process.py` — `pid_pop` now wraps the Redis `getdel` return value with `str()` before passing to `int()`, resolving a Pylance type error caused by `ResponseT` being assignable to `Awaitable[Any]`
-- `tests/test_utils.py` — added `assert result is not None` before `len()` and index access on `load_allowed_commands_grouped()` results to satisfy Pylance's type narrowing (`list | None` is not `Sized`)
+- `tests/py/test_utils.py` — added `assert result is not None` before `len()` and index access on `load_allowed_commands_grouped()` results to satisfy Pylance's type narrowing (`list | None` is not `Sized`)
 - Logging timing fix — `configure_logging(CFG)` is now called before `from process import ...` so Redis connection log records emitted at module-import time are formatted correctly; previously they fired before `logging.basicConfig` and were silently dropped by Python's lastResort handler
 - `commands.py` — `split_chained_commands()` now uses the pre-compiled `SHELL_CHAIN_RE` object instead of duplicating the regex pattern string
 

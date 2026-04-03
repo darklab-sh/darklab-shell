@@ -20,7 +20,7 @@ before_script:
 test-py-pytest:
   stage: test
   script:
-    - pytest tests/ -v
+    - pytest tests/py/ -v
 
 test-js-unit:
   stage: test
@@ -54,7 +54,7 @@ test-js-e2e:
 lint:
   stage: lint
   script:
-    - flake8 app/ tests/
+    - flake8 app/ tests/py/
     - bandit -r app/ -ll -q
 
 audit:
@@ -72,5 +72,17 @@ docker-build:
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_BUILDKIT: "1"
   before_script: []
+  rules:
+    # Always build on the main branch so there is always a verified image
+    - if: $CI_COMMIT_BRANCH == "main"
+    # On other branches, only build when image-affecting files change
+    - changes:
+        - Dockerfile
+        - app/requirements.txt
+        - .dockerignore
+        - docker-compose*.yml
+    # Allow a manual trigger on any branch for one-off verification
+    - when: manual
+      allow_failure: true
   script:
     - docker build -t shell.darklab.sh:$CI_COMMIT_SHA .

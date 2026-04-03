@@ -50,11 +50,13 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 ├── playwright.config.js        # Playwright e2e test config (starts Flask on port 5001)
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
 ├── tests/
-│   ├── conftest.py             # pytest configuration (sets working directory to app/)
-│   ├── test_validation.py      # Tests for command validation and rewrite logic
-│   ├── test_utils.py           # Tests for utility functions (split_chained_commands, load_allowed_commands,
-│   │                           #   load_faq, path blocking edge cases, pid map, _format_retention, rewrites)
-│   ├── test_routes.py          # Flask integration tests via test client (all HTTP routes)
+│   ├── py/                     # Python / pytest tests
+│   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
+│   │   ├── test_validation.py  # Tests for command validation and rewrite logic
+│   │   ├── test_utils.py       # Tests for utility functions (split_chained_commands, load_allowed_commands,
+│   │   │                       #   load_faq, path blocking edge cases, pid map, _format_retention, rewrites)
+│   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
+│   │   └── test_logging.py     # Structured logging: formatters, configure_logging, all log events
 │   └── js/
 │       ├── unit/               # Vitest unit tests for pure JS functions
 │       │   ├── helpers/
@@ -685,7 +687,7 @@ docker compose logs -f
 **Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging (323 tests):
 
 ```bash
-python3 -m pytest tests/ -v
+python3 -m pytest tests/py/ -v
 ```
 
 Tests are split across four files: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views), and structured logging (`_extra_fields`, text/GELF formatters, `configure_logging`, and all log events emitted by the application). No running server or Docker required — file I/O and Redis are mocked where needed.
@@ -710,7 +712,7 @@ npm run test:e2e
 
 ```bash
 # Style and syntax
-flake8 app/app.py tests/
+flake8 app/app.py tests/py/
 
 # Security scan (medium severity and above)
 bandit -r app/app.py -ll -q
@@ -719,7 +721,7 @@ bandit -r app/app.py -ll -q
 pip-audit -r app/requirements.txt -r requirements-dev.txt
 ```
 
-These checks plus a Docker image build verification run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`. The `test` stage runs three parallel jobs: `test-py-pytest` (pytest), `test-js-unit` (Vitest, Node 22 image), and `test-js-e2e` (Playwright, Python 3.12 image with Node and Chromium installed).
+These checks run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`. The `test` stage runs three parallel jobs: `test-py-pytest` (pytest), `test-js-unit` (Vitest, Node 22 image), and `test-js-e2e` (Playwright, Python 3.12 image with Node and Chromium installed). The `build` stage runs a Docker image build on every push to `main`, on any branch when `Dockerfile`, `app/requirements.txt`, `.dockerignore`, or `docker-compose*.yml` change, and is available as a manual trigger otherwise.
 
 ---
 

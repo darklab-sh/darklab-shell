@@ -282,7 +282,7 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 ## Test Suite
 
-Tests live in `tests/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` before import so `app.py` can find its relative-path assets (`index.html`, etc.). `test_validation.py` imports `app.py` directly via `sys.path.insert`.
+Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`index.html`, etc.) and app modules are importable. `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
 ### Python tests — four files, 323 tests total
 
