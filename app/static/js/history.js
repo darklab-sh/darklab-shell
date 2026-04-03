@@ -157,7 +157,11 @@ function refreshHistoryPanel() {
           .then(fullRun => {
             const newId = createTab(fullRun.command);
             const t = tabs.find(t => t.id === newId);
-            if (t) t.command = fullRun.command;
+            if (t) {
+              t.command = fullRun.command;
+              cmdInput.value = t.command;
+              cmdInput.dispatchEvent(new Event('input'));
+            }
             appendLine(`$ ${fullRun.command}`, '', newId);
             appendLine('', '', newId);
             (fullRun.output || []).forEach(line => appendLine(line, '', newId));
