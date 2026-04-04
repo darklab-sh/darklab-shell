@@ -8,6 +8,12 @@ This document captures the key architectural decisions, bugs encountered, and re
 
 A web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, real-time SSE streaming.
 
+## Table of Contents
+- [Project Overview](#project-overview)
+- [Key Architectural Decisions](#key-architectural-decisions)
+- [Project Tests](#project-tests)
+- [Testing Strategy](#testing-strategy)
+
 The Python backend is split into focused modules with acyclic dependencies:
 
 ```
@@ -284,7 +290,7 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`index.html`, etc.) and app modules are importable. `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
-### Python tests — four files, 323 tests total
+### Python tests — four files, 362 tests total
 
 - **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `conf/allowed_commands.txt` file.
 - **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_allowed_commands_grouped` (category headers, deny entry exclusion), `load_faq`, `load_welcome` (cmd/out parsing, rstrip behaviour), `load_autocomplete` (comment/blank filtering), path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity and idempotency, `pid_register`/`pid_pop` in-process mode, `_format_retention`, `_expiry_note` (active/today/expired/invalid date branches), `_permalink_error_page` (status, body, retention message), database init and retention pruning (tables created, idempotent re-init, old records pruned, recent records kept).
@@ -295,7 +301,7 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 **Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
 
-### JS unit tests (Vitest) — 38 tests
+### JS unit tests (Vitest) — 72 tests
 
 The browser JS files share a single global scope (by design — no ES modules, no bundler). This makes tree-shaking impossible but the functions themselves can still be unit-tested by loading each file's source into an isolated execution context via `new Function(src + '\nreturn {fn1, fn2}')(localStorage, APP_CONFIG)`.
 
@@ -309,29 +315,36 @@ The browser JS files share a single global scope (by design — no ES modules, n
 
 `fromScript` returns `{ ...fns, _storage }` so tests that need to pre-populate or inspect localStorage can do so via `_storage.setItem(...)` / `_storage.getItem(...)` instead of the jsdom global.
 
-**What is tested (38 tests across 3 files):**
-- `utils.test.js` (21 tests) — `escapeHtml` (plain text, `&`, `<`, `>`, multi-entity, empty string), `escapeRegex` (plain text, dot, star, parens, brackets, RegExp roundtrip), `renderMotd` (plain text, `**bold**`, `` `code` ``, `[text](https://url)`, http links, non-http scheme guard, `\n` → `<br>`, XSS prevention via escapeHtml-first ordering, multi-construct string)
-- `runner.test.js` (6 tests) — `_formatElapsed` (0s, sub-minute, exactly 60s, multi-minute, exactly 1h, h+m+s)
-- `history.test.js` (11 tests) — `_getStarred` (empty, populated, invalid JSON, empty array), `_saveStarred` (array content, empty set, roundtrip), `_toggleStar` (add, remove, other entries unaffected, double-toggle)
+**What is tested (72 tests across 10 files):**
+- `utils.test.js` — HTML escaping, regex escaping, and MOTD rendering helpers
+- `runner.test.js` — elapsed formatting plus kill/status helpers
+- `history.test.js` — starred-command localStorage helpers
+- `session.test.js` — anonymous session ID persistence and `apiFetch()` header injection
+- `autocomplete.test.js` — dropdown filtering, highlighting, acceptance, and dismissal
+- `tabs.test.js` — tab limits, rename, command recall, export guards, and last-tab reset
+- `welcome.test.js` — welcome animation cancellation and completion
+- `app.test.js` — startup theme and timestamp-mode bootstrap behavior
+- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers
 
 Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
 
-### JS e2e tests (Playwright) — 42 tests
+### JS e2e tests (Playwright) — 51 tests
 
 Playwright tests exercise the full UI against a real Flask server. `playwright.config.js` starts Flask on port 5001 via `webServer` using the `.venv` Python interpreter run from the `app/` directory (matching `conftest.py`'s `chdir` logic).
 
-**What is tested (42 tests across 10 files):**
-- `commands.spec.js` (3 tests) — output appears after running a command; status pill shows EXIT 0 and `.exit-ok` line; shell-operator commands show `[denied]` and ERROR status
-- `history.spec.js` (4 tests) — loading a run from the history drawer populates the command input; clicking a history entry whose command is already open switches to that tab (no duplicate); deleting a starred entry removes it from the chip bar; clearing all history removes all chips including starred ones
-- `kill.spec.js` (2 tests) — kill button stops a running `ping` command and status becomes KILLED; kill button is hidden after the command is killed
-- `mobile.spec.js` (4 tests) — hamburger visible and desktop header buttons hidden at 375 px; clicking hamburger opens `#mobile-menu`; menu contains history and theme actions; clicking outside closes the menu
-- `output.spec.js` (6 tests) — copy button shows the "Copied" toast; clear button empties the output; status reverts to IDLE after clear; save-txt triggers a `.txt` download; save-html triggers a `.html` download; downloaded HTML contains the command text
-- `rate-limit.spec.js` (1 test) — 6 simultaneous POST `/run` requests yield at least one 429
-- `search.spec.js` (5 tests) — search bar hidden by default, opens on toggle; typing highlights `mark.search-hl` elements; counter shows `X / Y`; next/prev navigate matches; clearing input removes all highlights
-- `share.spec.js` (3 tests) — permalink button shows the "copied" toast; navigating to the share URL renders the command; fresh tab shows "No output" toast
-- `tabs.spec.js` (8 tests) — new-tab button disabled at `APP_CONFIG.max_tabs`; double-click renames a tab; Escape cancels rename; input is empty on initial tab; switching tab restores its last-run command; new tab starts empty
-- `timestamps.spec.js` (3 tests) — ts-btn cycles elapsed → clock → off; active class set when enabled; output lines carry `data-ts-c` (always) and `data-ts-e` (server-output lines only)
-- `ui.spec.js` (5 tests) — theme-btn toggles `body.light`; FAQ overlay opens; FAQ closes via button; FAQ closes via backdrop click
+**What is tested (51 tests across 12 files):**
+- `commands.spec.js` — command execution, denial, and exit-status rendering
+- `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
+- `kill.spec.js` — kill confirmation and killed-state UI
+- `mobile.spec.js` — hamburger/menu visibility and dismissal
+- `output.spec.js` — copy, clear, save .txt/.html, and download fidelity
+- `rate-limit.spec.js` — per-session rate limiting
+- `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
+- `share.spec.js` — snapshot permalinks plus single-run history permalinks and JSON/HTML views
+- `tabs.spec.js` — max-tabs, rename, rename persistence, command recall, and last-tab reset behavior
+- `timestamps.spec.js` — timestamp mode cycling and output metadata
+- `ui.spec.js` — theme toggling and FAQ modal behavior
+- `autocomplete.spec.js` / `welcome.spec.js` — command suggestion interaction and welcome-animation interruption
 
 **Implementation notes learned during setup:**
 - `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
@@ -340,6 +353,11 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - Test commands use `curl http://localhost:5001/health` and `curl http://localhost:5001/config`. These are in the allowlist, complete in under 50 ms, always exit 0, and create real history entries. `echo` is not in the allowlist and cannot be used.
 - Search tests look for `localhost` (from the echoed command line) rather than for text in the actual command output; the echo line is always rendered before the run starts, making the assertion immune to rate-limit contamination from adjacent tests.
 - `data-ts-e` (elapsed) is only set on lines appended while a run is active; the initial command echo line has no elapsed value and must not be used to assert for that attribute.
+
+### Testing Strategy
+- The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. See `README.md:687‑712` for the latest command fragments.
+- Vitest explicitly exercises `session.js`, `autocomplete.js`, and the new `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
+- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome-animation cancellation, delete-non-favourites, tab rename persistence, and single-run permalink JSON/HTML exports.
 
 Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
 

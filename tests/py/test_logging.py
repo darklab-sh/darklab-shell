@@ -18,12 +18,9 @@ Run with: pytest tests/ (from the repo root)
 import io
 import json
 import logging
-import os
 import sqlite3
-import sys
+import uuid
 import unittest.mock as mock
-
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 
 import app as shell_app
 import database as db_module
@@ -46,10 +43,39 @@ def _emit(formatter, level, msg, extra=None):
     return buf.getvalue().strip()
 
 
-def get_client():
+def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
     shell_app.app.config["RATELIMIT_ENABLED"] = False
-    return shell_app.app.test_client()
+    client = shell_app.app.test_client()
+    if use_forwarded_for:
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+    return client
+
+
+class _FakeStdout:
+    def __init__(self, lines):
+        self._lines = list(lines)
+
+    def readline(self):
+        return self._lines.pop(0) if self._lines else ""
+
+    def close(self):
+        pass
+
+
+class _FakeProc:
+    def __init__(self, lines=None, pid=4321, returncode=0):
+        self.pid = pid
+        self.returncode = returncode
+        self.stdout = _FakeStdout(lines or [])
+
+    def wait(self):
+        return self.returncode
+
+    def poll(self):
+        if getattr(self.stdout, "_lines", []):
+            return None
+        return self.returncode
 
 
 # ── _extra_fields ─────────────────────────────────────────────────────────────
@@ -571,6 +597,126 @@ class TestCmdRewriteEvent:
                     self._post_run(client, "ping google.com")
         rewrite_calls = [c for c in mock_info.call_args_list if c[0][0] == "CMD_REWRITE"]
         assert len(rewrite_calls) == 0
+
+
+class TestRunLifecycleEvents:
+    def test_run_start_emits_info(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["hello\n", ""])
+
+        with mock.patch.object(shell_app.log, "info") as mock_info, \
+             mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("app.pid_register"), \
+             mock.patch("app.pid_pop"), \
+             mock.patch("app.select.select", side_effect=[
+                 ([fake_proc.stdout], [], []),
+                 ([fake_proc.stdout], [], []),
+             ]):
+            resp = client.post("/run", json={"command": "echo hello"})
+            _ = resp.get_data(as_text=True)
+
+        calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_START"]
+        assert len(calls) == 1
+
+    def test_run_end_emits_info_with_exit_code(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["hello\n", ""], returncode=7)
+
+        with mock.patch.object(shell_app.log, "info") as mock_info, \
+             mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("app.pid_register"), \
+             mock.patch("app.pid_pop"), \
+             mock.patch("app.select.select", side_effect=[
+                 ([fake_proc.stdout], [], []),
+                 ([fake_proc.stdout], [], []),
+             ]):
+            resp = client.post("/run", json={"command": "echo hello"})
+            _ = resp.get_data(as_text=True)
+
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_END")
+        assert call.kwargs["extra"]["exit_code"] == 7
+
+    def test_run_kill_emits_info(self):
+        client = get_client()
+
+        with mock.patch.object(shell_app.log, "info") as mock_info, \
+             mock.patch("app.pid_pop", return_value=1234), \
+             mock.patch("app.os.getpgid", return_value=4321), \
+             mock.patch("app.os.killpg"):
+            resp = client.post("/kill", json={"run_id": "run-123"})
+
+        assert resp.status_code == 200
+        calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_KILL"]
+        assert len(calls) == 1
+
+    def test_kill_miss_emits_debug(self):
+        client = get_client()
+
+        with mock.patch.object(shell_app.log, "debug") as mock_debug, \
+             mock.patch("app.pid_pop", return_value=None):
+            resp = client.post("/kill", json={"run_id": "missing-run"})
+
+        assert resp.status_code == 404
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "KILL_MISS"]
+        assert len(calls) == 1
+
+
+class TestRunFailureEvents:
+    def test_cmd_timeout_emits_warning(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["still running\n"], returncode=-15)
+
+        with mock.patch.object(shell_app.log, "warning") as mock_warn, \
+             mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("app.pid_register"), \
+             mock.patch("app.pid_pop"), \
+             mock.patch("app.os.getpgid", return_value=4321), \
+             mock.patch("app.os.killpg"), \
+             mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": -1}):
+            resp = client.post("/run", json={"command": "sleep forever"})
+            _ = resp.get_data(as_text=True)
+
+        calls = [c for c in mock_warn.call_args_list if c[0][0] == "CMD_TIMEOUT"]
+        assert len(calls) == 1
+
+    def test_run_saved_error_emits_error(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["saved line\n", ""])
+
+        with mock.patch.object(shell_app.log, "error") as mock_error, \
+             mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("app.pid_register"), \
+             mock.patch("app.pid_pop"), \
+             mock.patch("app.select.select", side_effect=[
+                 ([fake_proc.stdout], [], []),
+                 ([fake_proc.stdout], [], []),
+             ]), \
+             mock.patch("app.db_connect", side_effect=Exception("db write failed")):
+            resp = client.post("/run", json={"command": "echo saved"})
+            _ = resp.get_data(as_text=True)
+
+        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SAVED_ERROR"]
+        assert len(calls) == 1
+
+    def test_run_stream_error_emits_error(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["hello\n"])
+
+        with mock.patch.object(shell_app.log, "error") as mock_error, \
+             mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("app.pid_register"), \
+             mock.patch("app.pid_pop"), \
+             mock.patch("app.select.select", side_effect=RuntimeError("stream exploded")):
+            resp = client.post("/run", json={"command": "echo boom"})
+            _ = resp.get_data(as_text=True)
+
+        calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_STREAM_ERROR"]
+        assert len(calls) == 1
 
 
 class TestRequestResponseDebugEvents:

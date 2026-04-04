@@ -11,7 +11,6 @@ Tests for pure utility functions across the app modules:
 Run with: pytest tests/ (from the repo root)
 """
 
-import sys
 import os
 import sqlite3
 import tempfile
@@ -19,7 +18,6 @@ import textwrap
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import process
 import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
@@ -86,8 +84,8 @@ class TestSplitChainedCommands:
 # ── load_allowed_commands ─────────────────────────────────────────────────────
 
 class TestLoadAllowedCommands:
-    def _write(self, content, tmp_path):
-        path = os.path.join(tmp_path, "allowed_commands.txt")
+    def _write(self, content, tmp_dir):
+        path = os.path.join(tmp_dir, "allowed_commands.txt")
         with open(path, "w") as f:
             f.write(textwrap.dedent(content))
         return path
@@ -387,7 +385,7 @@ class TestFormatRetention:
 
 # ── load_welcome ──────────────────────────────────────────────────────────────
 
-class TestLoadWelcome:
+class TestWelcomeLoading:
     def _write(self, content):
         f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
         f.write(content)
@@ -451,7 +449,7 @@ class TestLoadWelcome:
 
 # ── load_autocomplete ─────────────────────────────────────────────────────────
 
-class TestLoadAutocomplete:
+class TestAutocompleteLoading:
     def test_missing_file_returns_empty_list(self):
         with mock.patch("commands.AUTOCOMPLETE_FILE", "/nonexistent/auto_complete.txt"):
             result = load_autocomplete()
@@ -493,9 +491,9 @@ class TestLoadAutocomplete:
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────
 
-class TestLoadAllowedCommandsGrouped:
-    def _write(self, content, tmp_path):
-        path = os.path.join(tmp_path, "allowed_commands.txt")
+class TestAllowedCommandsGroupingBasics:
+    def _write(self, content, tmp_dir):
+        path = os.path.join(tmp_dir, "allowed_commands.txt")
         with open(path, "w") as f:
             f.write(textwrap.dedent(content))
         return path

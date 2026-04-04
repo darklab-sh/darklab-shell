@@ -86,4 +86,24 @@ test.describe('history drawer', () => {
     // All chips should be gone
     await expect(page.locator('.hist-chip')).toHaveCount(0)
   })
+
+  test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
+    await runCommand(page, CMD_A)
+    await runCommand(page, CMD_B)
+
+    await openHistoryWithEntries(page)
+    const entries = page.locator('.history-entry')
+    await entries.nth(0).locator('[data-action="star"]').click()
+    await closeHistory(page)
+
+    await openHistory(page)
+    await page.locator('#hist-clear-all-btn').click()
+    await expect(page.locator('#hist-del-nonfav')).toBeVisible()
+    await page.locator('#hist-del-nonfav').click()
+
+    await expect(page.locator('.hist-chip.starred')).toHaveCount(1)
+    await expect(page.locator('.hist-chip')).toHaveCount(1)
+    await expect(page.locator('.history-entry')).toHaveCount(1)
+    await expect(page.locator('.history-entry.starred')).toHaveCount(1)
+  })
 })

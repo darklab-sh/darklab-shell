@@ -56,6 +56,21 @@ test.describe('tab renaming', () => {
 
     await expect(label).toHaveText(original)
   })
+
+  test('renamed labels stay in place after running another command', async ({ page }) => {
+    const label = page.locator('.tab').first().locator('.tab-label')
+
+    await label.dblclick()
+    const input = page.locator('.tab-rename-input')
+    await input.waitFor({ state: 'visible' })
+    await input.fill('ops-tab')
+    await input.press('Enter')
+    await expect(label).toHaveText('ops-tab')
+
+    await runCommand(page, CMD)
+
+    await expect(label).toHaveText('ops-tab')
+  })
 })
 
 test.describe('tab command recall', () => {
@@ -91,5 +106,24 @@ test.describe('tab command recall', () => {
     await runCommand(page, CMD)
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
+  })
+})
+
+test.describe('tab closing', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('closing the only tab resets it instead of removing it', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    await page.locator('.tab').first().locator('.tab-close').click()
+
+    await expect(page.locator('.tab')).toHaveCount(1)
+    await expect(page.locator('.tab .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('.tab-panel .output')).toBeEmpty()
+    await expect(page.locator('#cmd')).toHaveValue(CMD)
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })
 })

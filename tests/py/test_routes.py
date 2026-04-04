@@ -4,24 +4,25 @@ These tests exercise HTTP-level behaviour without starting a real server.
 Run with: pytest tests/ (from the repo root)
 """
 
-import sys
-import os
 import json
 import logging
 import sqlite3
+import uuid
 import unittest.mock as mock
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import app as shell_app
 from database import DB_PATH
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-def get_client():
+def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
     shell_app.app.config["RATELIMIT_ENABLED"] = False
-    return shell_app.app.test_client()
+    client = shell_app.app.test_client()
+    if use_forwarded_for:
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+    return client
 
 
 # ── / ─────────────────────────────────────────────────────────────────────────
@@ -167,6 +168,15 @@ class TestAllowedCommandsRoute:
         assert data["restricted"] is True
         assert "ping" in data["commands"]
 
+    def test_returns_grouped_commands_when_restricted(self):
+        client = get_client()
+        groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
+        with mock.patch("app.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
+            with mock.patch("app.load_allowed_commands_grouped", return_value=groups):
+                data = json.loads(client.get("/allowed-commands").data)
+        assert data["restricted"] is True
+        assert data["groups"] == groups
+
 
 # ── /faq ──────────────────────────────────────────────────────────────────────
 
@@ -253,6 +263,42 @@ class TestHistoryRoute:
         client = get_client()
         resp = client.get("/history/nonexistent-run-id")
         assert resp.status_code == 404
+
+    def test_history_respects_panel_limit_and_sorts_newest_first(self):
+        client = get_client()
+        session = "limit-test-session"
+        run_ids = ["limit-run-1", "limit-run-2", "limit-run-3"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "echo one", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "echo two", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "echo three", "2026-01-01T00:00:05", "2026-01-01T00:00:06", 0, "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("app.CFG", {**shell_app.CFG, "history_panel_limit": 2}):
+                resp = client.get("/history", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            commands = [r["command"] for r in data["runs"]]
+
+            assert commands == ["echo three", "echo two"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
 
 
 # ── /share ────────────────────────────────────────────────────────────────────
@@ -564,7 +610,7 @@ class TestGetClientIp:
 
     def test_no_xff_falls_back_to_remote_addr(self):
         with mock.patch.object(shell_app.log, "debug") as mock_debug:
-            get_client().get("/health")
+            get_client(use_forwarded_for=False).get("/health")
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         # Flask test client REMOTE_ADDR is 127.0.0.1
         assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"

@@ -1,6 +1,14 @@
 # shell.darklab.sh
 
-A lightweight web interface for running network diagnostic and vulnerability scanning commands against remote endpoints, with output streamed in real time. Designed for testing and troubleshooting remote hosts — DNS lookups, port scans, traceroutes, HTTP checks, web app scanning, and more — without needing SSH access to a server. Built with Python and Flask, designed to run in Docker.
+... Built with Python and Flask, designed to run in Docker.
+
+## Table of Contents
+- [Features](#features)
+- [Project Structure](#project-structure)
+- [Quick Start](#quick-start)
+- [Configuration](#configuration)
+- [Development & Testing](#development--testing)
+- [Architecture & Docs](#architecture--decision-log)
 
 ---
 
@@ -28,6 +36,7 @@ A lightweight web interface for running network diagnostic and vulnerability sca
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
+- **Anonymous session tracking** — the client generates a UUID session ID once (`session.js`) and sends it on every API call via `X-Session-ID`; this keeps history/test data scoped to each browser/tab and allows the server tests to isolate rate-limit buckets
 - **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
 - **FAQ modal** — built-in help with allowed commands grouped by category; click any command chip to load it into the command bar with autocomplete. The retention/limits entry shows live values for command timeout, output line limit, and permalink retention with a note that they are configurable by the operator. Extend with instance-specific entries via `faq.yaml`
 
@@ -684,7 +693,7 @@ docker compose logs -f
 
 ### Running Tests
 
-**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging (323 tests):
+**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging (362 tests):
 
 ```bash
 python3 -m pytest tests/py/ -v
@@ -692,13 +701,22 @@ python3 -m pytest tests/py/ -v
 
 Tests are split across four files: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views), and structured logging (`_extra_fields`, text/GELF formatters, `configure_logging`, and all log events emitted by the application). No running server or Docker required — file I/O and Redis are mocked where needed.
 
-**JS unit tests** (Vitest) — covers pure functions extracted from browser scripts:
+**JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
 ```bash
 npm run test:unit
 ```
 
-38 tests covering `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js), `_formatElapsed` (runner.js), and the `_getStarred` / `_saveStarred` / `_toggleStar` localStorage helpers (history.js). Uses jsdom so no browser is required.
+72 tests across 10 files covering `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, and status mapping (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar` (history.js); session ID persistence and `apiFetch()` header injection (session.js); autocomplete rendering and acceptance (autocomplete.js); tab state, rename, export, and permalink guards (tabs.js); welcome animation cancellation and commit behavior (welcome.js); search helpers; output rendering; and selected app bootstrap behavior. Uses jsdom so no browser is required.
+
+**Testing notes**
+- Vitest now exercises `session.js`, so the README mentions `X-Session-ID` as the client-scoped session header and documents the single-run permalink JSON view handled in `/history/<run_id>?json`.
+- Playwright tests run with `workers: 1` (rate limiting is per session) and mock `navigator.clipboard.writeText` by recording the value on `window.__clipboardText`, avoiding clipboard permission prompts.
+- The E2E suite now covers both `/share/<id>` snapshots and `/history/<run_id>` permalinks (HTML and JSON), the welcome animation cancel path, delete-non-favorites, and tab rename persistence; these behaviors are described in the Features section above.
+- For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
+- Vitest now exercises `session.js`, so the README mentions `X-Session-ID` as the client-scoped session header and documents the single-run permalink JSON view handled in `/history/<run_id>?json`.
+- Playwright tests run with `workers: 1` (rate limiting is per session) and mock `navigator.clipboard.writeText` by recording the value on `window.__clipboardText`, avoiding clipboard permission prompts.
+- The E2E suite now covers both `/share/<id>` snapshots and `/history/<run_id>` permalinks (HTML and JSON), the welcome animation cancel path, delete-non-favorites, and tab rename persistence; these behaviors are described in the Features section above.
 
 **JS e2e tests** (Playwright) — exercises the full UI against a live Flask server:
 
@@ -706,7 +724,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-42 tests across 10 spec files. Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, permalink/share, rate limiting, search/highlight, output actions (copy, clear, save .txt/.html), tab rename, max-tabs limit, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+51 tests across 12 spec files. Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 ### Linting & Security Scanning
 

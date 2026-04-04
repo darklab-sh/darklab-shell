@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, openHistoryWithEntries } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 
@@ -9,7 +9,12 @@ test.describe('permalink / share', () => {
     // requiring the clipboard-write permission grant.
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
-        value: { writeText: () => Promise.resolve() },
+        value: {
+          writeText: text => {
+            window.__clipboardText = text
+            return Promise.resolve()
+          },
+        },
         configurable: true,
       })
     })
@@ -53,5 +58,22 @@ test.describe('permalink / share', () => {
     await page.locator('[data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output')
+  })
+
+  test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+
+    const copied = await page.evaluate(() => window.__clipboardText)
+    expect(copied).toMatch(/\/history\/[0-9a-f-]+$/)
+
+    await page.goto(copied)
+    await expect(page.locator('body')).toContainText(CMD, { timeout: 10_000 })
+
+    await page.goto(`${copied}?json`)
+    await expect(page.locator('body')).toContainText('"command":"curl http://localhost:5001/health"')
+    await expect(page.locator('body')).toContainText('"exit_code":0')
   })
 })

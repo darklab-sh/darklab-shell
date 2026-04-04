@@ -53,3 +53,29 @@ export function fromScript(relPath, ...names) {
   )
   return { ...fns, _storage: storage }
 }
+
+/**
+ * Load a browser JS file into a custom execution context and return the
+ * requested named bindings.
+ */
+export function fromDomScript(relPath, globals, ...names) {
+  const src = readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
+  const globalNames = Object.keys(globals)
+  const globalValues = Object.values(globals)
+  const returnExpr = `\nreturn { ${names.join(', ')} };`
+  const fns = new Function(...globalNames, src + returnExpr)(...globalValues)
+  return fns
+}
+
+/**
+ * Load one or more browser JS files into a custom execution context and return
+ * a custom object literal expression.
+ */
+export function fromDomScripts(relPaths, globals, returnExpr) {
+  const src = relPaths
+    .map(relPath => readFileSync(resolve(REPO_ROOT, relPath), 'utf8'))
+    .join('\n')
+  const globalNames = Object.keys(globals)
+  const globalValues = Object.values(globals)
+  return new Function(...globalNames, `${src}\nreturn ${returnExpr};`)(...globalValues)
+}

@@ -19,9 +19,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
 - **`SHARE_CREATED` info** — share (permalink snapshot) creation is logged at INFO with IP, share ID, and label
 - **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
-  - Vitest unit tests (`tests/js/unit/`) — 38 tests covering `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed` (runner.js), and `_getStarred` / `_saveStarred` / `_toggleStar` (history.js); no browser required
+  - Vitest unit tests (`tests/js/unit/`) — 72 tests covering `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
   - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
-  - Playwright e2e tests (`tests/js/e2e/`) — 42 tests across 10 spec files exercising the full UI against a live Flask server: command execution and denial, kill, history drawer, permalink/share, rate limiting, search/highlight, output actions (copy, clear, save .txt/.html), tab rename, max-tabs limit, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
+  - Playwright e2e tests (`tests/js/e2e/`) — 51 tests across 12 spec files exercising the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
   - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
   - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
@@ -78,13 +78,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Welcome timing config** — four new `config.yaml` keys: `welcome_char_ms`, `welcome_jitter_ms`, `welcome_post_cmd_ms`, `welcome_inter_block_ms`
 - **`/welcome` API endpoint** — serves `welcome.yaml` blocks for the startup typeout animation
 - **Netcat** (`nc`) added to allowed commands and Dockerfile
-- **Expanded test suite** — 296 tests (+100) covering new route behaviour, session isolation, database pruning, permalink expiry, welcome/autocomplete loaders, and config endpoint fields; new `test_logging.py` with 94 tests for the structured logging module
+- **Expanded test suite** — 362 tests (+166) covering new route behaviour, session isolation, rate limiting, database pruning, permalink expiry, welcome/autocomplete loaders, run/history/share edge cases, and config endpoint fields; new `test_logging.py` with 94 tests for the structured logging module
 
 ### Changed
 - **App modularisation** — `app.py` split into `commands.py`, `config.py`, `database.py`, `permalinks.py`, and `process.py` for cleaner separation of concerns
 - **Permalink error pages** — improved human-readable retention period in 404 messages; `_format_retention()` decomposes days into years, months, and days
 - **Clear button** — now cancels a running welcome animation in addition to clearing tab output
-- **README / ARCHITECTURE** — updated to reflect all v1.1 features, new module structure, JS load order, tab state fields, and test counts
+- **README / ARCHITECTURE** — updated to reflect current test counts and the expanded Vitest/Playwright coverage areas
 
 ### Fixed
 - `tab.renamed` flag prevents command labels from overwriting user-chosen tab names
