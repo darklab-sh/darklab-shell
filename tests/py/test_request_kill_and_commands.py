@@ -105,6 +105,18 @@ class TestKillRoute:
         )
         killpg.assert_not_called()
 
+    def test_kill_rejects_non_object_json(self):
+        client = get_client()
+        resp = client.post("/kill", json=["bad", "payload"])
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
+
+    def test_kill_rejects_non_string_run_id(self):
+        client = get_client()
+        resp = client.post("/kill", json={"run_id": 123})
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "run_id must be a string"
+
 
 # ── commands.py edge coverage ─────────────────────────────────────────────────
 

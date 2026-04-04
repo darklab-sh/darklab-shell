@@ -15,6 +15,8 @@ ALLOWED_COMMANDS_FILE = os.path.join(_CONF, "allowed_commands.txt")
 AUTOCOMPLETE_FILE     = os.path.join(_CONF, "auto_complete.txt")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
+ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
+APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -88,7 +90,7 @@ def load_faq():
 
 
 def load_welcome():
-    """Read welcome.yaml and return a list of {cmd, out} blocks for the startup typeout.
+    """Read welcome.yaml and return startup blocks for the welcome typeout.
     Returns an empty list if the file is missing or empty, disabling the welcome animation."""
     if not os.path.exists(WELCOME_FILE):
         return []
@@ -100,10 +102,34 @@ def load_welcome():
         {
             "cmd": str(item.get("cmd", "")).strip(),
             "out": str(item.get("out", "")).rstrip() if item.get("out") else "",
+            "group": str(item.get("group", "")).strip().lower() if item.get("group") else "",
+            "featured": bool(item.get("featured", False)),
         }
         for item in data
         if isinstance(item, dict) and item.get("cmd")
     ]
+
+
+def load_ascii_art():
+    """Read ascii.txt and return the welcome banner art as plain text.
+    Returns an empty string if the file is missing or empty."""
+    if not os.path.exists(ASCII_FILE):
+        return ""
+    with open(ASCII_FILE) as f:
+        return f.read().rstrip()
+
+
+def load_welcome_hints():
+    """Read app_hints.txt and return a list of app-usage hints."""
+    if not os.path.exists(APP_HINTS_FILE):
+        return []
+    hints = []
+    with open(APP_HINTS_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                hints.append(line)
+    return hints
 
 
 def load_autocomplete():

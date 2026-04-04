@@ -78,4 +78,14 @@ describe('appendLine', () => {
     expect(line.dataset.tsC).toMatch(/^\d{2}:\d{2}:\d{2}$/)
     expect(line.dataset.tsE).toMatch(/^\+\d+\.\d+s$/)
   })
+
+  it('does nothing when there is no output container for the target tab', () => {
+    document.body.innerHTML = ''
+    const { appendLine, _getTabs } = loadOutputFns()
+
+    appendLine('orphan line', '', 'missing-tab')
+
+    expect(document.querySelector('.line')).toBeNull()
+    expect(_getTabs()[0].rawLines).toHaveLength(0)
+  })
 })

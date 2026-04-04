@@ -76,18 +76,41 @@ heartbeat_interval_seconds: 20
 
 # Base delay between each typed character in the welcome animation (milliseconds).
 # Lower values make the typing appear faster.
-welcome_char_ms: 10
+welcome_char_ms: 18
 
 # Random jitter added on top of welcome_char_ms per character (milliseconds).
 # Adds a human feel — each character takes between welcome_char_ms and
 # welcome_char_ms + welcome_jitter_ms. Set to 0 for perfectly even typing.
-welcome_jitter_ms: 25
+welcome_jitter_ms: 12
 
-# How long the cursor blinks on the command line after typing finishes,
-# before the command's output lines appear (milliseconds).
-# Simulates the pause between pressing Enter and seeing results.
-welcome_post_cmd_ms: 500
+# How long the welcome animation pauses after a command finishes typing,
+# before the next visual step begins (milliseconds).
+# This affects the decorative intro command and each sampled welcome command.
+# Lower values make the intro feel snappier; higher values make it feel more theatrical.
+welcome_post_cmd_ms: 650
 
-# How long a blinking cursor sits on an empty line between animation blocks
-# before the next command starts typing (milliseconds).
-welcome_inter_block_ms: 1200
+# How long the welcome animation waits between one sampled command block
+# finishing and the next sampled command starting to type (milliseconds).
+# This is the main "breathing room" between sampled command examples.
+welcome_inter_block_ms: 850
+
+# How many sampled command examples to show after the ASCII/status intro.
+# Lower values shorten the welcome sequence. Set to 0 to skip sampled commands.
+welcome_sample_count: 5
+
+# Labels shown in the fake startup-status block during the welcome animation.
+# Keep this short and stylized — 4 to 6 uppercase labels reads best.
+welcome_status_labels:
+  - CONFIG
+  - RUNNER
+  - HISTORY
+  - LIMITS
+  - AUTOCOMPLETE
+
+# How often the footer app hints rotate while the welcome tab remains idle (milliseconds).
+# Higher values make the hints feel calmer; lower values make them feel more animated.
+welcome_hint_interval_ms: 4200
+
+# Maximum number of footer-hint rotations after the initial hint is shown.
+# Set to 0 to keep only the first hint visible with no rotation.
+welcome_hint_rotations: 2

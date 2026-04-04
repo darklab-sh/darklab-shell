@@ -46,6 +46,10 @@ def _create_schema(conn):
             content    TEXT NOT NULL
         )
     """)
+
+
+def _create_indexes(conn):
+    """Create supporting indexes after schema migrations have run."""
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
 
@@ -83,6 +87,7 @@ def db_init():
     with db_connect() as conn:
         _create_schema(conn)
         _migrate_schema(conn)
+        _create_indexes(conn)
         _prune_retention(conn)
         conn.commit()
 

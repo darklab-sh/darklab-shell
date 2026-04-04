@@ -144,4 +144,16 @@ describe('tabs helpers', () => {
 
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to share yet')
   })
+
+  it('permalinkTab shows a failure toast when the share request rejects', async () => {
+    const apiFetch = vi.fn(() => Promise.reject(new Error('share failed')))
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({ apiFetch })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to create permalink')
+  })
 })

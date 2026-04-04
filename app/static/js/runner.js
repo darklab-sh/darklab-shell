@@ -126,8 +126,8 @@ function runCommand() {
   // asynchronously via SSE) to avoid a race condition where rapid Enter presses
   // fire before the server's 'started' message arrives.
   // If the welcome typeout is still running, cancel it and clear partial output
-  if (_welcomeActive || _welcomeDone) {
-    cancelWelcome();
+  if (welcomeOwnsTab(activeTabId)) {
+    cancelWelcome(activeTabId);
     clearTab(activeTabId);
   }
 

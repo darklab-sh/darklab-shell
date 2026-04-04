@@ -31,6 +31,7 @@ from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
     load_faq, load_autocomplete, load_welcome,
+    load_ascii_art, load_welcome_hints,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _permalink_error_page, _permalink_page
@@ -135,6 +136,10 @@ def get_config():
         "welcome_jitter_ms":      CFG["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    CFG["welcome_post_cmd_ms"],
         "welcome_inter_block_ms": CFG["welcome_inter_block_ms"],
+        "welcome_sample_count":   CFG["welcome_sample_count"],
+        "welcome_status_labels":  CFG["welcome_status_labels"],
+        "welcome_hint_interval_ms": CFG["welcome_hint_interval_ms"],
+        "welcome_hint_rotations": CFG["welcome_hint_rotations"],
     })
 
 
@@ -164,6 +169,18 @@ def autocomplete():
 def get_welcome():
     """Return welcome message blocks for the startup typeout animation."""
     return jsonify(load_welcome())
+
+
+@app.route("/welcome/ascii")
+def get_welcome_ascii():
+    """Return the ASCII banner art used by the welcome animation."""
+    return Response(load_ascii_art(), mimetype="text/plain")
+
+
+@app.route("/welcome/hints")
+def get_welcome_hints():
+    """Return rotating footer hints for the welcome animation."""
+    return jsonify({"items": load_welcome_hints()})
 
 
 @app.route("/history")
@@ -230,9 +247,25 @@ def clear_history():
 def save_share():
     """Save a tab snapshot (all output from a tab) for sharing via permalink."""
     data = request.get_json() or {}
-    label   = data.get("label", "untitled").strip()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    label   = data.get("label", "untitled")
     content = data.get("content", [])  # list of {text, cls} objects
     session_id = get_session_id()
+    if not isinstance(label, str):
+        return jsonify({"error": "Label must be a string"}), 400
+    if not isinstance(content, list):
+        return jsonify({"error": "Content must be a list"}), 400
+    for item in content:
+        if isinstance(item, str):
+            continue
+        if not isinstance(item, dict):
+            return jsonify({"error": "Content items must be strings or objects"}), 400
+        if not isinstance(item.get("text"), str):
+            return jsonify({"error": "Content objects must include a string text field"}), 400
+        if "cls" in item and not isinstance(item["cls"], str):
+            return jsonify({"error": "Content objects must use string cls values"}), 400
+    label = label.strip()
     share_id = str(uuid.uuid4())
     created  = datetime.now(timezone.utc).isoformat()
     with db_connect() as conn:
@@ -274,9 +307,14 @@ def get_share(share_id):
 @limiter.limit(lambda: f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second")
 def run_command():
     data             = request.get_json() or {}
-    original_command = data.get("command", "").strip()
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+    original_command = data.get("command", "")
     session_id       = get_session_id()
     client_ip        = get_client_ip()
+    if not isinstance(original_command, str):
+        return jsonify({"error": "Command must be a string"}), 400
+    original_command = original_command.strip()
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
 
@@ -430,8 +468,12 @@ def run_command():
 @app.route("/kill", methods=["POST"])
 def kill_command():
     data      = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
     run_id    = data.get("run_id", "")
     client_ip = get_client_ip()
+    if not isinstance(run_id, str):
+        return jsonify({"error": "run_id must be a string"}), 400
     pid       = pid_pop(run_id)
     if not pid:
         log.debug("KILL_MISS", extra={"ip": client_ip, "run_id": run_id})

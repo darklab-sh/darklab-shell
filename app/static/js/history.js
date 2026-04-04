@@ -18,9 +18,63 @@ function _toggleStar(cmd) {
 
 // ── Command history chips ──
 let cmdHistory = [];
+let _cmdHistoryNavIndex = -1;
+let _cmdHistoryNavDraft = '';
+
+function resetCmdHistoryNav() {
+  _cmdHistoryNavIndex = -1;
+  _cmdHistoryNavDraft = '';
+}
+
+function navigateCmdHistory(delta) {
+  if (!cmdHistory.length) return false;
+
+  if (delta > 0) {
+    if (_cmdHistoryNavIndex === -1) {
+      _cmdHistoryNavDraft = cmdInput.value;
+      _cmdHistoryNavIndex = 0;
+    } else if (_cmdHistoryNavIndex < cmdHistory.length - 1) {
+      _cmdHistoryNavIndex++;
+    } else {
+      return true;
+    }
+    cmdInput.value = cmdHistory[_cmdHistoryNavIndex];
+    return true;
+  }
+
+  if (delta < 0) {
+    if (_cmdHistoryNavIndex === -1) return false;
+    if (_cmdHistoryNavIndex > 0) {
+      _cmdHistoryNavIndex--;
+      cmdInput.value = cmdHistory[_cmdHistoryNavIndex];
+      return true;
+    }
+    cmdInput.value = _cmdHistoryNavDraft;
+    resetCmdHistoryNav();
+    return true;
+  }
+
+  return false;
+}
 
 function addToHistory(cmd) {
   cmdHistory = [cmd, ...cmdHistory.filter(c => c !== cmd)].slice(0, APP_CONFIG.recent_commands_limit);
+  resetCmdHistoryNav();
+  renderHistory();
+}
+
+function hydrateCmdHistory(runs) {
+  const items = Array.isArray(runs) ? runs : [];
+  const seen = new Set();
+  cmdHistory = items
+    .map(run => run && typeof run.command === 'string' ? run.command : '')
+    .filter(cmd => {
+      if (!cmd || seen.has(cmd)) return false;
+      seen.add(cmd);
+      return true;
+    })
+    .slice(0, APP_CONFIG.recent_commands_limit);
+  resetCmdHistoryNav();
   renderHistory();
 }
 
@@ -57,7 +111,11 @@ function renderHistory() {
 
     chip.appendChild(starEl);
     chip.appendChild(textEl);
-    chip.addEventListener('click', () => { cmdInput.value = cmd; cmdInput.focus(); });
+    chip.addEventListener('click', () => {
+      cmdInput.value = cmd;
+      resetCmdHistoryNav();
+      cmdInput.focus();
+    });
     histRow.appendChild(chip);
   });
 }
@@ -97,7 +155,7 @@ function executeHistAction(type) {
       cmdHistory = cmdHistory.filter(c => c !== command);
       renderHistory();
       refreshHistoryPanel();
-    });
+    }).catch(() => showToast('Failed to delete run'));
   } else if (action === 'clear-nonfav') {
     apiFetch('/history')
       .then(r => r.json())
@@ -110,7 +168,8 @@ function executeHistAction(type) {
         renderHistory();
         return Promise.all(toDelete.map(r => apiFetch(`/history/${r.id}`, { method: 'DELETE' })));
       })
-      .then(() => refreshHistoryPanel());
+      .then(() => refreshHistoryPanel())
+      .catch(() => showToast('Failed to clear history'));
   } else {
     apiFetch('/history', { method: 'DELETE' }).then(() => {
       // Wipe all starred state and chips — nothing left in history to pin
@@ -118,7 +177,7 @@ function executeHistAction(type) {
       cmdHistory = [];
       renderHistory();
       refreshHistoryPanel();
-    });
+    }).catch(() => showToast('Failed to clear history'));
   }
 }
 
@@ -162,11 +221,11 @@ function refreshHistoryPanel() {
         if (e.target.closest('.history-action-btn')) return;
 
         // If a tab already has this command, switch to it instead of duplicating
-        const existing = tabs.find(t => t.command === run.command);
-        if (existing) {
-          activateTab(existing.id);
-          historyPanel.classList.remove('open');
-          return;
+    const existing = tabs.find(t => t.command === run.command);
+    if (existing) {
+      activateTab(existing.id);
+      historyPanel.classList.remove('open');
+      return;
         }
 
         const cmdEl = entry.querySelector('.history-entry-cmd');
@@ -179,6 +238,7 @@ function refreshHistoryPanel() {
             if (t) {
               t.command = fullRun.command;
               cmdInput.value = t.command;
+              resetCmdHistoryNav();
               cmdInput.dispatchEvent(new Event('input'));
             }
             appendLine(`$ ${fullRun.command}`, '', newId);
@@ -205,12 +265,16 @@ function refreshHistoryPanel() {
       });
 
       entry.querySelector('[data-action="copy"]').addEventListener('click', () => {
-        navigator.clipboard.writeText(run.command).then(() => showToast('Command copied to clipboard'));
+        navigator.clipboard.writeText(run.command)
+          .then(() => showToast('Command copied to clipboard'))
+          .catch(() => showToast('Failed to copy command'));
       });
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
         const url = `${location.origin}/history/${run.id}`;
-        navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard'));
+        navigator.clipboard.writeText(url)
+          .then(() => showToast('Link copied to clipboard'))
+          .catch(() => showToast('Failed to copy link'));
       });
 
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {

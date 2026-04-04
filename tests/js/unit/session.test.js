@@ -46,6 +46,16 @@ describe('session.js', () => {
     expect(storage.getItem('session_id')).toBe('generated-session')
   })
 
+  it('treats a blank stored session id as missing and generates a new one', () => {
+    const { _getSessionId, storage } = loadSession({
+      storageData: { session_id: '' },
+      randomUUID: () => 'generated-from-blank',
+    })
+
+    expect(_getSessionId()).toBe('generated-from-blank')
+    expect(storage.getItem('session_id')).toBe('generated-from-blank')
+  })
+
   it('apiFetch injects the X-Session-ID header', async () => {
     const { apiFetch, fetchCalls } = loadSession({
       storageData: { session_id: 'session-123' },

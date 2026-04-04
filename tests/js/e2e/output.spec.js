@@ -24,6 +24,20 @@ test.describe('output actions', () => {
     await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
   })
 
+  test('copy button shows a failure toast when clipboard writeText rejects', async ({ page }) => {
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: () => Promise.reject(new Error('clipboard denied')) },
+        configurable: true,
+      })
+    })
+
+    await page.locator('[data-action="copy"]').click()
+
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('Failed to copy')
+  })
+
   // ── Clear ─────────────────────────────────────────────────────────────────
 
   test('clear button removes all output from the active tab', async ({ page }) => {

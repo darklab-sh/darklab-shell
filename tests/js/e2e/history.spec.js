@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistory, openHistoryWithEntries, closeHistory } from './helpers.js'
+import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory } from './helpers.js'
 
 // Use allowed commands that complete quickly and exit 0.
 // curl against the local test server is ideal — always available and fast.
@@ -8,6 +8,7 @@ const CMD_B = 'curl http://localhost:5001/config'
 
 test.describe('history drawer', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': '203.0.113.62' })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     // Clear any localStorage state left over from a previous test run
@@ -68,6 +69,7 @@ test.describe('history drawer', () => {
   test('clear all history removes all chips including starred ones', async ({ page }) => {
     await runCommand(page, CMD_A)
     await runCommand(page, CMD_B)
+    await waitForHistoryRuns(page, 2)
 
     // Star both runs
     await openHistoryWithEntries(page)
@@ -90,6 +92,7 @@ test.describe('history drawer', () => {
   test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
     await runCommand(page, CMD_A)
     await runCommand(page, CMD_B)
+    await waitForHistoryRuns(page, 2)
 
     await openHistoryWithEntries(page)
     const entries = page.locator('.history-entry')

@@ -222,13 +222,38 @@ The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `conte
 
 `tab.runStart` is set *after* the `$ cmd` prompt line is appended so the prompt itself has no `data-ts-e` attribute and shows no elapsed stamp.
 
-### Welcome Typeout Animation
+### Welcome Animation
 
-`welcome.js` exposes two functions: `runWelcome()` and `cancelWelcome()`. `runWelcome()` is called once from `app.js` after the initial tab is created. It sets `_welcomeActive = true` before the fetch so cancellation works even during the async load, then types each block character-by-character with `setTimeout(38 + 0–18ms jitter)` for a natural feel. `appendLine()` is called per completed line (not per character) — a temporary DOM cursor element simulates the in-progress character stream.
+`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout:
 
-`cancelWelcome()` flips `_welcomeActive = false`. Because every `setTimeout` callback checks this flag before continuing, the animation stops within one character's delay. `runCommand()` calls `cancelWelcome()` followed by `clearTab(activeTabId)` to wipe the partial output before streaming real results.
+1. render a decorative `cat ~/.ascii-art.txt` prompt line
+2. fetch `/welcome/ascii` and stream the ASCII banner from `conf/ascii.txt`
+3. render fake startup-status rows using `APP_CONFIG.welcome_status_labels`
+4. fetch `/welcome` and sample a curated set of commands from `conf/welcome.yaml` using `welcome_sample_count`
+5. attach click and keyboard handlers to the sampled command text and the featured `TRY THIS FIRST` badge so they load into the prompt without executing
+6. fetch `/welcome/hints` and rotate footer hints briefly while the welcome tab is still idle, using `welcome_hint_interval_ms` and `welcome_hint_rotations`
 
-The `conf/welcome.yaml` format is `{cmd, out}` blocks. `load_welcome()` uses `.rstrip()` on `out` (not `.strip()`) to preserve intentional leading-whitespace indentation in displayed output while stripping trailing newlines.
+The implementation still types character-by-character using short timed waits, but it now mixes in short-lived loading spinners for the status rows and finite hint rotation. The intro `cat ~/.ascii-art.txt` line is intentionally decorative only and is never clickable.
+
+Welcome ownership is tab-scoped. `runWelcome()` records a `welcomeTabId`, and teardown only happens when the action targets that same tab. That avoids the old cross-tab bug where running a command or clearing output in some other tab could wipe the welcome content. `runCommand()` checks whether the active tab is the welcome owner before clearing, and clear/close actions do the same.
+
+`load_welcome()` now accepts richer blocks from `conf/welcome.yaml`:
+
+- `cmd` — required
+- `out` — optional sample output, trimmed with `.rstrip()` so leading indentation survives
+- `group` — optional category bucket used for curated sampling
+- `featured` — optional boolean used to bias the primary sample and show the badge
+
+The route shape is intentional. Frontend-facing config content is exposed through narrow, typed endpoints rather than a generic “serve files from `conf/`” handler:
+
+- `/faq` for `faq.yaml`
+- `/autocomplete` for `auto_complete.txt`
+- `/welcome` for sampled command metadata from `welcome.yaml`
+- `/welcome/ascii` for plain-text banner art from `ascii.txt`
+- `/welcome/hints` for hint strings from `app_hints.txt`
+- `/config` for normalized values from `config.yaml`
+
+That keeps parsing and validation on the server side and lets the file format evolve without coupling the browser directly to raw config files.
 
 ### Starring / Favorites
 
@@ -237,6 +262,8 @@ Starred commands are stored in `localStorage['starred']` as a JSON array of comm
 `_toggleStar(cmd)` loads the set, adds or removes the entry, and saves it back. `renderHistory()` (chips) and `refreshHistoryPanel()` (drawer) both sort starred entries to the top before rendering. The `☆` / `★` icons in chips and the `☆ star` / `★ starred` buttons in the drawer update optimistically without a full re-render.
 
 When starring a command from the history drawer, if the command is not already in `cmdHistory` (the in-memory chips list), it is prepended and the list is trimmed to `recent_commands_limit`. This means a command that was never run in the current session — e.g. one from a previous container session that only appears in the SQLite history — becomes immediately accessible as a chip after being starred, without requiring the user to run it first.
+
+`cmdHistory` is also hydrated on startup from `/history` via `hydrateCmdHistory()` in `history.js`. That matters for keyboard recall: blank-input `ArrowUp` / `ArrowDown` navigation now works on first load from persisted history, not only after a command has been run in the current browser tab.
 
 ### The KILLED Race Condition
 
@@ -250,7 +277,7 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 ### Config Loading
 
-The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, and `max_output_lines`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
+The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
 
 ### Session Identity
 
@@ -290,18 +317,19 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`index.html`, etc.) and app modules are importable. `test_validation.py` imports `app.py` directly via `sys.path.insert`.
 
-### Python tests — four files, 362 tests total
+### Python tests
 
-- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites. These tests mock `load_allowed_commands` so they don't depend on the actual `conf/allowed_commands.txt` file.
-- **`test_utils.py`** — pure utility functions: `split_chained_commands` (all 10 operators), `load_allowed_commands` parser (file handling, comment/deny parsing), `load_allowed_commands_grouped` (category headers, deny entry exclusion), `load_faq`, `load_welcome` (cmd/out parsing, rstrip behaviour), `load_autocomplete` (comment/blank filtering), path-blocking edge cases (URLs vs. filesystem paths), `_is_denied` with multi-word tool prefixes, `rewrite_command` case-insensitivity and idempotency, `pid_register`/`pid_pop` in-process mode, `_format_retention`, `_expiry_note` (active/today/expired/invalid date branches), `_permalink_error_page` (status, body, retention message), database init and retention pruning (tables created, idempotent re-init, old records pruned, recent records kept).
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types (`application/json` / `text/html`), error cases (`/run` with missing/empty/disallowed command), history CRUD, session isolation (runs and deletes scoped by `X-Session-ID`), run permalink HTML and JSON views, share create/retrieve/HTML label and content type, health degradation when DB fails, `/welcome` and `/autocomplete` routes, `get_client_ip()` XFF validation (valid IPv4/IPv6, multi-value, absent, and non-IP fallback cases).
-- **`test_logging.py`** — structured logging: `_extra_fields` exclusion of stdlib and underscore-prefixed attrs; `_TextFormatter` timestamp format, level label padding, extra sorting and quoting (including empty-string repr), exception tracebacks; `GELFFormatter` JSON validity, GELF 1.1 version field, syslog level mapping, `_`-prefixed extras, special JSON character handling, no stdlib field leakage, `full_message` on exceptions; `configure_logging` format/level selection (including lowercase input), unknown-level fallback, `propagate=False`, werkzeug silencing, no duplicate handlers; all application log events (`CMD_DENIED`, `RATE_LIMIT`, `HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL`, `HEALTH_OK`, `HEALTH_DEGRADED`, `PAGE_LOAD`, `SHARE_CREATED`, `SHARE_VIEWED`, `RUN_VIEWED`, `RUN_NOT_FOUND`, `SHARE_NOT_FOUND`, `HISTORY_DELETED`, `HISTORY_CLEARED`, `CMD_REWRITE`, `REQUEST`/`RESPONSE`, `DB_PRUNED`, `LOGGING_CONFIGURED`, `KILL_FAILED`, `RUN_SPAWN_ERROR`) verified at the correct level with expected extras.
+- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, and command rewrites. These tests mock `load_allowed_commands` so they do not depend on the actual `conf/allowed_commands.txt` file.
+- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_welcome_hints()`, autocomplete loading, database init/migration, and retention behavior.
+- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, `/welcome/ascii` and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
+- **`test_run_history_share.py` / `test_request_kill_and_commands.py`** — focused route flows for persistence, kill behavior, and request/command execution edges.
+- **`test_logging.py`** — structured logging formatters, setup, and application log events.
 
 **Rate limiting in tests.** `app.config["RATELIMIT_ENABLED"] = False` is set in every `get_client()` helper, but Flask-Limiter 4.x with `memory://` storage still increments counters even when this flag is set dynamically at runtime — it only truly disables the limit check, not the counter itself. Test classes that POST to `/run` multiple times (e.g. `TestCmdRewriteEvent`, `TestRunSpawnErrorEvent`) therefore use a dedicated `X-Forwarded-For` IP from the RFC 5737 TEST-NET-3 range (`203.0.113.x`) via the request headers. This gives each class its own isolated rate-limit bucket so accumulated hits from one class cannot exhaust the limit and cause spurious 429s in later classes within the same test run. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
 
 **Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
 
-### JS unit tests (Vitest) — 72 tests
+### JS unit tests (Vitest)
 
 The browser JS files share a single global scope (by design — no ES modules, no bundler). This makes tree-shaking impossible but the functions themselves can still be unit-tested by loading each file's source into an isolated execution context via `new Function(src + '\nreturn {fn1, fn2}')(localStorage, APP_CONFIG)`.
 
@@ -315,24 +343,24 @@ The browser JS files share a single global scope (by design — no ES modules, n
 
 `fromScript` returns `{ ...fns, _storage }` so tests that need to pre-populate or inspect localStorage can do so via `_storage.setItem(...)` / `_storage.getItem(...)` instead of the jsdom global.
 
-**What is tested (72 tests across 10 files):**
+**What is tested:**
 - `utils.test.js` — HTML escaping, regex escaping, and MOTD rendering helpers
 - `runner.test.js` — elapsed formatting plus kill/status helpers
-- `history.test.js` — starred-command localStorage helpers
+- `history.test.js` — starred-command localStorage helpers plus startup hydration of blank-input command recall from `/history`
 - `session.test.js` — anonymous session ID persistence and `apiFetch()` header injection
 - `autocomplete.test.js` — dropdown filtering, highlighting, acceptance, and dismissal
 - `tabs.test.js` — tab limits, rename, command recall, export guards, and last-tab reset
-- `welcome.test.js` — welcome animation cancellation and completion
-- `app.test.js` — startup theme and timestamp-mode bootstrap behavior
+- `welcome.test.js` — welcome animation cancellation, badge behavior, and current DOM/state transitions
+- `app.test.js` — startup theme, timestamp-mode bootstrap behavior, and config/history boot wiring
 - `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers
 
 Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
 
-### JS e2e tests (Playwright) — 51 tests
+### JS e2e tests (Playwright)
 
 Playwright tests exercise the full UI against a real Flask server. `playwright.config.js` starts Flask on port 5001 via `webServer` using the `.venv` Python interpreter run from the `app/` directory (matching `conftest.py`'s `chdir` logic).
 
-**What is tested (51 tests across 12 files):**
+**What is tested:**
 - `commands.spec.js` — command execution, denial, and exit-status rendering
 - `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
 - `kill.spec.js` — kill confirmation and killed-state UI
@@ -344,7 +372,8 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `tabs.spec.js` — max-tabs, rename, rename persistence, command recall, and last-tab reset behavior
 - `timestamps.spec.js` — timestamp mode cycling and output metadata
 - `ui.spec.js` — theme toggling and FAQ modal behavior
-- `autocomplete.spec.js` / `welcome.spec.js` — command suggestion interaction and welcome-animation interruption
+- `autocomplete.spec.js` — command suggestion interaction
+- `welcome.spec.js` — welcome interruption, decorative intro non-clickability, clickable sampled commands and badge, and tab-scoped welcome teardown
 
 **Implementation notes learned during setup:**
 - `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
@@ -355,9 +384,9 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `data-ts-e` (elapsed) is only set on lines appended while a run is active; the initial command echo line has no elapsed value and must not be used to assert for that attribute.
 
 ### Testing Strategy
-- The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. See `README.md:687‑712` for the latest command fragments.
+- The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. The file-by-file breakdown and maintenance notes live in [tests/README.md](tests/README.md).
 - Vitest explicitly exercises `session.js`, `autocomplete.js`, and the new `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
-- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome-animation cancellation, delete-non-favourites, tab rename persistence, and single-run permalink JSON/HTML exports.
+- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, tab rename persistence, and single-run permalink JSON/HTML exports.
 
 Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
 

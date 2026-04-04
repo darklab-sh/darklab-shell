@@ -173,11 +173,11 @@ pd-httpx -u https://example.com -follow-redirects
 
 # dnsx
 dnsx -h
-dnsx -d example.com
-dnsx -d example.com -resp
-dnsx -d example.com -a -resp
-dnsx -d example.com -cname -resp
-dnsx -d example.com -mx -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -cname -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -mx -resp
 
 # fping
 fping -h

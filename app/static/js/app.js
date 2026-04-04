@@ -183,7 +183,7 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
     data.commands.forEach(cmd => list.appendChild(makeChip(cmd)));
     el.appendChild(list);
   }
-});
+}).catch(() => {});
 
 apiFetch('/faq').then(r => r.json()).then(data => {
   if (!data.items || !data.items.length) return;
@@ -201,6 +201,12 @@ apiFetch('/faq').then(r => r.json()).then(data => {
     div.appendChild(a);
     faqBody.appendChild(div);
   });
+}).catch(() => {});
+
+apiFetch('/history').then(r => r.json()).then(data => {
+  if (typeof hydrateCmdHistory === 'function') {
+    hydrateCmdHistory(data.runs || []);
+  }
 }).catch(() => {});
 
 // ── Tabs ──
@@ -296,9 +302,10 @@ document.addEventListener('click', e => {
 // ── Autocomplete ──
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
-});
+}).catch(() => {});
 
 cmdInput.addEventListener('input', () => {
+  resetCmdHistoryNav();
   const val = cmdInput.value;
   acIndex = -1;
   if (!val.trim()) { acHide(); return; }
@@ -319,8 +326,26 @@ cmdInput.addEventListener('keydown', e => {
     else if (acFiltered.length > 0) { acIndex = 0; acShow(acFiltered); }
     return;
   }
-  if (e.key === 'ArrowDown') { e.preventDefault(); if (!acFiltered.length) return; acIndex = Math.min(acIndex + 1, acFiltered.length - 1); acShow(acFiltered); return; }
-  if (e.key === 'ArrowUp')   { e.preventDefault(); if (!acFiltered.length) return; acIndex = Math.max(acIndex - 1, -1); acShow(acFiltered); return; }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    if (acFiltered.length) {
+      acIndex = Math.min(acIndex + 1, acFiltered.length - 1);
+      acShow(acFiltered);
+      return;
+    }
+    if (navigateCmdHistory(-1)) acHide();
+    return;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    if (acFiltered.length) {
+      acIndex = Math.max(acIndex - 1, -1);
+      acShow(acFiltered);
+      return;
+    }
+    if (navigateCmdHistory(1)) acHide();
+    return;
+  }
   if (e.key === 'Escape')    { acHide(); return; }
 });
 

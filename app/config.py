@@ -25,10 +25,14 @@ def load_config():
         "max_tabs":                   8,
         "command_timeout_seconds":    0,
         "heartbeat_interval_seconds": 20,
-        "welcome_char_ms":            10,
-        "welcome_jitter_ms":          10,
-        "welcome_post_cmd_ms":        700,
-        "welcome_inter_block_ms":     1500,
+        "welcome_char_ms":            18,
+        "welcome_jitter_ms":          12,
+        "welcome_post_cmd_ms":        650,
+        "welcome_inter_block_ms":     850,
+        "welcome_sample_count":       5,
+        "welcome_status_labels":      ["CONFIG", "RUNNER", "HISTORY", "LIMITS", "AUTOCOMPLETE"],
+        "welcome_hint_interval_ms":   4200,
+        "welcome_hint_rotations":     2,
     }
     config_path = os.path.join(os.path.dirname(__file__), "conf", "config.yaml")
     if os.path.exists(config_path):

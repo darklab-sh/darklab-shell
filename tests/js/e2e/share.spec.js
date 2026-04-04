@@ -5,6 +5,7 @@ const CMD = 'curl http://localhost:5001/health'
 
 test.describe('permalink / share', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': '203.0.113.61' })
     // Mock clipboard so writeText() resolves in headless Chromium without
     // requiring the clipboard-write permission grant.
     await page.addInitScript(() => {
@@ -54,10 +55,26 @@ test.describe('permalink / share', () => {
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {
-    // Do NOT run any command — the tab has no output
-    await page.locator('[data-action="permalink"]').click()
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab.active')).toContainText('tab 2')
+    await page.locator('.tab-panel.active [data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output')
+  })
+
+  test('permalink button shows a failure toast when clipboard writeText rejects', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: () => Promise.reject(new Error('clipboard denied')) },
+        configurable: true,
+      })
+    })
+
+    await page.locator('[data-action="permalink"]').click()
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('Failed to copy link')
   })
 
   test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({ page }) => {

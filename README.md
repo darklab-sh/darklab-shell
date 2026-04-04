@@ -1,6 +1,6 @@
 # shell.darklab.sh
 
-... Built with Python and Flask, designed to run in Docker.
+A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history and permalinks. The project is built to run in Docker by default, but also supports local development without containers.
 
 ## Table of Contents
 - [Features](#features)
@@ -19,10 +19,10 @@
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
 - **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered via CSS with no DOM rebuild
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
-- **Welcome animation** — on first page load, a configurable typeout animation runs in the terminal, showing example commands and their purpose character by character. Cancels immediately when the user runs a command. Controlled by `welcome.yaml`
+- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
-- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss
+- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
@@ -70,13 +70,18 @@
 │       ├── unit/               # Vitest unit tests for pure JS functions
 │       │   ├── helpers/
 │       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│       │   ├── utils.test.js   # escapeHtml, escapeRegex
-│       │   ├── runner.test.js  # _formatElapsed
-│       │   └── history.test.js # _getStarred, _saveStarred, _toggleStar
+│       │   ├── app.test.js     # bootstrap wiring, modal controls, search controls
+│       │   ├── runner.test.js  # _formatElapsed, run/kill edge cases, stall recovery
+│       │   ├── history.test.js # starred state, clipboard, delete/clear failures
+│       │   └── output.test.js  # ANSI rendering and output edge cases
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
-│           ├── helpers.js      # runCommand, openHistory, closeHistory helpers
-│           ├── tabs.spec.js    # Tab command recall and new-tab behaviour
-│           └── history.spec.js # History drawer: load command, dedup tab, star/chip cleanup
+│           ├── helpers.js      # runCommand/openHistory helpers
+│           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
+│           ├── runner-stall.spec.js   # SSE stall recovery
+│           ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
+│           ├── share.spec.js    # snapshot permalinks and clipboard behavior
+│           ├── history.spec.js  # History drawer: load command, dedup tab, star/chip cleanup
+│           └── tabs.spec.js     # Tab command recall and new-tab behaviour
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
 │   └── run_local.sh                    # Script to run without Docker using Python directly
@@ -95,8 +100,10 @@
     │   ├── config.yaml         # Application configuration (see Configuration section)
     │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
     │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
+    │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
+    │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
     │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
-    │   └── welcome.yaml            # Welcome animation blocks {cmd, out}; loaded on page start (optional)
+    │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
     ├── requirements.txt        # Python runtime dependencies
     └── static/
         ├── css/
@@ -111,7 +118,7 @@
             ├── search.js       # In-output search (with case-sensitive and regex modes)
             ├── autocomplete.js # Command autocomplete dropdown
             ├── history.js      # Command history chips and drawer (with starring)
-            ├── welcome.js      # Welcome typeout animation
+            ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
             ├── app.js          # Initialization and event wiring (loads last)
             └── vendor/
@@ -137,6 +144,8 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 |------|--------------------------|
 | `conf/allowed_commands.txt` | Immediately — re-read on every request |
 | `conf/faq.yaml` | Immediately — re-read on every request |
+| `conf/ascii.txt` | On next page load — fetched once by the browser on load |
+| `conf/app_hints.txt` | On next page load — fetched once by the browser on load |
 | `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
 | `conf/auto_complete.txt` | On next page load — fetched once by the browser |
 | `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
@@ -264,10 +273,14 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `max_output_lines` | `2000` | Max lines retained per tab. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
 | `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
-| `welcome_char_ms` | `10` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
-| `welcome_jitter_ms` | `10` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
-| `welcome_post_cmd_ms` | `700` | How long the cursor blinks on the command line after typing finishes, before output appears (ms) |
-| `welcome_inter_block_ms` | `1500` | Pause between finishing one block and the next command starting to type (ms) |
+| `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
+| `welcome_jitter_ms` | `12` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
+| `welcome_post_cmd_ms` | `650` | Pause after a welcome command finishes typing, before the next visual step begins (ms) |
+| `welcome_inter_block_ms` | `850` | Gap between one sampled welcome command block finishing and the next sampled command starting (ms) |
+| `welcome_sample_count` | `5` | Number of sampled command examples shown after the ASCII/status intro. `0` disables sampled commands |
+| `welcome_status_labels` | `["CONFIG","RUNNER","HISTORY","LIMITS","AUTOCOMPLETE"]` | Labels shown in the fake startup-status block during the welcome animation. Best with 4-6 short labels |
+| `welcome_hint_interval_ms` | `4200` | Delay between footer-hint rotations while the welcome tab remains idle (ms) |
+| `welcome_hint_rotations` | `2` | Number of footer-hint rotations after the first hint is shown. `0` keeps the first hint static |
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG`. See [Logging](#logging) |
 | `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog). See [Logging](#logging) |
 
@@ -418,7 +431,15 @@ The file is optional — if it doesn't exist or contains no valid entries, the F
 
 ## Welcome Animation
 
-When the page first loads, a typeout animation runs in the terminal showing example commands and their output character by character, simulating a live session. This is controlled by `app/conf/welcome.yaml`. If the file is absent or empty, no animation plays.
+When the page first loads, the terminal can render a staged welcome sequence:
+
+- a decorative `cat ~/.ascii-art.txt` prompt line
+- ASCII banner text loaded from `app/conf/ascii.txt`
+- a fake startup-status block using labels from `welcome_status_labels`
+- curated sampled commands and their sample output from `app/conf/welcome.yaml`
+- rotating footer hints loaded from `app/conf/app_hints.txt`
+
+If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt` or `app_hints.txt` are absent, those parts are skipped as well.
 
 **Format:**
 
@@ -428,13 +449,29 @@ When the page first loads, a typeout animation runs in the terminal showing exam
     PING google.com: 56 data bytes
     64 bytes from 142.250.80.46: icmp_seq=0 ttl=116 time=8.4 ms
     ...
+  group: network
+  featured: true
 
 - cmd: "# Just a comment with no output"
 ```
 
-Each entry must have a `cmd` field (the command shown after `$`). The `out` field is optional — if omitted, only the command prompt line is shown. Leading whitespace in `out` is preserved for visual indentation; trailing whitespace is stripped.
+Fields:
 
-The animation plays at approximately 15–25 characters per second with natural jitter. If the user runs a command before the animation completes, it stops immediately and clears the partial output. The file is fetched once on page load — edit `conf/welcome.yaml` and reload the page to see changes without restarting the server.
+- `cmd` — required command text shown after `$`
+- `out` — optional sample output shown below that command
+- `group` — optional sampling bucket used to keep the welcome set varied across categories
+- `featured` — optional boolean; featured commands are preferred for the first sample and get the `TRY THIS FIRST` badge
+
+Notes:
+
+- Leading whitespace in `out` is preserved; trailing whitespace is stripped
+- The decorative `cat ~/.ascii-art.txt` intro line is not interactive
+- Sampled welcome commands are clickable and load directly into the prompt without running
+- The `TRY THIS FIRST` badge is clickable and has the same behavior as clicking the featured command text
+- App hints rotate only briefly; they are not an endless carousel
+- If the user runs a command before the welcome sequence completes, it stops immediately and clears the partial output in that same tab only
+
+The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, or `conf/app_hints.txt` and reload the page to see changes without restarting the server.
 
 ---
 
@@ -678,7 +715,9 @@ docker compose logs -f
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
 | `GET` | `/faq` | Returns custom FAQ entries from `faq.yaml` as JSON |
-| `GET` | `/welcome` | Returns welcome animation blocks from `welcome.yaml` as JSON |
+| `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
+| `GET` | `/welcome/ascii` | Returns the welcome ASCII banner from `ascii.txt` as plain text |
+| `GET` | `/welcome/hints` | Returns rotating welcome footer hints from `app_hints.txt` as JSON |
 | `GET` | `/history` | Returns last N completed runs for the current session as JSON |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run (`?json` for raw JSON) |
 | `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
@@ -693,13 +732,13 @@ docker compose logs -f
 
 ### Running Tests
 
-**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging (362 tests):
+**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging:
 
 ```bash
 python3 -m pytest tests/py/ -v
 ```
 
-Tests are split across four files: command validation (shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, command rewrites and idempotency), utility functions (`split_chained_commands`, `load_allowed_commands`, `load_allowed_commands_grouped`, `load_faq`, `load_welcome`, `load_autocomplete`, PID map, retention formatting, expiry note rendering, permalink error pages, database init and retention pruning), Flask route integration (all HTTP endpoints via `app.test_client()`, response content types, session isolation, run/snapshot permalink HTML and JSON views), and structured logging (`_extra_fields`, text/GELF formatters, `configure_logging`, and all log events emitted by the application). No running server or Docker required — file I/O and Redis are mocked where needed.
+Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, and backend parsing of `welcome.yaml` metadata like `group` and `featured`. No running server or Docker required — file I/O and Redis are mocked where needed.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -707,16 +746,14 @@ Tests are split across four files: command validation (shell operator blocking, 
 npm run test:unit
 ```
 
-72 tests across 10 files covering `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, and status mapping (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar` (history.js); session ID persistence and `apiFetch()` header injection (session.js); autocomplete rendering and acceptance (autocomplete.js); tab state, rename, export, and permalink guards (tabs.js); welcome animation cancellation and commit behavior (welcome.js); search helpers; output rendering; and selected app bootstrap behavior. Uses jsdom so no browser is required.
+Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, and status mapping (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, and history action failures (history.js); session ID persistence and `apiFetch()` header injection (session.js); autocomplete rendering and acceptance (autocomplete.js); tab state, rename, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
 
 **Testing notes**
-- Vitest now exercises `session.js`, so the README mentions `X-Session-ID` as the client-scoped session header and documents the single-run permalink JSON view handled in `/history/<run_id>?json`.
-- Playwright tests run with `workers: 1` (rate limiting is per session) and mock `navigator.clipboard.writeText` by recording the value on `window.__clipboardText`, avoiding clipboard permission prompts.
-- The E2E suite now covers both `/share/<id>` snapshots and `/history/<run_id>` permalinks (HTML and JSON), the welcome animation cancel path, delete-non-favorites, and tab rename persistence; these behaviors are described in the Features section above.
+- Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
+- Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
+- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` permalinks (HTML and JSON), welcome interruption, decorative intro behavior, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, the mobile welcome layout regression, delete-non-favorites, tab rename persistence, output actions, history clipboard failure, and the boot/stall resilience cases.
+- The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
 - For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
-- Vitest now exercises `session.js`, so the README mentions `X-Session-ID` as the client-scoped session header and documents the single-run permalink JSON view handled in `/history/<run_id>?json`.
-- Playwright tests run with `workers: 1` (rate limiting is per session) and mock `navigator.clipboard.writeText` by recording the value on `window.__clipboardText`, avoiding clipboard permission prompts.
-- The E2E suite now covers both `/share/<id>` snapshots and `/history/<run_id>` permalinks (HTML and JSON), the welcome animation cancel path, delete-non-favorites, and tab rename persistence; these behaviors are described in the Features section above.
 
 **JS e2e tests** (Playwright) — exercises the full UI against a live Flask server:
 
@@ -724,7 +761,9 @@ npm run test:unit
 npm run test:e2e
 ```
 
-51 tests across 12 spec files. Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+
+For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
 
 ### Linting & Security Scanning
 

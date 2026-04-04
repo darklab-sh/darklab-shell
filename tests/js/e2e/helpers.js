@@ -34,16 +34,27 @@ export async function openHistory(page) {
  * retry the fetch — by then the commit will have landed.
  */
 export async function openHistoryWithEntries(page) {
+  await waitForHistoryRuns(page, 1)
   await openHistory(page)
+  await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible', timeout: 10_000 })
+}
 
-  const hasEntries = await page.locator('#history-list .history-entry').count() > 0
-  if (!hasEntries) {
-    // Retry: close and re-open to trigger a fresh /history fetch
-    await page.locator('#history-close').click()
-    await page.locator('#history-panel').waitFor({ state: 'hidden' })
-    await openHistory(page)
-    await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible', timeout: 10_000 })
-  }
+export async function waitForHistoryRuns(page, minRuns) {
+  await page.waitForFunction(async min => {
+    try {
+      const resp = await apiFetch('/history')
+      const data = await resp.json()
+      return data.runs && data.runs.length >= min
+    } catch {
+      return false
+    }
+  }, minRuns, { timeout: 20_000 })
+
+  return page.evaluate(async () => {
+    const resp = await apiFetch('/history')
+    const data = await resp.json()
+    return data.runs || []
+  })
 }
 
 /**

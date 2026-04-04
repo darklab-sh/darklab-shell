@@ -77,6 +77,28 @@ class TestHealthRoute:
         assert data["status"] == "degraded"
         assert data["db"] is False
 
+    def test_status_ok_when_redis_pings_successfully(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.return_value = True
+        with mock.patch("app.redis_client", fake_redis):
+            resp = client.get("/health")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["status"] == "ok"
+        assert data["redis"] is True
+
+    def test_status_degraded_when_redis_ping_fails(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.side_effect = Exception("redis down")
+        with mock.patch("app.redis_client", fake_redis):
+            resp = client.get("/health")
+        assert resp.status_code == 503
+        data = json.loads(resp.data)
+        assert data["status"] == "degraded"
+        assert data["redis"] is False
+
 
 # ── /config ───────────────────────────────────────────────────────────────────
 
@@ -102,7 +124,9 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in ("command_timeout_seconds",
                     "welcome_char_ms", "welcome_jitter_ms",
-                    "welcome_post_cmd_ms", "welcome_inter_block_ms"):
+                    "welcome_post_cmd_ms", "welcome_inter_block_ms",
+                    "welcome_sample_count", "welcome_status_labels",
+                    "welcome_hint_interval_ms", "welcome_hint_rotations"):
             assert key in data, f"missing key: {key}"
 
     def test_all_new_keys_are_ints(self):
@@ -110,8 +134,12 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in ("command_timeout_seconds",
                     "welcome_char_ms", "welcome_jitter_ms",
-                    "welcome_post_cmd_ms", "welcome_inter_block_ms"):
+                    "welcome_post_cmd_ms", "welcome_inter_block_ms",
+                    "welcome_sample_count", "welcome_hint_interval_ms",
+                    "welcome_hint_rotations"):
             assert isinstance(data[key], int), f"{key} should be int, got {type(data[key])}"
+        assert isinstance(data["welcome_status_labels"], list)
+        assert all(isinstance(item, str) for item in data["welcome_status_labels"])
 
     def test_command_timeout_reflects_cfg(self):
         client = get_client()
@@ -126,6 +154,10 @@ class TestConfigRoute:
             "welcome_jitter_ms": 5,
             "welcome_post_cmd_ms": 400,
             "welcome_inter_block_ms": 1000,
+            "welcome_sample_count": 4,
+            "welcome_status_labels": ["CONFIG", "CACHE", "READY"],
+            "welcome_hint_interval_ms": 3000,
+            "welcome_hint_rotations": 1,
         }
         with mock.patch("app.CFG", {**shell_app.CFG, **overrides}):
             data = json.loads(client.get("/config").data)
@@ -193,6 +225,35 @@ class TestFaqRoute:
         assert isinstance(data["items"], list)
 
 
+# ── /welcome/ascii ───────────────────────────────────────────────────────────
+
+class TestWelcomeAsciiRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii")
+        assert resp.status_code == 200
+
+    def test_contains_banner_art(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii")
+        assert b"/$$" in resp.data
+
+
+# ── /welcome/hints ───────────────────────────────────────────────────────────
+
+class TestWelcomeHintsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/hints")
+        assert resp.status_code == 200
+
+    def test_items_key_present(self):
+        client = get_client()
+        data = json.loads(client.get("/welcome/hints").data)
+        assert "items" in data
+        assert isinstance(data["items"], list)
+
+
 # ── /run ──────────────────────────────────────────────────────────────────────
 
 class TestRunRoute:
@@ -205,6 +266,18 @@ class TestRunRoute:
         client = get_client()
         resp = client.post("/run", json={"command": "   "})
         assert resp.status_code == 400
+
+    def test_non_string_command_returns_400(self):
+        client = get_client()
+        resp = client.post("/run", json={"command": 123})
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Command must be a string"
+
+    def test_non_object_json_returns_400(self):
+        client = get_client()
+        resp = client.post("/run", json=["not", "an", "object"])
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
@@ -315,6 +388,93 @@ class TestShareRoute:
         data = json.loads(resp.data)
         assert "id" in data
         assert "url" in data
+
+    def test_post_rejects_non_string_label(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": 123, "content": []},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Label must be a string"
+
+    def test_post_rejects_non_list_content(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": {"text": "line"}},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content must be a list"
+
+    def test_post_rejects_invalid_content_item(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": ["ok", 123]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content items must be strings or objects"
+
+    def test_post_rejects_content_object_without_text(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": [{"cls": "notice"}]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
+
+    def test_post_rejects_content_object_with_non_string_text(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": [{"text": 123, "cls": "notice"}]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
+
+    def test_post_rejects_content_object_with_non_string_cls(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": [{"text": "hello", "cls": 123}]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content objects must use string cls values"
+
+    def test_post_accepts_renderable_content_objects(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={
+                "label": "good content",
+                "content": [
+                    {"text": "$ echo hi", "cls": "cmd", "tsC": "2026-01-01 00:00:00"},
+                    {"text": "hi", "cls": "notice"},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert "id" in data
+
+    def test_post_rejects_non_object_json(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json=["bad", "payload"],
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
 
     def test_get_nonexistent_share_returns_404(self):
         client = get_client()

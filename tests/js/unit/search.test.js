@@ -83,4 +83,62 @@ describe('search helpers', () => {
     expect(input.value).toBe('')
     expect(document.querySelectorAll('mark.search-hl').length).toBe(0)
   })
+
+  it('runSearch leaves the UI unchanged when the query is blank', () => {
+    const { runSearch } = loadSearchFns()
+    const count = document.getElementById('searchCount')
+    count.textContent = 'stale'
+    document.getElementById('searchInput').value = ''
+
+    runSearch()
+
+    expect(count.textContent).toBe('')
+    expect(document.querySelectorAll('mark.search-hl').length).toBe(0)
+  })
+
+  it('runSearch is a no-op when the active tab has no output', () => {
+    const { runSearch } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/search.js',
+    ], {
+      document,
+      activeTabId: 'tab-1',
+      getOutput: () => null,
+      searchInput: document.getElementById('searchInput'),
+      searchCount: document.getElementById('searchCount'),
+    }, `{
+      runSearch,
+    }`)
+
+    document.getElementById('searchInput').value = 'hello'
+    runSearch()
+
+    expect(document.getElementById('searchCount').textContent).toBe('')
+  })
+
+  it('navigateSearch is a no-op when there are no matches', () => {
+    const { navigateSearch } = loadSearchFns()
+    document.getElementById('searchInput').value = 'missing'
+
+    navigateSearch(1)
+
+    expect(document.getElementById('searchCount').textContent).toBe('')
+  })
+
+  it('clearHighlights is safe when no output has been rendered', () => {
+    const { clearHighlights } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/search.js',
+    ], {
+      document,
+      activeTabId: 'tab-1',
+      getOutput: () => null,
+      searchInput: document.getElementById('searchInput'),
+      searchCount: document.getElementById('searchCount'),
+    }, `{
+      clearHighlights,
+    }`)
+
+    expect(() => clearHighlights()).not.toThrow()
+  })
 })

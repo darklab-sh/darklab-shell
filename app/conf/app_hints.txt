@@ -1,0 +1,16 @@
+# Rotating app hints shown in the welcome footer.
+# These are application-focused tips only, not command examples.
+
+Use the history panel to reopen saved runs.
+Click a permalink to share command output.
+Autocomplete only suggests allowed diagnostics commands.
+The run button executes the current command in the prompt.
+Long output is trimmed so the terminal stays responsive.
+Arrow Up/Down cycles command history when autocomplete is not active.
+The welcome banner uses sampled examples from the allowlist.
+Use the search bar to scan output with case-sensitive or regex matching.
+Double-click a tab label to rename it without losing later command output.
+The timestamps toggle cycles between off, elapsed, and clock time.
+Save HTML preserves ANSI colors; save txt exports a plain text snapshot.
+The kill button sends SIGTERM to the whole process group for that tab.
+The history chips row lets you reload recent commands with one click.

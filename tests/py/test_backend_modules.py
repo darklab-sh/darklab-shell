@@ -23,7 +23,7 @@ import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_faq,
-    load_welcome, load_autocomplete, load_allowed_commands_grouped,
+    load_welcome, load_ascii_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
@@ -407,6 +407,18 @@ class TestWelcomeLoading:
         assert len(result) == 1
         assert result[0]["cmd"] == "ping google.com"
         assert result[0]["out"] == "64 bytes"
+        assert result[0]["group"] == ""
+        assert result[0]["featured"] is False
+
+    def test_entry_with_group_and_featured_metadata(self):
+        path = self._write("- cmd: dig example.com A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert result[0]["group"] == "dns"
+        assert result[0]["featured"] is True
 
     def test_entry_without_out_gets_empty_string(self):
         path = self._write("- cmd: ping google.com\n")
@@ -445,6 +457,38 @@ class TestWelcomeLoading:
         finally:
             os.unlink(path)
         assert result == []
+
+
+# ── load_ascii_art / load_welcome_hints ──────────────────────────────────────
+
+class TestWelcomeAssetLoading:
+    def test_missing_ascii_file_returns_empty_string(self):
+        with mock.patch("commands.ASCII_FILE", "/nonexistent/ascii.txt"):
+            assert load_ascii_art() == ""
+
+    def test_ascii_art_trims_only_trailing_whitespace(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("  banner  \n\n")
+            path = f.name
+        try:
+            with mock.patch("commands.ASCII_FILE", path):
+                assert load_ascii_art() == "  banner"
+        finally:
+            os.unlink(path)
+
+    def test_missing_hints_file_returns_empty_list(self):
+        with mock.patch("commands.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
+            assert load_welcome_hints() == []
+
+    def test_hints_loader_ignores_blank_lines_and_comments(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# comment\n\nUse the history panel.\n  \n# another\nPress Enter to run.\n")
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_FILE", path):
+                assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
+        finally:
+            os.unlink(path)
 
 
 # ── load_autocomplete ─────────────────────────────────────────────────────────
@@ -682,6 +726,21 @@ class TestDatabaseInit:
         assert "runs" in tables
         assert "snapshots" in tables
 
+    def test_creates_session_indexes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
+            snapshot_indexes = {row[1] for row in conn.execute("PRAGMA index_list('snapshots')").fetchall()}
+            conn.close()
+
+        assert "idx_session" in indexes
+        assert "idx_snapshots_session" in snapshot_indexes
+
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
         with tempfile.TemporaryDirectory() as tmp:
@@ -777,3 +836,45 @@ class TestDatabaseInit:
             ).fetchone()[0]
             conn.close()
         assert count == 1
+
+    def test_legacy_runs_table_gets_session_id_column_migrated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE runs (
+                    id       TEXT PRIMARY KEY,
+                    command  TEXT NOT NULL,
+                    started  TEXT NOT NULL,
+                    finished TEXT,
+                    exit_code INTEGER,
+                    output   TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT INTO runs (id, command, started) VALUES ('legacy-run', 'ping', datetime('now'))"
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            session_id = conn.execute(
+                "SELECT session_id FROM runs WHERE id='legacy-run'"
+            ).fetchone()[0]
+            conn.close()
+
+        assert "session_id" in columns
+        assert session_id == ""
+
+    def test_migrate_schema_ignores_existing_column_error(self):
+        conn = mock.MagicMock()
+        conn.execute.side_effect = sqlite3.OperationalError("duplicate column name: session_id")
+
+        database._migrate_schema(conn)
+
+        conn.execute.assert_called_once_with("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")

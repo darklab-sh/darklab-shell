@@ -43,6 +43,7 @@ function loadRunnerFns({
   createTab = () => 'tab-2',
   addToHistory = () => {},
   appendLine = () => {},
+  welcomeOwnsTab = () => false,
 } = {}) {
   document.body.innerHTML = `
     <input id="cmd" />
@@ -94,6 +95,7 @@ function loadRunnerFns({
     createTab,
     clearTab,
     cancelWelcome,
+    welcomeOwnsTab,
     refreshHistoryPanel: () => {},
     showToast: () => {},
     clearTimeout,
@@ -197,5 +199,97 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenNthCalledWith(1, '\n$ curl /tmp/file\n', '')
     expect(appendLine).toHaveBeenNthCalledWith(2, '[denied] Access to /data and /tmp is not permitted.', 'denied')
     expect(status.className).toBe('status-pill fail')
+  })
+
+  it('runCommand shows a fetch error when the /run request rejects', async () => {
+    const apiFetch = vi.fn(() => Promise.reject(new Error('network down')))
+    const appendLine = vi.fn()
+    const { runCommand, status, runBtn } = loadRunnerFns({
+      cmdValue: 'echo hello',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }))
+    expect(appendLine).toHaveBeenLastCalledWith('\n[fetch error] network down', 'exit-fail', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('runCommand handles a 403 response as a denied command', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      status: 403,
+      json: () => Promise.resolve({ error: 'not allowed' }),
+    }))
+    const appendLine = vi.fn()
+    const { runCommand, status, runBtn } = loadRunnerFns({
+      cmdValue: 'echo hello',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenLastCalledWith('[denied] not allowed', 'denied', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('runCommand handles a 429 response as rate limited', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      status: 429,
+      json: () => Promise.resolve({}),
+    }))
+    const appendLine = vi.fn()
+    const { runCommand, status, runBtn } = loadRunnerFns({
+      cmdValue: 'echo hello',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenLastCalledWith('[rate limited] Too many requests. Please wait a moment.', 'denied', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('runCommand cancels and clears welcome output when the active tab owns welcome', async () => {
+    const apiFetch = vi.fn(() => Promise.reject(new Error('network down')))
+    const appendLine = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    const { runCommand, cancelWelcome, clearTab } = loadRunnerFns({
+      cmdValue: 'echo hello',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+      welcomeOwnsTab,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(welcomeOwnsTab).toHaveBeenCalledWith('tab-1')
+    expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
+    expect(clearTab).toHaveBeenCalledWith('tab-1')
+    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    }))
   })
 })

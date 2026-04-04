@@ -8,6 +8,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.2] — unreleased
 
 ### Added
+- **Richer welcome startup flow** — first load can now show a decorative ASCII banner from `app/conf/ascii.txt`, fake startup-status lines, curated sampled commands from `app/conf/welcome.yaml`, and rotating footer hints from `app/conf/app_hints.txt`
+  - sampled welcome commands are clickable and load into the prompt without running
+  - the featured sample gets a clickable `TRY THIS FIRST` badge
+  - `/welcome/ascii` serves the banner as plain text and `/welcome/hints` serves footer hints as JSON
+- **Welcome sampling metadata** — `welcome.yaml` entries now support `group` and `featured` fields so the sampled command set can stay varied while still biasing one primary onboarding command
+- **Configurable welcome status labels** — new `welcome_status_labels` key in `config.yaml`, exposed through `/config`, lets operators tune the fake startup block without editing frontend code
+- **Configurable welcome pacing knobs** — `welcome_sample_count`, `welcome_hint_interval_ms`, and `welcome_hint_rotations` now let operators tune how many sampled commands are shown and how active the footer hint feed feels
+- **Startup command-history hydration** — the frontend now hydrates recent-command recall from `/history` on boot so blank-input `ArrowUp` / `ArrowDown` works on first load, not only after a command has been run in the current tab
 - **Structured logging** — new `logging_setup.py` module providing four log levels (ERROR / WARN / INFO / DEBUG) and two output formats (`text` and `gelf`)
   - `text` format: human-readable `2026-04-02T10:00:00Z [INFO ] EVENT  key=value ...` lines with structured context appended as sorted key=value pairs
   - `gelf` format: newline-delimited GELF 1.1 JSON with `short_message` as the event name and all context in `_`-prefixed additional fields, compatible with Graylog / OpenSearch and other GELF back-ends
@@ -19,9 +27,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
 - **`SHARE_CREATED` info** — share (permalink snapshot) creation is logged at INFO with IP, share ID, and label
 - **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
-  - Vitest unit tests (`tests/js/unit/`) — 72 tests covering `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
+  - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
   - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
-  - Playwright e2e tests (`tests/js/e2e/`) — 51 tests across 12 spec files exercising the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
+  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
   - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
   - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
@@ -44,6 +52,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Smart client IP detection** — `get_client_ip()` now validates the `X-Forwarded-For` value against a regex before trusting it; invalid or absent values fall back to the direct connection IP, making the app work correctly with or without a reverse proxy and without any config setting
 
 ### Fixed
+- **Welcome teardown scoping** — welcome cleanup is now tied to the tab that owns the startup animation, preventing commands or clear actions in other tabs from wiping the welcome content
+- **Welcome interaction targets** — the decorative `cat ~/.ascii-art.txt` intro line is no longer interactive, while the featured badge and sampled command text both load the sample into the prompt
+- **Welcome mobile layout** — sampled command prompts and the `TRY THIS FIRST` badge no longer collapse into character-by-character wrapping on small screens
+- **Autocomplete examples** — `dnsx` `-d` suggestions in `auto_complete.txt` now include a real SecLists wordlist via `-w`, so the examples are runnable as shown
+- **Request validation** — `/run`, `/kill`, and `/share` now reject non-object JSON bodies and invalid field types instead of assuming shape and failing deeper in the handler
 - `history.js` — loading a run from the history drawer now sets `tab.command` on the newly created tab, so switching away and back correctly restores the command in the input bar (previously only tabs created by running a command directly had their command recalled)
 - `history.js` — clicking a history entry whose command is already loaded in another tab now switches to that existing tab instead of opening a duplicate; the history panel closes as normal
 - `history.js` — deleting a history entry now removes the command from the starred set and chip bar; previously the star persisted in localStorage so the command would reappear as a favourite the next time it was run
@@ -54,6 +67,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - `commands.py` — `split_chained_commands()` now uses the pre-compiled `SHELL_CHAIN_RE` object instead of duplicating the regex pattern string
 
 ### Changed
+- **Welcome defaults** — welcome timing defaults were retuned to make the startup sequence shorter and clearer: `welcome_char_ms` `10 -> 18`, `welcome_jitter_ms` `10 -> 12`, `welcome_post_cmd_ms` `700 -> 650`, `welcome_inter_block_ms` `1500 -> 850`
+- **Welcome timing semantics** — `welcome_post_cmd_ms` and `welcome_inter_block_ms` are now documented in terms of visible UX steps rather than old typewriter implementation details
+- **Welcome status presentation** — status lines now hold the `loading` state longer and animate through a lightweight spinner sequence before flipping to `loaded`
+- **Welcome content files** — `app_hints.txt` adds app-specific onboarding hints, and `welcome.yaml` examples were cleaned up to use real installed wordlists and safer sample commands
+- **Welcome styling** — the ASCII banner remains plain terminal content instead of a nested framed widget; the rendered art is larger, uses a solid green treatment, and no longer dims when later welcome blocks appear
+- **Documentation** — README, architecture notes, test guide, and changelog now describe the current welcome system, config keys, extra content files, boot-time history hydration, and updated route/test coverage
+- **Welcome route naming** — grouped the newer welcome-content routes under `/welcome/*` for consistency with the existing `/welcome` command-sample endpoint
 - `styles.css` — muted text color brightened for readability: dark theme `#606060` → `#7a7a7a`, light theme `#888` → `#666`
 - `.gitignore` — added `.vscode/` to excluded paths
 - `CHANGELOG.md` — added `CHANGELOG.md` to track changes between versions
