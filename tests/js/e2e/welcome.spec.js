@@ -17,6 +17,17 @@ test.describe('welcome animation', () => {
         ]),
       })
     })
+    await page.route('**/run', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"welcome-test-run"}\n\n',
+          'data: {"type":"output","text":"status\\n"}\n\n',
+          'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+        ].join(''),
+      })
+    })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
