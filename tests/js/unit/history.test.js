@@ -324,11 +324,12 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, executeHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, executeHistAction, confirmHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
 
+    confirmHistAction('delete', 'run-1', 'ping example.com')
     executeHistAction('delete')
     await Promise.resolve()
     await Promise.resolve()
