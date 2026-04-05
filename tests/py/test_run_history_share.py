@@ -260,7 +260,7 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "APP_NAME=shell.darklab.sh\\n" in body
         assert "SESSION_ID=sess-env\\n" in body
-        assert "SHELL=/shell.darklab.sh\\n" in body
+        assert "SHELL=/app/shell.darklab.sh/bin/bash\\n" in body
         assert "TERM=xterm-256color\\n" in body
         assert '"type": "exit"' in body
 
