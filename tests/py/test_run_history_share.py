@@ -240,7 +240,7 @@ class TestRunStreaming:
         data = json.loads(hist.data)
         assert [r["command"] for r in data["runs"]] == ["clear"]
 
-    def test_fake_env_returns_synthetic_environment(self):
+    def test_fake_env_returns_web_environment(self):
         client = get_client()
 
         resp = client.post("/run", json={"command": "env"}, headers={"X-Session-ID": "sess-env"})
@@ -260,14 +260,219 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "Synthetic shell helpers:\\n" in body
+        assert "Web shell helpers:\\n" in body
+        assert "banner     Print the configured ASCII banner without replaying welcome.\\n" in body
         assert "clear      Clear the current terminal tab output.\\n" in body
-        assert "env        Show the synthetic shell environment variables.\\n" in body
-        assert "help       Show synthetic shell helpers available in this app.\\n" in body
+        assert "date       Show the current server time.\\n" in body
+        assert "env        Show the web shell environment variables.\\n" in body
+        assert "faq        Show configured FAQ entries inside the terminal.\\n" in body
+        assert "fortune    Print a short operator-themed one-liner.\\n" in body
+        assert "groups     Show the web shell group membership.\\n" in body
+        assert "help       Show web shell helpers available in this app.\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
+        assert "hostname   Show the instance hostname/app name.\\n" in body
+        assert "limits     Show configured runtime and retention limits.\\n" in body
         assert "man <cmd>  Show the real man page for an allowed command.\\n" in body
-        assert "uname -a   Describe the synthetic shell environment.\\n" in body
+        assert "last       Show recent completed runs with timestamps and exit codes.\\n" in body
+        assert "retention  Show retention and full-output persistence settings.\\n" in body
+        assert "status     Summarize the current session and instance settings.\\n" in body
+        assert "tty        Show the web terminal device path.\\n" in body
+        assert "type <cmd> Describe whether a command is a helper command, real command, or missing.\\n" in body
+        assert "uname -a   Describe the web shell environment.\\n" in body
+        assert "uptime     Show app uptime since process start.\\n" in body
+        assert "version    Show web shell, app, Flask, and Python version details.\\n" in body
+        assert "which <cmd> Locate a web helper or real command.\\n" in body
+        assert "who        Show the current web shell user/session.\\n" in body
         assert '"type": "exit"' in body
+
+    def test_fake_banner_renders_ascii_art(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.load_ascii_art", return_value="line one\nline two"):
+            resp = client.post("/run", json={"command": "banner"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "line one\\n" in body
+        assert "line two\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_which_and_type_describe_commands(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+            which_resp = client.post("/run", json={"command": "which curl"})
+            which_body = which_resp.get_data(as_text=True)
+            type_resp = client.post("/run", json={"command": "type history"})
+            type_body = type_resp.get_data(as_text=True)
+
+        assert which_resp.status_code == 200
+        assert "/usr/bin/curl\\n" in which_body
+        assert type_resp.status_code == 200
+        assert "history is a helper command\\n" in type_body
+
+    def test_fake_limits_and_status_show_configuration(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.CFG", {**shell_app.CFG, "max_tabs": 4, "permalink_retention_days": 365}):
+            limits_resp = client.post("/run", json={"command": "limits"}, headers={"X-Session-ID": "sess-limits"})
+            limits_body = limits_resp.get_data(as_text=True)
+            status_resp = client.post("/run", json={"command": "status"}, headers={"X-Session-ID": "sess-limits"})
+            status_body = status_resp.get_data(as_text=True)
+
+        assert limits_resp.status_code == 200
+        assert "live preview lines" in limits_body
+        assert f"{shell_app.CFG['max_output_lines']}\\n" in limits_body
+        assert status_resp.status_code == 200
+        assert "session" in status_body
+        assert "sess-limits\\n" in status_body
+        assert "tab limit" in status_body
+        assert "4\\n" in status_body
+        assert "retention" in status_body
+        assert "365\\n" in status_body
+
+    def test_fake_last_lists_recent_completed_runs(self):
+        client = get_client()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("run-last-1", "sess-last", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    "run-last-2", "sess-last", "dig example.com A",
+                    "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 1, "[]",
+                )
+            )
+            conn.commit()
+
+        resp = client.post("/run", json={"command": "last"}, headers={"X-Session-ID": "sess-last"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "2025-12-31 18:00:05  [1]  dig example.com A\\n" in body
+        assert "2025-12-31 18:00:00  [0]  ping example.com\\n" in body
+
+    def test_fake_who_tty_groups_and_version_render_shell_identity(self):
+        client = get_client()
+
+        who_resp = client.post("/run", json={"command": "who"}, headers={"X-Session-ID": "sess-who"})
+        who_body = who_resp.get_data(as_text=True)
+        tty_resp = client.post("/run", json={"command": "tty"})
+        tty_body = tty_resp.get_data(as_text=True)
+        groups_resp = client.post("/run", json={"command": "groups"})
+        groups_body = groups_resp.get_data(as_text=True)
+        version_resp = client.post("/run", json={"command": "version"})
+        version_body = version_resp.get_data(as_text=True)
+
+        assert who_resp.status_code == 200
+        assert "shell.darklab.sh  pts/web  sess-who\\n" in who_body
+        assert tty_resp.status_code == 200
+        assert "/dev/pts/web\\n" in tty_body
+        assert groups_resp.status_code == 200
+        assert "shell.darklab.sh operators\\n" in groups_body
+        assert version_resp.status_code == 200
+        assert "shell.darklab.sh web shell\\n" in version_body
+        assert f"App {shell_app.APP_VERSION}\\n" in version_body
+        assert "Flask " in version_body
+        assert "Python " in version_body
+
+    def test_fake_faq_renders_builtin_and_configured_entries(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.load_all_faq", return_value=[
+            {"question": "Built-in question?", "answer": "Built-in answer."},
+            {"question": "What is this?", "answer": "A synthetic shell."},
+            {"question": "How do I stop a command?", "answer": "Use Kill."},
+        ]):
+            resp = client.post("/run", json={"command": "faq"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Configured FAQ entries:\\n" in body
+        assert "Q: Built-in question?\\n" in body
+        assert "A: Built-in answer.\\n" in body
+        assert "Q: What is this?\\n" in body
+        assert "A: A synthetic shell.\\n" in body
+        assert "Q: How do I stop a command?\\n" in body
+        assert "A: Use Kill.\\n" in body
+
+    def test_fake_retention_reports_preview_and_full_output_policy(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.CFG", {
+            **shell_app.CFG,
+            "permalink_retention_days": 365,
+            "persist_full_run_output": True,
+            "full_output_max_bytes": 5242880,
+        }):
+            resp = client.post("/run", json={"command": "retention"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Retention policy:\\n" in body
+        assert "run preview retention  365 days\\n" in body
+        assert "full output save       yes\\n" in body
+        assert "full output max        5242880 bytes\\n" in body
+
+    def test_fake_fortune_returns_configured_line(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.random.choice", return_value="Trust the output, not the hunch."):
+            resp = client.post("/run", json={"command": "fortune"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Trust the output, not the hunch.\\n" in body
+
+    def test_fake_sudo_reports_web_shell_restriction(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "sudo ping example.com"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "sudo: 'ping example.com' is not happening today.\\n" in body
+
+    def test_fake_reboot_reports_web_shell_restriction(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "reboot"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "reboot: bold choice.\\n" in body
+        assert "If this web shell could reboot the host, we would both have bigger problems.\\n" in body
+
+    def test_fake_rm_root_refuses_exact_root_delete_pattern(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "rm -fr /"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "rm: nice try.\\n" in body
+        assert "Even this web shell has standards.\\n" in body
+
+    def test_fake_date_hostname_and_uptime_render_shell_style_information(self):
+        client = get_client()
+
+        date_resp = client.post("/run", json={"command": "date"})
+        date_body = date_resp.get_data(as_text=True)
+        host_resp = client.post("/run", json={"command": "hostname"})
+        host_body = host_resp.get_data(as_text=True)
+        uptime_resp = client.post("/run", json={"command": "uptime"})
+        uptime_body = uptime_resp.get_data(as_text=True)
+
+        assert date_resp.status_code == 200
+        assert '"type": "output"' in date_body
+        assert host_resp.status_code == 200
+        assert "shell.darklab.sh\\n" in host_body
+        assert uptime_resp.status_code == 200
+        assert "up " in uptime_body
 
     def test_fake_man_renders_real_page_for_allowed_topic(self):
         client = get_client()
@@ -335,14 +540,14 @@ class TestRunStreaming:
         assert "man is only available for allowed commands. Topic not allowed: rm\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_man_for_synthetic_topic_returns_synthetic_help(self):
+    def test_fake_man_for_helper_topic_returns_web_shell_help(self):
         client = get_client()
 
         resp = client.post("/run", json={"command": "man history"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "Synthetic shell helpers:\\n" in body
+        assert "Web shell helpers:\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
         assert '"type": "exit"' in body
 
@@ -376,17 +581,17 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "/shell.darklab.sh\\n" in body
+        assert "/app/shell.darklab.sh/bin\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_uname_a_returns_synthetic_environment(self):
+    def test_fake_uname_a_returns_web_shell_environment(self):
         client = get_client()
 
         resp = client.post("/run", json={"command": "uname -a"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "shell.darklab.sh Linux synthetic-web-terminal x86_64 app-runtime\\n" in body
+        assert "shell.darklab.sh Linux web-terminal x86_64 app-runtime\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_id_returns_synthetic_identity(self):
@@ -429,9 +634,10 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "PID TTY          TIME CMD\\n" in body
-        assert "ping example.com\\n" in body
-        assert "dig example.com A\\n" in body
+        assert "PID TTY      EXIT START    END      CMD\\n" in body
+        assert " 9000 pts/0    -    -        -        ps aux\\n" in body
+        assert "pts/0    0    18:00:05 18:00:06 dig example.com A\\n" in body
+        assert "pts/0    0    18:00:00 18:00:03 ping example.com\\n" in body
         assert '"type": "exit"' in body
 
     def test_run_reports_missing_allowlisted_command_without_spawning(self):

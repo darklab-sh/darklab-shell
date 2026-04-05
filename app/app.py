@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 
 # Logging must be configured before other local imports — process.py
 # connects to Redis at module import time and emits log calls then.
-from config        import CFG, SCANNER_PREFIX
+from config        import APP_VERSION, CFG, SCANNER_PREFIX
 from logging_setup import configure_logging
 configure_logging(CFG)
 
@@ -40,7 +40,6 @@ from permalinks import _permalink_error_page, _permalink_page
 from fake_commands import resolve_fake_command, execute_fake_command
 from run_output_store import RunOutputCapture, load_full_output_lines
 
-APP_VERSION = "1.2"
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN = shutil.which("kill") or "/bin/kill"

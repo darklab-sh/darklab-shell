@@ -20,6 +20,59 @@ WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 
+BUILTIN_FAQ = [
+    {
+        "question": "What is this?",
+        "answer": (
+            "shell.darklab.sh is a lightweight web interface for running network diagnostic "
+            "and vulnerability scanning commands against remote endpoints, with output streamed "
+            "in real time. It's designed for testing and troubleshooting remote hosts."
+        ),
+    },
+    {
+        "question": "Why does mtr look different here?",
+        "answer": (
+            "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
+            "available in a web shell. It runs in --report-wide mode instead."
+        ),
+    },
+    {
+        "question": "Can I request a new tool?",
+        "answer": "Yes. Contact the instance operator to request additional allowlisted tools.",
+    },
+    {
+        "question": "How do tabs and permalinks work?",
+        "answer": (
+            "Each command runs in the active tab. Use additional tabs to keep results visible "
+            "side by side. The permalink action saves a shareable view of the visible output."
+        ),
+    },
+    {
+        "question": "How do I stop a running command?",
+        "answer": "Use the Kill button shown while a command is running.",
+    },
+    {
+        "question": "How do I access search, history and theme on mobile?",
+        "answer": "Use the mobile menu in the top-right corner.",
+    },
+    {
+        "question": "How do I save or share my results?",
+        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
+    },
+    {
+        "question": "How do I rename a tab?",
+        "answer": "Double-click the tab label, then press Enter or click away to confirm.",
+    },
+    {
+        "question": "What do the timestamp options do?",
+        "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
+    },
+    {
+        "question": "Are my commands visible to other users?",
+        "answer": "No. History and saved data are scoped to your anonymous browser session.",
+    },
+]
+
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
 # Both use >>? so > and >> are matched without allowing whitespace between them.
@@ -89,6 +142,11 @@ def load_faq():
         for item in data
         if isinstance(item, dict) and item.get("question") and item.get("answer")
     ]
+
+
+def load_all_faq():
+    """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
+    return [*BUILTIN_FAQ, *load_faq()]
 
 
 def load_welcome():

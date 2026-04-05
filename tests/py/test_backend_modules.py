@@ -23,7 +23,7 @@ import process
 import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
-    split_chained_commands, load_allowed_commands, load_faq,
+    split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
@@ -220,6 +220,20 @@ class TestLoadFaq:
         finally:
             os.unlink(path)
         assert result == []
+
+    def test_load_all_faq_appends_custom_entries_after_builtin_items(self):
+        yaml_content = "- question: Custom question?\n  answer: Custom answer.\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq()
+        finally:
+            os.unlink(path)
+        assert result[0]["question"] == "What is this?"
+        assert result[-1]["question"] == "Custom question?"
+        assert result[-1]["answer"] == "Custom answer."
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────

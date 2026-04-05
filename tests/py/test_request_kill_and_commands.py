@@ -244,18 +244,38 @@ class TestIsCommandAllowedEdges:
 
 class TestFakeCommandResolution:
     def test_resolves_supported_fake_commands(self):
+        assert resolve_fake_command("banner") == "banner"
         assert resolve_fake_command("clear") == "clear"
+        assert resolve_fake_command("date") == "date"
         assert resolve_fake_command("env") == "env"
+        assert resolve_fake_command("faq") == "faq"
+        assert resolve_fake_command("fortune") == "fortune"
+        assert resolve_fake_command("groups") == "groups"
         assert resolve_fake_command("help") == "help"
         assert resolve_fake_command("history") == "history"
+        assert resolve_fake_command("hostname") == "hostname"
         assert resolve_fake_command("id") == "id"
+        assert resolve_fake_command("last") == "last"
+        assert resolve_fake_command("limits") == "limits"
         assert resolve_fake_command("ls") == "ls"
         assert resolve_fake_command("man curl") == "man"
         assert resolve_fake_command("pwd") == "pwd"
+        assert resolve_fake_command("reboot") == "reboot"
+        assert resolve_fake_command("retention") == "retention"
+        assert resolve_fake_command("rm -fr /") == "rm_root"
+        assert resolve_fake_command("status") == "status"
+        assert resolve_fake_command("sudo") == "sudo"
+        assert resolve_fake_command("tty") == "tty"
+        assert resolve_fake_command("type curl") == "type"
         assert resolve_fake_command("uname -a") == "uname"
+        assert resolve_fake_command("uptime") == "uptime"
+        assert resolve_fake_command("version") == "version"
+        assert resolve_fake_command("which curl") == "which"
+        assert resolve_fake_command("who") == "who"
         assert resolve_fake_command("whoami") == "whoami"
         assert resolve_fake_command("ps aux") == "ps"
 
     def test_rejects_non_fake_commands(self):
         assert resolve_fake_command("ping example.com") is None
+        assert resolve_fake_command("rm /tmp/file") is None
         assert resolve_fake_command("") is None

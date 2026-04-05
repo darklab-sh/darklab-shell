@@ -5,11 +5,19 @@
 # Tab completes the highlighted suggestion. Arrow keys navigate the list.
 
 # fake shell helpers
+banner
 clear
+date
 env
+faq
+fortune
+groups
 help
 history
+hostname
 id
+last
+limits
 ls
 man ping
 man curl
@@ -17,11 +25,21 @@ man dig
 man nmap
 man traceroute
 man wget
+tty
+version
+who
+which curl
+which history
+type curl
+type history
 pwd
 ps
 ps aux
 ps -ef
+retention
+status
 uname -a
+uptime
 whoami
 
 # ping

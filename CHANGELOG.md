@@ -13,18 +13,34 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `/history/<run_id>/full` remains as a backward-compatible alias
   - full-output artifacts are deleted alongside their parent run on single-run delete, clear-history, and retention pruning
 - **Fake shell command framework** — `/run` now recognizes a small synthetic-command layer before process spawning so common shell helpers can be useful without weakening the allowlist model
+  - `banner` prints the configured ASCII art without replaying the full welcome sequence
   - `clear` clears the current terminal tab through the normal `/run` flow
-  - `env` prints a stable synthetic shell environment for the current session
-  - `help` lists the available synthetic helpers
+  - `date` prints the current server time
+  - `env` prints a stable web shell environment for the current session
+  - `faq` prints the built-in FAQ plus custom `faq.yaml` entries inside the terminal
+  - `fortune` prints a short operator-themed one-liner
+  - `groups` prints web shell group membership
+  - `help` lists the available web shell helpers
   - `history` prints recent commands from the current session in shell-style history order
-  - `id` prints a stable synthetic identity for the app
+  - `hostname` prints the configured app/instance name
+  - `id` prints a stable web-shell identity for the app
+  - `last` prints recent completed runs with timestamps and exit codes
+  - `limits` prints the configured runtime, retention, and rate-limit settings in-terminal
   - `ls` prints the current allowlist grouped by category
   - `man <allowed-command>` renders the real system man page for allowlisted topics through a non-interactive, terminal-safe path
-  - `man <fake-command>` reuses the synthetic helper description instead of rejecting the topic
-  - `pwd` prints a synthetic workspace path
+  - `man <fake-command>` reuses the matching helper description instead of rejecting the topic
+  - `retention` prints run-preview retention and full-output persistence settings directly in-terminal
+  - `reboot`, `sudo`, and exact `rm -fr /` / `rm -rf /` patterns now return explicit web-shell guardrail messages
+  - `status` prints a short session and instance summary
+  - `tty` prints a web terminal device path
+  - `type <cmd>` and `which <cmd>` distinguish helper commands, real commands, and missing runtime binaries
+  - `pwd` prints a web-shell workspace path
+  - `version` prints web shell, app, Flask, and Python version details
+  - `who` prints the current web shell user/session
   - `whoami` prints a short project description and the GitLab README link
-  - `ps` / `ps aux` / `ps -ef` print recent commands from the current session in a lightweight process-list format
-  - `uname -a` prints a stable synthetic environment string instead of host kernel details
+  - `ps` / `ps aux` / `ps -ef` now show the current `ps` invocation with a fake PID plus prior completed commands with separate exit/start/end columns
+  - `uname -a` prints a stable web-shell environment string instead of host kernel details
+  - `uptime` prints app uptime since process start
 - **Richer welcome startup flow** — first load can now show a decorative ASCII banner from `app/conf/ascii.txt`, fake startup-status lines, curated sampled commands from `app/conf/welcome.yaml`, and rotating footer hints from `app/conf/app_hints.txt`
   - sampled welcome commands are clickable and load into the prompt without running
   - the featured sample gets a clickable `TRY THIS FIRST` badge

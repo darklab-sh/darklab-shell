@@ -7,6 +7,8 @@ import os
 import pwd
 import yaml
 
+APP_VERSION = "1.2"
+
 
 def load_config():
     """Load config.yaml, falling back to defaults for any missing keys."""

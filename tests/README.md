@@ -38,8 +38,9 @@ Pytest lives in `tests/py/` and is organized by backend concern:
 
 - `test_validation.py` - command validation, shell operator blocking, path blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
 - `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, shared missing-binary handling, canonical run permalink behavior when full-output artifacts exist, and the backward-compatible `/history/<run_id>/full` alias
-- `test_run_history_share.py` - run/history/share flows with SQLite persistence, including synthetic `/run` command paths for fake shell helpers, constrained `man` rendering, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
-- `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution
+- `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
+- `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
+- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` builtin+custom merge behavior, and module-level utility coverage
 - `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, and module-level loaders/helpers
 - `test_logging.py` - structured logging, formatter output, and log-event assertions
 
