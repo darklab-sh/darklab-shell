@@ -5,7 +5,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.2] — unreleased
+## [1.2] — 2026-04-05
 
 ### Added
 - **Split run-output persistence** — completed runs now keep a capped preview in SQLite for the history drawer and normal run permalink, while optional full output is persisted separately as compressed artifacts with metadata in a dedicated `run_output_artifacts` table
