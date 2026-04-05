@@ -25,10 +25,13 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - tab switch input neutrality (no command repopulation)
 - tab overflow arrows and drag reorder
 - terminal-style autocomplete placement (above/below)
+- app-safe keyboard shortcuts for tab lifecycle and tab actions
+- readline-style editing for `Ctrl+W`, `Ctrl+U`, `Ctrl+K`, `Alt/Option+B`, and `Alt/Option+F`
+- `keys` helper command plus FAQ/README shortcut documentation
+- macOS-friendly `Option` shortcut handling and E2E coverage
 
 #### Remaining
 - improve inline selection visibility for advanced keyboard flows
-- consider adding additional readline-like shortcuts (`Ctrl+W` done; evaluate `Ctrl+U`, `Ctrl+K`, `Alt+B/F`)
 - keep the `keys` helper command, FAQ entry, and README shortcut section aligned as bindings ship
 - add a user options modal for timestamps, line numbers, and other preferences with cookie persistence
 - add phase 2 for tab drag reorder: mobile touch-and-drag behavior
@@ -43,21 +46,22 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - keep browser-conflicting bindings optional; define app-safe shortcuts as the primary contract
 
 Planned tab bindings:
-- `Alt+T` new tab
-- `Alt+W` close current tab
-- `Alt+ArrowRight` / `Alt+ArrowLeft` next / previous tab
-- `Alt+1` ... `Alt+9` direct tab jump
+- shipped: `Alt/Option+T` new tab
+- shipped: `Alt/Option+W` close current tab
+- shipped: `Alt/Option+ArrowRight` / `Alt/Option+ArrowLeft` next / previous tab
+- shipped: `Alt/Option+1` ... `Alt/Option+9` direct tab jump
 
 Planned action bindings:
-- `Enter` / `Escape` confirm / cancel kill dialog
-- `Alt+P` create permalink
-- `Alt+Shift+C` copy active-tab output
-- `Ctrl+L` clear current tab output
+- shipped: `Enter` / `Escape` confirm / cancel kill dialog
+- shipped: `Alt/Option+P` create permalink
+- shipped: `Alt/Option+Shift+C` copy active-tab output
+- shipped: `Ctrl+L` clear current tab output
 
 Planned readline-style editing:
-- `Ctrl+U` kill to beginning of line
-- `Ctrl+K` kill to end of line
-- `Alt+B` / `Alt+F` move backward / forward by word
+- shipped: `Ctrl+U` kill to beginning of line
+- shipped: `Ctrl+K` kill to end of line
+- shipped: `Alt/Option+B` / `Alt/Option+F` move backward / forward by word
+- remaining: consider `Ctrl+A`, `Ctrl+E`, yank/kill-ring behavior, and additional shell-native editing keys
 
 Helper-command plan:
 - `keys` is now the dedicated shortcut-discovery helper command

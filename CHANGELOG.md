@@ -10,6 +10,11 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - **Terminal-native input surface** — the visible command-entry UI is now rendered inline inside terminal output while keeping a hidden real input for browser/mobile keyboard semantics
 - **Shell-like editing and control behavior** — blank/whitespace `Enter` now emits a fresh prompt line, and `Ctrl+C` now opens kill confirmation during active runs or emits a new prompt line when idle
+- **Keyboard shortcut layer** — app-safe shortcuts now cover tab lifecycle, active-tab actions, and shell-style line editing
+  - `Alt/Option+T`, `Alt/Option+W`, `Alt/Option+ArrowLeft/Right`, and `Alt/Option+1...9` manage tab creation, closing, and navigation
+  - `Alt/Option+P`, `Alt/Option+Shift+C`, and `Ctrl+L` trigger permalink, copy, and clear actions for the active tab
+  - `Ctrl+U`, `Ctrl+K`, and `Alt/Option+B` / `Alt/Option+F` add readline-style prompt editing on top of the existing `Ctrl+W` support
+- **Keyboard shortcut discovery** — new `keys` web-shell helper prints the current shortcut set plus remaining planned shortcut work, and is exposed through `help`, `man keys`, autocomplete, the README, and the FAQ modal
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop
 - **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
@@ -24,6 +29,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Output actions UX** — `copy` and `save txt` now report a friendly no-output toast when the tab only contains welcome/decorative lines
 
 ### Fixed
+- **macOS keyboard shortcuts** — app-safe `Option` shortcuts now match physical key codes instead of the produced symbol, preventing `Option+T`, `Option+W`, `Option+Shift+C`, and `Option+B/F` from inserting special characters into the prompt
 - **Welcome skip edge case** — pressing Enter while welcome is active no longer leaves a stray legacy prompt marker in output
 - **Prompt cursor rendering** — prompt caret visibility now remains stable after welcome interruption, normal settle, and follow-up command execution
 - **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command

@@ -542,10 +542,10 @@ Current keyboard behavior:
 
 On macOS, `Option` is the key used for the app-safe `Alt` shortcuts above. The `Ctrl+...` bindings are intentional shell-style controls and are separate from browser `Command` shortcuts.
 
-Planned shortcut rollout for the shell-style UI:
+Shipped app-safe shortcuts:
 
-| Shortcut | Planned action | Notes |
-|----------|----------------|-------|
+| Shortcut | Action | Notes |
+|----------|--------|-------|
 | `Option+T` (`Alt+T`) | New tab | Preferred app-safe binding |
 | `Option+W` (`Alt+W`) | Close current tab | Avoids fighting browser `Ctrl/Cmd+W` |
 | `Option+ArrowRight` (`Alt+ArrowRight`) | Next tab | |
@@ -555,15 +555,15 @@ Planned shortcut rollout for the shell-style UI:
 | `Option+P` (`Alt+P`) | Create permalink for active tab | |
 | `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
 | `Ctrl+L` | Clear current tab output | Shell-style convenience |
-| `Ctrl+U` | Delete from cursor to start of line | Planned readline-style editing |
-| `Ctrl+K` | Delete from cursor to end of line | Planned readline-style editing |
-| `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Planned readline-style editing |
+| `Ctrl+U` | Delete from cursor to start of line | Readline-style editing |
+| `Ctrl+K` | Delete from cursor to end of line | Readline-style editing |
+| `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Readline-style editing |
 
 Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
 
 Longer-term plan:
 
-- add a dedicated helper command for shortcut discovery, likely `keys`
+- keep the `keys` helper command aligned with shipped behavior and remaining shortcut work
 - add a user options surface so shortcuts and terminal display preferences can be documented and configured together
 
 The same shortcut reference is also available in-terminal via `keys`.

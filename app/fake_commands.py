@@ -309,7 +309,7 @@ def _run_fake_env(session_id: str) -> list[dict[str, str]]:
     lines = [
         f"APP_NAME={CFG['app_name']}",
         f"SESSION_ID={session_id or 'anonymous'}",
-        "SHELL=/shell.darklab.sh",
+        "SHELL=/app/shell.darklab.sh/bin/bash",
         "TERM=xterm-256color",
     ]
     return _text_lines(lines)
