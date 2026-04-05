@@ -274,6 +274,7 @@ class TestRunStreaming:
 
         fake_proc = mock.Mock(returncode=0, stdout="NAME\ncurl - transfer a URL\n", stderr="")
         with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("fake_commands.subprocess.run", return_value=fake_proc):
             resp = client.post("/run", json={"command": "man curl"})
             body = resp.get_data(as_text=True)
@@ -288,6 +289,7 @@ class TestRunStreaming:
         man_text = "\n".join(f"line {index}" for index in range(1, 6)) + "\n"
         fake_proc = mock.Mock(returncode=0, stdout=man_text, stderr="")
         with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("fake_commands.subprocess.run", return_value=fake_proc), \
              mock.patch("fake_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
             resp = client.post("/run", json={"command": "man curl"})
@@ -313,6 +315,7 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
+             mock.patch("fake_commands.resolve_runtime_command", return_value="/usr/bin/man"), \
              mock.patch("fake_commands.subprocess.run") as run_cmd:
             resp = client.post("/run", json={"command": "man curl"})
             body = resp.get_data(as_text=True)
