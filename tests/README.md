@@ -18,8 +18,8 @@ Current totals on this branch:
 
 - `pytest`: 444
 - `vitest`: 167
-- `playwright`: 83
-- total: 694
+- `playwright`: 89
+- total: 700
 
 ## Running The Suites
 
@@ -88,13 +88,13 @@ Spec files:
 
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
-- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, and killed-state UI
+- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, and killed-state UI
 - `mobile.spec.js` - mobile menu visibility and dismissal
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
-- `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings and prompt word-motion behavior
+- `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings including tab actions, permalink/copy, clear, and prompt word-motion behavior
 - `share.spec.js` - snapshot permalinks, canonical single-run permalinks, and clipboard failure handling
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, and closing behavior
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow

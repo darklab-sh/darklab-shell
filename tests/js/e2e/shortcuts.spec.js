@@ -64,6 +64,74 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
+  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'π',
+      code: 'KeyP',
+      altKey: true,
+    })
+
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5000 })
+    await expect(page.locator('#permalink-toast')).toContainText(/link copied/i)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('macOS Option+ArrowRight and Option+ArrowLeft cycle tabs', async ({ page }) => {
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(3)
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowLeft',
+      code: 'ArrowLeft',
+      altKey: true,
+    })
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 2')
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: 'ArrowRight',
+      code: 'ArrowRight',
+      altKey: true,
+    })
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('macOS Option+digit jumps directly to a tab without inserting a symbol', async ({ page }) => {
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(3)
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: '£',
+      code: 'Digit3',
+      altKey: true,
+    })
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+
+    await dispatchMacOptionKey(page, '#cmd', {
+      key: '¡',
+      code: 'Digit1',
+      altKey: true,
+    })
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Ctrl+L clears the active tab output in the browser', async ({ page }) => {
+    await runCommand(page, CMD)
+    await expect(page.locator('.tab-panel.active .output')).not.toBeEmpty()
+
+    await page.locator('#cmd').press('Control+l')
+
+    await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
+    await expect(page.locator('.tab-panel.active .output .shell-prompt-wrap')).toBeVisible()
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
+  })
+
   test('macOS Option+B and Option+F move by word without inserting symbols into the prompt', async ({ page }) => {
     const input = page.locator('#cmd')
     await input.fill('dig darklab.sh A')

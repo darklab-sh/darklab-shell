@@ -835,7 +835,7 @@ python3 -m pytest tests/py/ -v
 
 Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
 
-Current totals in this branch: **444 pytest + 167 Vitest + 83 Playwright = 694 tests**.
+Current totals in this branch: **444 pytest + 167 Vitest + 89 Playwright = 700 tests**.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -848,7 +848,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 **Testing notes**
 - Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
 - Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, history clipboard failure, and the boot/stall resilience cases.
+- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, kill-modal Enter/Escape behavior, history clipboard failure, and the boot/stall resilience cases.
 - The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
 - For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
 
@@ -858,7 +858,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 npm run test:e2e
 ```
 
-Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, kill-modal keyboard confirmation, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
 

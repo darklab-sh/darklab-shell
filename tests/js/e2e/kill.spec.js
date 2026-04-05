@@ -59,6 +59,34 @@ test.describe('kill running command', () => {
     await expect(page.locator('#kill-overlay')).toBeHidden()
   })
 
+  test('Enter confirms kill while the kill confirmation modal is open', async ({ page }) => {
+    await page.locator('#cmd').fill(LONG_CMD)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await page.locator('#cmd').press('Control+c')
+    await expect(page.locator('#kill-overlay')).toBeVisible()
+
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
+    await expect(page.locator('#kill-overlay')).toBeHidden()
+  })
+
+  test('Escape cancels kill while the kill confirmation modal is open', async ({ page }) => {
+    await page.locator('#cmd').fill(LONG_CMD)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await page.locator('#cmd').press('Control+c')
+    await expect(page.locator('#kill-overlay')).toBeVisible()
+
+    await page.keyboard.press('Escape')
+
+    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING')
+  })
+
   test('Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation', async ({ page }) => {
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
 
