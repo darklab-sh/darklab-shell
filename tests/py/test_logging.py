@@ -1261,16 +1261,18 @@ class TestRunSpawnErrorEvent:
     def test_spawn_error_returns_500(self):
         client = get_client()
         with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-            with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
-                resp = self._post_run(client, "ping 8.8.8.8")
+            with mock.patch("app.runtime_missing_command_name", return_value=None):
+                with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                    resp = self._post_run(client, "ping 8.8.8.8")
         assert resp.status_code == 500
 
     def test_spawn_error_emits_error_log(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
-                    self._post_run(client, "ping 8.8.8.8")
+                with mock.patch("app.runtime_missing_command_name", return_value=None):
+                    with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                        self._post_run(client, "ping 8.8.8.8")
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR"]
         assert len(calls) == 1
 
@@ -1278,8 +1280,9 @@ class TestRunSpawnErrorEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
-                    self._post_run(client, "ping 8.8.8.8")
+                with mock.patch("app.runtime_missing_command_name", return_value=None):
+                    with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                        self._post_run(client, "ping 8.8.8.8")
         call = next(c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR")
         assert "ip" in call.kwargs["extra"]
 
@@ -1287,7 +1290,8 @@ class TestRunSpawnErrorEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
-                    self._post_run(client, "ping 8.8.8.8")
+                with mock.patch("app.runtime_missing_command_name", return_value=None):
+                    with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                        self._post_run(client, "ping 8.8.8.8")
         call = next(c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR")
         assert call.kwargs["extra"]["cmd"] == "ping 8.8.8.8"
