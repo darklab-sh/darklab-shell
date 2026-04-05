@@ -4,6 +4,9 @@
 // load at the end of <body> after all HTML is rendered).
 const cmdInput    = document.getElementById('cmd');
 const runBtn      = document.getElementById('run-btn');
+const shellPromptWrap = document.getElementById('shell-prompt-wrap');
+const shellPromptText = document.getElementById('shell-prompt-text');
+const shellPromptCaret = document.getElementById('shell-prompt-caret');
 const status      = document.getElementById('status');
 const histRow     = document.getElementById('history-row');
 const tabsBar     = document.getElementById('tabs-bar');

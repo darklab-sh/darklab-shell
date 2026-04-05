@@ -191,9 +191,27 @@ describe('runner helpers', () => {
     runCommand()
 
     expect(apiFetch).not.toHaveBeenCalled()
-    expect(appendLine).toHaveBeenNthCalledWith(1, '\n$ ping google.com | cat /etc/passwd\n', '')
+    expect(appendLine).toHaveBeenNthCalledWith(1, 'ping google.com | cat /etc/passwd', 'prompt-echo', undefined)
     expect(appendLine).toHaveBeenNthCalledWith(2, '[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
     expect(status.className).toBe('status-pill fail')
+  })
+
+  it('runCommand on blank or whitespace input creates a new empty prompt line', () => {
+    const apiFetch = vi.fn(() => Promise.resolve())
+    const appendLine = vi.fn()
+    const { runCommand, cmdInput, status } = loadRunnerFns({
+      cmdValue: '   ',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('', 'prompt-echo', 'tab-1')
+    expect(cmdInput.value).toBe('')
+    expect(status.className).toBe('status-pill idle')
   })
 
   it('runCommand blocks direct /tmp and /data paths client-side before calling the API', () => {
@@ -209,7 +227,7 @@ describe('runner helpers', () => {
     runCommand()
 
     expect(apiFetch).not.toHaveBeenCalled()
-    expect(appendLine).toHaveBeenNthCalledWith(1, '\n$ curl /tmp/file\n', '')
+    expect(appendLine).toHaveBeenNthCalledWith(1, 'curl /tmp/file', 'prompt-echo', undefined)
     expect(appendLine).toHaveBeenNthCalledWith(2, '[denied] Access to /data and /tmp is not permitted.', 'denied')
     expect(status.className).toBe('status-pill fail')
   })

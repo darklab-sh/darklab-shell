@@ -203,17 +203,32 @@ External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 for ANSI-to-HTML 
 
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
 
+### Shell Prompt Model
+
+The visible command surface is terminal-native:
+
+- a hidden real `#cmd` input remains the source of truth for browser/mobile keyboard input, selection, and focus
+- a rendered prompt row is mounted into the active tab output and mirrors the hidden input value/caret/selection
+- the prompt unmounts while a command is running and remounts when the run finishes/fails/is killed
+- submitted commands are echoed as styled prompt lines in output so transcript flow reads like a real shell
+- blank/whitespace `Enter` does not call `/run`; it appends a new prompt line
+- `Ctrl+C` maps to shell-like behavior: open kill confirm while running, otherwise emit a fresh prompt line
+
+This keeps browser editing semantics and accessibility predictable without relying on `contenteditable`.
+
 ### Tab State
 
 Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
 
-- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; restored to the input bar when the tab is activated so the user can re-run or edit it without copying from the output. If a history entry is clicked and an existing tab already has a matching `command`, that tab is activated instead of opening a duplicate
+- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when clicking history entries (if a matching tab already exists, that tab is activated)
 - `runId` — the UUID from the SSE `started` message, used for kill requests
 - `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
 - `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
 - `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
 - `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
 - `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
+
+Tab switching is intentionally input-neutral: activating a different tab clears the hidden input and resets history-navigation cursor state instead of restoring prior tab text into the prompt.
 
 ### Timestamps: CSS-Driven Display
 
@@ -241,6 +256,8 @@ The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `conte
 The implementation still types character-by-character using short timed waits, but it now mixes in overlapping loading spinners for the status rows, a staged handoff into the first prompt, and finite hint rotation.
 
 Welcome ownership is tab-scoped. `runWelcome()` records a `welcomeTabId`, and teardown only happens when the action targets that same tab. That avoids the old cross-tab bug where running a command or clearing output in some other tab could wipe the welcome content. `runCommand()` checks whether the active tab is the welcome owner before clearing, and clear/close actions do the same.
+
+Welcome settle behavior is intentionally keyboard-friendly: printable typing, `Escape`, and `Enter` all fast-forward the active welcome sequence to its settled state.
 
 `load_welcome()` now accepts richer blocks from `conf/welcome.yaml`:
 
@@ -324,6 +341,13 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`templates/`, `conf/`, etc.) and app modules are importable.
 
+Current totals on this branch:
+
+- `pytest`: 440
+- `vitest`: 131
+- `playwright`: 78
+- total: 649
+
 ### Python tests
 
 - **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites, and shared runtime-command availability helpers. These tests mock `load_allowed_commands` or runtime lookups so they do not depend on the actual `conf/allowed_commands.txt` file or installed binaries.
@@ -355,8 +379,8 @@ The browser JS files share a single global scope (by design — no ES modules, n
 - `runner.test.js` — elapsed formatting plus kill/status helpers
 - `history.test.js` — starred-command localStorage helpers, startup hydration of blank-input command recall from `/history`, and history restore overlay/failure behavior
 - `session.test.js` — anonymous session ID persistence and `apiFetch()` header injection
-- `autocomplete.test.js` — dropdown filtering, highlighting, acceptance, and dismissal
-- `tabs.test.js` — tab limits, rename, command recall, export guards, and last-tab reset
+- `autocomplete.test.js` — terminal-style suggestion list placement (above/below), highlighting, acceptance, and dismissal
+- `tabs.test.js` — tab limits, rename, drag-reorder state sync, rename/overflow scroll-button behavior, prompt mounting rules, no-output toasts, export guards, and last-tab reset
 - `welcome.test.js` — welcome animation cancellation, badge behavior, and current DOM/state transitions
 - `app.test.js` — startup theme, timestamp-mode bootstrap behavior, and config/history boot wiring
 - `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers
@@ -370,17 +394,17 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 **What is tested:**
 - `commands.spec.js` — command execution, denial, and exit-status rendering
 - `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
-- `kill.spec.js` — kill confirmation and killed-state UI
+- `kill.spec.js` — kill confirmation, Ctrl+C shell-kill behavior, and killed-state UI
 - `mobile.spec.js` — hamburger/menu visibility and dismissal
-- `output.spec.js` — copy, clear, save .txt/.html, and download fidelity
+- `output.spec.js` — copy/clear/export actions, no-output toasts, and download fidelity
 - `rate-limit.spec.js` — per-session rate limiting
 - `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
 - `share.spec.js` — snapshot permalinks plus single-run history permalinks and JSON/HTML views
-- `tabs.spec.js` — max-tabs, rename, rename persistence, command recall, and last-tab reset behavior
+- `tabs.spec.js` — max-tabs, rename, drag reorder, neutral-input tab switching, blank-prompt Enter behavior, and last-tab reset behavior
 - `timestamps.spec.js` — timestamp mode cycling and output metadata
 - `ui.spec.js` — theme toggling and FAQ modal behavior
 - `autocomplete.spec.js` — command suggestion interaction
-- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, preferred-command stability, and tab-scoped welcome teardown
+- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, prompt-key settle behavior, preferred-command stability, and tab-scoped welcome teardown
 
 **Implementation notes learned during setup:**
 - `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.

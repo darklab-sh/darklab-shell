@@ -84,7 +84,7 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('switching to a tab restores its last-run command', async ({ page }) => {
+  test('switching to a tab does not restore prior commands into input', async ({ page }) => {
     // Run a command on tab 1
     await runCommand(page, CMD)
 
@@ -98,14 +98,32 @@ test.describe('tab command recall', () => {
     // Switch back to tab 1 (first tab in the bar)
     await page.locator('.tab').first().click()
 
-    // The input should be restored to the command run on tab 1
-    await expect(page.locator('#cmd')).toHaveValue(CMD)
+    // Input stays neutral across tab switches
+    await expect(page.locator('#cmd')).toHaveValue('')
   })
 
   test('a freshly created tab starts with an empty input', async ({ page }) => {
     await runCommand(page, CMD)
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('pressing Enter on a blank prompt appends a fresh prompt line', async ({ page }) => {
+    await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15000 })
+    const beforeCount = await page.locator('.tab-panel.active .output .line.prompt-echo').count()
+
+    await page.evaluate(() => {
+      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle('tab-1')
+    })
+    await page.waitForFunction(() => {
+      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
+    })
+
+    await page.locator('#cmd').press('Enter')
+
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(beforeCount + 1)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })
 })
 
@@ -122,8 +140,31 @@ test.describe('tab closing', () => {
 
     await expect(page.locator('.tab')).toHaveCount(1)
     await expect(page.locator('.tab .tab-label')).toHaveText('tab 1')
-    await expect(page.locator('.tab-panel .output')).toBeEmpty()
-    await expect(page.locator('#cmd')).toHaveValue(CMD)
+    await expect(page.locator('.tab-panel .output .line')).toHaveCount(0)
+    await expect(page.locator('.tab-panel .output .shell-prompt-wrap')).toBeVisible()
+    await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
+  })
+})
+
+test.describe('tab strip interactions', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('drag reordering the active tab returns focus to the terminal input', async ({ page }) => {
+    await page.locator('#new-tab-btn').click()
+
+    const secondTab = page.locator('.tab').nth(1)
+    await secondTab.click()
+    await page.locator('#cmd').fill('')
+
+    await secondTab.dragTo(page.locator('.tab').first())
+
+    await expect(page.locator('#cmd')).toBeFocused()
+
+    await page.keyboard.type('dig example.com A')
+    await expect(page.locator('#cmd')).toHaveValue('dig example.com A')
   })
 })

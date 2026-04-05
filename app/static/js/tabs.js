@@ -1,6 +1,137 @@
 // ── Tab state ──
 let tabs = [];
 let activeTabId = null;
+let _tabsScrollControlsBound = false;
+let _draggedTabId = null;
+let _dragMoved = false;
+let _tabDragSuppressClickUntil = 0;
+
+function updateTabScrollButtons() {
+  const leftBtn = document.getElementById('tabs-scroll-left');
+  const rightBtn = document.getElementById('tabs-scroll-right');
+  if (!leftBtn || !rightBtn || !tabsBar) return;
+  const maxScroll = Math.max(0, tabsBar.scrollWidth - tabsBar.clientWidth);
+  if (maxScroll <= 1) {
+    leftBtn.disabled = true;
+    rightBtn.disabled = true;
+    return;
+  }
+  leftBtn.disabled = tabsBar.scrollLeft <= 1;
+  rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
+}
+
+function ensureActiveTabVisible(tabId) {
+  const tabEl = document.querySelector(`.tab[data-id="${tabId}"]`);
+  if (!tabEl || typeof tabEl.scrollIntoView !== 'function') return;
+  tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
+}
+
+function scrollTabsBar(direction) {
+  if (!tabsBar || typeof tabsBar.scrollBy !== 'function') return;
+  tabsBar.scrollBy({ left: direction * 220, behavior: 'smooth' });
+  setTimeout(updateTabScrollButtons, 180);
+}
+
+function setupTabScrollControls() {
+  if (_tabsScrollControlsBound) return;
+  const leftBtn = document.getElementById('tabs-scroll-left');
+  const rightBtn = document.getElementById('tabs-scroll-right');
+  if (!leftBtn || !rightBtn || !tabsBar) return;
+  leftBtn.addEventListener('click', () => scrollTabsBar(-1));
+  rightBtn.addEventListener('click', () => scrollTabsBar(1));
+  tabsBar.addEventListener('scroll', updateTabScrollButtons, { passive: true });
+  window.addEventListener('resize', updateTabScrollButtons);
+  _tabsScrollControlsBound = true;
+  updateTabScrollButtons();
+}
+
+function syncTabOrderFromDom() {
+  if (!tabsBar) return;
+  const orderedIds = [...tabsBar.querySelectorAll('.tab')].map(node => node.dataset.id);
+  if (!orderedIds.length) return;
+  const byId = new Map(tabs.map(tab => [tab.id, tab]));
+  tabs = orderedIds.map(id => byId.get(id)).filter(Boolean);
+}
+
+function bindTabDragReorder(tab, id) {
+  if (!tab) return;
+  tab.setAttribute('draggable', 'true');
+
+  tab.addEventListener('dragstart', e => {
+    _draggedTabId = id;
+    _dragMoved = false;
+    tab.classList.add('tab-dragging');
+    if (e.dataTransfer) {
+      e.dataTransfer.effectAllowed = 'move';
+      e.dataTransfer.setData('text/plain', id);
+    }
+  });
+
+  tab.addEventListener('dragover', e => {
+    if (!_draggedTabId || _draggedTabId === id || !tabsBar) return;
+    const dragged = tabsBar.querySelector(`.tab[data-id="${_draggedTabId}"]`);
+    if (!dragged) return;
+    e.preventDefault();
+
+    const rect = tab.getBoundingClientRect();
+    const after = e.clientX > rect.left + (rect.width / 2);
+    if (after) {
+      if (tab.nextSibling !== dragged) tabsBar.insertBefore(dragged, tab.nextSibling);
+    } else if (tab !== dragged.nextSibling) {
+      tabsBar.insertBefore(dragged, tab);
+    }
+    _dragMoved = true;
+  });
+
+  tab.addEventListener('drop', e => {
+    if (!_draggedTabId) return;
+    e.preventDefault();
+    syncTabOrderFromDom();
+    updateTabScrollButtons();
+    ensureActiveTabVisible(activeTabId);
+  });
+
+  tab.addEventListener('dragend', () => {
+    tab.classList.remove('tab-dragging');
+    if (_dragMoved) {
+      syncTabOrderFromDom();
+      updateTabScrollButtons();
+      ensureActiveTabVisible(activeTabId);
+      _tabDragSuppressClickUntil = Date.now() + 160;
+      if (id === activeTabId && typeof cmdInput !== 'undefined' && cmdInput) {
+        cmdInput.focus();
+      }
+    }
+    _draggedTabId = null;
+    _dragMoved = false;
+  });
+}
+
+function unmountShellPrompt() {
+  if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
+  if (shellPromptWrap.parentElement) shellPromptWrap.remove();
+}
+
+function mountShellPrompt(tabId, force = false) {
+  if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
+  const tabState = tabs.find(t => t.id === tabId);
+  // Never show a prompt while a command is running in this tab.
+  if (tabState && tabState.st === 'running') {
+    unmountShellPrompt();
+    return;
+  }
+  if (!force && typeof _welcomeActive !== 'undefined' && _welcomeActive
+      && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(tabId)) {
+    unmountShellPrompt();
+    return;
+  }
+  const panel = document.querySelector(`.tab-panel[data-id="${tabId}"]`);
+  if (!panel) return;
+  const out = panel.querySelector('.output');
+  if (!out) return;
+  out.appendChild(shellPromptWrap);
+  out.scrollTop = out.scrollHeight;
+}
 
 function updateNewTabBtn() {
   const btn = document.getElementById('new-tab-btn');
@@ -22,6 +153,7 @@ function createTab(label) {
   tab.dataset.id = id;
   tab.innerHTML = `<span class="tab-status idle"></span><span class="tab-label">${escapeHtml(label)}</span><span class="tab-close">✕</span>`;
   tab.addEventListener('click', e => {
+    if (Date.now() < _tabDragSuppressClickUntil) return;
     if (e.target.classList.contains('tab-close')) { closeTab(id); return; }
     activateTab(id);
   });
@@ -32,8 +164,14 @@ function createTab(label) {
     e.stopPropagation();
     startTabRename(id, labelEl);
   });
+  bindTabDragReorder(tab, id);
 
-  tabsBar.appendChild(tab);
+  const newTabButton = document.getElementById('new-tab-btn');
+  if (newTabButton && newTabButton.parentElement === tabsBar) {
+    tabsBar.insertBefore(tab, newTabButton);
+  } else {
+    tabsBar.appendChild(tab);
+  }
 
   const panel = document.createElement('div');
   panel.className = 'tab-panel';
@@ -50,6 +188,12 @@ function createTab(label) {
         <button class="term-action-btn" data-action="clear"     data-tab="${id}">clear</button>
       </div>
     </div>`;
+  panel.querySelector('.terminal-body')?.addEventListener('click', e => {
+    if (id !== activeTabId) return;
+    if (e.target.closest('.term-action-btn')) return;
+    if (e.target.closest('.welcome-command-loadable')) return;
+    if (typeof cmdInput !== 'undefined' && cmdInput) cmdInput.focus();
+  });
   panel.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
@@ -66,6 +210,7 @@ function createTab(label) {
   tabs.push({ id, label, command: '', runId: null, runStart: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle', renamed: false });
   activateTab(id);
   updateNewTabBtn();
+  updateTabScrollButtons();
   return id;
 }
 
@@ -73,14 +218,18 @@ function activateTab(id) {
   activeTabId = id;
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.id === id));
+  mountShellPrompt(id);
   const t = tabs.find(t => t.id === id);
   setStatus(t ? (t.st || 'idle') : 'idle');
+  ensureActiveTabVisible(id);
+  updateTabScrollButtons();
   clearSearch();
-  // Restore the last command run in this tab so it's easy to re-run or edit
   const input = document.getElementById('cmd');
-  if (input && t) {
-    input.value = t.command;
+  if (input) {
+    input.value = '';
+    if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
     input.dispatchEvent(new Event('input'));
+    input.focus();
   }
 }
 
@@ -106,6 +255,7 @@ function closeTab(id) {
     activateTab(tabs[Math.min(idx, tabs.length - 1)].id);
   }
   updateNewTabBtn();
+  updateTabScrollButtons();
 }
 
 function setTabStatus(id, st) {
@@ -113,6 +263,10 @@ function setTabStatus(id, st) {
   if (dot) dot.className = `tab-status ${st}`;
   const t = tabs.find(t => t.id === id);
   if (t) t.st = st;
+  if (id === activeTabId) {
+    if (st === 'running') unmountShellPrompt();
+    else mountShellPrompt(id);
+  }
 }
 
 function setTabLabel(id, label) {
@@ -131,15 +285,31 @@ function clearTab(id) {
   if (out) out.innerHTML = '';
   const t = tabs.find(t => t.id === id);
   if (t) { t.rawLines = []; t.runStart = null; }
+  if (id === activeTabId) mountShellPrompt(id);
   setTabStatus(id, 'idle');
   if (id === activeTabId) { setStatus('idle'); clearSearch(); }
+}
+
+function _getExportableRawLines(tab) {
+  if (!tab || !Array.isArray(tab.rawLines)) return [];
+  return tab.rawLines.filter(line => {
+    if (!line || typeof line.text !== 'string') return false;
+    const cls = String(line.cls || '');
+    if (cls === 'wlc-live' || cls.startsWith('welcome-')) return false;
+    const plain = line.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim();
+    return plain.length > 0;
+  });
 }
 
 // ── Copy to clipboard ──
 function copyTab(id) {
   const t = tabs.find(t => t.id === id);
-  if (!t || !t.rawLines.length) return;
-  const text = t.rawLines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
+  const lines = _getExportableRawLines(t);
+  if (!lines.length) {
+    showToast('No output to copy yet');
+    return;
+  }
+  const text = lines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
   navigator.clipboard.writeText(text)
     .then(() => showToast('Copied to clipboard'))
     .catch(() => showToast('Failed to copy'));
@@ -150,9 +320,13 @@ function copyTab(id) {
 // content and ANSI escape codes don't appear in the saved file.
 function saveTab(id) {
   const t = tabs.find(t => t.id === id);
-  if (!t || !t.rawLines.length) return;
+  const lines = _getExportableRawLines(t);
+  if (!lines.length) {
+    showToast('No output to export');
+    return;
+  }
   // Strip ANSI escape codes for plain text export
-  const text = t.rawLines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
+  const text = lines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
   const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   const blob = new Blob([text], { type: 'text/plain' });
   const a = document.createElement('a');
@@ -259,12 +433,16 @@ function startTabRename(id, labelEl) {
     if (labelEl.contains(input)) labelEl.removeChild(input);
     setTabLabel(id, next);
     if (t) t.renamed = true;
+    updateTabScrollButtons();
+    ensureActiveTabVisible(id);
   }
   function cancel() {
     if (done) return;
     done = true;
     if (labelEl.contains(input)) labelEl.removeChild(input);
     setTabLabel(id, original);
+    updateTabScrollButtons();
+    ensureActiveTabVisible(id);
   }
 
   input.addEventListener('keydown', e => {
@@ -274,6 +452,11 @@ function startTabRename(id, labelEl) {
   });
   input.addEventListener('blur', commit);
   input.addEventListener('click', e => e.stopPropagation());
+  input.addEventListener('input', () => {
+    // Renaming can change tab width before commit, which affects scroll affordances.
+    updateTabScrollButtons();
+    ensureActiveTabVisible(id);
+  });
 }
 
 function permalinkTab(id) {

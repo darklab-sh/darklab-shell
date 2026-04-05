@@ -15,7 +15,7 @@ test.describe('history drawer', () => {
     await page.evaluate(() => localStorage.clear())
   })
 
-  test('loading a run from history populates the command input', async ({ page }) => {
+  test('loading a run from history opens output in a tab without repopulating command input', async ({ page }) => {
     await runCommand(page, CMD_A)
 
     // Navigate away by opening a new tab (clears the input)
@@ -26,8 +26,9 @@ test.describe('history drawer', () => {
     await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
-    // The input bar should now contain the command that was loaded
-    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
+    // Command input remains neutral; loaded output appears in the active tab.
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(page.locator('.tab-panel.active .output')).toContainText(CMD_A)
   })
 
   test('clicking a history entry that is already open switches to that tab', async ({ page }) => {
@@ -40,8 +41,8 @@ test.describe('history drawer', () => {
 
     // No new tab should have been created
     await expect(page.locator('.tab')).toHaveCount(initialTabCount)
-    // The existing tab should be active and show the command in the input
-    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
+    // The existing tab should be active without repopulating the command input
+    await expect(page.locator('#cmd')).toHaveValue('')
   })
 
   test('deleting a starred entry removes it from the chip bar', async ({ page }) => {

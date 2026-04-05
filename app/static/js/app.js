@@ -1,6 +1,51 @@
 // ── app.js — Initialization ──
 // This file wires event listeners and bootstraps the app after all modules load.
 
+function syncShellPrompt() {
+  if (typeof shellPromptText === 'undefined' || !shellPromptText || !cmdInput) return;
+  const value = cmdInput.value || '';
+  const len = value.length;
+  let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : len;
+  let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : len;
+  start = Math.max(0, Math.min(start, len));
+  end = Math.max(0, Math.min(end, len));
+  if (start > end) [start, end] = [end, start];
+
+  if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
+    shellPromptWrap.classList.toggle('shell-prompt-empty', len === 0);
+    shellPromptWrap.classList.toggle('shell-prompt-has-value', len > 0);
+  }
+
+  shellPromptText.replaceChildren();
+  if (!len) return;
+
+  if (start > 0) shellPromptText.appendChild(document.createTextNode(value.slice(0, start)));
+
+  if (end > start) {
+    const sel = document.createElement('span');
+    sel.className = 'shell-prompt-selection';
+    sel.textContent = value.slice(start, end);
+    shellPromptText.appendChild(sel);
+  } else {
+    if (start < len) {
+      const caretChar = document.createElement('span');
+      caretChar.className = 'shell-caret-char';
+      caretChar.setAttribute('aria-hidden', 'true');
+      caretChar.textContent = value.slice(start, start + 1);
+      shellPromptText.appendChild(caretChar);
+      if (start + 1 < len) shellPromptText.appendChild(document.createTextNode(value.slice(start + 1)));
+      return;
+    }
+    const caret = document.createElement('span');
+    caret.className = 'shell-inline-caret';
+    caret.setAttribute('aria-hidden', 'true');
+    caret.textContent = '';
+    shellPromptText.appendChild(caret);
+  }
+
+  if (end < len) shellPromptText.appendChild(document.createTextNode(value.slice(end)));
+}
+
 // ── Theme ──
 const savedTheme = localStorage.getItem('theme');
 if (savedTheme === 'light') document.body.classList.add('light');
@@ -148,7 +193,7 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
     const chip = document.createElement('span');
     chip.className = 'allowed-chip';
     chip.textContent = cmd;
-    chip.title = 'Click to load into command bar';
+    chip.title = 'Click to load into prompt';
     chip.addEventListener('click', () => {
       cmdInput.value = cmd + ' ';
       closeFaq();
@@ -162,7 +207,7 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   }
 
   if (data.groups && data.groups.length > 0) {
-    el.innerHTML = 'Click any command to load it into the command bar:';
+    el.innerHTML = 'Click any command to load it into the prompt:';
     data.groups.forEach(group => {
       const groupEl = document.createElement('div');
       groupEl.className = 'allowed-group';
@@ -179,7 +224,7 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
       el.appendChild(groupEl);
     });
   } else {
-    el.innerHTML = 'Click any command to load it into the command bar:';
+    el.innerHTML = 'Click any command to load it into the prompt:';
     const list = document.createElement('div');
     list.className = 'allowed-list';
     data.commands.forEach(cmd => list.appendChild(makeChip(cmd)));
@@ -218,8 +263,12 @@ apiFetch('/history').then(r => r.json()).then(data => {
 });
 
 // ── Tabs ──
+if (typeof setupTabScrollControls === 'function') setupTabScrollControls();
 createTab('tab 1');
 runWelcome();
+setTimeout(() => {
+  if (cmdInput) cmdInput.focus();
+}, 0);
 
 document.getElementById('new-tab-btn').addEventListener('click', () => {
   createTab('tab ' + (tabs.length + 1));
@@ -296,6 +345,56 @@ killOverlay.addEventListener('click', e => {
 
 // ── Global keyboard shortcuts ──
 document.addEventListener('keydown', e => {
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    if (e.target === cmdInput) return;
+    const editable = e.target && e.target.closest && e.target.closest('input, textarea, [contenteditable="true"]');
+    if (editable) return;
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    if (activeTab && activeTab.st === 'running') {
+      if (typeof confirmKill === 'function') confirmKill(activeTabId);
+    } else if (typeof interruptPromptLine === 'function') {
+      interruptPromptLine(activeTabId);
+    }
+    e.preventDefault();
+    return;
+  }
+  if (
+    typeof _welcomeActive !== 'undefined' && _welcomeActive
+    && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
+    && cmdInput
+    && !e.metaKey && !e.ctrlKey && !e.altKey
+    && !e.target.closest('input, textarea, [contenteditable="true"]')
+    && e.key.length === 1
+  ) {
+    if (typeof mountShellPrompt === 'function') mountShellPrompt(activeTabId, true);
+    cmdInput.focus();
+    cmdInput.value += e.key;
+    cmdInput.dispatchEvent(new Event('input'));
+    e.preventDefault();
+    return;
+  }
+  if (
+    e.key === 'Enter'
+    && typeof _welcomeActive !== 'undefined' && _welcomeActive
+    && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
+  ) {
+    if (typeof mountShellPrompt === 'function') mountShellPrompt(activeTabId, true);
+    if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle(activeTabId);
+    if (cmdInput) cmdInput.focus();
+    e.preventDefault();
+    return;
+  }
+  if (
+    e.key === 'Escape'
+    && typeof _welcomeActive !== 'undefined' && _welcomeActive
+    && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
+  ) {
+    if (typeof mountShellPrompt === 'function') mountShellPrompt(activeTabId, true);
+    if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle(activeTabId);
+    if (cmdInput) cmdInput.focus();
+    e.preventDefault();
+    return;
+  }
   if (e.key === 'Escape') { closeFaq(); searchBar.style.display = 'none'; clearSearch(); }
 });
 
@@ -307,6 +406,26 @@ document.addEventListener('click', e => {
   if (!e.target.closest('.prompt-wrap')) acHide();
 });
 
+if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
+  shellPromptWrap.addEventListener('click', e => {
+    if (e.target === runBtn || e.target.closest('#run-btn')) return;
+    cmdInput.focus();
+  });
+}
+
+if (cmdInput) {
+  cmdInput.addEventListener('focus', () => {
+    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+    syncShellPrompt();
+  });
+  cmdInput.addEventListener('blur', () => {
+    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.remove('shell-prompt-focused');
+    syncShellPrompt();
+  });
+  cmdInput.addEventListener('select', syncShellPrompt);
+  cmdInput.addEventListener('keyup', syncShellPrompt);
+}
+
 // ── Autocomplete ──
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
@@ -315,10 +434,20 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
 });
 
 cmdInput.addEventListener('input', () => {
-  resetCmdHistoryNav();
+  syncShellPrompt();
+  const keepHistoryNav =
+    typeof _suspendCmdHistoryNavReset !== 'undefined' && _suspendCmdHistoryNavReset;
+  if (keepHistoryNav) _suspendCmdHistoryNavReset = false;
+  else resetCmdHistoryNav();
   const val = cmdInput.value;
-  if (val.trim() && typeof requestWelcomeSettle === 'function') {
+  if (val.length > 0 && typeof requestWelcomeSettle === 'function') {
+    if (typeof mountShellPrompt === 'function') mountShellPrompt(activeTabId, true);
     requestWelcomeSettle(activeTabId);
+  }
+  if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
+    acSuppressInputOnce = false;
+    acHide();
+    return;
   }
   acIndex = -1;
   if (!val.trim()) { acHide(); return; }
@@ -327,7 +456,53 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    e.preventDefault();
+    const activeTab = tabs.find(t => t.id === activeTabId);
+    if (activeTab && activeTab.st === 'running') {
+      if (typeof confirmKill === 'function') confirmKill(activeTabId);
+      return;
+    }
+    if (typeof interruptPromptLine === 'function') interruptPromptLine(activeTabId);
+    return;
+  }
+
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
+    e.preventDefault();
+    const value = cmdInput.value;
+    let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : value.length;
+    let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : value.length;
+    if (start > end) [start, end] = [end, start];
+
+    if (start !== end) {
+      cmdInput.value = value.slice(0, start) + value.slice(end);
+      cmdInput.setSelectionRange(start, start);
+      cmdInput.dispatchEvent(new Event('input'));
+      return;
+    }
+
+    if (start === 0) return;
+
+    let cut = start;
+    while (cut > 0 && /\s/.test(value[cut - 1])) cut--;
+    while (cut > 0 && !/\s/.test(value[cut - 1])) cut--;
+
+    cmdInput.value = value.slice(0, cut) + value.slice(start);
+    cmdInput.setSelectionRange(cut, cut);
+    cmdInput.dispatchEvent(new Event('input'));
+    return;
+  }
+
   if (e.key === 'Enter') {
+    if (
+      typeof _welcomeActive !== 'undefined' && _welcomeActive
+      && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
+    ) {
+      e.preventDefault();
+      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle(activeTabId);
+      if (cmdInput) cmdInput.focus();
+      return;
+    }
     if (acIndex >= 0 && acFiltered[acIndex]) { e.preventDefault(); acAccept(acFiltered[acIndex]); }
     else { acHide(); runCommand(); }
     return;
@@ -341,7 +516,8 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'ArrowDown') {
     e.preventDefault();
-    if (acFiltered.length) {
+    const acOpen = acDropdown && acDropdown.style.display !== 'none';
+    if (acOpen && acFiltered.length) {
       acIndex = Math.min(acIndex + 1, acFiltered.length - 1);
       acShow(acFiltered);
       return;
@@ -351,7 +527,8 @@ cmdInput.addEventListener('keydown', e => {
   }
   if (e.key === 'ArrowUp') {
     e.preventDefault();
-    if (acFiltered.length) {
+    const acOpen = acDropdown && acDropdown.style.display !== 'none';
+    if (acOpen && acFiltered.length) {
       acIndex = Math.max(acIndex - 1, -1);
       acShow(acFiltered);
       return;
@@ -364,3 +541,5 @@ cmdInput.addEventListener('keydown', e => {
 
 // ── Run button ──
 runBtn.addEventListener('click', runCommand);
+
+syncShellPrompt();

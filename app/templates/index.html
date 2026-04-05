@@ -36,15 +36,6 @@
   <span id="motd" style="display:inline-block;padding:5px 14px;background:rgba(57,255,20,0.06);border:1px solid var(--green-dim);border-radius:4px;color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></span>
 </div>
 
-<div class="input-row">
-  <div class="prompt-wrap">
-    <span class="prompt-prefix">$</span>
-    <input id="cmd" type="text" placeholder="Enter bash command…" autocomplete="off" spellcheck="false" autofocus aria-label="Command">
-    <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
-  </div>
-  <button id="run-btn">Run</button>
-</div>
-
 <div id="history-row" class="history-row" style="display:none">
   <span class="history-label">Recent:</span>
 </div>
@@ -54,10 +45,12 @@
     <span class="dot dot-r"></span>
     <span class="dot dot-y"></span>
     <span class="dot dot-g"></span>
+    <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
     <div class="tabs-bar" id="tabs-bar">
       <!-- tabs injected here -->
+      <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
     </div>
-    <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+    <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
     <div class="terminal-bar-btns">
       <button id="search-toggle-btn" title="Search output (Ctrl+F)">⌕ search</button>
       <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
@@ -79,6 +72,18 @@
   </div>
   <div id="tab-panels">
     <!-- panels injected here -->
+  </div>
+  <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
+    <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
+    <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
+      <span class="shell-prompt-text" id="shell-prompt-text"></span>
+      <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
+    </div>
+    <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
+  </div>
+  <div class="shell-input-row" aria-hidden="true">
+    <input id="cmd" type="text" placeholder="" autocomplete="off" spellcheck="false" autofocus aria-label="Command">
+    <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
   </div>
 </div>
 

@@ -14,6 +14,13 @@ The suites are intentionally layered:
 2. Vitest checks client-side helper logic and browser-module failure paths in jsdom
 3. Playwright checks the integrated UI, network behavior, and cross-module interactions in a real browser
 
+Current totals on this branch:
+
+- `pytest`: 440
+- `vitest`: 131
+- `playwright`: 78
+- total: 649
+
 ## Running The Suites
 
 Run the full sets:
@@ -41,7 +48,6 @@ Pytest lives in `tests/py/` and is organized by backend concern:
 - `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
 - `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
 - `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` builtin+custom merge behavior, and module-level utility coverage
-- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, and module-level loaders/helpers
 - `test_logging.py` - structured logging, formatter output, and log-event assertions
 
 Notes:
@@ -58,11 +64,11 @@ Files and focus:
 
 - `config.test.js` - frontend fallback config coverage for keys mirrored from `/config`
 - `utils.test.js` - escaping and MOTD rendering
-- `runner.test.js` - elapsed formatting, kill flow, friendly network/server error handling, rate-limit handling, fake-command SSE handling including synthetic `clear`, and stall recovery
+- `runner.test.js` - elapsed formatting, kill flow, friendly network/server error handling, rate-limit handling, fake-command SSE handling including web-shell `clear`, prompt blank-line behavior, and stall recovery
 - `history.test.js` - starred state helpers, startup hydration for blank-input command recall, clipboard fallback handling, history action failures, and the restore-loading overlay for history-to-tab preview fetches
 - `session.test.js` - session ID persistence and `apiFetch()` header injection
-- `autocomplete.test.js` - dropdown filtering and selection
-- `tabs.test.js` - tab lifecycle, export guards, permalink copy failure, and clipboard fallbacks
+- `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, and selection
+- `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, and no-output toast behavior
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, and featured-sample interaction behavior
 - `app.test.js` - bootstrap wiring, modal controls, search controls, startup fallbacks, and startup fetch logging
 - `search.test.js` - search helper boundaries and no-op behavior
@@ -82,17 +88,17 @@ Spec files:
 
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
-- `kill.spec.js` - kill confirmation and killed-state UI
+- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, and killed-state UI
 - `mobile.spec.js` - mobile menu visibility and dismissal
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
 - `share.spec.js` - snapshot permalinks, canonical single-run permalinks, and clipboard failure handling
-- `tabs.spec.js` - max tabs, rename, recall, and closing behavior
+- `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, and closing behavior
 - `timestamps.spec.js` - timestamp mode toggling and line metadata
 - `ui.spec.js` - theme toggle and FAQ modal
-- `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, welcome-tab isolation, preferred-command stability, and the mobile welcome layout regression
+- `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, prompt-key settle behavior, welcome-tab isolation, preferred-command stability, and the mobile welcome layout regression
 - `failure-paths.spec.js` - `/run` denial/rate limit/offline handling, share failure, and history delete/clear failure toasts
 - `boot-resilience.spec.js` - startup fetch fallbacks and core smoke checks
 

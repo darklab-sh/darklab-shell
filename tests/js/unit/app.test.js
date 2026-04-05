@@ -6,6 +6,12 @@ async function loadAppFns({
   doKill: doKillOverride = vi.fn(),
   pendingKillTabId = null,
   requestWelcomeSettle: requestWelcomeSettleOverride = vi.fn(),
+  tabs: tabsOverride = [],
+  confirmKill: confirmKillOverride = vi.fn(),
+  interruptPromptLine: interruptPromptLineOverride = vi.fn(),
+  welcomeActive = false,
+  welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
+  runCommand: runCommandOverride = vi.fn(),
 } = {}) {
   document.body.className = ''
   document.body.innerHTML = `
@@ -30,6 +36,13 @@ async function loadAppFns({
     <div id="version-label"></div>
     <div id="motd"></div>
     <div id="motd-wrap"></div>
+    <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
+      <div id="shell-prompt-line">
+        <span id="shell-prompt-text" class="shell-prompt-text"></span>
+        <span id="shell-prompt-caret"></span>
+        <span id="shell-prompt-ghost" class="shell-prompt-ghost"></span>
+      </div>
+    </div>
     <div id="faq-limits-text"></div>
     <div id="faq-allowed-text"></div>
     <div id="mobile-menu">
@@ -130,10 +143,17 @@ async function loadAppFns({
     resetCmdHistoryNav: () => {},
     navigateCmdHistory: () => false,
     logClientError,
-    tabs: [],
+    tabs: tabsOverride,
     activeTabId: 'tab-1',
+    confirmKill: confirmKillOverride,
+    interruptPromptLine: interruptPromptLineOverride,
+    _welcomeActive: welcomeActive,
+    welcomeOwnsTab: welcomeOwnsTabOverride,
+    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+    shellPromptText: document.getElementById('shell-prompt-text'),
+    shellPromptCaret: document.getElementById('shell-prompt-caret'),
     requestWelcomeSettle: requestWelcomeSettleOverride,
-    runCommand: () => {},
+    runCommand: runCommandOverride,
     doKill: doKillOverride,
     Event,
     setTimeout: (fn) => {
@@ -150,7 +170,20 @@ async function loadAppFns({
   await Promise.resolve()
   await Promise.resolve()
 
-  return { ...fns, storage, apiFetch, runSearch, clearSearch, navigateSearch, cmdInput, requestWelcomeSettle: requestWelcomeSettleOverride, logClientError }
+  return {
+    ...fns,
+    storage,
+    apiFetch,
+    runSearch,
+    clearSearch,
+    navigateSearch,
+    cmdInput,
+    requestWelcomeSettle: requestWelcomeSettleOverride,
+    confirmKill: confirmKillOverride,
+    interruptPromptLine: interruptPromptLineOverride,
+    runCommand: runCommandOverride,
+    logClientError,
+  }
 }
 
 describe('app helpers', () => {
@@ -261,6 +294,105 @@ describe('app helpers', () => {
     cmdInput.dispatchEvent(new Event('input', { bubbles: true }))
 
     expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('settles welcome immediately when Enter is pressed during welcome playback', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    const { cmdInput } = await loadAppFns({
+      requestWelcomeSettle,
+      welcomeActive: true,
+      welcomeOwnsTab,
+    })
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(welcomeOwnsTab).toHaveBeenCalledWith('tab-1')
+    expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('does not run command when Enter is pressed in cmd input during welcome playback', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const welcomeOwnsTab = vi.fn(() => true)
+    const runCommand = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      requestWelcomeSettle,
+      welcomeActive: true,
+      welcomeOwnsTab,
+      runCommand,
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+
+    expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
+    expect(runCommand).not.toHaveBeenCalled()
+  })
+
+  it('mirrors the hidden command input into the shell prompt line', async () => {
+    const { cmdInput } = await loadAppFns()
+    const shellPromptText = document.getElementById('shell-prompt-text')
+    const shellPromptWrap = document.getElementById('shell-prompt-wrap')
+
+    expect(shellPromptText.textContent).toBe('')
+    expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(true)
+
+    cmdInput.value = 'ping example.com'
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(shellPromptText.textContent).toBe('ping example.com')
+    expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
+  })
+
+  it('renders cursor and selection state from the hidden input', async () => {
+    const { cmdInput } = await loadAppFns()
+    const shellPromptText = document.getElementById('shell-prompt-text')
+
+    cmdInput.value = 'nothing'
+    cmdInput.setSelectionRange(3, 3)
+    cmdInput.dispatchEvent(new Event('keyup'))
+    expect(shellPromptText.querySelector('.shell-caret-char')?.textContent).toBe('h')
+
+    cmdInput.setSelectionRange(1, 4)
+    cmdInput.dispatchEvent(new Event('select'))
+    expect(shellPromptText.querySelector('.shell-prompt-selection')?.textContent).toBe('oth')
+  })
+
+  it('supports ctrl+w to delete one word to the left', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig example.com A'
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.value).toBe('dig example.com ')
+  })
+
+  it('uses Ctrl+C to open kill confirm when active tab is running', async () => {
+    const confirmKill = vi.fn()
+    const { cmdInput, interruptPromptLine } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      confirmKill,
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true }))
+
+    expect(confirmKill).toHaveBeenCalledWith('tab-1')
+    expect(interruptPromptLine).not.toHaveBeenCalled()
+  })
+
+  it('uses Ctrl+C to jump to a new prompt line when no command is running', async () => {
+    const interruptPromptLine = vi.fn()
+    const { cmdInput, confirmKill } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+      interruptPromptLine,
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true }))
+
+    expect(interruptPromptLine).toHaveBeenCalledWith('tab-1')
+    expect(confirmKill).not.toHaveBeenCalled()
   })
 
   it('wires the history delete modal buttons and backdrop correctly', async () => {

@@ -5,6 +5,29 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3] — unreleased
+
+### Added
+- **Terminal-native input surface** — the visible command-entry UI is now rendered inline inside terminal output while keeping a hidden real input for browser/mobile keyboard semantics
+- **Shell-like editing and control behavior** — blank/whitespace `Enter` now emits a fresh prompt line, and `Ctrl+C` now opens kill confirmation during active runs or emits a new prompt line when idle
+- **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
+- **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop
+- **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
+
+### Changed
+- **Welcome interruption and settle behavior** — welcome fast-forward now consistently responds to keyboard actions used in the inline-prompt flow and preserves correct prompt mounting after settle
+- **Tab activation model** — switching tabs now keeps the prompt input neutral (no automatic command repopulation), preventing cross-tab draft leakage
+- **Prompt rendering model** — submitted commands are preserved as styled prompt lines in output and running tabs hide the live prompt until completion, matching shell transcript flow more closely
+- **Autocomplete presentation** — dropdown framing was removed in favor of a terminal-style suggestion list that can flip above the prompt when space is tight
+- **Output actions UX** — `copy` and `save txt` now report a friendly no-output toast when the tab only contains welcome/decorative lines
+
+### Fixed
+- **Welcome skip edge case** — pressing Enter while welcome is active no longer leaves a stray legacy prompt marker in output
+- **Prompt cursor rendering** — prompt caret visibility now remains stable after welcome interruption, normal settle, and follow-up command execution
+- **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command
+- **Tab-bar resize edge case** — tab overflow controls now recalculate correctly when tab width changes (for example after rename)
+
+
 ## [1.2] — 2026-04-05
 
 ### Added

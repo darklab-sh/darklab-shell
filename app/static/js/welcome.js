@@ -151,6 +151,15 @@ function cancelWelcome(tabId = null) {
   _clearWelcomeLiveLine();
   _clearWelcomeBanner();
   _resetWelcomePlan();
+  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) {
+    mountShellPrompt(tabId, true);
+    setTimeout(() => {
+      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+      if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+    }, 0);
+  }
+  if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+  if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   return true;
 }
 
@@ -250,7 +259,7 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
     cmdText.classList.add('welcome-command-loadable');
     cmdText.tabIndex = 0;
     cmdText.setAttribute('role', 'button');
-    cmdText.title = 'Click to load into command bar';
+    cmdText.title = 'Click to load into prompt';
     cmdText.setAttribute('aria-label', `Load command: ${cmd}`);
   }
   if (commentText) {
@@ -306,7 +315,7 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
     cmdText.classList.add('welcome-command-loadable');
     cmdText.tabIndex = 0;
     cmdText.setAttribute('role', 'button');
-    cmdText.title = 'Click to load into command bar';
+    cmdText.title = 'Click to load into prompt';
     cmdText.setAttribute('aria-label', `Load command: ${cmd}`);
     cmdText.replaceWith(cmdText.cloneNode(true));
     const boundCmdText = line.querySelector('.welcome-command-text');
@@ -467,6 +476,11 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
   if (!current) return;
   used.add(current);
   await _showWelcomeHint(tabId, current, true);
+  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) {
+    mountShellPrompt(tabId, true);
+    if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
+  }
 
   let rotations = 0;
   while (_shouldRotateWelcomeHints(tabId) && rotations < maxRotations) {
@@ -481,6 +495,7 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
   }
 
   _welcomeActive = false;
+  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
 }
 
 function _ensureFeaturedWelcomeBadge(line, cmd) {
@@ -491,7 +506,7 @@ function _ensureFeaturedWelcomeBadge(line, cmd) {
   badge.textContent = 'try this first';
   badge.tabIndex = 0;
   badge.setAttribute('role', 'button');
-  badge.title = 'Click to load into command bar';
+  badge.title = 'Click to load into prompt';
   badge.setAttribute('aria-label', `Load command: ${cmd}`);
   badge.addEventListener('click', () => {
     line.querySelector('.welcome-command-text')?.click();
@@ -513,9 +528,11 @@ function _ensureWelcomeFinalHint(tabId, hints) {
     line.textContent = `# ${String(hints[0]).trim()}`;
     getOutput(tabId)?.appendChild(line);
     _welcomeHintNode = line;
+    if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId, true);
     return;
   }
   _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
+  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId, true);
 }
 
 function settleWelcome(tabId = activeTabId) {
@@ -552,15 +569,18 @@ function settleWelcome(tabId = activeTabId) {
   _welcomeDone = true;
   _ensureWelcomeFinalHint(tabId, _welcomePlan && _welcomePlan.hints);
   _welcomeActive = false;
+  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
   out.scrollTop = out.scrollHeight;
   return true;
 }
 
 async function runWelcome() {
+  const tabId = activeTabId;
   _welcomeActive = true;
   _welcomeDone = false;
   _welcomeTabId = activeTabId;
   _welcomeSettleRequested = false;
+  if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
 
   const [data, asciiArt, hintData] = await Promise.all([
     apiFetch('/welcome').then(r => r.json()).catch(err => {
@@ -579,10 +599,9 @@ async function runWelcome() {
   if (!data || !data.length || !_welcomeActive) {
     _welcomeActive = false;
     _welcomeTabId = null;
+    if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
     return;
   }
-
-  const tabId = activeTabId;
   const CHAR_MS        = APP_CONFIG.welcome_char_ms        ?? 10;
   const JITTER         = APP_CONFIG.welcome_jitter_ms      ?? 10;
   const POST_CMD_MS    = APP_CONFIG.welcome_post_cmd_ms    ?? 700;
@@ -669,6 +688,7 @@ async function runWelcome() {
     } else {
       _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
       _welcomeActive = false;
+      if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
     }
   }
 }

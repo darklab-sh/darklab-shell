@@ -147,6 +147,37 @@ test.describe('welcome animation', () => {
     await expect(page.locator('#cmd')).toHaveValue('dig ')
   })
 
+  test('pressing Space in the prompt settles the remaining welcome intro immediately', async ({ page }) => {
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.wlc-command-text')?.textContent || ''
+      return text.length >= 5
+    })
+
+    await page.locator('#cmd').press(' ')
+
+    await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
+    await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig example.com A')
+    await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
+    await expect(page.locator('#cmd')).toHaveValue(' ')
+  })
+
+  test('pressing Escape in the prompt settles welcome without changing input text', async ({ page }) => {
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.wlc-command-text')?.textContent || ''
+      return text.length >= 5
+    })
+
+    await page.locator('#cmd').press('Escape')
+
+    await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
+    await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig example.com A')
+    await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(page.locator('#cmd')).toBeFocused()
+  })
+
   test('running a command in another tab does not tear down the original welcome tab', async ({ page }) => {
     await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.', { timeout: 15000 })
 

@@ -128,6 +128,25 @@ function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
   return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Full output persistence is disabled or unavailable]`;
 }
 
+function appendCommandEcho(cmd, tabId) {
+  appendLine(cmd, 'prompt-echo', tabId);
+}
+
+function appendPromptNewline(tabId) {
+  appendLine('', 'prompt-echo', tabId);
+}
+
+function interruptPromptLine(tabId = activeTabId) {
+  const t = tabs.find(tab => tab.id === tabId);
+  if (t && t.st === 'running') return false;
+  appendPromptNewline(tabId);
+  cmdInput.value = '';
+  cmdInput.dispatchEvent(new Event('input'));
+  cmdInput.focus();
+  if (tabId === activeTabId) setStatus('idle');
+  return true;
+}
+
 // ── Kill confirmation modal ──
 let pendingKillTabId = null;
 
@@ -166,8 +185,24 @@ function doKill(tabId) {
 
 // ── Run command ──
 function runCommand() {
-  const cmd = cmdInput.value.trim();
-  if (!cmd) return;
+  const raw = cmdInput.value;
+  const cmd = raw.trim();
+  if (!cmd) {
+    if (
+      typeof _welcomeActive !== 'undefined' && _welcomeActive
+      && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
+    ) {
+      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle(activeTabId);
+      cmdInput.focus();
+      return;
+    }
+    appendPromptNewline(activeTabId);
+    cmdInput.value = '';
+    cmdInput.dispatchEvent(new Event('input'));
+    cmdInput.focus();
+    setStatus('idle');
+    return;
+  }
 
   // If the active tab is currently running a command, open a new tab automatically
   // rather than streaming two commands' output on top of each other.
@@ -190,14 +225,14 @@ function runCommand() {
   // Client-side validation mirrors server-side checks for immediate feedback
   const shellOps = /&&|\|\|?|;;?|`|\$\(|>>?|</;
   if (shellOps.test(cmd)) {
-    appendLine('\n$ ' + cmd + '\n', '');
+    appendCommandEcho(cmd);
     appendLine('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied');
     setStatus('fail');
     return;
   }
 
   if (/(?<![\w:\/])\/data\b/.test(cmd) || /(?<![\w:\/])\/tmp\b/.test(cmd)) {
-    appendLine('\n$ ' + cmd + '\n', '');
+    appendCommandEcho(cmd);
     appendLine('[denied] Access to /data and /tmp is not permitted.', 'denied');
     setStatus('fail');
     return;
@@ -207,7 +242,10 @@ function runCommand() {
   if (!activeTab || !activeTab.renamed) setTabLabel(activeTabId, cmd);
   const _cmdTab = tabs.find(t => t.id === activeTabId);
   if (_cmdTab) _cmdTab.command = cmd;
-  appendLine('\n$ ' + cmd + '\n', '');
+  appendCommandEcho(cmd);
+  cmdInput.value = '';
+  cmdInput.dispatchEvent(new Event('input'));
+  cmdInput.focus();
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
   const _runTab = tabs.find(t => t.id === activeTabId);
   if (_runTab) _runTab.runStart = Date.now();

@@ -84,4 +84,40 @@ describe('autocomplete helpers', () => {
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(focusSpy).toHaveBeenCalled()
   })
+
+  it('positions dropdown above and renders reverse order when space below is tight', () => {
+    const { acShow } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'n'
+    const wrap = document.createElement('div')
+    wrap.className = 'shell-prompt-wrap'
+    wrap.appendChild(document.getElementById('ac'))
+    document.body.appendChild(wrap)
+
+    const prefix = document.createElement('span')
+    prefix.className = 'prompt-prefix'
+    prefix.textContent = 'anon@shell.darklab.sh:~$'
+    wrap.insertBefore(prefix, document.getElementById('ac'))
+
+    vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
+    vi.spyOn(wrap, 'getBoundingClientRect').mockReturnValue({
+      top: 260,
+      bottom: 295,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
+
+    acShow(['nmap -sV', 'nslookup example.com'])
+
+    expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
+    const items = [...document.querySelectorAll('.ac-item')].map(el => el.textContent.trim())
+    expect(items[0]).toBe('nslookup example.com')
+    expect(items[1]).toBe('nmap -sV')
+  })
 })

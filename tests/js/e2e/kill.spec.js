@@ -44,4 +44,28 @@ test.describe('kill running command', () => {
     // Kill button should no longer be visible once the command has ended
     await expect(page.locator('.tab-kill-btn')).toBeHidden()
   })
+
+  test('Ctrl+C opens the kill confirmation modal while a command is running', async ({ page }) => {
+    await page.locator('#cmd').fill(LONG_CMD)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await page.locator('#cmd').press('Control+c')
+
+    await expect(page.locator('#kill-overlay')).toBeVisible()
+    await expect(page.locator('#kill-confirm')).toBeVisible()
+
+    await page.locator('#kill-cancel').click()
+    await expect(page.locator('#kill-overlay')).toBeHidden()
+  })
+
+  test('Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation', async ({ page }) => {
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
+
+    await page.locator('#cmd').press('Control+c')
+
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(1)
+    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await expect(page.locator('#cmd')).toBeFocused()
+  })
 })

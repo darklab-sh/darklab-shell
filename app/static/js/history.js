@@ -20,6 +20,7 @@ function _toggleStar(cmd) {
 let cmdHistory = [];
 let _cmdHistoryNavIndex = -1;
 let _cmdHistoryNavDraft = '';
+let _suspendCmdHistoryNavReset = false;
 
 function resetCmdHistoryNav() {
   _cmdHistoryNavIndex = -1;
@@ -39,6 +40,8 @@ function navigateCmdHistory(delta) {
       return true;
     }
     cmdInput.value = cmdHistory[_cmdHistoryNavIndex];
+    _suspendCmdHistoryNavReset = true;
+    cmdInput.dispatchEvent(new Event('input'));
     return true;
   }
 
@@ -47,9 +50,13 @@ function navigateCmdHistory(delta) {
     if (_cmdHistoryNavIndex > 0) {
       _cmdHistoryNavIndex--;
       cmdInput.value = cmdHistory[_cmdHistoryNavIndex];
+      _suspendCmdHistoryNavReset = true;
+      cmdInput.dispatchEvent(new Event('input'));
       return true;
     }
     cmdInput.value = _cmdHistoryNavDraft;
+    _suspendCmdHistoryNavReset = true;
+    cmdInput.dispatchEvent(new Event('input'));
     resetCmdHistoryNav();
     return true;
   }
@@ -115,6 +122,7 @@ function renderHistory() {
       cmdInput.value = cmd;
       resetCmdHistoryNav();
       cmdInput.focus();
+      cmdInput.dispatchEvent(new Event('input'));
     });
     histRow.appendChild(chip);
   });
@@ -245,9 +253,6 @@ function refreshHistoryPanel() {
             const t = tabs.find(t => t.id === newId);
             if (t) {
               t.command = fullRun.command;
-              cmdInput.value = t.command;
-              resetCmdHistoryNav();
-              cmdInput.dispatchEvent(new Event('input'));
             }
             appendLine(`$ ${fullRun.command}`, '', newId);
             appendLine('', '', newId);

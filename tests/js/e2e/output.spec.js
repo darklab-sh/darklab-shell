@@ -46,7 +46,8 @@ test.describe('output actions', () => {
 
     await page.locator('[data-action="clear"]').click()
 
-    await expect(page.locator('.tab-panel.active .output')).toBeEmpty()
+    await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
+    await expect(page.locator('.tab-panel.active .output .shell-prompt-wrap')).toBeVisible()
   })
 
   test('status reverts to idle after clearing output', async ({ page }) => {
@@ -88,5 +89,30 @@ test.describe('output actions', () => {
     const html = Buffer.concat(chunks).toString('utf8')
 
     expect(html).toContain('curl http://localhost:5001/health')
+  })
+})
+
+test.describe('output actions with no exportable output', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: () => Promise.resolve() },
+        configurable: true,
+      })
+    })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('copy button shows a toast when there is no output to copy', async ({ page }) => {
+    await page.locator('[data-action="copy"]').click()
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('No output to copy yet')
+  })
+
+  test('save-txt button shows a toast when there is no output to export', async ({ page }) => {
+    await page.locator('[data-action="save"]').click()
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('No output to export')
   })
 })

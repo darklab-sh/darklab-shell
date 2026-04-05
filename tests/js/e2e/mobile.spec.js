@@ -30,8 +30,8 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
 
-    // Click somewhere neutral — the command input area
-    await page.locator('#cmd').click()
+    // Click somewhere neutral in the header area
+    await page.locator('header').click()
     await expect(page.locator('#mobile-menu')).not.toHaveClass(/open/)
   })
 })
