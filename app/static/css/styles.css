@@ -762,9 +762,11 @@ body.light .tabs-bar::-webkit-scrollbar-thumb:hover { background: #777; }
   transition: color 0.15s, border-color 0.15s;
   user-select: none;
   flex-shrink: 0;
+  touch-action: pan-y;
 }
 .tab:active { cursor: grabbing; }
 .tab.tab-dragging { opacity: 0.55; }
+.tab.tab-touch-dragging { opacity: 0.72; }
 .tab:hover { color: var(--text); }
 .tab.active { color: var(--green); border-bottom-color: var(--green); }
 .tab .tab-close {

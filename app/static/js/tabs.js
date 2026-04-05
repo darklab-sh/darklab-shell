@@ -5,6 +5,7 @@ let _tabsScrollControlsBound = false;
 let _draggedTabId = null;
 let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
+let _touchDragState = null;
 
 function refocusTabsTerminalInput() {
   if (typeof cmdInput === 'undefined' || !cmdInput || typeof cmdInput.focus !== 'function') return;
@@ -59,9 +60,101 @@ function syncTabOrderFromDom() {
   tabs = orderedIds.map(id => byId.get(id)).filter(Boolean);
 }
 
+function _tabFromClientX(clientX, excludeId = null) {
+  if (!tabsBar) return null;
+  const nodes = [...tabsBar.querySelectorAll('.tab')];
+  return nodes.find(node => {
+    if (!node || node.dataset.id === excludeId) return false;
+    const rect = node.getBoundingClientRect();
+    return clientX >= rect.left && clientX <= rect.right;
+  }) || null;
+}
+
+function _reorderDraggedTab(dragged, target, clientX) {
+  if (!dragged || !target || !tabsBar || dragged === target) return;
+  const rect = target.getBoundingClientRect();
+  const after = clientX > rect.left + (rect.width / 2);
+  if (after) {
+    if (target.nextSibling !== dragged) tabsBar.insertBefore(dragged, target.nextSibling);
+  } else if (target !== dragged.nextSibling) {
+    tabsBar.insertBefore(dragged, target);
+  }
+}
+
+function _touchDragAutoScroll(clientX) {
+  if (!tabsBar || typeof tabsBar.scrollBy !== 'function') return;
+  const rect = tabsBar.getBoundingClientRect();
+  const edge = 36;
+  if (clientX <= rect.left + edge) tabsBar.scrollBy({ left: -18, behavior: 'auto' });
+  else if (clientX >= rect.right - edge) tabsBar.scrollBy({ left: 18, behavior: 'auto' });
+}
+
+function _cleanupTouchDrag() {
+  if (!_touchDragState) return;
+  document.removeEventListener('pointermove', _onTouchDragMove);
+  document.removeEventListener('pointerup', _onTouchDragEnd);
+  document.removeEventListener('pointercancel', _onTouchDragEnd);
+  _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging');
+  _touchDragState = null;
+}
+
+function _onTouchDragMove(e) {
+  if (!_touchDragState || e.pointerId !== _touchDragState.pointerId) return;
+  const dx = e.clientX - _touchDragState.startX;
+  const dy = e.clientY - _touchDragState.startY;
+  if (!_touchDragState.active) {
+    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
+    _touchDragState.active = true;
+    _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
+  }
+  e.preventDefault();
+  const dragged = _touchDragState.tab;
+  const target = _tabFromClientX(e.clientX, _touchDragState.id);
+  if (target) {
+    _reorderDraggedTab(dragged, target, e.clientX);
+    _touchDragState.moved = true;
+  }
+  _touchDragAutoScroll(e.clientX);
+  updateTabScrollButtons();
+}
+
+function _onTouchDragEnd(e) {
+  if (!_touchDragState || e.pointerId !== _touchDragState.pointerId) return;
+  const state = _touchDragState;
+  const moved = state.active && state.moved;
+  _cleanupTouchDrag();
+  if (!moved) return;
+  syncTabOrderFromDom();
+  updateTabScrollButtons();
+  ensureActiveTabVisible(activeTabId);
+  _tabDragSuppressClickUntil = Date.now() + 220;
+  if (state.id === activeTabId && typeof cmdInput !== 'undefined' && cmdInput) {
+    cmdInput.focus();
+  }
+}
+
+function _startTouchTabDrag(tab, id, e) {
+  if (!e || e.pointerType !== 'touch') return;
+  if (e.target && e.target.closest && e.target.closest('.tab-close')) return;
+  _cleanupTouchDrag();
+  _touchDragState = {
+    id,
+    tab,
+    pointerId: e.pointerId,
+    startX: e.clientX,
+    startY: e.clientY,
+    active: false,
+    moved: false,
+  };
+  document.addEventListener('pointermove', _onTouchDragMove, { passive: false });
+  document.addEventListener('pointerup', _onTouchDragEnd);
+  document.addEventListener('pointercancel', _onTouchDragEnd);
+}
+
 function bindTabDragReorder(tab, id) {
   if (!tab) return;
   tab.setAttribute('draggable', 'true');
+  tab.addEventListener('pointerdown', e => _startTouchTabDrag(tab, id, e));
 
   tab.addEventListener('dragstart', e => {
     _draggedTabId = id;

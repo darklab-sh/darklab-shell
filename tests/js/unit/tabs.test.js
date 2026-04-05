@@ -1,6 +1,12 @@
 import { vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
+function touchPointerEvent(type, init) {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.assign(event, init)
+  return event
+}
+
 function loadTabsFns({ maxTabs = 3, apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }) } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -259,5 +265,59 @@ describe('tabs helpers', () => {
     const cmdInput = document.getElementById('cmd')
     document.getElementById('tabs-scroll-right').click()
     expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('reorders tabs through touch pointer dragging on mobile', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    const firstId = createTab('tab 1')
+    const secondId = createTab('tab 2')
+    const thirdId = createTab('tab 3')
+
+    const tabs = [...document.querySelectorAll('.tab')]
+    tabs.forEach((tab, index) => {
+      const left = index * 100
+      tab.getBoundingClientRect = () => ({
+        left,
+        right: left + 90,
+        top: 0,
+        bottom: 36,
+        width: 90,
+        height: 36,
+      })
+    })
+    const tabsBar = document.getElementById('tabs-bar')
+    tabsBar.getBoundingClientRect = () => ({
+      left: 0,
+      right: 320,
+      top: 0,
+      bottom: 40,
+      width: 320,
+      height: 40,
+    })
+    tabsBar.scrollBy = vi.fn()
+
+    const dragged = document.querySelector(`.tab[data-id="${thirdId}"]`)
+    dragged.dispatchEvent(touchPointerEvent('pointerdown', {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 250,
+      clientY: 12,
+    }))
+    document.dispatchEvent(touchPointerEvent('pointermove', {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 20,
+      clientY: 12,
+    }))
+    document.dispatchEvent(touchPointerEvent('pointerup', {
+      pointerId: 7,
+      pointerType: 'touch',
+      clientX: 20,
+      clientY: 12,
+    }))
+
+    expect(_getTabs().map(tab => tab.id)).toEqual([thirdId, firstId, secondId])
+    expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
+    expect(document.getElementById('cmd').focus).toHaveBeenCalled()
   })
 })
