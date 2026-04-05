@@ -7,6 +7,8 @@ pure functions that can be imported and tested in isolation.
 
 import os
 import re
+import shlex
+import shutil
 import yaml
 
 _HERE = os.path.dirname(__file__)
@@ -143,6 +145,40 @@ def load_autocomplete():
             if line and not line.startswith("#"):
                 suggestions.append(line)
     return suggestions
+
+
+def split_command_argv(command: str) -> list[str]:
+    """Split a shell-like command string into argv tokens for simple root-command inspection."""
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.strip().split()
+
+
+def command_root(command: str) -> str | None:
+    """Return the first argv token from a command string, lowercased."""
+    parts = split_command_argv(command)
+    if not parts:
+        return None
+    return parts[0].strip().lower() or None
+
+
+def resolve_runtime_command(command_name: str) -> str | None:
+    """Return the absolute path to command_name if installed on this instance."""
+    return shutil.which(command_name)
+
+
+def runtime_missing_command_name(command: str) -> str | None:
+    """Return the missing root command name for a command string, or None if installed/empty."""
+    root = command_root(command)
+    if not root:
+        return None
+    return None if resolve_runtime_command(root) else root
+
+
+def runtime_missing_command_message(command_name: str) -> str:
+    """Return the standard instance-level message for missing runtime commands."""
+    return f"Command is not installed on this instance: {command_name}"
 
 
 def split_chained_commands(command: str) -> list[str]:

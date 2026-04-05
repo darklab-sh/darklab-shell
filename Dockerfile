@@ -1,13 +1,19 @@
 FROM python:3.12-slim
 
+# Remove dpkg config that prevents man pages from being installed
+RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
+
 # Ensure all packages are up to date and install dependencies and tools
 RUN apt-get update
 RUN apt-get upgrade -y
 
-RUN apt-get install -y  procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
+RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
                         mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl golang-go \
                         libxml-writer-perl libjson-perl rubygems ruby-dev build-essential fping hping3 \
-                        masscan python3-requests fierce dnsenum libcap2-bin sudo gosu
+                        masscan python3-requests fierce dnsenum libcap2-bin sudo gosu groff-base bsdextrautils
+
+# Update the man page database
+RUN mandb -c 
 
 # Set GOBIN so all Go binaries install directly into /usr/local/bin,
 # world-executable and not owned by root's home directory

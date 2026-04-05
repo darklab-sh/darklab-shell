@@ -11,6 +11,7 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
+from fake_commands import resolve_fake_command
 from commands import (
     load_allowed_commands_grouped,
     load_autocomplete,
@@ -239,3 +240,22 @@ class TestIsCommandAllowedEdges:
         ok, reason = self._check("curl /tmp/file")
         assert not ok
         assert "/tmp" in reason
+
+
+class TestFakeCommandResolution:
+    def test_resolves_supported_fake_commands(self):
+        assert resolve_fake_command("clear") == "clear"
+        assert resolve_fake_command("env") == "env"
+        assert resolve_fake_command("help") == "help"
+        assert resolve_fake_command("history") == "history"
+        assert resolve_fake_command("id") == "id"
+        assert resolve_fake_command("ls") == "ls"
+        assert resolve_fake_command("man curl") == "man"
+        assert resolve_fake_command("pwd") == "pwd"
+        assert resolve_fake_command("uname -a") == "uname"
+        assert resolve_fake_command("whoami") == "whoami"
+        assert resolve_fake_command("ps aux") == "ps"
+
+    def test_rejects_non_fake_commands(self):
+        assert resolve_fake_command("ping example.com") is None
+        assert resolve_fake_command("") is None

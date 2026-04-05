@@ -20,6 +20,8 @@ function loadSession({ storageData = {}, fetchImpl, randomUUID = () => 'generate
     fetch: fetchFn,
   }, `{
     apiFetch,
+    describeFetchError,
+    logClientError,
     _getSessionId: () => SESSION_ID,
   }`)
 
@@ -82,5 +84,21 @@ describe('session.js', () => {
       'Content-Type': 'application/json',
       'X-Session-ID': 'session-abc',
     })
+  })
+
+  it('describeFetchError returns a friendly offline message for network failures', () => {
+    const { describeFetchError } = loadSession()
+
+    expect(describeFetchError(new Error('Failed to fetch'))).toBe(
+      'Unable to reach the server. Check that it is running and try again.'
+    )
+  })
+
+  it('describeFetchError preserves non-network error details', () => {
+    const { describeFetchError } = loadSession()
+
+    expect(describeFetchError(new Error('TLS handshake failed'))).toBe(
+      'Request to the server failed: TLS handshake failed'
+    )
   })
 })

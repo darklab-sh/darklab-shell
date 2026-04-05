@@ -24,13 +24,17 @@ logging_setup.py — GELFFormatter, _TextFormatter, configure_logging(cfg)
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
 permalinks.py  — HTML rendering for permalink pages
+run_output_store.py — preview/full-output capture and artifact helpers
     ↑
 app.py         — Flask app, rate limiter, all route handlers
 
 commands.py    — Command validation and rewrites (no CFG dependency, standalone)
+fake_commands.py — Synthetic shell helpers for /run
 ```
 
 `commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. `app.py` imports by name from each module (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
+
+`fake_commands.py` sits alongside that path and provides a small synthetic-command layer for shell-like helpers that should be useful in the UI without spawning a real process. `/run` checks that layer before allowlist validation and process launch. Today it handles `clear`, `env`, `help`, `history`, `id`, `ls`, `man`, `ps`, `pwd`, `uname -a`, and `whoami`. Most of the commands are intentionally synthetic: they surface app-specific state like the allowlist and session history, return stable environment strings, or trigger UI-native behavior like clearing the current tab. `man <topic>` is the one exception: for allowlisted real commands it renders the real system man page, while `man <fake-command>` reuses the synthetic helper descriptions instead of rejecting the topic. Runtime command availability is now checked in the shared command layer, so fake commands and normal allowlisted `/run` commands both return the same clean instance-level message when a required binary is missing.
 
 `logging_setup.py` depends only on `config.py` and the standard library. It must be imported and `configure_logging(CFG)` called before any other local import in `app.py` — `process.py` attempts a Redis connection at module-import time and emits log records then, so the logger must already be configured with the correct formatter and level when those calls fire.
 
@@ -224,16 +228,17 @@ The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `conte
 
 ### Welcome Animation
 
-`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout:
+`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, `requestWelcomeSettle(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout:
 
-1. render a decorative `cat ~/.ascii-art.txt` prompt line
-2. fetch `/welcome/ascii` and stream the ASCII banner from `conf/ascii.txt`
-3. render fake startup-status rows using `APP_CONFIG.welcome_status_labels`
+1. fetch `/welcome/ascii` and stream the ASCII banner from `conf/ascii.txt`
+2. render fake startup-status rows using `APP_CONFIG.welcome_status_labels`
+3. pause briefly using `welcome_post_status_pause_ms` so the boot phase lands before the example phase begins
 4. fetch `/welcome` and sample a curated set of commands from `conf/welcome.yaml` using `welcome_sample_count`
-5. attach click and keyboard handlers to the sampled command text and the featured `TRY THIS FIRST` badge so they load into the prompt without executing
-6. fetch `/welcome/hints` and rotate footer hints briefly while the welcome tab is still idle, using `welcome_hint_interval_ms` and `welcome_hint_rotations`
+5. show the first prompt, let it idle for at least `welcome_first_prompt_idle_ms`, then type the featured example
+6. attach click and keyboard handlers to the sampled command text and the featured `TRY THIS FIRST` badge so they load into the prompt without executing
+7. fetch `/welcome/hints` and rotate footer hints briefly while the welcome tab is still idle, using `welcome_hint_interval_ms` and `welcome_hint_rotations`
 
-The implementation still types character-by-character using short timed waits, but it now mixes in short-lived loading spinners for the status rows and finite hint rotation. The intro `cat ~/.ascii-art.txt` line is intentionally decorative only and is never clickable.
+The implementation still types character-by-character using short timed waits, but it now mixes in overlapping loading spinners for the status rows, a staged handoff into the first prompt, and finite hint rotation.
 
 Welcome ownership is tab-scoped. `runWelcome()` records a `welcomeTabId`, and teardown only happens when the action targets that same tab. That avoids the old cross-tab bug where running a command or clearing output in some other tab could wipe the welcome content. `runCommand()` checks whether the active tab is the welcome owner before clearing, and clear/close actions do the same.
 
@@ -277,7 +282,9 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 ### Config Loading
 
-The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
+The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
+
+Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_bytes` stay backend-only because the frontend does not need to know them to render the normal tab or history flows.
 
 ### Session Identity
 
@@ -315,14 +322,14 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 ## Test Suite
 
-Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`index.html`, etc.) and app modules are importable. `test_validation.py` imports `app.py` directly via `sys.path.insert`.
+Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`index.html`, etc.) and app modules are importable.
 
 ### Python tests
 
-- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, and command rewrites. These tests mock `load_allowed_commands` so they do not depend on the actual `conf/allowed_commands.txt` file.
-- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_welcome_hints()`, autocomplete loading, database init/migration, and retention behavior.
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, `/welcome/ascii` and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
-- **`test_run_history_share.py` / `test_request_kill_and_commands.py`** — focused route flows for persistence, kill behavior, and request/command execution edges.
+- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites, and shared runtime-command availability helpers. These tests mock `load_allowed_commands` or runtime lookups so they do not depend on the actual `conf/allowed_commands.txt` file or installed binaries.
+- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_welcome_hints()`, run-output artifact capture/read helpers, autocomplete loading, database init/migration, and retention behavior.
+- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, canonical single-run permalink behavior with full-output artifacts, preview forcing via `?preview=1`, the `/history/<run_id>/full` alias, `/welcome/ascii` and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
+- **`test_run_history_share.py` / `test_request_kill_and_commands.py`** — focused route flows for persistence, kill behavior, synthetic command execution, constrained `man` rendering, loader edges, shared missing-binary handling, and artifact cleanup on run delete/clear.
 - **`test_logging.py`** — structured logging formatters, setup, and application log events.
 
 **Rate limiting in tests.** `app.config["RATELIMIT_ENABLED"] = False` is set in every `get_client()` helper, but Flask-Limiter 4.x with `memory://` storage still increments counters even when this flag is set dynamically at runtime — it only truly disables the limit check, not the counter itself. Test classes that POST to `/run` multiple times (e.g. `TestCmdRewriteEvent`, `TestRunSpawnErrorEvent`) therefore use a dedicated `X-Forwarded-For` IP from the RFC 5737 TEST-NET-3 range (`203.0.113.x`) via the request headers. This gives each class its own isolated rate-limit bucket so accumulated hits from one class cannot exhaust the limit and cause spurious 429s in later classes within the same test run. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
@@ -346,7 +353,7 @@ The browser JS files share a single global scope (by design — no ES modules, n
 **What is tested:**
 - `utils.test.js` — HTML escaping, regex escaping, and MOTD rendering helpers
 - `runner.test.js` — elapsed formatting plus kill/status helpers
-- `history.test.js` — starred-command localStorage helpers plus startup hydration of blank-input command recall from `/history`
+- `history.test.js` — starred-command localStorage helpers, startup hydration of blank-input command recall from `/history`, and history restore overlay/failure behavior
 - `session.test.js` — anonymous session ID persistence and `apiFetch()` header injection
 - `autocomplete.test.js` — dropdown filtering, highlighting, acceptance, and dismissal
 - `tabs.test.js` — tab limits, rename, command recall, export guards, and last-tab reset
@@ -373,7 +380,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `timestamps.spec.js` — timestamp mode cycling and output metadata
 - `ui.spec.js` — theme toggling and FAQ modal behavior
 - `autocomplete.spec.js` — command suggestion interaction
-- `welcome.spec.js` — welcome interruption, decorative intro non-clickability, clickable sampled commands and badge, and tab-scoped welcome teardown
+- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, preferred-command stability, and tab-scoped welcome teardown
 
 **Implementation notes learned during setup:**
 - `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
@@ -394,10 +401,18 @@ Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and r
 
 ## Database
 
-`./data/history.db` — SQLite, WAL mode. Two persistent tables:
+`./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
 
-- `runs` — one row per completed command. Persists across restarts. Pruned by `permalink_retention_days` config.
+- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Persists across restarts. Pruned by `permalink_retention_days`.
+- `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
+
+The storage model is intentionally split:
+
+- live tabs and normal history restore use `max_output_lines` and the `runs.output_preview` payload, which keeps only the most recent preview lines
+- full-output persistence is controlled by backend-only config keys `persist_full_run_output` and `full_output_max_bytes`
+- `full_output_max_bytes` is enforced on the uncompressed UTF-8 stream before gzip compression, so the limit tracks output volume rather than the final on-disk `.gz` size
+- deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
 
 Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Multi-worker Process Killing above).
 

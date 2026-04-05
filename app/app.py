@@ -26,15 +26,18 @@ configure_logging(CFG)
 
 log = logging.getLogger("shell")
 
-from database   import db_connect
+from database   import db_connect, delete_run_artifacts
 from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
     load_faq, load_autocomplete, load_welcome,
     load_ascii_art, load_welcome_hints,
     is_command_allowed, rewrite_command,
+    runtime_missing_command_message, runtime_missing_command_name,
 )
 from permalinks import _permalink_error_page, _permalink_page
+from fake_commands import resolve_fake_command, execute_fake_command
+from run_output_store import RunOutputCapture, load_full_output_lines
 
 APP_VERSION = "1.2"
 
@@ -104,6 +107,139 @@ def get_session_id():
     return request.headers.get("X-Session-ID", "").strip()
 
 
+def _run_output_capture(run_id):
+    return RunOutputCapture(
+        run_id=run_id,
+        preview_limit=CFG["max_output_lines"],
+        persist_full_output=CFG.get("persist_full_run_output", False),
+        full_output_max_bytes=CFG.get("full_output_max_bytes", 0),
+    )
+
+
+def _save_completed_run(run_id, session_id, command, run_started, finished_iso, exit_code, capture):
+    capture.finalize()
+    try:
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs "
+                "("
+                "id, session_id, command, started, finished, exit_code, output, output_preview, "
+                "preview_truncated, output_line_count, full_output_available, full_output_truncated"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_id,
+                    session_id,
+                    command,
+                    run_started,
+                    finished_iso,
+                    exit_code,
+                    None,
+                    json.dumps(list(capture.preview_lines)),
+                    int(capture.preview_truncated),
+                    capture.output_line_count,
+                    int(capture.full_output_available),
+                    int(capture.full_output_truncated),
+                )
+            )
+            if capture.full_output_available and capture.artifact_rel_path:
+                conn.execute(
+                    "INSERT OR REPLACE INTO run_output_artifacts "
+                    "(run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        run_id,
+                        capture.artifact_rel_path,
+                        "gzip",
+                        capture.full_output_bytes,
+                        capture.output_line_count,
+                        int(capture.full_output_truncated),
+                        finished_iso,
+                    )
+                )
+            conn.commit()
+    except Exception:
+        log.error("RUN_SAVED_ERROR", exc_info=True, extra={
+            "run_id": run_id, "session": session_id, "cmd": command,
+        })
+
+
+def _preview_output_from_run(run):
+    raw = run.get("output_preview")
+    if raw is None:
+        raw = run.get("output")
+    return json.loads(raw) if raw else []
+
+
+def _preview_notice(run):
+    if not run.get("preview_truncated"):
+        return None
+    shown = CFG.get("max_output_lines", 0) or len(_preview_output_from_run(run))
+    total = run.get("output_line_count") or shown
+    if run.get("full_output_available"):
+        return (
+            f"[preview truncated — only the last {shown} lines are shown here, "
+            f"but the full output had {total} lines. Use the permalink button below or in the history panel for complete results]"
+        )
+    return (
+        f"[preview truncated — only the last {shown} lines are shown here, "
+        f"but the full output had {total} lines. Full output persistence is disabled or unavailable]"
+    )
+
+
+def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0):
+    run_id      = str(uuid.uuid4())
+    run_started = datetime.now(timezone.utc).isoformat()
+    capture = _run_output_capture(run_id)
+
+    log.info("RUN_START", extra={
+        "run_id": run_id, "session": session_id, "ip": client_ip,
+        "pid": 0, "cmd": original_command,
+    })
+
+    def generate():
+        try:
+            yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
+            for event in events:
+                if event.get("type") == "output":
+                    line = event.get("text", "")
+                    capture.add_line(line)
+                    yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10)})}\n\n"
+                elif event.get("type") == "clear":
+                    yield f"data: {json.dumps({'type': 'clear'})}\n\n"
+
+            finished = datetime.now(timezone.utc)
+            elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
+            log.info("RUN_END", extra={
+                "run_id": run_id, "session": session_id, "ip": client_ip,
+                "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+            })
+            yield f"data: {json.dumps({
+                'type': 'exit',
+                'code': exit_code,
+                'elapsed': elapsed,
+                'preview_truncated': capture.preview_truncated,
+                'output_line_count': capture.output_line_count,
+                'full_output_available': capture.full_output_available,
+            })}\n\n"
+            _save_completed_run(
+                run_id, session_id, original_command, run_started,
+                finished.isoformat(), exit_code, capture,
+            )
+        except Exception as e:
+            log.error("RUN_STREAM_ERROR", exc_info=True, extra={
+                "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
+            })
+            yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
+
+    return Response(generate(), mimetype="text/event-stream",
+                    headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
+
+
+def _fake_run_response(original_command, session_id, client_ip):
+    events, exit_code = execute_fake_command(original_command, session_id)
+    return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @app.route("/favicon.ico")
@@ -136,6 +272,8 @@ def get_config():
         "welcome_jitter_ms":      CFG["welcome_jitter_ms"],
         "welcome_post_cmd_ms":    CFG["welcome_post_cmd_ms"],
         "welcome_inter_block_ms": CFG["welcome_inter_block_ms"],
+        "welcome_first_prompt_idle_ms": CFG["welcome_first_prompt_idle_ms"],
+        "welcome_post_status_pause_ms": CFG["welcome_post_status_pause_ms"],
         "welcome_sample_count":   CFG["welcome_sample_count"],
         "welcome_status_labels":  CFG["welcome_status_labels"],
         "welcome_hint_interval_ms": CFG["welcome_hint_interval_ms"],
@@ -189,35 +327,74 @@ def get_history():
     session_id = get_session_id()
     with db_connect() as conn:
         rows = conn.execute(
-            "SELECT id, command, started, finished, exit_code "
+            "SELECT id, command, started, finished, exit_code, "
+            "preview_truncated, output_line_count, full_output_available, full_output_truncated "
             "FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT ?",
             (session_id, CFG["history_panel_limit"])
         ).fetchall()
-    return jsonify({"runs": [dict(r) for r in rows]})
+    runs = []
+    for row in rows:
+        item = dict(row)
+        item["preview_truncated"] = bool(item.get("preview_truncated"))
+        item["full_output_available"] = bool(item.get("full_output_available"))
+        item["full_output_truncated"] = bool(item.get("full_output_truncated"))
+        runs.append(item)
+    return jsonify({"runs": runs})
 
 
 @app.route("/history/<run_id>")
 def get_run(run_id):
     """Serve a styled HTML permalink page for a single run, or JSON if ?json is passed."""
     with db_connect() as conn:
-        row = conn.execute("SELECT * FROM runs WHERE id = ?", (run_id,)).fetchone()
+        row = conn.execute(
+            "SELECT runs.*, art.rel_path "
+            "FROM runs LEFT JOIN run_output_artifacts art ON art.run_id = runs.id "
+            "WHERE runs.id = ?",
+            (run_id,),
+        ).fetchone()
     if not row:
         log.warning("RUN_NOT_FOUND", extra={"ip": get_client_ip(), "run_id": run_id})
         return _permalink_error_page("run")
     run = dict(row)
-    run["output"] = json.loads(run["output"]) if run["output"] else []
-    log.info("RUN_VIEWED", extra={"ip": get_client_ip(), "run_id": run_id, "cmd": run["command"]})
+    run["preview_truncated"] = bool(run.get("preview_truncated"))
+    run["full_output_available"] = bool(run.get("full_output_available"))
+    run["full_output_truncated"] = bool(run.get("full_output_truncated"))
+    preview_requested = request.args.get("preview") == "1"
+    is_full_view = (not preview_requested) and run["full_output_available"] and bool(run.get("rel_path"))
+    if is_full_view:
+        run["output"] = load_full_output_lines(run["rel_path"])
+        if run["full_output_truncated"]:
+            run["output"].append(
+                f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]"
+            )
+    else:
+        run["output"] = _preview_output_from_run(run)
+    run["preview_notice"] = _preview_notice(run) if not is_full_view else None
+    log.info("RUN_VIEWED", extra={
+        "ip": get_client_ip(), "run_id": run_id, "cmd": run["command"], "full_output": is_full_view,
+    })
 
     if "json" in request.args:
         return jsonify(run)
 
+    content_lines = list(run["output"])
+    preview_notice = run["preview_notice"]
+    if preview_notice:
+        content_lines.append(preview_notice)
+
     return _permalink_page(
-        title=f"$ {run['command']}",
+        title=f"$ {run['command']}" + (" (full output)" if is_full_view else ""),
         label=run["command"],
         created=run["started"],
-        content_lines=run["output"],
+        content_lines=content_lines,
         json_url=f"/history/{run_id}?json",
     )
+
+
+@app.route("/history/<run_id>/full")
+def get_run_full_output(run_id):
+    """Backward-compatible alias for the canonical /history/<run_id> permalink."""
+    return get_run(run_id)
 
 
 @app.route("/history/<run_id>", methods=["DELETE"])
@@ -225,6 +402,12 @@ def delete_run(run_id):
     """Delete a specific run from history for this session."""
     session_id = get_session_id()
     with db_connect() as conn:
+        owned = conn.execute(
+            "SELECT id FROM runs WHERE id = ? AND session_id = ?",
+            (run_id, session_id),
+        ).fetchone()
+        if owned:
+            delete_run_artifacts(conn, [run_id])
         cur = conn.execute("DELETE FROM runs WHERE id = ? AND session_id = ?", (run_id, session_id))
         conn.commit()
     if cur.rowcount:
@@ -237,6 +420,11 @@ def clear_history():
     """Delete all runs for this session."""
     session_id = get_session_id()
     with db_connect() as conn:
+        run_ids = [
+            row["id"]
+            for row in conn.execute("SELECT id FROM runs WHERE session_id = ?", (session_id,)).fetchall()
+        ]
+        delete_run_artifacts(conn, run_ids)
         cur = conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
         conn.commit()
     log.info("HISTORY_CLEARED", extra={"ip": get_client_ip(), "session": session_id, "count": cur.rowcount})
@@ -318,6 +506,9 @@ def run_command():
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
 
+    if resolve_fake_command(original_command):
+        return _fake_run_response(original_command, session_id, client_ip)
+
     allowed, reason = is_command_allowed(original_command)
     if not allowed:
         log.warning("CMD_DENIED", extra={
@@ -332,9 +523,19 @@ def run_command():
             "ip": client_ip, "original": original_command, "rewritten": command,
         })
 
+    missing_runtime = runtime_missing_command_name(command)
+    if missing_runtime:
+        return _synthetic_run_response(
+            original_command,
+            session_id,
+            client_ip,
+            [{"type": "output", "text": runtime_missing_command_message(missing_runtime)}],
+            127,
+        )
+
     run_id      = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
-    captured_lines = []
+    capture = _run_output_capture(run_id)
 
     # Start the process immediately — before the generator runs — so the PID
     # is registered before any kill request could arrive
@@ -373,7 +574,7 @@ def run_command():
 
             # If the command was rewritten, surface a notice to the user
             if notice:
-                captured_lines.append(f"[notice] {notice}")
+                capture.add_line(f"[notice] {notice}")
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
             assert proc.stdout is not None  # guaranteed by stdout=PIPE in Popen
@@ -407,7 +608,7 @@ def run_command():
                 if ready:
                     line = proc.stdout.readline()
                     if line:
-                        captured_lines.append(line.rstrip("\n"))
+                        capture.add_line(line)
                         yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
                     else:
                         # EOF — process has finished
@@ -428,30 +629,20 @@ def run_command():
                 "run_id": run_id, "session": session_id, "ip": client_ip,
                 "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
             })
-            yield f"data: {json.dumps({'type': 'exit', 'code': exit_code, 'elapsed': elapsed})}\n\n"
+            yield f"data: {json.dumps({
+                'type': 'exit',
+                'code': exit_code,
+                'elapsed': elapsed,
+                'preview_truncated': capture.preview_truncated,
+                'output_line_count': capture.output_line_count,
+                'full_output_available': capture.full_output_available,
+            })}\n\n"
 
             # Store completed run in SQLite for persistent permalink/history access
-            try:
-                with db_connect() as conn:
-                    conn.execute(
-                        "INSERT INTO runs "
-                        "(id, session_id, command, started, finished, exit_code, output) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                        (
-                            run_id,
-                            session_id,
-                            original_command,
-                            run_started,
-                            finished.isoformat(),
-                            exit_code,
-                            json.dumps(captured_lines),
-                        )
-                    )
-                    conn.commit()
-            except Exception:
-                log.error("RUN_SAVED_ERROR", exc_info=True, extra={
-                    "run_id": run_id, "session": session_id, "cmd": original_command,
-                })
+            _save_completed_run(
+                run_id, session_id, original_command, run_started,
+                finished.isoformat(), exit_code, capture,
+            )
 
         except Exception as e:
             log.error("RUN_STREAM_ERROR", exc_info=True, extra={

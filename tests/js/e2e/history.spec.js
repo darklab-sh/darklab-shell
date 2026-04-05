@@ -109,4 +109,5 @@ test.describe('history drawer', () => {
     await expect(page.locator('.history-entry')).toHaveCount(1)
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
   })
+
 })

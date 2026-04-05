@@ -12,13 +12,14 @@ test.describe('autocomplete', () => {
 
     const dropdown = page.locator('#ac-dropdown')
     await expect(dropdown).toBeVisible()
-    await expect(dropdown.locator('.ac-item')).toHaveCount(12)
+    await expect(dropdown).toContainText('man nmap')
+    await expect(dropdown).toContainText('nmap -h')
 
     await page.keyboard.press('ArrowDown')
-    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('nmap -h')
+    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('man nmap')
 
     await page.keyboard.press('Tab')
-    await expect(input).toHaveValue('nmap -h')
+    await expect(input).toHaveValue('man nmap')
     await expect(dropdown).toBeHidden()
   })
 

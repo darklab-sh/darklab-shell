@@ -4,6 +4,26 @@
 # These appear as you type in the command box.
 # Tab completes the highlighted suggestion. Arrow keys navigate the list.
 
+# fake shell helpers
+clear
+env
+help
+history
+id
+ls
+man ping
+man curl
+man dig
+man nmap
+man traceroute
+man wget
+pwd
+ps
+ps aux
+ps -ef
+uname -a
+whoami
+
 # ping
 ping -h
 ping -c 4 example.com

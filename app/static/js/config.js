@@ -15,6 +15,8 @@ let APP_CONFIG = {
   welcome_jitter_ms: 12,
   welcome_post_cmd_ms: 650,
   welcome_inter_block_ms: 850,
+  welcome_first_prompt_idle_ms: 2100,
+  welcome_post_status_pause_ms: 220,
   welcome_sample_count: 5,
   welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
   welcome_hint_interval_ms: 4200,

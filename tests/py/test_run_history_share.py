@@ -6,7 +6,9 @@ These tests are intentionally closer to "real bug finding" than
 the lighter smoke tests in test_routes.py.
 """
 
+import gzip
 import json
+import os
 import uuid
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
@@ -16,6 +18,7 @@ import pytest
 import app as shell_app
 import database as shell_db
 from database import db_connect
+from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 
 
 def get_client(*, use_forwarded_for=True):
@@ -200,6 +203,324 @@ class TestRunStreaming:
         assert '"type": "started"' in body
         assert '"type": "output"' in body
         assert '"type": "exit"' in body
+
+    def test_fake_ls_streams_allowed_commands_and_persists_history(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.load_allowed_commands_grouped", return_value=[
+            {"name": "Networking", "commands": ["ping", "dig"]},
+        ]):
+            resp = client.post("/run", json={"command": "ls"}, headers={"X-Session-ID": "sess-fake-ls"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert '"type": "started"' in body
+        assert '"type": "output"' in body
+        assert "[Networking]\\n" in body
+        assert "ping\\n" in body
+        assert "dig\\n" in body
+        assert '"type": "exit"' in body
+
+        hist = client.get("/history", headers={"X-Session-ID": "sess-fake-ls"})
+        data = json.loads(hist.data)
+        assert [r["command"] for r in data["runs"]] == ["ls"]
+
+    def test_fake_clear_emits_clear_event_and_persists_history(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "clear"}, headers={"X-Session-ID": "sess-clear"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert '"type": "started"' in body
+        assert '"type": "clear"' in body
+        assert '"type": "exit"' in body
+
+        hist = client.get("/history", headers={"X-Session-ID": "sess-clear"})
+        data = json.loads(hist.data)
+        assert [r["command"] for r in data["runs"]] == ["clear"]
+
+    def test_fake_env_returns_synthetic_environment(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "env"}, headers={"X-Session-ID": "sess-env"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "APP_NAME=shell.darklab.sh\\n" in body
+        assert "SESSION_ID=sess-env\\n" in body
+        assert "SHELL=/shell.darklab.sh\\n" in body
+        assert "TERM=xterm-256color\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_help_lists_available_helpers(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "help"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Synthetic shell helpers:\\n" in body
+        assert "clear      Clear the current terminal tab output.\\n" in body
+        assert "env        Show the synthetic shell environment variables.\\n" in body
+        assert "help       Show synthetic shell helpers available in this app.\\n" in body
+        assert "history    Show recent commands from this session.\\n" in body
+        assert "man <cmd>  Show the real man page for an allowed command.\\n" in body
+        assert "uname -a   Describe the synthetic shell environment.\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_man_renders_real_page_for_allowed_topic(self):
+        client = get_client()
+
+        fake_proc = mock.Mock(returncode=0, stdout="NAME\ncurl - transfer a URL\n", stderr="")
+        with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("fake_commands.subprocess.run", return_value=fake_proc):
+            resp = client.post("/run", json={"command": "man curl"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "NAME\\n" in body
+        assert "curl - transfer a URL\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_man_does_not_clip_to_max_output_lines(self):
+        client = get_client()
+        man_text = "\n".join(f"line {index}" for index in range(1, 6)) + "\n"
+        fake_proc = mock.Mock(returncode=0, stdout=man_text, stderr="")
+        with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, None]), \
+             mock.patch("fake_commands.subprocess.run", return_value=fake_proc), \
+             mock.patch("fake_commands.CFG", {**shell_app.CFG, "max_output_lines": 2}):
+            resp = client.post("/run", json={"command": "man curl"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "line 5\\n" in body
+        assert "man page clipped" not in body
+        assert '"type": "exit"' in body
+
+    def test_fake_man_reports_when_helper_binary_is_unavailable(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.runtime_missing_command_name", return_value="man"):
+            resp = client.post("/run", json={"command": "man curl"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Command is not installed on this instance: man\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_man_reports_when_allowlisted_topic_is_missing(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.runtime_missing_command_name", side_effect=[None, "curl"]), \
+             mock.patch("fake_commands.subprocess.run") as run_cmd:
+            resp = client.post("/run", json={"command": "man curl"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Command is not installed on this instance: curl\\n" in body
+        assert '"type": "exit"' in body
+        run_cmd.assert_not_called()
+
+    def test_fake_man_rejects_topics_outside_allowlist(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "man rm"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "man is only available for allowed commands. Topic not allowed: rm\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_man_for_synthetic_topic_returns_synthetic_help(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "man history"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Synthetic shell helpers:\\n" in body
+        assert "history    Show recent commands from this session.\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_history_lists_recent_session_commands(self):
+        client = get_client()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("run-h1", "sess-history", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("run-h2", "sess-history", "dig example.com A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+            )
+            conn.commit()
+
+        resp = client.post("/run", json={"command": "history"}, headers={"X-Session-ID": "sess-history"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "1  ping example.com\\n" in body
+        assert "2  dig example.com A\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_pwd_returns_synthetic_path(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "pwd"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "/shell.darklab.sh\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_uname_a_returns_synthetic_environment(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "uname -a"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "shell.darklab.sh Linux synthetic-web-terminal x86_64 app-runtime\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_id_returns_synthetic_identity(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "id"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "uid=1000(shell.darklab.sh) gid=1000(shell.darklab.sh) groups=1000(shell.darklab.sh)\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_whoami_streams_project_description(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "whoami"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "shell.darklab.sh\\n" in body
+        assert "README: https://gitlab.com/darklab.sh/shell.darklab.sh\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_ps_lists_recent_session_commands(self):
+        client = get_client()
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("run-1", "sess-ps", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                ("run-2", "sess-ps", "dig example.com A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+            )
+            conn.commit()
+
+        resp = client.post("/run", json={"command": "ps aux"}, headers={"X-Session-ID": "sess-ps"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "PID TTY          TIME CMD\\n" in body
+        assert "ping example.com\\n" in body
+        assert "dig example.com A\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_run_reports_missing_allowlisted_command_without_spawning(self):
+        client = get_client()
+
+        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("app.subprocess.Popen") as popen:
+            resp = client.post("/run", json={"command": "nmap -sV example.com"}, headers={"X-Session-ID": "sess-missing"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert '"type": "started"' in body
+        assert "Command is not installed on this instance: nmap\\n" in body
+        assert '"type": "exit"' in body
+        popen.assert_not_called()
+
+        hist = client.get("/history", headers={"X-Session-ID": "sess-missing"})
+        data = json.loads(hist.data)
+        assert [r["command"] for r in data["runs"]] == ["nmap -sV example.com"]
+
+    def test_run_checks_missing_binary_after_rewrite(self):
+        client = get_client()
+
+        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV example.com", None)), \
+             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("app.subprocess.Popen") as popen:
+            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Command is not installed on this instance: nmap\\n" in body
+        assert '"type": "exit"' in body
+        popen.assert_not_called()
+
+
+class TestRunOutputArtifacts:
+    def _insert_run_with_artifact(self, run_id, session_id="sess-artifact"):
+        ensure_run_output_dir()
+        artifact_path = os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz")
+        with gzip.open(artifact_path, "wt", encoding="utf-8") as handle:
+            handle.write("line 1\nline 2\n")
+
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, output_preview, preview_truncated, "
+                "output_line_count, full_output_available, full_output_truncated) "
+                "VALUES (?, ?, ?, datetime('now'), ?, 1, 2, 1, 0)",
+                (run_id, session_id, "nmap -sV 10.0.0.1", json.dumps(["line 2"])),
+            )
+            conn.execute(
+                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                "VALUES (?, ?, 'gzip', 14, 2, 0, datetime('now'))",
+                (run_id, f"{run_id}.txt.gz"),
+            )
+            conn.commit()
+        return artifact_path
+
+    def test_delete_run_removes_output_artifact(self):
+        client = get_client()
+        artifact_path = self._insert_run_with_artifact("artifact-delete-run", session_id="sess-delete-artifact")
+        assert os.path.exists(artifact_path)
+
+        resp = client.delete("/history/artifact-delete-run", headers={"X-Session-ID": "sess-delete-artifact"})
+
+        assert resp.status_code == 200
+        assert not os.path.exists(artifact_path)
+        with db_connect() as conn:
+            assert (
+                conn.execute(
+                    "SELECT 1 FROM run_output_artifacts WHERE run_id = ?",
+                    ("artifact-delete-run",),
+                ).fetchone()
+                is None
+            )
+
+    def test_clear_history_removes_output_artifacts_for_session(self):
+        client = get_client()
+        artifact_a = self._insert_run_with_artifact("artifact-clear-a", session_id="sess-clear-artifact")
+        artifact_b = self._insert_run_with_artifact("artifact-clear-b", session_id="sess-clear-artifact")
+        assert os.path.exists(artifact_a)
+        assert os.path.exists(artifact_b)
+
+        resp = client.delete("/history", headers={"X-Session-ID": "sess-clear-artifact"})
+
+        assert resp.status_code == 200
+        assert not os.path.exists(artifact_a)
+        assert not os.path.exists(artifact_b)
+        with db_connect() as conn:
+            assert conn.execute("SELECT COUNT(*) FROM run_output_artifacts").fetchone()[0] == 0
 
 
 # ── /history isolation ────────────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 # shell.darklab.sh
 
-A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history and permalinks. The project is built to run in Docker by default, but also supports local development without containers.
+A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history, run previews, and permalinks. Completed runs can also persist full output as compressed artifacts for later inspection. The project is built to run in Docker by default, but also supports local development without containers.
 
 ## Table of Contents
 - [Features](#features)
@@ -20,11 +20,13 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered via CSS with no DOM rebuild
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
+- **Useful fake shell commands** — a small synthetic-command layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `whoami` explains the project and links to the README, `ps` and `history` show recent commands from your session history, `help` lists the available helpers, `env`, `pwd`, `uname -a`, and `id` return stable synthetic environment details without exposing host internals, `clear` clears the current terminal tab without spawning a real process, and `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed. `man <fake-command>` falls back to the synthetic helper description for that command instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
+- **Full-output permalinks for long runs** — when full-output persistence is enabled, run permalinks automatically serve the complete saved output of that run, while loading a run back into a terminal tab still uses the capped preview so the UI stays fast
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
 - **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
@@ -61,10 +63,10 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 ├── tests/
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
-│   │   ├── test_validation.py  # Tests for command validation and rewrite logic
-│   │   ├── test_utils.py       # Tests for utility functions (split_chained_commands, load_allowed_commands,
-│   │   │                       #   load_faq, path blocking edge cases, pid map, _format_retention, rewrites)
+│   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
 │   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
+│   │   ├── test_run_history_share.py # Higher-value /run, history, share, fake-command, and persistence flows
+│   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and fake-command resolution
 │   │   └── test_logging.py     # Structured logging: formatters, configure_logging, all log events
 │   └── js/
 │       ├── unit/               # Vitest unit tests for pure JS functions
@@ -89,11 +91,13 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │   └── history.db              #   stores run history and tab snapshots
 └── app/
     ├── app.py                  # Flask app, rate limiting, and all route handlers
+    ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
     ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection
     ├── database.py             # SQLite connection, schema init, retention pruning
     ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
     ├── permalinks.py           # HTML rendering for /history/<id> and /share/<id> pages
+    ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
     ├── index.html              # Frontend HTML shell (served by Flask)
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customise the instance
@@ -257,7 +261,7 @@ npm install
 
 ## Configuration
 
-All application settings live in `app/conf/config.yaml`. The file is read at startup — changes take effect after `docker compose restart` with no rebuild needed. If a setting is omitted, the default value is used.
+All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the instance-specific differences stay active.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -266,17 +270,21 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `default_theme` | `dark` | Default color theme for new visitors. Options: `dark`, `light`. Overridden by the user's saved preference |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
-| `permalink_retention_days` | `0` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
+| `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
 | `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
-| `max_output_lines` | `2000` | Max lines retained per tab. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
+| `max_output_lines` | `5000` | Max lines retained in the live tab and in the SQLite run preview. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
+| `persist_full_run_output` | `true` | Server-side only. Persist full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
+| `full_output_max_bytes` | `5242880` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` = unlimited |
 | `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
 | `welcome_jitter_ms` | `12` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
 | `welcome_post_cmd_ms` | `650` | Pause after a welcome command finishes typing, before the next visual step begins (ms) |
 | `welcome_inter_block_ms` | `850` | Gap between one sampled welcome command block finishing and the next sampled command starting (ms) |
+| `welcome_first_prompt_idle_ms` | `1500` | Minimum idle time for the first ready prompt before the featured command starts typing (ms). Useful for giving the cursor a few visible blinks |
+| `welcome_post_status_pause_ms` | `500` | Extra pause after the fake startup-status block completes and before the first command prompt appears (ms) |
 | `welcome_sample_count` | `5` | Number of sampled command examples shown after the ASCII/status intro. `0` disables sampled commands |
 | `welcome_status_labels` | `["CONFIG","RUNNER","HISTORY","LIMITS","AUTOCOMPLETE"]` | Labels shown in the fake startup-status block during the welcome animation. Best with 4-6 short labels |
 | `welcome_hint_interval_ms` | `4200` | Delay between footer-hint rotations while the welcome tab remains idle (ms) |
@@ -318,6 +326,11 @@ Log level and format are configured in `config.yaml` and take effect after `dock
 ### GELF back-end integration
 
 The `docker-compose.yml` already ships container logs to Graylog via the Docker GELF log driver. Setting `log_format: gelf` in `config.yaml` additionally formats the application-level log records as GELF JSON so that structured fields (`_ip`, `_run_id`, `_cmd`, etc.) are available as first-class Graylog message fields rather than embedded in a plain string.
+
+The repository's checked-in `config.yaml` currently overrides two server defaults:
+
+- `log_format: gelf`
+- `command_timeout_seconds: 7200`
 
 ---
 
@@ -433,7 +446,6 @@ The file is optional — if it doesn't exist or contains no valid entries, the F
 
 When the page first loads, the terminal can render a staged welcome sequence:
 
-- a decorative `cat ~/.ascii-art.txt` prompt line
 - ASCII banner text loaded from `app/conf/ascii.txt`
 - a fake startup-status block using labels from `welcome_status_labels`
 - curated sampled commands and their sample output from `app/conf/welcome.yaml`
@@ -465,7 +477,6 @@ Fields:
 Notes:
 
 - Leading whitespace in `out` is preserved; trailing whitespace is stripped
-- The decorative `cat ~/.ascii-art.txt` intro line is not interactive
 - Sampled welcome commands are clickable and load directly into the prompt without running
 - The `TRY THIS FIRST` badge is clickable and has the same behavior as clicking the featured command text
 - App hints rotate only briefly; they are not an endless carousel
@@ -562,7 +573,9 @@ The full [SecLists](https://github.com/danielmiessler/SecLists) collection is in
 
 Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. Switching to a tab automatically restores that tab's last command in the input bar — making it easy to re-run or tweak without copying from the output. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.
 
-The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies a shareable link to that run's output), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions.
+The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies a shareable link to that run's output), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions. Large history restores show an in-drawer loading overlay so slower machines do not look hung while the preview is fetched and rendered.
+
+When full-output persistence is enabled, the **permalink** action for a run automatically points at the complete saved output of that run. Loading a history entry into a normal tab still uses the capped preview (`/history/<run_id>?json&preview=1`) so the browser is not forced to render very large scans. If the preview was truncated, the tab includes a notice pointing to the permalink for the full output.
 
 The **clear all** button at the top of the history drawer prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt.
 
@@ -576,7 +589,9 @@ There are two types of permalink:
 
 **Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. This is the recommended way to share results.
 
-**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run's output, also served as a styled HTML page.
+**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite.
+
+**Full output alias** (`/history/<run_id>/full`) — backward-compatible alias to the same run permalink. This exists so older links and tests continue to resolve cleanly.
 
 Both types persist across container restarts via the `./data` SQLite volume. The `./data` directory is the only writable path in an otherwise read-only container and is created automatically on first run.
 
@@ -605,7 +620,7 @@ Click **◑ theme** in the header to toggle between dark and light mode. Your pr
 
 ## Database
 
-Run history and tab snapshots are stored in a SQLite database at `./data/history.db`. Active process tracking (running PIDs) is handled by Redis — see the Redis section above. The database is created automatically on first run and persists across container restarts and recreations.
+Run history, preview metadata, full-output artifact metadata, and tab snapshots are stored under `./data`. SQLite lives at `./data/history.db`, while persisted full-output artifacts are written as compressed files under `./data/run-output/`. Active process tracking (running PIDs) is handled by Redis — see the Redis section above. The writable `./data` directory is created automatically on first run and persists across container restarts and recreations.
 
 ### Schema
 
@@ -619,7 +634,24 @@ Run history and tab snapshots are stored in a SQLite database at `./data/history
 | `started` | TEXT | ISO 8601 timestamp when the command was submitted |
 | `finished` | TEXT | ISO 8601 timestamp when the process exited |
 | `exit_code` | INTEGER | Process exit code (0 = success) |
-| `output` | TEXT | JSON array of plain-text output lines |
+| `output` | TEXT | Legacy preview payload kept for backward compatibility with older rows |
+| `output_preview` | TEXT | JSON array of the most recent plain-text preview lines used by the history drawer and `/history/<run_id>` |
+| `preview_truncated` | INTEGER | `1` when the stored preview hit `max_output_lines` and older lines were dropped from the top |
+| `output_line_count` | INTEGER | Total number of output lines seen for the run |
+| `full_output_available` | INTEGER | `1` when a persisted full-output artifact exists for this run |
+| `full_output_truncated` | INTEGER | `1` when the full-output artifact hit `full_output_max_bytes` and was cut off |
+
+**`run_output_artifacts` table** — one row per persisted full-output artifact:
+
+| Column | Type | Description |
+|--------|------|-------------|
+| `run_id` | TEXT | Primary key and foreign-key reference to `runs.id` |
+| `rel_path` | TEXT | Relative artifact path under `./data/run-output/` |
+| `compression` | TEXT | Artifact encoding (`gzip`) |
+| `byte_size` | INTEGER | Number of uncompressed UTF-8 bytes accepted into the artifact before gzip compression |
+| `line_count` | INTEGER | Number of output lines written to the full artifact |
+| `truncated` | INTEGER | `1` when the artifact hit `full_output_max_bytes` |
+| `created` | TEXT | ISO 8601 timestamp when the artifact metadata row was created |
 
 **`snapshots` table** — one row per tab permalink:
 
@@ -633,13 +665,13 @@ Run history and tab snapshots are stored in a SQLite database at `./data/history
 
 ### Retention
 
-The history drawer shows the most recent runs per session up to the `history_panel_limit` config setting, but the database stores everything until pruned. Retention is controlled by `permalink_retention_days` in `config.yaml` — on startup, runs and snapshots older than the configured number of days are deleted. The default is `0` (unlimited). Permalinks will work for as long as the database file exists and the records haven't been pruned.
+The history drawer shows the most recent runs per session up to the `history_panel_limit` config setting, but the database stores everything until pruned. Retention is controlled by `permalink_retention_days` in `config.yaml` — on startup, runs, run-output artifact metadata, the artifact files themselves, and snapshots older than the configured number of days are deleted together. The built-in default is `365` days; `0` means unlimited retention. Preview permalinks and full-output pages will work for as long as the database rows and any referenced artifact files still exist.
 
 To inspect or manage the database directly:
 
 ```bash
 # Row counts
-sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM snapshots;"
+sqlite3 data/history.db "SELECT COUNT(*) FROM runs; SELECT COUNT(*) FROM run_output_artifacts; SELECT COUNT(*) FROM snapshots;"
 
 # Delete runs older than 90 days
 sqlite3 data/history.db "DELETE FROM runs WHERE started < datetime('now', '-90 days');"
@@ -719,7 +751,8 @@ docker compose logs -f
 | `GET` | `/welcome/ascii` | Returns the welcome ASCII banner from `ascii.txt` as plain text |
 | `GET` | `/welcome/hints` | Returns rotating welcome footer hints from `app_hints.txt` as JSON |
 | `GET` | `/history` | Returns last N completed runs for the current session as JSON |
-| `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run (`?json` for raw JSON) |
+| `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
+| `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>` (`?json` for raw JSON) |
 | `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
 | `POST` | `/run` | Runs a command, streams output via SSE |
 | `POST` | `/kill` | Kills a running process by `run_id` |
@@ -738,7 +771,7 @@ docker compose logs -f
 python3 -m pytest tests/py/ -v
 ```
 
-Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, and backend parsing of `welcome.yaml` metadata like `group` and `featured`. No running server or Docker required — file I/O and Redis are mocked where needed.
+Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -746,12 +779,12 @@ Pytest covers command validation, config/content loaders, malformed-request hand
 npm run test:unit
 ```
 
-Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, and status mapping (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, and history action failures (history.js); session ID persistence and `apiFetch()` header injection (session.js); autocomplete rendering and acceptance (autocomplete.js); tab state, rename, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
+Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, synthetic `clear` handling, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); autocomplete rendering and acceptance (autocomplete.js); tab state, rename, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
 
 **Testing notes**
 - Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
 - Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` permalinks (HTML and JSON), welcome interruption, decorative intro behavior, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, the mobile welcome layout regression, delete-non-favorites, tab rename persistence, output actions, history clipboard failure, and the boot/stall resilience cases.
+- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename persistence, output actions, history clipboard failure, and the boot/stall resilience cases.
 - The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
 - For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
 

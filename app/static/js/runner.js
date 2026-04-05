@@ -79,6 +79,55 @@ function hideTabKillBtn(tabId) {
   if (btn) btn.style.display = 'none';
 }
 
+function _describeRunnerFetchError(err, context = 'server') {
+  if (typeof describeFetchError === 'function') return describeFetchError(err, context);
+  const message = err && err.message ? err.message : 'unknown network error';
+  return `Request to the ${context} failed: ${message}`;
+}
+
+function _logRunnerError(context, err) {
+  if (typeof logClientError === 'function') logClientError(context, err);
+}
+
+function _handleKillRequestFailure(err, tabId) {
+  _logRunnerError('kill request failed', err);
+  showToast('Failed to send kill request; command may still be running');
+  appendLine('[kill request failed] ' + _describeRunnerFetchError(err), 'notice', tabId);
+}
+
+function _handleRunTransportFailure(err, tabId) {
+  _logRunnerError('run request failed', err);
+  appendLine('\n[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
+  if (tabId === activeTabId) setStatus('fail');
+  setTabStatus(tabId, 'fail');
+  stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+}
+
+async function _readRunErrorMessage(res) {
+  const contentType = (res.headers && typeof res.headers.get === 'function' && res.headers.get('content-type')) || '';
+  try {
+    if (contentType.includes('application/json') && typeof res.json === 'function') {
+      const data = await res.json();
+      if (data && typeof data.error === 'string' && data.error.trim()) return data.error.trim();
+    } else if (typeof res.text === 'function') {
+      const text = (await res.text()).trim();
+      if (text) return text;
+    }
+  } catch (err) {
+    _logRunnerError('failed to parse /run error response', err);
+  }
+  return '';
+}
+
+function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
+  const shown = APP_CONFIG.max_output_lines || outputLineCount || 0;
+  const total = outputLineCount || shown;
+  if (fullOutputAvailable) {
+    return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Use the permalink button below or in the history panel for complete results]`;
+  }
+  return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Full output persistence is disabled or unavailable]`;
+}
+
 // ── Kill confirmation modal ──
 let pendingKillTabId = null;
 
@@ -97,7 +146,7 @@ function doKill(tabId) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ run_id: t.runId })
-    });
+    }).catch(err => _handleKillRequestFailure(err, tabId));
     t.runId = null;
   } else {
     // runId not yet available (SSE 'started' hasn't arrived) — flag it so the
@@ -188,6 +237,20 @@ function runCommand() {
       stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
       return;
     }
+    if (!res.ok) {
+      return _readRunErrorMessage(res).then(message => {
+        const suffix = message ? ` ${message}` : '';
+        appendLine(`[server error] The server could not start the command.${suffix}`, 'exit-fail', tabId);
+        setStatus('fail'); setTabStatus(tabId, 'fail');
+        stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+      });
+    }
+    if (!res.body || typeof res.body.getReader !== 'function') {
+      appendLine('[server error] The server returned an invalid streaming response.', 'exit-fail', tabId);
+      setStatus('fail'); setTabStatus(tabId, 'fail');
+      stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+      return;
+    }
 
     const reader = res.body.getReader();
     const decoder = new TextDecoder();
@@ -217,7 +280,7 @@ function runCommand() {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
                       body: JSON.stringify({ run_id: t.runId })
-                    });
+                    }).catch(err => _handleKillRequestFailure(err, tabId));
                     t.runId = null;
                   } else {
                     t.killed = false;
@@ -225,6 +288,10 @@ function runCommand() {
                 }
               } else if (msg.type === 'notice') {
                 appendLine(msg.text, 'notice', tabId);
+              } else if (msg.type === 'clear') {
+                clearTab(tabId);
+                const t = tabs.find(t => t.id === tabId);
+                if (t) t.syntheticClear = true;
               } else if (msg.type === 'output') {
                 msg.text.split('\n').forEach((line, i, arr) => {
                   if (i < arr.length - 1 || line) appendLine(line, '', tabId);
@@ -243,8 +310,11 @@ function runCommand() {
                 }
                 const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
                 stopTimer();
+                if (msg.preview_truncated) {
+                  appendLine(_previewTruncationNotice(msg.output_line_count, msg.full_output_available), 'notice', tabId);
+                }
                 if (msg.code === 0) {
-                  appendLine(`\n[process exited with code 0${dur}]`, 'exit-ok', tabId);
+                  if (!(t && t.syntheticClear)) appendLine(`\n[process exited with code 0${dur}]`, 'exit-ok', tabId);
                   if (tabId === activeTabId) setStatus('ok');
                   setTabStatus(tabId, 'ok');
                 } else {
@@ -252,6 +322,7 @@ function runCommand() {
                   if (tabId === activeTabId) setStatus('fail');
                   setTabStatus(tabId, 'fail');
                 }
+                if (t) t.syntheticClear = false;
                 runBtn.disabled = false; hideTabKillBtn(tabId);
                 if (historyPanel.classList.contains('open')) refreshHistoryPanel();
               } else if (msg.type === 'error') {
@@ -270,9 +341,6 @@ function runCommand() {
     read();
   }).catch(err => {
     _clearStalledTimeout(tabId);
-    appendLine('\n[fetch error] ' + err.message, 'exit-fail', tabId);
-    if (tabId === activeTabId) setStatus('fail');
-    setTabStatus(tabId, 'fail');
-    stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+    _handleRunTransportFailure(err, tabId);
   });
 }

@@ -1,6 +1,12 @@
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
-async function loadAppFns({ theme = null, apiFetch: apiFetchOverride = null, doKill: doKillOverride = vi.fn(), pendingKillTabId = null } = {}) {
+async function loadAppFns({
+  theme = null,
+  apiFetch: apiFetchOverride = null,
+  doKill: doKillOverride = vi.fn(),
+  pendingKillTabId = null,
+  requestWelcomeSettle: requestWelcomeSettleOverride = vi.fn(),
+} = {}) {
   document.body.className = ''
   document.body.innerHTML = `
     <header><h1></h1></header>
@@ -78,6 +84,7 @@ async function loadAppFns({ theme = null, apiFetch: apiFetchOverride = null, doK
   const runSearch = vi.fn()
   const clearSearch = vi.fn()
   const navigateSearch = vi.fn()
+  const logClientError = vi.fn()
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
 
@@ -120,7 +127,12 @@ async function loadAppFns({ theme = null, apiFetch: apiFetchOverride = null, doK
     acIndex: -1,
     acShow: () => {},
     acAccept: () => {},
+    resetCmdHistoryNav: () => {},
+    navigateCmdHistory: () => false,
+    logClientError,
     tabs: [],
+    activeTabId: 'tab-1',
+    requestWelcomeSettle: requestWelcomeSettleOverride,
     runCommand: () => {},
     doKill: doKillOverride,
     Event,
@@ -138,7 +150,7 @@ async function loadAppFns({ theme = null, apiFetch: apiFetchOverride = null, doK
   await Promise.resolve()
   await Promise.resolve()
 
-  return { ...fns, storage, apiFetch, runSearch, clearSearch, navigateSearch, cmdInput }
+  return { ...fns, storage, apiFetch, runSearch, clearSearch, navigateSearch, cmdInput, requestWelcomeSettle: requestWelcomeSettleOverride, logClientError }
 }
 
 describe('app helpers', () => {
@@ -227,15 +239,28 @@ describe('app helpers', () => {
       <div class="prompt-wrap"></div>
     `
 
-    const { storage } = await loadAppFns({ apiFetch })
+    const { storage, logClientError } = await loadAppFns({ apiFetch })
     await Promise.resolve()
     await Promise.resolve()
 
     expect(apiFetch).toHaveBeenCalledWith('/config')
     expect(apiFetch).toHaveBeenCalledWith('/allowed-commands')
     expect(apiFetch).toHaveBeenCalledWith('/autocomplete')
+    expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
+    expect(logClientError).toHaveBeenCalledWith('failed to load /allowed-commands', expect.any(Error))
+    expect(logClientError).toHaveBeenCalledWith('failed to load /autocomplete', expect.any(Error))
     expect(document.body.classList.contains('light')).toBe(false)
     expect(storage.getItem('theme')).toBeNull()
+  })
+
+  it('settles the welcome intro immediately when the user types into the active welcome tab', async () => {
+    const requestWelcomeSettle = vi.fn()
+    const { cmdInput } = await loadAppFns({ requestWelcomeSettle })
+
+    cmdInput.value = 'dig '
+    cmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(requestWelcomeSettle).toHaveBeenCalledWith('tab-1')
   })
 
   it('wires the history delete modal buttons and backdrop correctly', async () => {

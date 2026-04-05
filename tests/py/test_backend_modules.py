@@ -8,6 +8,7 @@ Tests for pure utility functions across the app modules:
   - rewrite_command case-insensitivity          (commands.py)
   - pid_register / pid_pop in-process mode      (process.py)
   - _format_retention                           (permalinks.py)
+  - run-output artifact capture/read helpers    (run_output_store.py)
 Run with: pytest tests/ (from the repo root)
 """
 
@@ -27,6 +28,7 @@ from commands import (
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
+from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_lines
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -476,6 +478,50 @@ class TestWelcomeAssetLoading:
         finally:
             os.unlink(path)
 
+
+# ── run_output_store ──────────────────────────────────────────────────────────
+
+class TestRunOutputCapture:
+    def teardown_method(self):
+        if os.path.isdir(RUN_OUTPUT_DIR):
+            for name in os.listdir(RUN_OUTPUT_DIR):
+                if name.startswith("test-run-output-"):
+                    os.unlink(os.path.join(RUN_OUTPUT_DIR, name))
+
+    def test_preview_keeps_only_last_n_lines(self):
+        capture = RunOutputCapture("test-run-output-preview", preview_limit=2, persist_full_output=False, full_output_max_bytes=0)
+        capture.add_line("one")
+        capture.add_line("two")
+        capture.add_line("three")
+        capture.finalize()
+
+        assert list(capture.preview_lines) == ["two", "three"]
+        assert capture.preview_truncated is True
+        assert capture.output_line_count == 3
+
+    def test_full_output_artifact_round_trips_lines(self):
+        capture = RunOutputCapture("test-run-output-artifact", preview_limit=2, persist_full_output=True, full_output_max_bytes=0)
+        capture.add_line("alpha")
+        capture.add_line("beta")
+        capture.finalize()
+
+        assert capture.full_output_available is True
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        assert load_full_output_lines(artifact_rel_path) == ["alpha", "beta"]
+
+    def test_full_output_artifact_respects_byte_cap(self):
+        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=5)
+        capture.add_line("1234")
+        capture.add_line("5678")
+        capture.finalize()
+
+        assert capture.full_output_available is True
+        assert capture.full_output_truncated is True
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        assert load_full_output_lines(artifact_rel_path) == ["1234"]
+
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("commands.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
             assert load_welcome_hints() == []
@@ -877,4 +923,5 @@ class TestDatabaseInit:
 
         database._migrate_schema(conn)
 
-        conn.execute.assert_called_once_with("ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''")
+        assert conn.execute.call_count >= 1
+        assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"

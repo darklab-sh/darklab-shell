@@ -8,6 +8,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.2] — unreleased
 
 ### Added
+- **Split run-output persistence** — completed runs now keep a capped preview in SQLite for the history drawer and normal run permalink, while optional full output is persisted separately as compressed artifacts with metadata in a dedicated `run_output_artifacts` table
+  - canonical run permalinks at `/history/<run_id>` now serve the full saved output when an artifact exists
+  - `/history/<run_id>/full` remains as a backward-compatible alias
+  - full-output artifacts are deleted alongside their parent run on single-run delete, clear-history, and retention pruning
+- **Fake shell command framework** — `/run` now recognizes a small synthetic-command layer before process spawning so common shell helpers can be useful without weakening the allowlist model
+  - `clear` clears the current terminal tab through the normal `/run` flow
+  - `env` prints a stable synthetic shell environment for the current session
+  - `help` lists the available synthetic helpers
+  - `history` prints recent commands from the current session in shell-style history order
+  - `id` prints a stable synthetic identity for the app
+  - `ls` prints the current allowlist grouped by category
+  - `man <allowed-command>` renders the real system man page for allowlisted topics through a non-interactive, terminal-safe path
+  - `man <fake-command>` reuses the synthetic helper description instead of rejecting the topic
+  - `pwd` prints a synthetic workspace path
+  - `whoami` prints a short project description and the GitLab README link
+  - `ps` / `ps aux` / `ps -ef` print recent commands from the current session in a lightweight process-list format
+  - `uname -a` prints a stable synthetic environment string instead of host kernel details
 - **Richer welcome startup flow** — first load can now show a decorative ASCII banner from `app/conf/ascii.txt`, fake startup-status lines, curated sampled commands from `app/conf/welcome.yaml`, and rotating footer hints from `app/conf/app_hints.txt`
   - sampled welcome commands are clickable and load into the prompt without running
   - the featured sample gets a clickable `TRY THIS FIRST` badge
@@ -15,6 +32,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Welcome sampling metadata** — `welcome.yaml` entries now support `group` and `featured` fields so the sampled command set can stay varied while still biasing one primary onboarding command
 - **Configurable welcome status labels** — new `welcome_status_labels` key in `config.yaml`, exposed through `/config`, lets operators tune the fake startup block without editing frontend code
 - **Configurable welcome pacing knobs** — `welcome_sample_count`, `welcome_hint_interval_ms`, and `welcome_hint_rotations` now let operators tune how many sampled commands are shown and how active the footer hint feed feels
+- **Additional welcome timing knobs** — `welcome_first_prompt_idle_ms` and `welcome_post_status_pause_ms` now let operators tune how long the first ready prompt sits before typing begins and how clearly the boot/status block hands off into the command phase
+- **Full-output persistence config** — `persist_full_run_output` and `full_output_max_bytes` now let operators keep complete run output outside the `runs` table without loading massive scans back into the interactive tab UI
 - **Startup command-history hydration** — the frontend now hydrates recent-command recall from `/history` on boot so blank-input `ArrowUp` / `ArrowDown` works on first load, not only after a command has been run in the current tab
 - **Structured logging** — new `logging_setup.py` module providing four log levels (ERROR / WARN / INFO / DEBUG) and two output formats (`text` and `gelf`)
   - `text` format: human-readable `2026-04-02T10:00:00Z [INFO ] EVENT  key=value ...` lines with structured context appended as sorted key=value pairs
@@ -52,11 +71,18 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Smart client IP detection** — `get_client_ip()` now validates the `X-Forwarded-For` value against a regex before trusting it; invalid or absent values fall back to the direct connection IP, making the app work correctly with or without a reverse proxy and without any config setting
 
 ### Fixed
+- **Friendlier client fetch failures** — dead-server or rejected `/run` requests now render a clear offline message instead of surfacing the browser’s raw `NetworkError` text
+- **Better `/run` bad-path handling** — non-403/429 non-streaming error responses now show a clearer server-side failure message instead of falling through to opaque client behavior
+- **Kill request failure visibility** — failed `/kill` requests now surface a toast and inline notice so the user knows the command may still be running server-side
+- **Startup fetch logging** — client-side bootstrap and welcome-content fetch failures are now logged through a shared browser helper instead of being silently swallowed
 - **Welcome teardown scoping** — welcome cleanup is now tied to the tab that owns the startup animation, preventing commands or clear actions in other tabs from wiping the welcome content
-- **Welcome interaction targets** — the decorative `cat ~/.ascii-art.txt` intro line is no longer interactive, while the featured badge and sampled command text both load the sample into the prompt
+- **Welcome interaction targets** — sampled command text and the featured badge both load the sample into the prompt without running it
 - **Welcome mobile layout** — sampled command prompts and the `TRY THIS FIRST` badge no longer collapse into character-by-character wrapping on small screens
+- **Welcome typing settle path** — typing into the prompt now reliably fast-forwards the welcome sequence even when the user types very early in the intro
+- **Welcome command finalization** — typed command rows are now finalized in place instead of fading out and being replaced, removing the visible flash when comments appear and the next line starts
 - **Autocomplete examples** — `dnsx` `-d` suggestions in `auto_complete.txt` now include a real SecLists wordlist via `-w`, so the examples are runnable as shown
 - **Request validation** — `/run`, `/kill`, and `/share` now reject non-object JSON bodies and invalid field types instead of assuming shape and failing deeper in the handler
+- **Shared command availability handling** — runtime command availability is now checked in the shared command layer so missing binaries return the same clean instance-level message for both fake commands and normal allowlisted `/run` commands instead of surfacing raw OS errors or shell failures
 - `history.js` — loading a run from the history drawer now sets `tab.command` on the newly created tab, so switching away and back correctly restores the command in the input bar (previously only tabs created by running a command directly had their command recalled)
 - `history.js` — clicking a history entry whose command is already loaded in another tab now switches to that existing tab instead of opening a duplicate; the history panel closes as normal
 - `history.js` — deleting a history entry now removes the command from the starred set and chip bar; previously the star persisted in localStorage so the command would reappear as a favourite the next time it was run
@@ -70,6 +96,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Welcome defaults** — welcome timing defaults were retuned to make the startup sequence shorter and clearer: `welcome_char_ms` `10 -> 18`, `welcome_jitter_ms` `10 -> 12`, `welcome_post_cmd_ms` `700 -> 650`, `welcome_inter_block_ms` `1500 -> 850`
 - **Welcome timing semantics** — `welcome_post_cmd_ms` and `welcome_inter_block_ms` are now documented in terms of visible UX steps rather than old typewriter implementation details
 - **Welcome status presentation** — status lines now hold the `loading` state longer and animate through a lightweight spinner sequence before flipping to `loaded`
+- **Welcome phase handoff** — the startup flow now begins directly with the ASCII/status boot sequence, pauses briefly before the example phase, and lets the first ready prompt idle visibly before the featured command starts typing
+- **Run history restore model** — loading a run from history now always uses the stored preview output instead of assuming the full run output lives inline on the `runs` row; long runs surface an explicit preview-truncated notice and point to the canonical run permalink for full results
+  - history-to-tab restores now show an in-drawer loading overlay while large previews are fetched and rendered
 - **Welcome content files** — `app_hints.txt` adds app-specific onboarding hints, and `welcome.yaml` examples were cleaned up to use real installed wordlists and safer sample commands
 - **Welcome styling** — the ASCII banner remains plain terminal content instead of a nested framed widget; the rendered art is larger, uses a solid green treatment, and no longer dims when later welcome blocks appear
 - **Documentation** — README, architecture notes, test guide, and changelog now describe the current welcome system, config keys, extra content files, boot-time history hydration, and updated route/test coverage

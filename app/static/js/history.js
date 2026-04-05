@@ -181,6 +181,12 @@ function executeHistAction(type) {
   }
 }
 
+function _setHistoryLoadState(loading) {
+  if (!historyLoadOverlay) return;
+  historyLoadOverlay.classList.toggle('open', !!loading);
+  historyLoadOverlay.setAttribute('aria-hidden', loading ? 'false' : 'true');
+}
+
 function refreshHistoryPanel() {
   apiFetch('/history').then(r => r.json()).then(data => {
     historyList.innerHTML = '';
@@ -230,9 +236,11 @@ function refreshHistoryPanel() {
 
         const cmdEl = entry.querySelector('.history-entry-cmd');
         cmdEl.textContent = 'loading…';
-        apiFetch(`/history/${run.id}?json`)
+        _setHistoryLoadState(true);
+        apiFetch(`/history/${run.id}?json&preview=1`)
           .then(r => r.json())
           .then(fullRun => {
+            const previewNotice = fullRun.preview_notice || null;
             const newId = createTab(fullRun.command);
             const t = tabs.find(t => t.id === newId);
             if (t) {
@@ -244,13 +252,17 @@ function refreshHistoryPanel() {
             appendLine(`$ ${fullRun.command}`, '', newId);
             appendLine('', '', newId);
             (fullRun.output || []).forEach(line => appendLine(line, '', newId));
+            if (previewNotice) {
+              appendLine(previewNotice, 'notice', newId);
+            }
             appendLine(`\n[history — exit ${fullRun.exit_code}]`, fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail', newId);
             historyPanel.classList.remove('open');
           })
           .catch(() => {
             entry.querySelector('.history-entry-cmd').textContent = run.command;
             showToast('Failed to load run');
-          });
+          })
+          .finally(() => _setHistoryLoadState(false));
       });
 
       entry.querySelector('[data-action="star"]').addEventListener('click', () => {
@@ -276,7 +288,6 @@ function refreshHistoryPanel() {
           .then(() => showToast('Link copied to clipboard'))
           .catch(() => showToast('Failed to copy link'));
       });
-
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
         confirmHistAction('delete', run.id, run.command);
       });

@@ -6,6 +6,7 @@ Run with: pytest tests/ (from the repo root)
 
 import json
 import logging
+import os
 import sqlite3
 import uuid
 import unittest.mock as mock
@@ -125,6 +126,7 @@ class TestConfigRoute:
         for key in ("command_timeout_seconds",
                     "welcome_char_ms", "welcome_jitter_ms",
                     "welcome_post_cmd_ms", "welcome_inter_block_ms",
+                    "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
                     "welcome_sample_count", "welcome_status_labels",
                     "welcome_hint_interval_ms", "welcome_hint_rotations"):
             assert key in data, f"missing key: {key}"
@@ -135,6 +137,7 @@ class TestConfigRoute:
         for key in ("command_timeout_seconds",
                     "welcome_char_ms", "welcome_jitter_ms",
                     "welcome_post_cmd_ms", "welcome_inter_block_ms",
+                    "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
                     "welcome_sample_count", "welcome_hint_interval_ms",
                     "welcome_hint_rotations"):
             assert isinstance(data[key], int), f"{key} should be int, got {type(data[key])}"
@@ -154,6 +157,8 @@ class TestConfigRoute:
             "welcome_jitter_ms": 5,
             "welcome_post_cmd_ms": 400,
             "welcome_inter_block_ms": 1000,
+            "welcome_first_prompt_idle_ms": 1800,
+            "welcome_post_status_pause_ms": 300,
             "welcome_sample_count": 4,
             "welcome_status_labels": ["CONFIG", "CACHE", "READY"],
             "welcome_hint_interval_ms": 3000,
@@ -292,6 +297,20 @@ class TestRunRoute:
         with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
             resp = client.post("/run", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
+
+    def test_missing_allowlisted_command_returns_synthetic_run(self):
+        client = get_client()
+        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("app.subprocess.Popen") as popen:
+            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert '"type": "started"' in body
+        assert "Command is not installed on this instance: nmap\\n" in body
+        assert '"type": "exit"' in body
+        popen.assert_not_called()
 
     def test_non_json_body_handled(self):
         client = get_client()
@@ -658,21 +677,65 @@ class TestHistorySessionIsolation:
 # ── /history/<run_id> permalink ───────────────────────────────────────────────
 
 class TestRunPermalinkRoute:
-    def _insert_run(self, run_id, command, output=None):
+    def _insert_run(
+        self,
+        run_id,
+        command,
+        output=None,
+        *,
+        preview_truncated=0,
+        full_output_available=0,
+        full_output_truncated=0,
+        full_output_lines=None,
+    ):
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, output) "
-            "VALUES (?, 'test-session', ?, datetime('now'), ?)",
-            (run_id, command, json.dumps(output or []))
+            "INSERT INTO runs (id, session_id, command, started, output_preview, preview_truncated, "
+            "output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, 'test-session', ?, datetime('now'), ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                command,
+                json.dumps(output or []),
+                preview_truncated,
+                len(output or []),
+                full_output_available,
+                full_output_truncated,
+            )
         )
+        if full_output_available and full_output_lines is not None:
+            conn.execute(
+                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                "VALUES (?, ?, 'gzip', ?, ?, ?, datetime('now'))",
+                (
+                    run_id,
+                    f"{run_id}.txt.gz",
+                    len("\n".join(full_output_lines).encode()),
+                    len(full_output_lines),
+                    full_output_truncated,
+                ),
+            )
         conn.commit()
         conn.close()
+        if full_output_available and full_output_lines is not None:
+            import gzip
+            from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+            ensure_run_output_dir()
+            with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+                for line in full_output_lines:
+                    f.write(line + "\n")
 
     def _delete_run(self, run_id):
+        from run_output_store import RUN_OUTPUT_DIR
         conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM run_output_artifacts WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
         conn.commit()
         conn.close()
+        try:
+            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+        except FileNotFoundError:
+            pass
 
     def test_html_view_returns_200(self):
         run_id = "permalink-html-test-run"
@@ -703,6 +766,40 @@ class TestRunPermalinkRoute:
         finally:
             self._delete_run(run_id)
 
+    def test_json_view_returns_full_output_when_artifact_exists(self):
+        run_id = "permalink-json-full-test-run"
+        self._insert_run(
+            run_id,
+            "man curl",
+            ["preview"],
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            assert data["command"] == "man curl"
+            assert data["output"] == ["full line 1", "full line 2"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_preview_view_returns_preview_when_requested(self):
+        run_id = "permalink-json-preview-test-run"
+        self._insert_run(
+            run_id,
+            "man curl",
+            ["preview line"],
+            preview_truncated=1,
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
+            assert data["command"] == "man curl"
+            assert data["output"] == ["preview line"]
+            assert "permalink button below or in the history panel" in data["preview_notice"]
+        finally:
+            self._delete_run(run_id)
+
     def test_html_content_type(self):
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
@@ -711,6 +808,106 @@ class TestRunPermalinkRoute:
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
+
+    def test_permalink_uses_full_output_when_available(self):
+        run_id = "permalink-full-link-test-run"
+        self._insert_run(
+            run_id,
+            "nmap -sV 10.0.0.1",
+            ["preview line"],
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert b"full line 1" in resp.data
+            assert b"preview line" not in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_preview_page_appends_truncation_notice_when_no_full_output_exists(self):
+        run_id = "permalink-preview-truncated-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert b"preview truncated" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+
+class TestRunFullOutputRoute:
+    def _insert_run(self, run_id, command):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
+            "VALUES (?, 'test-session', ?, datetime('now'), 1)",
+            (run_id, command)
+        )
+        conn.execute(
+            "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+            "VALUES (?, ?, 'gzip', 12, 2, 0, datetime('now'))",
+            (run_id, f"{run_id}.txt.gz")
+        )
+        conn.commit()
+        conn.close()
+
+        import gzip
+        from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+        ensure_run_output_dir()
+        with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+            f.write("line 1\nline 2\n")
+
+    def _delete_run(self, run_id):
+        from run_output_store import RUN_OUTPUT_DIR
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        conn.commit()
+        conn.close()
+        try:
+            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+        except FileNotFoundError:
+            pass
+
+    def test_full_output_json_returns_artifact_lines(self):
+        run_id = "permalink-full-json-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1")
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}/full?json").data)
+            assert data["command"] == "nmap -sV 10.0.0.1"
+            assert data["output"] == ["line 1", "line 2"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_full_output_html_alias_matches_canonical_permalink(self):
+        run_id = "permalink-full-html-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1")
+        try:
+            resp = get_client().get(f"/history/{run_id}/full")
+            assert resp.status_code == 200
+            assert b"line 1" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_full_output_alias_falls_back_to_preview_when_artifact_is_unavailable(self):
+        run_id = "permalink-full-missing-artifact-run"
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
+            "VALUES (?, 'test-session', ?, datetime('now'), 0)",
+            (run_id, "nmap -sV 10.0.0.1"),
+        )
+        conn.commit()
+        conn.close()
+        try:
+            resp = get_client().get(f"/history/{run_id}/full")
+            assert resp.status_code == 200
+            assert b"nmap -sV 10.0.0.1" in resp.data
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            conn.commit()
+            conn.close()
 
 
 # ── Response content types ────────────────────────────────────────────────────

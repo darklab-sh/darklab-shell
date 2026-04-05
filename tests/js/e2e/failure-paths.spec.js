@@ -52,6 +52,17 @@ test.describe('failure paths', () => {
     await expect(page.locator('.tab-panel.active .output')).toContainText('[rate limited] Too many requests. Please wait a moment.')
   })
 
+  test('a rejected /run request renders a friendly offline message', async ({ page }) => {
+    await page.route('**/run', route => {
+      route.abort('failed')
+    })
+
+    await runCommand(page, CMD)
+
+    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('[connection error] Unable to reach the server. Check that it is running and try again.')
+  })
+
   test('permalink shows a failure toast when /share returns invalid JSON', async ({ page }) => {
     await page.route('**/share', route => {
       route.fulfill({

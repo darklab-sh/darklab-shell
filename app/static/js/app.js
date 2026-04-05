@@ -90,7 +90,9 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
       `<table style="border-collapse:collapse;margin-bottom:6px">${tableRows}</table>` +
       `<span style="color:var(--muted);font-size:11px">These limits are configured by the operator of this instance.</span>`;
   }
-}).catch(() => {});
+}).catch(err => {
+  if (typeof logClientError === 'function') logClientError('failed to load /config', err);
+});
 
 // ── Hamburger menu (mobile) ──
 const hamburgerBtn = document.getElementById('hamburger-btn');
@@ -183,7 +185,9 @@ apiFetch('/allowed-commands').then(r => r.json()).then(data => {
     data.commands.forEach(cmd => list.appendChild(makeChip(cmd)));
     el.appendChild(list);
   }
-}).catch(() => {});
+}).catch(err => {
+  if (typeof logClientError === 'function') logClientError('failed to load /allowed-commands', err);
+});
 
 apiFetch('/faq').then(r => r.json()).then(data => {
   if (!data.items || !data.items.length) return;
@@ -201,13 +205,17 @@ apiFetch('/faq').then(r => r.json()).then(data => {
     div.appendChild(a);
     faqBody.appendChild(div);
   });
-}).catch(() => {});
+}).catch(err => {
+  if (typeof logClientError === 'function') logClientError('failed to load /faq', err);
+});
 
 apiFetch('/history').then(r => r.json()).then(data => {
   if (typeof hydrateCmdHistory === 'function') {
     hydrateCmdHistory(data.runs || []);
   }
-}).catch(() => {});
+}).catch(err => {
+  if (typeof logClientError === 'function') logClientError('failed to load /history', err);
+});
 
 // ── Tabs ──
 createTab('tab 1');
@@ -302,11 +310,16 @@ document.addEventListener('click', e => {
 // ── Autocomplete ──
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
-}).catch(() => {});
+}).catch(err => {
+  if (typeof logClientError === 'function') logClientError('failed to load /autocomplete', err);
+});
 
 cmdInput.addEventListener('input', () => {
   resetCmdHistoryNav();
   const val = cmdInput.value;
+  if (val.trim() && typeof requestWelcomeSettle === 'function') {
+    requestWelcomeSettle(activeTabId);
+  }
   acIndex = -1;
   if (!val.trim()) { acHide(); return; }
   acFiltered = acSuggestions.filter(s => s.toLowerCase().includes(val.toLowerCase())).slice(0, 12);

@@ -199,6 +199,7 @@ describe('history panel actions', () => {
     document.body.innerHTML = `
       <div id="history-panel"></div>
       <div id="history-list"></div>
+      <div id="history-load-overlay"></div>
       <div id="hist-del-overlay"></div>
       <div id="hist-del-msg"></div>
       <button id="hist-del-nonfav"></button>
@@ -219,7 +220,7 @@ describe('history panel actions', () => {
           }),
         })
       }
-      if (url === '/history/run-1?json') {
+      if (url === '/history/run-1?json&preview=1') {
         return Promise.resolve({
           json: () => Promise.resolve({
             command: 'ping example.com',
@@ -239,9 +240,11 @@ describe('history panel actions', () => {
     const tabs = [{ id: 'tab-1', command: '', rawLines: [], st: 'idle' }]
     const historyPanel = document.getElementById('history-panel')
     const historyList = document.getElementById('history-list')
+    const historyLoadOverlay = document.getElementById('history-load-overlay')
     const histDelOverlay = document.getElementById('hist-del-overlay')
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
+    const windowOpen = vi.fn()
 
     return {
       ...fromDomScripts([
@@ -254,6 +257,7 @@ describe('history panel actions', () => {
         location,
         historyPanel,
         historyList,
+        historyLoadOverlay,
         histRow: document.createElement('div'),
         histDelOverlay,
         cmdInput,
@@ -262,6 +266,7 @@ describe('history panel actions', () => {
         createTab,
         appendLine,
         showToast,
+        window: { open: windowOpen },
         _getStarred,
         _saveStarred,
         refreshHistoryPanel: () => {},
@@ -275,6 +280,7 @@ describe('history panel actions', () => {
       }`),
       apiFetch,
       clipboard,
+      windowOpen,
     }
   }
 
@@ -368,4 +374,75 @@ describe('history panel actions', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to clear history')
     expect(document.querySelectorAll('#history-list .history-entry')).toHaveLength(1)
   })
+
+  it('shows and clears the history loading overlay while a run is being restored', async () => {
+    let resolveRun
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            runs: [
+              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+            ],
+          }),
+        })
+      }
+      if (url === '/history/run-1?json&preview=1') {
+        return new Promise((resolve) => {
+          resolveRun = () => resolve({
+            json: () => Promise.resolve({
+              command: 'ping example.com',
+              output: ['ok'],
+              exit_code: 0,
+            }),
+          })
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(true)
+
+    resolveRun()
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('clears the history loading overlay and shows a failure toast when a restore fetch fails', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            runs: [
+              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+            ],
+          }),
+        })
+      }
+      if (url === '/history/run-1?json&preview=1') {
+        return Promise.reject(new Error('restore failed'))
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
+    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to load run')
+  })
+
 })

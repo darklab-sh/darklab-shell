@@ -39,11 +39,14 @@ function loadRunnerFns({
   tabs = [{ id: 'tab-1', st: 'running', runId: null, killed: false, pendingKill: false }],
   activeTabId = 'tab-1',
   cmdValue = '',
+  appConfig = {},
   apiFetch = () => Promise.resolve(),
   createTab = () => 'tab-2',
   addToHistory = () => {},
   appendLine = () => {},
   welcomeOwnsTab = () => false,
+  clearTab: clearTabOverride = null,
+  showToast: showToastOverride = null,
 } = {}) {
   document.body.innerHTML = `
     <input id="cmd" />
@@ -68,8 +71,9 @@ function loadRunnerFns({
     const dot = document.querySelector(`.tab[data-id="${id}"] .tab-status`)
     if (dot) dot.className = `tab-status ${nextStatus}`
   })
-  const clearTab = vi.fn()
+  const clearTab = clearTabOverride || vi.fn()
   const cancelWelcome = vi.fn()
+  const showToast = showToastOverride || vi.fn()
 
   const fns = fromDomScripts([
     'app/static/js/runner.js',
@@ -83,7 +87,7 @@ function loadRunnerFns({
     status,
     runTimer,
     historyPanel,
-    APP_CONFIG: {},
+    APP_CONFIG: appConfig,
     _welcomeActive: false,
     _welcomeDone: false,
     searchBar: document.createElement('div'),
@@ -97,7 +101,15 @@ function loadRunnerFns({
     cancelWelcome,
     welcomeOwnsTab,
     refreshHistoryPanel: () => {},
-    showToast: () => {},
+    showToast,
+    describeFetchError: (err, context = 'server') => {
+      const message = err && err.message ? err.message : 'unknown network error'
+      if (message === 'Failed to fetch' || message === 'network down') {
+        return `Unable to reach the ${context}. Check that it is running and try again.`
+      }
+      return `Request to the ${context} failed: ${message}`
+    },
+    logClientError: () => {},
     clearTimeout,
     setTimeout,
     Event,
@@ -117,6 +129,7 @@ function loadRunnerFns({
     setTabLabel,
     clearTab,
     cancelWelcome,
+    showToast,
   }
 }
 
@@ -202,7 +215,7 @@ describe('runner helpers', () => {
   })
 
   it('runCommand shows a fetch error when the /run request rejects', async () => {
-    const apiFetch = vi.fn(() => Promise.reject(new Error('network down')))
+    const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
       cmdValue: 'echo hello',
@@ -219,7 +232,32 @@ describe('runner helpers', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     }))
-    expect(appendLine).toHaveBeenLastCalledWith('\n[fetch error] network down', 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenLastCalledWith('\n[connection error] Unable to reach the server. Check that it is running and try again.', 'exit-fail', 'tab-1')
+    expect(status.className).toBe('status-pill fail')
+    expect(runBtn.disabled).toBe(false)
+  })
+
+  it('runCommand handles a 500 response as a friendly server error', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: false,
+      status: 500,
+      headers: { get: () => 'application/json' },
+      json: () => Promise.resolve({ error: 'backend unavailable' }),
+    }))
+    const appendLine = vi.fn()
+    const { runCommand, status, runBtn } = loadRunnerFns({
+      cmdValue: 'echo hello',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenLastCalledWith('[server error] The server could not start the command. backend unavailable', 'exit-fail', 'tab-1')
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
   })
@@ -269,7 +307,7 @@ describe('runner helpers', () => {
   })
 
   it('runCommand cancels and clears welcome output when the active tab owns welcome', async () => {
-    const apiFetch = vi.fn(() => Promise.reject(new Error('network down')))
+    const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
     const welcomeOwnsTab = vi.fn(() => true)
     const { runCommand, cancelWelcome, clearTab } = loadRunnerFns({
@@ -291,5 +329,107 @@ describe('runner helpers', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     }))
+  })
+
+  it('runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line', async () => {
+    const appendLine = vi.fn()
+    const clearTab = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => {
+          let done = false
+          return {
+            read: () => {
+              if (done) return Promise.resolve({ done: true, value: undefined })
+              done = true
+              const payload = [
+                'data: {"type":"started","run_id":"run-clear"}',
+                'data: {"type":"clear"}',
+                'data: {"type":"exit","code":0,"elapsed":0.1}',
+              ].join('\n\n') + '\n\n'
+              return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+            },
+          }
+        },
+      },
+    }))
+    const loaded = loadRunnerFns({
+      cmdValue: 'clear',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+      clearTab,
+    })
+
+    loaded.runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(clearTab).toHaveBeenCalledWith('tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('[process exited with code 0'), 'exit-ok', 'tab-1')
+    expect(loaded.status.className).toBe('status-pill ok')
+  })
+
+  it('runCommand appends a count-aware preview truncation notice on exit', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => {
+          let done = false
+          return {
+            read: () => {
+              if (done) return Promise.resolve({ done: true, value: undefined })
+              done = true
+              const payload = [
+                'data: {"type":"started","run_id":"run-man"}',
+                'data: {"type":"output","text":"line 1"}',
+                'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
+              ].join('\n\n') + '\n\n'
+              return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+            },
+          }
+        },
+      },
+    }))
+    const loaded = loadRunnerFns({
+      cmdValue: 'man curl',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appConfig: { max_output_lines: 5000 },
+      apiFetch,
+      appendLine,
+    })
+
+    loaded.runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. Use the permalink button below or in the history panel for complete results]',
+      'notice',
+      'tab-1',
+    )
+  })
+
+  it('doKill shows a notice when the kill request fails', async () => {
+    const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
+    const appendLine = vi.fn()
+    const { doKill, showToast } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    doKill('tab-1')
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(showToast).toHaveBeenCalledWith('Failed to send kill request; command may still be running')
+    expect(appendLine).toHaveBeenCalledWith('[kill request failed] Unable to reach the server. Check that it is running and try again.', 'notice', 'tab-1')
   })
 })
