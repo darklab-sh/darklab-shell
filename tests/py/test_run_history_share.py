@@ -26,7 +26,10 @@ def get_client(*, use_forwarded_for=True):
     shell_app.app.config["RATELIMIT_ENABLED"] = False
     client = shell_app.app.test_client()
     if use_forwarded_for:
-        client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+        token = uuid.uuid4().hex
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = (
+            f"2001:db8:{token[0:4]}:{token[4:8]}:{token[8:12]}:{token[12:16]}:{token[16:20]}:{token[20:24]}"
+        )
     return client
 
 
@@ -70,6 +73,14 @@ class _FakeProc:
 # ── /run streaming ────────────────────────────────────────────────────────────
 
 class TestRunStreaming:
+    @staticmethod
+    def _local_dt_text(value: str) -> str:
+        return datetime.fromisoformat(value).astimezone().strftime("%Y-%m-%d %H:%M:%S")
+
+    @staticmethod
+    def _local_clock_text(value: str) -> str:
+        return datetime.fromisoformat(value).astimezone().strftime("%H:%M:%S")
+
     def test_run_emits_started_notice_output_and_exit(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", "world\n", ""])
@@ -353,8 +364,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "2025-12-31 18:00:05  [1]  dig example.com A\\n" in body
-        assert "2025-12-31 18:00:00  [0]  ping example.com\\n" in body
+        assert f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  [1]  dig example.com A\\n" in body
+        assert f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  [0]  ping example.com\\n" in body
 
     def test_fake_who_tty_groups_and_version_render_shell_identity(self):
         client = get_client()
@@ -636,8 +647,14 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "PID TTY      EXIT START    END      CMD\\n" in body
         assert " 9000 pts/0    -    -        -        ps aux\\n" in body
-        assert "pts/0    0    18:00:05 18:00:06 dig example.com A\\n" in body
-        assert "pts/0    0    18:00:00 18:00:03 ping example.com\\n" in body
+        assert (
+            f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:05+00:00')} "
+            f"{self._local_clock_text('2026-01-01T00:00:06+00:00')} dig example.com A\\n"
+        ) in body
+        assert (
+            f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:00+00:00')} "
+            f"{self._local_clock_text('2026-01-01T00:00:03+00:00')} ping example.com\\n"
+        ) in body
         assert '"type": "exit"' in body
 
     def test_run_reports_missing_allowlisted_command_without_spawning(self):
@@ -662,6 +679,7 @@ class TestRunStreaming:
 
     def test_run_checks_missing_binary_after_rewrite(self):
         client = get_client()
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = "2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa"
 
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
              mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV example.com", None)), \
