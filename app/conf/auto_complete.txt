@@ -4,6 +4,44 @@
 # These appear as you type in the command box.
 # Tab completes the highlighted suggestion. Arrow keys navigate the list.
 
+# fake shell helpers
+banner
+clear
+date
+env
+faq
+fortune
+groups
+help
+history
+hostname
+id
+last
+limits
+ls
+man ping
+man curl
+man dig
+man nmap
+man traceroute
+man wget
+tty
+version
+who
+which curl
+which history
+type curl
+type history
+pwd
+ps
+ps aux
+ps -ef
+retention
+status
+uname -a
+uptime
+whoami
+
 # ping
 ping -h
 ping -c 4 example.com
@@ -173,11 +211,11 @@ pd-httpx -u https://example.com -follow-redirects
 
 # dnsx
 dnsx -h
-dnsx -d example.com
-dnsx -d example.com -resp
-dnsx -d example.com -a -resp
-dnsx -d example.com -cname -resp
-dnsx -d example.com -mx -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -cname -resp
+dnsx -d example.com -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -mx -resp
 
 # fping
 fping -h

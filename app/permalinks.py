@@ -130,7 +130,7 @@ def _expiry_note(created: str) -> str:
         return ""
 
 
-def _permalink_page(title, label, created, content_lines, json_url) -> Response:
+def _permalink_page(title, label, created, content_lines, json_url, extra_actions=None) -> Response:
     """Render a self-contained HTML page for a permalink.
     content_lines can be a list of strings (single-run history) or
     a list of {text, cls} objects (tab snapshots with class info)."""
@@ -139,6 +139,11 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
     label_json = json.dumps(label)
     created_fmt = created[:19].replace("T", " ") + " UTC"
     expiry_html = _expiry_note(created)
+    extra_actions = extra_actions or []
+    extra_action_html = "".join(
+        f'<a class="btn" href="{action["href"]}">{action["label"]}</a>'
+        for action in extra_actions
+    )
     html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -185,6 +190,7 @@ def _permalink_page(title, label, created, content_lines, json_url) -> Response:
   <div class="meta">{created_fmt}</div>
   {expiry_html}
   <div class="actions">
+    {extra_action_html}
     <a class="btn" href="{json_url}">view json</a>
     <button class="btn" onclick="copyTxt()">copy</button>
     <button class="btn" onclick="saveTxt()">save .txt</button>

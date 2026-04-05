@@ -7,13 +7,71 @@ pure functions that can be imported and tested in isolation.
 
 import os
 import re
+import shlex
+import shutil
 import yaml
 
 _HERE = os.path.dirname(__file__)
-ALLOWED_COMMANDS_FILE = os.path.join(_HERE, "allowed_commands.txt")
-AUTOCOMPLETE_FILE     = os.path.join(_HERE, "auto_complete.txt")
-FAQ_FILE              = os.path.join(_HERE, "faq.yaml")
-WELCOME_FILE          = os.path.join(_HERE, "welcome.yaml")
+_CONF = os.path.join(_HERE, "conf")
+ALLOWED_COMMANDS_FILE = os.path.join(_CONF, "allowed_commands.txt")
+AUTOCOMPLETE_FILE     = os.path.join(_CONF, "auto_complete.txt")
+FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
+WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
+ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
+APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
+
+BUILTIN_FAQ = [
+    {
+        "question": "What is this?",
+        "answer": (
+            "shell.darklab.sh is a lightweight web interface for running network diagnostic "
+            "and vulnerability scanning commands against remote endpoints, with output streamed "
+            "in real time. It's designed for testing and troubleshooting remote hosts."
+        ),
+    },
+    {
+        "question": "Why does mtr look different here?",
+        "answer": (
+            "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
+            "available in a web shell. It runs in --report-wide mode instead."
+        ),
+    },
+    {
+        "question": "Can I request a new tool?",
+        "answer": "Yes. Contact the instance operator to request additional allowlisted tools.",
+    },
+    {
+        "question": "How do tabs and permalinks work?",
+        "answer": (
+            "Each command runs in the active tab. Use additional tabs to keep results visible "
+            "side by side. The permalink action saves a shareable view of the visible output."
+        ),
+    },
+    {
+        "question": "How do I stop a running command?",
+        "answer": "Use the Kill button shown while a command is running.",
+    },
+    {
+        "question": "How do I access search, history and theme on mobile?",
+        "answer": "Use the mobile menu in the top-right corner.",
+    },
+    {
+        "question": "How do I save or share my results?",
+        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
+    },
+    {
+        "question": "How do I rename a tab?",
+        "answer": "Double-click the tab label, then press Enter or click away to confirm.",
+    },
+    {
+        "question": "What do the timestamp options do?",
+        "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
+    },
+    {
+        "question": "Are my commands visible to other users?",
+        "answer": "No. History and saved data are scoped to your anonymous browser session.",
+    },
+]
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -86,8 +144,13 @@ def load_faq():
     ]
 
 
+def load_all_faq():
+    """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
+    return [*BUILTIN_FAQ, *load_faq()]
+
+
 def load_welcome():
-    """Read welcome.yaml and return a list of {cmd, out} blocks for the startup typeout.
+    """Read welcome.yaml and return startup blocks for the welcome typeout.
     Returns an empty list if the file is missing or empty, disabling the welcome animation."""
     if not os.path.exists(WELCOME_FILE):
         return []
@@ -99,10 +162,34 @@ def load_welcome():
         {
             "cmd": str(item.get("cmd", "")).strip(),
             "out": str(item.get("out", "")).rstrip() if item.get("out") else "",
+            "group": str(item.get("group", "")).strip().lower() if item.get("group") else "",
+            "featured": bool(item.get("featured", False)),
         }
         for item in data
         if isinstance(item, dict) and item.get("cmd")
     ]
+
+
+def load_ascii_art():
+    """Read ascii.txt and return the welcome banner art as plain text.
+    Returns an empty string if the file is missing or empty."""
+    if not os.path.exists(ASCII_FILE):
+        return ""
+    with open(ASCII_FILE) as f:
+        return f.read().rstrip()
+
+
+def load_welcome_hints():
+    """Read app_hints.txt and return a list of app-usage hints."""
+    if not os.path.exists(APP_HINTS_FILE):
+        return []
+    hints = []
+    with open(APP_HINTS_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                hints.append(line)
+    return hints
 
 
 def load_autocomplete():
@@ -118,10 +205,44 @@ def load_autocomplete():
     return suggestions
 
 
+def split_command_argv(command: str) -> list[str]:
+    """Split a shell-like command string into argv tokens for simple root-command inspection."""
+    try:
+        return shlex.split(command)
+    except ValueError:
+        return command.strip().split()
+
+
+def command_root(command: str) -> str | None:
+    """Return the first argv token from a command string, lowercased."""
+    parts = split_command_argv(command)
+    if not parts:
+        return None
+    return parts[0].strip().lower() or None
+
+
+def resolve_runtime_command(command_name: str) -> str | None:
+    """Return the absolute path to command_name if installed on this instance."""
+    return shutil.which(command_name)
+
+
+def runtime_missing_command_name(command: str) -> str | None:
+    """Return the missing root command name for a command string, or None if installed/empty."""
+    root = command_root(command)
+    if not root:
+        return None
+    return None if resolve_runtime_command(root) else root
+
+
+def runtime_missing_command_message(command_name: str) -> str:
+    """Return the standard instance-level message for missing runtime commands."""
+    return f"Command is not installed on this instance: {command_name}"
+
+
 def split_chained_commands(command: str) -> list[str]:
     """Split a command string on any shell chaining/piping/redirection operator
     and return the individual command tokens so each can be validated."""
-    parts = re.split(r'&&|\|\|?|;;?|`|\$\(|>>?|<', command)
+    parts = SHELL_CHAIN_RE.split(command)
     return [p.strip() for p in parts if p.strip()]
 
 

@@ -14,3 +14,19 @@ function apiFetch(url, options = {}) {
   });
   return fetch(url, options);
 }
+
+function describeFetchError(err, context = 'server') {
+  const message = (err && typeof err.message === 'string') ? err.message.trim() : '';
+  if (!message) return `Unable to reach the ${context}. Check that it is running and try again.`;
+  const lower = message.toLowerCase();
+  if (lower.includes('networkerror') || lower.includes('failed to fetch') || lower.includes('network down') || lower.includes('load failed')) {
+    return `Unable to reach the ${context}. Check that it is running and try again.`;
+  }
+  return `Request to the ${context} failed: ${message}`;
+}
+
+function logClientError(context, err) {
+  if (typeof console !== 'undefined' && typeof console.warn === 'function') {
+    console.warn(`[client] ${context}`, err);
+  }
+}

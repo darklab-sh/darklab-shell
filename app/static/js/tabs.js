@@ -54,7 +54,7 @@ function createTab(label) {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
       if (action === 'kill')      confirmKill(id);
-      if (action === 'clear')     { cancelWelcome(); clearTab(id); }
+      if (action === 'clear')     { cancelWelcome(id); clearTab(id); }
       if (action === 'copy')      copyTab(id);
       if (action === 'save')      saveTab(id);
       if (action === 'html')      exportTabHtml(id);
@@ -63,7 +63,7 @@ function createTab(label) {
   });
   tabPanels.appendChild(panel);
 
-  tabs.push({ id, label, runId: null, runStart: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle', renamed: false });
+  tabs.push({ id, label, command: '', runId: null, runStart: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle', renamed: false });
   activateTab(id);
   updateNewTabBtn();
   return id;
@@ -76,9 +76,16 @@ function activateTab(id) {
   const t = tabs.find(t => t.id === id);
   setStatus(t ? (t.st || 'idle') : 'idle');
   clearSearch();
+  // Restore the last command run in this tab so it's easy to re-run or edit
+  const input = document.getElementById('cmd');
+  if (input && t) {
+    input.value = t.command;
+    input.dispatchEvent(new Event('input'));
+  }
 }
 
 function closeTab(id) {
+  cancelWelcome(id);
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
     clearTab(id);
@@ -133,7 +140,9 @@ function copyTab(id) {
   const t = tabs.find(t => t.id === id);
   if (!t || !t.rawLines.length) return;
   const text = t.rawLines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
-  navigator.clipboard.writeText(text).then(() => showToast('Copied to clipboard'));
+  navigator.clipboard.writeText(text)
+    .then(() => showToast('Copied to clipboard'))
+    .catch(() => showToast('Failed to copy'));
 }
 
 // ── Plain text save ──
@@ -154,7 +163,7 @@ function saveTab(id) {
 }
 
 // ── HTML snapshot export ──
-// Generates a self-contained HTML file with terminal styling, ANSI colours
+// Generates a self-contained HTML file with terminal styling, ANSI colors
 // rendered as inline spans, and clock timestamps shown alongside each line.
 function exportTabHtml(id) {
   const t = tabs.find(t => t.id === id);
@@ -279,6 +288,8 @@ function permalinkTab(id) {
     body: JSON.stringify({ label: t.label, content: t.rawLines })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
-    navigator.clipboard.writeText(url).then(() => showToast('Link copied to clipboard'));
+    navigator.clipboard.writeText(url)
+      .then(() => showToast('Link copied to clipboard'))
+      .catch(() => showToast('Failed to copy link'));
   }).catch(() => showToast('Failed to create permalink'));
 }

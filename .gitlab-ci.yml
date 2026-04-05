@@ -1,5 +1,13 @@
 image: python:3.12-slim
 
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - when: never
+
 stages:
   - test
   - lint
@@ -17,19 +25,73 @@ cache:
 before_script:
   - pip install -q -r app/requirements.txt -r requirements-dev.txt
 
-test:
+test-py-pytest:
   stage: test
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
-    - pytest tests/ -v
+    - pytest tests/py/ -v
+
+test-js-unit:
+  stage: test
+  image: node:22-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run test:unit
+
+test-js-e2e:
+  stage: test
+  image: python:3.12
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && apt-get install -y -q nodejs iputils-ping
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
+    - npm ci
+    - npx playwright install --with-deps chromium
+  script:
+    - npm run test:e2e
+  artifacts:
+    when: on_failure
+    paths:
+      - playwright-report/
+      - test-results/
+    expire_in: 1 week
 
 lint:
   stage: lint
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
-    - flake8 app/ tests/
+    - flake8 app/ tests/py/
     - bandit -r app/ -ll -q
 
 audit:
   stage: audit
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
   script:
     - pip install -q pip-audit
     - pip-audit -r app/requirements.txt
@@ -43,5 +105,19 @@ docker-build:
     DOCKER_TLS_CERTDIR: "/certs"
     DOCKER_BUILDKIT: "1"
   before_script: []
+  rules:
+    # Always build on the main branch so there is always a verified image
+    - if: $CI_COMMIT_BRANCH == "main"
+    # Always build for merge requests targeting main so the merge gate sees a build
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_MERGE_REQUEST_TARGET_BRANCH_NAME == "main"
+    # On other branches, only build when image-affecting files change
+    - changes:
+        - Dockerfile
+        - app/requirements.txt
+        - .dockerignore
+        - docker-compose*.yml
+    # Allow a manual trigger on any branch for one-off verification
+    - when: manual
+      allow_failure: true
   script:
     - docker build -t shell.darklab.sh:$CI_COMMIT_SHA .

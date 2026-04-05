@@ -1,0 +1,168 @@
+# shell.darklab.sh — Configuration
+# ----------------------------------
+# Changes to this file take effect after a container restart (docker compose restart).
+# No rebuild is needed.
+
+# ── Branding ──────────────────────────────────────────────────────────────────
+
+# Name displayed in the browser tab, header, and permalink pages
+# Server default if unset: "shell.darklab.sh"
+# app_name: "shell.darklab.sh"
+
+# Optional message shown at the top of the terminal on page load.
+# Leave empty to disable.
+# Server default if unset: ""
+# motd: ""
+
+# ── Appearance ────────────────────────────────────────────────────────────────
+
+# Default color theme. Options: dark, light
+# Server default if unset: dark
+# default_theme: dark
+
+# ── History & Retention ───────────────────────────────────────────────────────
+
+# Number of runs shown in the history drawer per session (UI display limit only —
+# the database always stores everything until purged by the retention policy below)
+# Server default if unset: 50
+# history_panel_limit: 50
+
+# Number of recent commands shown as clickable chips below the input box
+# Server default if unset: 8
+# recent_commands_limit: 8
+
+# Permalink retention in days. Runs and snapshots older than this will be
+# deleted from the database on startup. Set to 0 for unlimited retention.
+# Server default if unset: 365
+# permalink_retention_days: 365
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+# Log verbosity level. Options: ERROR, WARN, INFO, DEBUG
+# ERROR — application errors only (spawn failures, health check failures, stream errors)
+# WARN  — errors plus warnings: denied commands, rate limit hits, command timeouts
+# INFO  — warnings plus operational events: run start/end/kill with client IP (default)
+# DEBUG — everything: every HTTP request/response, command rewrites, share creation, kill misses
+# Server default if unset: INFO
+# log_level: INFO
+
+# Log output format. Options: text, gelf
+# text — human-readable key=value lines, suitable for Docker stdout / local dev
+# gelf — newline-delimited GELF 1.1 JSON for Graylog / GELF-compatible back-ends
+#         short_message contains the event name; all context is in _-prefixed fields
+# Server default if unset: text
+log_format: gelf
+
+# ── Rate Limiting ─────────────────────────────────────────────────────────────
+
+# Maximum number of /run requests per minute per IP
+# Server default if unset: 30
+# rate_limit_per_minute: 30
+
+# Maximum number of /run requests per second per IP
+# Server default if unset: 5
+# rate_limit_per_second: 5
+
+# ── Terminal ──────────────────────────────────────────────────────────────────
+
+# Maximum number of tabs a user can have open at once.
+# Set to 0 for unlimited.
+# Server default if unset: 8
+# max_tabs: 8
+
+# Maximum number of output lines retained per tab. Older lines are dropped
+# from the top to prevent the browser slowing down on verbose commands.
+# Set to 0 for unlimited.
+# Server default if unset: 5000
+# max_output_lines: 5000
+
+# Persist the full output of completed runs as compressed artifact files under /data.
+# The history drawer and normal run permalink continue to use the capped preview stored
+# in SQLite; this enables a separate "view full output" page for completed runs.
+# Server default if unset: true
+# persist_full_run_output: true
+
+# Hard byte cap for persisted full-output artifacts.
+# Set to 0 for unlimited. If the artifact reaches this limit, the full-output page
+# remains available but includes a truncation notice.
+# Server default if unset: 5242880
+# full_output_max_bytes: 5242880
+
+# Automatically kill a running command after this many seconds.
+# Set to 0 to disable (commands run until they finish or are killed manually).
+# Server default if unset: 0
+command_timeout_seconds: 7200
+
+# How often (in seconds) to send a heartbeat comment on idle SSE connections
+# to prevent nginx and the browser from dropping the connection.
+# Server default if unset: 20
+# heartbeat_interval_seconds: 20
+
+# ── Welcome Animation ─────────────────────────────────────────────────────────
+
+# Base delay between each typed character in the welcome animation (milliseconds).
+# Lower values make the typing appear faster.
+# Server default if unset: 18
+# welcome_char_ms: 18
+
+# Random jitter added on top of welcome_char_ms per character (milliseconds).
+# Adds a human feel — each character takes between welcome_char_ms and
+# welcome_char_ms + welcome_jitter_ms. Set to 0 for perfectly even typing.
+# Server default if unset: 12
+# welcome_jitter_ms: 12
+
+# How long the welcome animation pauses after a command finishes typing,
+# before the next visual step begins (milliseconds).
+# This affects each sampled welcome command.
+# Lower values make the intro feel snappier; higher values make it feel more theatrical.
+# Server default if unset: 650
+# welcome_post_cmd_ms: 650
+
+# How long the welcome animation waits between one sampled command block
+# finishing and the next sampled command starting to type (milliseconds).
+# This is the main "breathing room" between sampled command examples.
+# Server default if unset: 850
+# welcome_inter_block_ms: 850
+
+# How long the very first shell prompt sits idle before the featured command
+# starts typing (milliseconds).
+# Increase this if you want the boot phase to land on a visible ready prompt
+# with a few cursor blinks before the first example begins.
+# Server default if unset: 1500
+# welcome_first_prompt_idle_ms: 1500
+
+# Extra pause after the fake startup-status block finishes and before the first
+# sampled command prompt appears (milliseconds).
+# This creates a clearer handoff from "boot complete" into the example phase.
+# Server default if unset: 500
+# welcome_post_status_pause_ms: 500
+
+# How many sampled command examples to show after the ASCII/status intro.
+# Lower values shorten the welcome sequence. Set to 0 to skip sampled commands.
+# Server default if unset: 5
+# welcome_sample_count: 5
+
+# Labels shown in the fake startup-status block during the welcome animation.
+# Keep this short and stylized — 4 to 6 uppercase labels reads best.
+# Server default if unset:
+#   - CONFIG
+#   - RUNNER
+#   - HISTORY
+#   - LIMITS
+#   - AUTOCOMPLETE
+# welcome_status_labels:
+#   - CONFIG
+#   - RUNNER
+#   - HISTORY
+#   - LIMITS
+#   - AUTOCOMPLETE
+
+# How often the footer app hints rotate while the welcome tab remains idle (milliseconds).
+# Higher values make the hints feel calmer; lower values make them feel more animated.
+# Server default if unset: 4200
+# welcome_hint_interval_ms: 4200
+
+# Maximum number of footer-hint rotations after the initial hint is shown.
+# Set to 0 to keep only the first hint visible with no rotation.
+# Server default if unset: 2
+# welcome_hint_rotations: 2

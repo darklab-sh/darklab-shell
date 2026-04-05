@@ -13,6 +13,7 @@ const searchInput = document.getElementById('search-input');
 const searchCount = document.getElementById('search-count');
 const historyPanel = document.getElementById('history-panel');
 const historyList  = document.getElementById('history-list');
+const historyLoadOverlay = document.getElementById('history-load-overlay');
 const acDropdown   = document.getElementById('ac-dropdown');
 const killOverlay    = document.getElementById('kill-overlay');
 const histDelOverlay = document.getElementById('hist-del-overlay');

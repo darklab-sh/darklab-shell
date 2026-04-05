@@ -8,10 +8,10 @@ Tests for pure utility functions across the app modules:
   - rewrite_command case-insensitivity          (commands.py)
   - pid_register / pid_pop in-process mode      (process.py)
   - _format_retention                           (permalinks.py)
+  - run-output artifact capture/read helpers    (run_output_store.py)
 Run with: pytest tests/ (from the repo root)
 """
 
-import sys
 import os
 import sqlite3
 import tempfile
@@ -19,16 +19,16 @@ import textwrap
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import process
 import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
-    split_chained_commands, load_allowed_commands, load_faq,
-    load_welcome, load_autocomplete, load_allowed_commands_grouped,
+    split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
+    load_welcome, load_ascii_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
+from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_lines
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -79,12 +79,15 @@ class TestSplitChainedCommands:
         parts = split_chained_commands("a | ")
         assert all(p for p in parts)
 
+    def test_empty_string_returns_empty_list(self):
+        assert split_chained_commands("") == []
+
 
 # ── load_allowed_commands ─────────────────────────────────────────────────────
 
 class TestLoadAllowedCommands:
-    def _write(self, content, tmp_path):
-        path = os.path.join(tmp_path, "allowed_commands.txt")
+    def _write(self, content, tmp_dir):
+        path = os.path.join(tmp_dir, "allowed_commands.txt")
         with open(path, "w") as f:
             f.write(textwrap.dedent(content))
         return path
@@ -169,6 +172,19 @@ class TestLoadFaq:
         assert result[0]["question"] == "What is this?"
         assert result[0]["answer"] == "A web shell."
 
+    def test_entries_missing_answer_filtered_out(self):
+        yaml_content = "- question: No answer here.\n- question: Has both.\n  answer: Yes.\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq()
+        finally:
+            os.unlink(path)
+        assert len(result) == 1
+        assert result[0]["question"] == "Has both."
+
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -204,6 +220,20 @@ class TestLoadFaq:
         finally:
             os.unlink(path)
         assert result == []
+
+    def test_load_all_faq_appends_custom_entries_after_builtin_items(self):
+        yaml_content = "- question: Custom question?\n  answer: Custom answer.\n"
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq()
+        finally:
+            os.unlink(path)
+        assert result[0]["question"] == "What is this?"
+        assert result[-1]["question"] == "Custom question?"
+        assert result[-1]["answer"] == "Custom answer."
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
@@ -371,7 +401,7 @@ class TestFormatRetention:
 
 # ── load_welcome ──────────────────────────────────────────────────────────────
 
-class TestLoadWelcome:
+class TestWelcomeLoading:
     def _write(self, content):
         f = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False)
         f.write(content)
@@ -393,6 +423,18 @@ class TestLoadWelcome:
         assert len(result) == 1
         assert result[0]["cmd"] == "ping google.com"
         assert result[0]["out"] == "64 bytes"
+        assert result[0]["group"] == ""
+        assert result[0]["featured"] is False
+
+    def test_entry_with_group_and_featured_metadata(self):
+        path = self._write("- cmd: dig example.com A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
+        try:
+            with mock.patch("commands.WELCOME_FILE", path):
+                result = load_welcome()
+        finally:
+            os.unlink(path)
+        assert result[0]["group"] == "dns"
+        assert result[0]["featured"] is True
 
     def test_entry_without_out_gets_empty_string(self):
         path = self._write("- cmd: ping google.com\n")
@@ -433,9 +475,85 @@ class TestLoadWelcome:
         assert result == []
 
 
+# ── load_ascii_art / load_welcome_hints ──────────────────────────────────────
+
+class TestWelcomeAssetLoading:
+    def test_missing_ascii_file_returns_empty_string(self):
+        with mock.patch("commands.ASCII_FILE", "/nonexistent/ascii.txt"):
+            assert load_ascii_art() == ""
+
+    def test_ascii_art_trims_only_trailing_whitespace(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("  banner  \n\n")
+            path = f.name
+        try:
+            with mock.patch("commands.ASCII_FILE", path):
+                assert load_ascii_art() == "  banner"
+        finally:
+            os.unlink(path)
+
+
+# ── run_output_store ──────────────────────────────────────────────────────────
+
+class TestRunOutputCapture:
+    def teardown_method(self):
+        if os.path.isdir(RUN_OUTPUT_DIR):
+            for name in os.listdir(RUN_OUTPUT_DIR):
+                if name.startswith("test-run-output-"):
+                    os.unlink(os.path.join(RUN_OUTPUT_DIR, name))
+
+    def test_preview_keeps_only_last_n_lines(self):
+        capture = RunOutputCapture("test-run-output-preview", preview_limit=2, persist_full_output=False, full_output_max_bytes=0)
+        capture.add_line("one")
+        capture.add_line("two")
+        capture.add_line("three")
+        capture.finalize()
+
+        assert list(capture.preview_lines) == ["two", "three"]
+        assert capture.preview_truncated is True
+        assert capture.output_line_count == 3
+
+    def test_full_output_artifact_round_trips_lines(self):
+        capture = RunOutputCapture("test-run-output-artifact", preview_limit=2, persist_full_output=True, full_output_max_bytes=0)
+        capture.add_line("alpha")
+        capture.add_line("beta")
+        capture.finalize()
+
+        assert capture.full_output_available is True
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        assert load_full_output_lines(artifact_rel_path) == ["alpha", "beta"]
+
+    def test_full_output_artifact_respects_byte_cap(self):
+        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=5)
+        capture.add_line("1234")
+        capture.add_line("5678")
+        capture.finalize()
+
+        assert capture.full_output_available is True
+        assert capture.full_output_truncated is True
+        artifact_rel_path = capture.artifact_rel_path
+        assert artifact_rel_path is not None
+        assert load_full_output_lines(artifact_rel_path) == ["1234"]
+
+    def test_missing_hints_file_returns_empty_list(self):
+        with mock.patch("commands.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
+            assert load_welcome_hints() == []
+
+    def test_hints_loader_ignores_blank_lines_and_comments(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# comment\n\nUse the history panel.\n  \n# another\nPress Enter to run.\n")
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_FILE", path):
+                assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
+        finally:
+            os.unlink(path)
+
+
 # ── load_autocomplete ─────────────────────────────────────────────────────────
 
-class TestLoadAutocomplete:
+class TestAutocompleteLoading:
     def test_missing_file_returns_empty_list(self):
         with mock.patch("commands.AUTOCOMPLETE_FILE", "/nonexistent/auto_complete.txt"):
             result = load_autocomplete()
@@ -477,9 +595,9 @@ class TestLoadAutocomplete:
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────
 
-class TestLoadAllowedCommandsGrouped:
-    def _write(self, content, tmp_path):
-        path = os.path.join(tmp_path, "allowed_commands.txt")
+class TestAllowedCommandsGroupingBasics:
+    def _write(self, content, tmp_dir):
+        path = os.path.join(tmp_dir, "allowed_commands.txt")
         with open(path, "w") as f:
             f.write(textwrap.dedent(content))
         return path
@@ -496,6 +614,7 @@ class TestLoadAllowedCommandsGrouped:
             )
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         assert len(result) == 2
         assert result[0]["name"] == "Network"
         assert result[0]["commands"] == ["ping", "curl"]
@@ -507,6 +626,7 @@ class TestLoadAllowedCommandsGrouped:
             path = self._write("ping\nnmap\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         assert len(result) == 1
         assert result[0]["name"] == ""
         assert "ping" in result[0]["commands"]
@@ -516,6 +636,7 @@ class TestLoadAllowedCommandsGrouped:
             path = self._write("## Scanning\nnmap\n!nmap -sU\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         commands_list = result[0]["commands"]
         assert "nmap" in commands_list
         assert "!nmap -su" not in commands_list
@@ -527,6 +648,7 @@ class TestLoadAllowedCommandsGrouped:
             path = self._write("## Empty\n!nmap -sU\n## Real\nping\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 result = load_allowed_commands_grouped()
+        assert result is not None
         names = [g["name"] for g in result]
         assert "Empty" not in names
         assert "Real" in names
@@ -664,6 +786,21 @@ class TestDatabaseInit:
         assert "runs" in tables
         assert "snapshots" in tables
 
+    def test_creates_session_indexes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            self._create_tables(db_path)
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+            conn = sqlite3.connect(db_path)
+            indexes = {row[1] for row in conn.execute("PRAGMA index_list('runs')").fetchall()}
+            snapshot_indexes = {row[1] for row in conn.execute("PRAGMA index_list('snapshots')").fetchall()}
+            conn.close()
+
+        assert "idx_session" in indexes
+        assert "idx_snapshots_session" in snapshot_indexes
+
     def test_init_is_idempotent(self):
         # Calling db_init() twice on the same DB must not raise
         with tempfile.TemporaryDirectory() as tmp:
@@ -759,3 +896,46 @@ class TestDatabaseInit:
             ).fetchone()[0]
             conn.close()
         assert count == 1
+
+    def test_legacy_runs_table_gets_session_id_column_migrated(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = self._fresh_db(tmp)
+            conn = sqlite3.connect(db_path)
+            conn.execute("""
+                CREATE TABLE runs (
+                    id       TEXT PRIMARY KEY,
+                    command  TEXT NOT NULL,
+                    started  TEXT NOT NULL,
+                    finished TEXT,
+                    exit_code INTEGER,
+                    output   TEXT
+                )
+            """)
+            conn.execute(
+                "INSERT INTO runs (id, command, started) VALUES ('legacy-run', 'ping', datetime('now'))"
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            columns = {row[1] for row in conn.execute("PRAGMA table_info(runs)").fetchall()}
+            session_id = conn.execute(
+                "SELECT session_id FROM runs WHERE id='legacy-run'"
+            ).fetchone()[0]
+            conn.close()
+
+        assert "session_id" in columns
+        assert session_id == ""
+
+    def test_migrate_schema_ignores_existing_column_error(self):
+        conn = mock.MagicMock()
+        conn.execute.side_effect = sqlite3.OperationalError("duplicate column name: session_id")
+
+        database._migrate_schema(conn)
+
+        assert conn.execute.call_count >= 1
+        assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"

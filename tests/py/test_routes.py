@@ -4,23 +4,26 @@ These tests exercise HTTP-level behaviour without starting a real server.
 Run with: pytest tests/ (from the repo root)
 """
 
-import sys
-import os
 import json
+import logging
+import os
 import sqlite3
+import uuid
 import unittest.mock as mock
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
 import app as shell_app
 from database import DB_PATH
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
 
-def get_client():
+def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
     shell_app.app.config["RATELIMIT_ENABLED"] = False
-    return shell_app.app.test_client()
+    client = shell_app.app.test_client()
+    if use_forwarded_for:
+        client.environ_base["HTTP_X_FORWARDED_FOR"] = f"203.0.113.{uuid.uuid4().int % 250 + 1}"
+    return client
 
 
 # ── / ─────────────────────────────────────────────────────────────────────────
@@ -75,6 +78,28 @@ class TestHealthRoute:
         assert data["status"] == "degraded"
         assert data["db"] is False
 
+    def test_status_ok_when_redis_pings_successfully(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.return_value = True
+        with mock.patch("app.redis_client", fake_redis):
+            resp = client.get("/health")
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["status"] == "ok"
+        assert data["redis"] is True
+
+    def test_status_degraded_when_redis_ping_fails(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.side_effect = Exception("redis down")
+        with mock.patch("app.redis_client", fake_redis):
+            resp = client.get("/health")
+        assert resp.status_code == 503
+        data = json.loads(resp.data)
+        assert data["status"] == "degraded"
+        assert data["redis"] is False
+
 
 # ── /config ───────────────────────────────────────────────────────────────────
 
@@ -100,7 +125,10 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in ("command_timeout_seconds",
                     "welcome_char_ms", "welcome_jitter_ms",
-                    "welcome_post_cmd_ms", "welcome_inter_block_ms"):
+                    "welcome_post_cmd_ms", "welcome_inter_block_ms",
+                    "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
+                    "welcome_sample_count", "welcome_status_labels",
+                    "welcome_hint_interval_ms", "welcome_hint_rotations"):
             assert key in data, f"missing key: {key}"
 
     def test_all_new_keys_are_ints(self):
@@ -108,8 +136,13 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in ("command_timeout_seconds",
                     "welcome_char_ms", "welcome_jitter_ms",
-                    "welcome_post_cmd_ms", "welcome_inter_block_ms"):
+                    "welcome_post_cmd_ms", "welcome_inter_block_ms",
+                    "welcome_first_prompt_idle_ms", "welcome_post_status_pause_ms",
+                    "welcome_sample_count", "welcome_hint_interval_ms",
+                    "welcome_hint_rotations"):
             assert isinstance(data[key], int), f"{key} should be int, got {type(data[key])}"
+        assert isinstance(data["welcome_status_labels"], list)
+        assert all(isinstance(item, str) for item in data["welcome_status_labels"])
 
     def test_command_timeout_reflects_cfg(self):
         client = get_client()
@@ -124,6 +157,12 @@ class TestConfigRoute:
             "welcome_jitter_ms": 5,
             "welcome_post_cmd_ms": 400,
             "welcome_inter_block_ms": 1000,
+            "welcome_first_prompt_idle_ms": 1800,
+            "welcome_post_status_pause_ms": 300,
+            "welcome_sample_count": 4,
+            "welcome_status_labels": ["CONFIG", "CACHE", "READY"],
+            "welcome_hint_interval_ms": 3000,
+            "welcome_hint_rotations": 1,
         }
         with mock.patch("app.CFG", {**shell_app.CFG, **overrides}):
             data = json.loads(client.get("/config").data)
@@ -166,6 +205,15 @@ class TestAllowedCommandsRoute:
         assert data["restricted"] is True
         assert "ping" in data["commands"]
 
+    def test_returns_grouped_commands_when_restricted(self):
+        client = get_client()
+        groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
+        with mock.patch("app.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
+            with mock.patch("app.load_allowed_commands_grouped", return_value=groups):
+                data = json.loads(client.get("/allowed-commands").data)
+        assert data["restricted"] is True
+        assert data["groups"] == groups
+
 
 # ── /faq ──────────────────────────────────────────────────────────────────────
 
@@ -178,6 +226,35 @@ class TestFaqRoute:
     def test_items_key_present(self):
         client = get_client()
         data = json.loads(client.get("/faq").data)
+        assert "items" in data
+        assert isinstance(data["items"], list)
+
+
+# ── /welcome/ascii ───────────────────────────────────────────────────────────
+
+class TestWelcomeAsciiRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii")
+        assert resp.status_code == 200
+
+    def test_contains_banner_art(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii")
+        assert b"/$$" in resp.data
+
+
+# ── /welcome/hints ───────────────────────────────────────────────────────────
+
+class TestWelcomeHintsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/hints")
+        assert resp.status_code == 200
+
+    def test_items_key_present(self):
+        client = get_client()
+        data = json.loads(client.get("/welcome/hints").data)
         assert "items" in data
         assert isinstance(data["items"], list)
 
@@ -195,6 +272,18 @@ class TestRunRoute:
         resp = client.post("/run", json={"command": "   "})
         assert resp.status_code == 400
 
+    def test_non_string_command_returns_400(self):
+        client = get_client()
+        resp = client.post("/run", json={"command": 123})
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Command must be a string"
+
+    def test_non_object_json_returns_400(self):
+        client = get_client()
+        resp = client.post("/run", json=["not", "an", "object"])
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
+
     def test_disallowed_command_returns_403(self):
         client = get_client()
         # Patch in commands' namespace — is_command_allowed calls load_allowed_commands
@@ -208,6 +297,20 @@ class TestRunRoute:
         with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
             resp = client.post("/run", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
+
+    def test_missing_allowlisted_command_returns_synthetic_run(self):
+        client = get_client()
+        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("app.subprocess.Popen") as popen:
+            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            body = resp.get_data(as_text=True)
+        assert resp.status_code == 200
+        assert '"type": "started"' in body
+        assert "Command is not installed on this instance: nmap\\n" in body
+        assert '"type": "exit"' in body
+        popen.assert_not_called()
 
     def test_non_json_body_handled(self):
         client = get_client()
@@ -253,6 +356,42 @@ class TestHistoryRoute:
         resp = client.get("/history/nonexistent-run-id")
         assert resp.status_code == 404
 
+    def test_history_respects_panel_limit_and_sorts_newest_first(self):
+        client = get_client()
+        session = "limit-test-session"
+        run_ids = ["limit-run-1", "limit-run-2", "limit-run-3"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "echo one", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "echo two", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "echo three", "2026-01-01T00:00:05", "2026-01-01T00:00:06", 0, "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("app.CFG", {**shell_app.CFG, "history_panel_limit": 2}):
+                resp = client.get("/history", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            commands = [r["command"] for r in data["runs"]]
+
+            assert commands == ["echo three", "echo two"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
 
 # ── /share ────────────────────────────────────────────────────────────────────
 
@@ -268,6 +407,93 @@ class TestShareRoute:
         data = json.loads(resp.data)
         assert "id" in data
         assert "url" in data
+
+    def test_post_rejects_non_string_label(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": 123, "content": []},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Label must be a string"
+
+    def test_post_rejects_non_list_content(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": {"text": "line"}},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content must be a list"
+
+    def test_post_rejects_invalid_content_item(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": ["ok", 123]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content items must be strings or objects"
+
+    def test_post_rejects_content_object_without_text(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": [{"cls": "notice"}]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
+
+    def test_post_rejects_content_object_with_non_string_text(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": [{"text": 123, "cls": "notice"}]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content objects must include a string text field"
+
+    def test_post_rejects_content_object_with_non_string_cls(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={"label": "bad content", "content": [{"text": "hello", "cls": 123}]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Content objects must use string cls values"
+
+    def test_post_accepts_renderable_content_objects(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={
+                "label": "good content",
+                "content": [
+                    {"text": "$ echo hi", "cls": "cmd", "tsC": "2026-01-01 00:00:00"},
+                    {"text": "hi", "cls": "notice"},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert "id" in data
+
+    def test_post_rejects_non_object_json(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json=["bad", "payload"],
+            headers={"X-Session-ID": "test-session"}
+        )
+        assert resp.status_code == 400
+        assert json.loads(resp.data)["error"] == "Request body must be a JSON object"
 
     def test_get_nonexistent_share_returns_404(self):
         client = get_client()
@@ -451,21 +677,65 @@ class TestHistorySessionIsolation:
 # ── /history/<run_id> permalink ───────────────────────────────────────────────
 
 class TestRunPermalinkRoute:
-    def _insert_run(self, run_id, command, output=None):
+    def _insert_run(
+        self,
+        run_id,
+        command,
+        output=None,
+        *,
+        preview_truncated=0,
+        full_output_available=0,
+        full_output_truncated=0,
+        full_output_lines=None,
+    ):
         conn = sqlite3.connect(DB_PATH)
         conn.execute(
-            "INSERT INTO runs (id, session_id, command, started, output) "
-            "VALUES (?, 'test-session', ?, datetime('now'), ?)",
-            (run_id, command, json.dumps(output or []))
+            "INSERT INTO runs (id, session_id, command, started, output_preview, preview_truncated, "
+            "output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, 'test-session', ?, datetime('now'), ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                command,
+                json.dumps(output or []),
+                preview_truncated,
+                len(output or []),
+                full_output_available,
+                full_output_truncated,
+            )
         )
+        if full_output_available and full_output_lines is not None:
+            conn.execute(
+                "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+                "VALUES (?, ?, 'gzip', ?, ?, ?, datetime('now'))",
+                (
+                    run_id,
+                    f"{run_id}.txt.gz",
+                    len("\n".join(full_output_lines).encode()),
+                    len(full_output_lines),
+                    full_output_truncated,
+                ),
+            )
         conn.commit()
         conn.close()
+        if full_output_available and full_output_lines is not None:
+            import gzip
+            from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+            ensure_run_output_dir()
+            with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+                for line in full_output_lines:
+                    f.write(line + "\n")
 
     def _delete_run(self, run_id):
+        from run_output_store import RUN_OUTPUT_DIR
         conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM run_output_artifacts WHERE run_id=?", (run_id,))
         conn.execute("DELETE FROM runs WHERE id=?", (run_id,))
         conn.commit()
         conn.close()
+        try:
+            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+        except FileNotFoundError:
+            pass
 
     def test_html_view_returns_200(self):
         run_id = "permalink-html-test-run"
@@ -496,6 +766,40 @@ class TestRunPermalinkRoute:
         finally:
             self._delete_run(run_id)
 
+    def test_json_view_returns_full_output_when_artifact_exists(self):
+        run_id = "permalink-json-full-test-run"
+        self._insert_run(
+            run_id,
+            "man curl",
+            ["preview"],
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}?json").data)
+            assert data["command"] == "man curl"
+            assert data["output"] == ["full line 1", "full line 2"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_json_preview_view_returns_preview_when_requested(self):
+        run_id = "permalink-json-preview-test-run"
+        self._insert_run(
+            run_id,
+            "man curl",
+            ["preview line"],
+            preview_truncated=1,
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
+            assert data["command"] == "man curl"
+            assert data["output"] == ["preview line"]
+            assert "permalink button below or in the history panel" in data["preview_notice"]
+        finally:
+            self._delete_run(run_id)
+
     def test_html_content_type(self):
         run_id = "permalink-ct-test-run"
         self._insert_run(run_id, "ping test")
@@ -504,6 +808,106 @@ class TestRunPermalinkRoute:
             assert "text/html" in resp.content_type
         finally:
             self._delete_run(run_id)
+
+    def test_permalink_uses_full_output_when_available(self):
+        run_id = "permalink-full-link-test-run"
+        self._insert_run(
+            run_id,
+            "nmap -sV 10.0.0.1",
+            ["preview line"],
+            full_output_available=1,
+            full_output_lines=["full line 1", "full line 2"],
+        )
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert b"full line 1" in resp.data
+            assert b"preview line" not in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_preview_page_appends_truncation_notice_when_no_full_output_exists(self):
+        run_id = "permalink-preview-truncated-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1", ["preview"], preview_truncated=1, full_output_available=0)
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            assert b"preview truncated" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+
+class TestRunFullOutputRoute:
+    def _insert_run(self, run_id, command):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
+            "VALUES (?, 'test-session', ?, datetime('now'), 1)",
+            (run_id, command)
+        )
+        conn.execute(
+            "INSERT INTO run_output_artifacts (run_id, rel_path, compression, byte_size, line_count, truncated, created) "
+            "VALUES (?, ?, 'gzip', 12, 2, 0, datetime('now'))",
+            (run_id, f"{run_id}.txt.gz")
+        )
+        conn.commit()
+        conn.close()
+
+        import gzip
+        from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
+        ensure_run_output_dir()
+        with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+            f.write("line 1\nline 2\n")
+
+    def _delete_run(self, run_id):
+        from run_output_store import RUN_OUTPUT_DIR
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("DELETE FROM run_output_artifacts WHERE run_id = ?", (run_id,))
+        conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+        conn.commit()
+        conn.close()
+        try:
+            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+        except FileNotFoundError:
+            pass
+
+    def test_full_output_json_returns_artifact_lines(self):
+        run_id = "permalink-full-json-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1")
+        try:
+            data = json.loads(get_client().get(f"/history/{run_id}/full?json").data)
+            assert data["command"] == "nmap -sV 10.0.0.1"
+            assert data["output"] == ["line 1", "line 2"]
+        finally:
+            self._delete_run(run_id)
+
+    def test_full_output_html_alias_matches_canonical_permalink(self):
+        run_id = "permalink-full-html-test-run"
+        self._insert_run(run_id, "nmap -sV 10.0.0.1")
+        try:
+            resp = get_client().get(f"/history/{run_id}/full")
+            assert resp.status_code == 200
+            assert b"line 1" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_full_output_alias_falls_back_to_preview_when_artifact_is_unavailable(self):
+        run_id = "permalink-full-missing-artifact-run"
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, full_output_available) "
+            "VALUES (?, 'test-session', ?, datetime('now'), 0)",
+            (run_id, "nmap -sV 10.0.0.1"),
+        )
+        conn.commit()
+        conn.close()
+        try:
+            resp = get_client().get(f"/history/{run_id}/full")
+            assert resp.status_code == 200
+            assert b"nmap -sV 10.0.0.1" in resp.data
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+            conn.commit()
+            conn.close()
 
 
 # ── Response content types ────────────────────────────────────────────────────
@@ -528,3 +932,54 @@ class TestContentTypes:
     def test_index_returns_html(self):
         resp = get_client().get("/")
         assert "text/html" in resp.content_type
+
+
+# ── get_client_ip ─────────────────────────────────────────────────────────────
+
+class TestGetClientIp:
+    """get_client_ip() uses X-Forwarded-For when it contains a valid IP,
+    otherwise falls back to the direct connection IP (REMOTE_ADDR)."""
+
+    def setup_method(self, method):  # noqa: ARG002
+        self._original_level = shell_app.log.level
+        shell_app.log.setLevel(logging.DEBUG)
+
+    def teardown_method(self, method):  # noqa: ARG002
+        shell_app.log.setLevel(self._original_level)
+
+    def test_valid_ipv4_in_xff_is_used(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "1.2.3.4"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "1.2.3.4"
+
+    def test_valid_ipv6_in_xff_is_used(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "2001:db8::1"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "2001:db8::1"
+
+    def test_first_ip_used_when_xff_has_multiple(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "5.6.7.8, 10.0.0.1"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "5.6.7.8"
+
+    def test_no_xff_falls_back_to_remote_addr(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client(use_forwarded_for=False).get("/health")
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        # Flask test client REMOTE_ADDR is 127.0.0.1
+        assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"
+
+    def test_non_ip_xff_falls_back_to_remote_addr(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": "not-an-ip"})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"
+
+    def test_empty_xff_falls_back_to_remote_addr(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/health", headers={"X-Forwarded-For": ""})
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
+        assert calls[0].kwargs["extra"]["ip"] == "127.0.0.1"

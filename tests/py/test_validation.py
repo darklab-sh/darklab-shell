@@ -6,13 +6,16 @@ blocking, allowlist prefix matching, deny prefix (!), and command rewrites.
 Run with: pytest tests/ (from the repo root)
 """
 
-import sys
-import os
 import unittest.mock as mock
 
-# conftest.py chdirs to app/ before this runs, so modules can be imported cleanly
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(__file__)), "app"))
-from commands import is_command_allowed, rewrite_command
+from commands import (
+    command_root,
+    is_command_allowed,
+    rewrite_command,
+    runtime_missing_command_message,
+    runtime_missing_command_name,
+    split_command_argv,
+)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -269,3 +272,29 @@ class TestRewrites:
         cmd, notice = rewrite_command("dig google.com")
         assert cmd == "dig google.com"
         assert notice is None
+
+
+# ── Runtime command availability helpers ─────────────────────────────────────
+
+class TestRuntimeCommandHelpers:
+    def test_split_command_argv_uses_shell_like_tokenization(self):
+        assert split_command_argv('curl -H "X-Test: 1" https://example.com') == [
+            "curl", "-H", "X-Test: 1", "https://example.com"
+        ]
+
+    def test_command_root_returns_lowercased_first_token(self):
+        assert command_root("NMAP -sV example.com") == "nmap"
+
+    def test_command_root_returns_none_for_blank_input(self):
+        assert command_root("   ") is None
+
+    def test_runtime_missing_command_name_returns_none_when_installed(self):
+        with mock.patch("commands.resolve_runtime_command", return_value="/usr/bin/curl"):
+            assert runtime_missing_command_name("curl https://example.com") is None
+
+    def test_runtime_missing_command_name_returns_root_when_missing(self):
+        with mock.patch("commands.resolve_runtime_command", return_value=None):
+            assert runtime_missing_command_name("nmap -sV example.com") == "nmap"
+
+    def test_runtime_missing_command_message_is_stable(self):
+        assert runtime_missing_command_message("nmap") == "Command is not installed on this instance: nmap"
