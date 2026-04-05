@@ -64,10 +64,17 @@ function _setTsMode(mode) {
   if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
   const mobileTs = document.querySelector('#mobile-menu [data-action="ts"]');
   if (mobileTs) mobileTs.textContent = label;
+  if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
 }
 
 document.getElementById('ts-btn').addEventListener('click', () => {
   _setTsMode(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
+  if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+});
+
+document.getElementById('ln-btn').addEventListener('click', () => {
+  _setLnMode(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
+  if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
 });
 
 document.getElementById('theme-btn').addEventListener('click', () => {
@@ -163,6 +170,11 @@ mobileMenu.querySelectorAll('button[data-action]').forEach(btn => {
     }
     if (action === 'ts') {
       _setTsMode(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
+      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+    }
+    if (action === 'ln') {
+      _setLnMode(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
+      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
     }
     if (action === 'theme') {
       document.body.classList.toggle('light');
@@ -451,7 +463,8 @@ cmdInput.addEventListener('input', () => {
   }
   acIndex = -1;
   if (!val.trim()) { acHide(); return; }
-  acFiltered = acSuggestions.filter(s => s.toLowerCase().includes(val.toLowerCase())).slice(0, 12);
+  const q = val.toLowerCase();
+  acFiltered = acSuggestions.filter(s => s.toLowerCase().startsWith(q)).slice(0, 12);
   acShow(acFiltered);
 });
 
@@ -518,7 +531,10 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     const acOpen = acDropdown && acDropdown.style.display !== 'none';
     if (acOpen && acFiltered.length) {
-      acIndex = Math.min(acIndex + 1, acFiltered.length - 1);
+      const acAbove = acDropdown.classList.contains('ac-up');
+      acIndex = acAbove
+        ? Math.max(acIndex - 1, 0)
+        : Math.min(acIndex + 1, acFiltered.length - 1);
       acShow(acFiltered);
       return;
     }
@@ -529,7 +545,10 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     const acOpen = acDropdown && acDropdown.style.display !== 'none';
     if (acOpen && acFiltered.length) {
-      acIndex = Math.max(acIndex - 1, -1);
+      const acAbove = acDropdown.classList.contains('ac-up');
+      acIndex = acAbove
+        ? Math.min(acIndex + 1, acFiltered.length - 1)
+        : Math.max(acIndex - 1, -1);
       acShow(acFiltered);
       return;
     }

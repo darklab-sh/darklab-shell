@@ -13,12 +13,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop
 - **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
+- **Display toggles for output prefixes** — line numbers can now be toggled independently from timestamps, with mobile-menu access and shared prefix alignment across output, prompt, and exit rows
 
 ### Changed
 - **Welcome interruption and settle behavior** — welcome fast-forward now consistently responds to keyboard actions used in the inline-prompt flow and preserves correct prompt mounting after settle
 - **Tab activation model** — switching tabs now keeps the prompt input neutral (no automatic command repopulation), preventing cross-tab draft leakage
 - **Prompt rendering model** — submitted commands are preserved as styled prompt lines in output and running tabs hide the live prompt until completion, matching shell transcript flow more closely
 - **Autocomplete presentation** — dropdown framing was removed in favor of a terminal-style suggestion list that can flip above the prompt when space is tight
+- **Autocomplete matching and navigation** — suggestions now match from the beginning of commands only, keep the active row in view, and use visual Up/Down navigation even when the list is rendered above the prompt
 - **Output actions UX** — `copy` and `save txt` now report a friendly no-output toast when the tab only contains welcome/decorative lines
 
 ### Fixed
@@ -26,6 +28,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Prompt cursor rendering** — prompt caret visibility now remains stable after welcome interruption, normal settle, and follow-up command execution
 - **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command
 - **Tab-bar resize edge case** — tab overflow controls now recalculate correctly when tab width changes (for example after rename)
+- **Welcome output prefix bleed** — line numbers and timestamps no longer distort the decorative welcome animation or shift its status rows
 
 
 ## [1.2] — 2026-04-05

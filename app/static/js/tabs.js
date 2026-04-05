@@ -131,6 +131,7 @@ function mountShellPrompt(tabId, force = false) {
   if (!out) return;
   out.appendChild(shellPromptWrap);
   out.scrollTop = out.scrollHeight;
+  if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes(out);
 }
 
 function updateNewTabBtn() {

@@ -27,6 +27,7 @@
 <div id="mobile-menu">
   <button data-action="search">⌕ search</button>
   <button data-action="history">⧖ history</button>
+  <button data-action="ln">line numbers: off</button>
   <button data-action="ts">timestamps: off</button>
   <button data-action="theme">◑ theme</button>
   <button data-action="faq">? FAQ</button>
@@ -53,6 +54,7 @@
     <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
     <div class="terminal-bar-btns">
       <button id="search-toggle-btn" title="Search output (Ctrl+F)">⌕ search</button>
+      <button id="ln-btn" title="Toggle line numbers">line numbers: off</button>
       <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
     </div>
     <span id="status" class="status-pill idle">IDLE</span>
@@ -179,7 +181,7 @@
 
       <div class="faq-item">
         <div class="faq-q">How do I access search, history and theme on mobile?</div>
-        <div class="faq-a">On small screens the header buttons are replaced by a <strong>☰</strong> menu in the top-right corner. Tap it to access search, run history, timestamps toggle, theme toggle, and this FAQ.</div>
+        <div class="faq-a">On small screens the header buttons are replaced by a <strong>☰</strong> menu in the top-right corner. Tap it to access search, run history, line numbers, timestamps, theme, and this FAQ.</div>
       </div>
 
       <div class="faq-item">
@@ -206,6 +208,15 @@
           <strong>off</strong> — no timestamps shown (default).<br>
           <strong>elapsed</strong> — shows how many seconds after the command started each line appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different stages of a scan take.<br>
           <strong>clock</strong> — shows the wall-clock time each line was received (e.g. <code>14:32:01</code>). Useful for correlating output with events elsewhere.
+        </div>
+      </div>
+
+      <div class="faq-item">
+        <div class="faq-q">What do the line number options do?</div>
+        <div class="faq-a">
+          The <strong>line numbers</strong> button in the terminal bar toggles numbered output lines on and off.<br><br>
+          <strong>off</strong> — no line numbers are shown (default).<br>
+          <strong>on</strong> — every output line is prefixed with a sequence number so you can reference specific rows while reading long scans or copied output.
         </div>
       </div>
 

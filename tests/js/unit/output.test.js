@@ -20,15 +20,27 @@ function loadOutputFns() {
     tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
     APP_CONFIG: { max_output_lines: 2 },
     getOutput: () => document.getElementById('out'),
+    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
   }, `{
     appendLine,
+    _setTsMode,
+    _setLnMode,
     _getTabs: () => tabs,
   }`)
 }
 
 describe('appendLine', () => {
   beforeEach(() => {
-    document.body.innerHTML = `<div id="out"></div>`
+    document.body.innerHTML = `
+      <div id="out">
+        <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
+          <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
+          <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
+            <span class="shell-prompt-text" id="shell-prompt-text"></span>
+          </div>
+        </div>
+      </div>
+    `
   })
 
   it('renders notice lines with textContent (not HTML)', () => {
@@ -77,6 +89,59 @@ describe('appendLine', () => {
     const line = document.querySelector('.line')
     expect(line.dataset.tsC).toMatch(/^\d{2}:\d{2}:\d{2}$/)
     expect(line.dataset.tsE).toMatch(/^\+\d+\.\d+s$/)
+  })
+
+  it('toggles the line-number body class and button labels', () => {
+    document.body.innerHTML = `
+      <button id="ln-btn"></button>
+      <button id="ts-btn"></button>
+      <div id="mobile-menu"><button data-action="ln"></button></div>
+      <div id="out"></div>
+    `
+    const { _setLnMode } = loadOutputFns()
+
+    _setLnMode('on')
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe('line numbers: on')
+
+    _setLnMode('off')
+    expect(document.body.classList.contains('ln-on')).toBe(false)
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+  })
+
+  it('numbers the prompt line after the current output rows', () => {
+    const { appendLine, _setLnMode } = loadOutputFns()
+
+    _setLnMode('on')
+    appendLine('hello', '', 'tab-1')
+
+    expect(document.querySelector('.line')?.dataset.prefix).toBe('1')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
+  })
+
+  it('does not assign prefixes to welcome animation lines', () => {
+    const { appendLine, _setLnMode } = loadOutputFns()
+
+    _setLnMode('on')
+    appendLine('loading /', 'welcome-status-line', 'tab-1')
+    appendLine('hello', '', 'tab-1')
+
+    expect(document.querySelector('.line.welcome-status-line')?.dataset.prefix).toBe('')
+    expect(document.querySelector('.line:not(.welcome-status-line)')?.dataset.prefix).toBe('1')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
+  })
+
+  it('combines line numbers and timestamps into a compact shared prefix', () => {
+    const { appendLine, _setLnMode, _setTsMode } = loadOutputFns()
+
+    _setLnMode('on')
+    _setTsMode('elapsed')
+
+    appendLine('timed line', '', 'tab-1')
+
+    expect(document.querySelector('.line')?.dataset.prefix).toMatch(/^1\s+\+\d+\.\ds$/)
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
   })
 
   it('does nothing when there is no output container for the target tab', () => {

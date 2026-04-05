@@ -8,11 +8,99 @@ ansi_up.use_classes = false;
 // needed to update existing lines when mode changes.
 let tsMode = 'off';
 
+// ── Line number mode ──
+// Cycles: 'off' → 'on' → 'off'
+// Body class 'ln-on' enables shared prefix rendering for output rows.
+let lnMode = 'off';
+
 function _outputPromptPrefix() {
   const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix');
   const text = promptPrefix ? String(promptPrefix.textContent || '').trim() : '';
   return text || '$';
 }
+
+function _formatOutputPrefix(index, tsText, includeTimestamp) {
+  const parts = [];
+  if (lnMode === 'on') parts.push(String(index));
+  if (includeTimestamp && tsText && (tsMode === 'elapsed' || tsMode === 'clock')) {
+    parts.push(tsText);
+  }
+  return parts.join(' ');
+}
+
+function _isWelcomeLine(line) {
+  if (!line || !line.classList) return false;
+  return [...line.classList].some(cls => cls.startsWith('welcome-') || cls.startsWith('wlc-'));
+}
+
+function syncOutputPrefixes(scope = document) {
+  const isElement = scope && typeof scope.querySelectorAll === 'function';
+  const looksLikeOutput = scope === document
+    || (isElement && (
+      scope.classList?.contains?.('output')
+      || scope.querySelector?.('.line')
+      || scope.querySelector?.('#shell-prompt-wrap')
+    ));
+  const outputs = scope === document
+    ? [...document.querySelectorAll('.output')]
+    : (looksLikeOutput ? [scope] : [...(scope?.querySelectorAll?.('.output') || [])]);
+
+  outputs.forEach(out => {
+    const lines = [...out.querySelectorAll('.line')];
+    const prefixStrings = [];
+    let visibleIndex = 0;
+
+    lines.forEach(line => {
+      if (_isWelcomeLine(line)) {
+        line.dataset.prefix = '';
+        return;
+      }
+      visibleIndex += 1;
+      const tsText = tsMode === 'elapsed'
+        ? String(line.dataset.tsE || '')
+        : tsMode === 'clock'
+          ? String(line.dataset.tsC || '')
+          : '';
+      const prefix = _formatOutputPrefix(visibleIndex, tsText, true);
+      line.dataset.prefix = prefix;
+      prefixStrings.push(prefix);
+    });
+
+    const prompt = out.querySelector('#shell-prompt-wrap');
+    if (prompt) {
+      const promptPrefix = lnMode === 'on' ? String(visibleIndex + 1) : '';
+      prompt.dataset.prefix = promptPrefix;
+      prefixStrings.push(promptPrefix);
+    }
+
+    const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
+    out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
+  });
+}
+
+function _setLnMode(mode) {
+  lnMode = mode;
+  document.body.classList.toggle('ln-on', mode === 'on');
+  const label = mode === 'on' ? 'line numbers: on' : 'line numbers: off';
+  const lnBtn = document.getElementById('ln-btn');
+  if (lnBtn) {
+    lnBtn.textContent = label;
+    lnBtn.classList.toggle('active', mode === 'on');
+  }
+  const mobileLn = document.querySelector('#mobile-menu [data-action="ln"]');
+  if (mobileLn) mobileLn.textContent = label;
+  syncOutputPrefixes();
+}
+
+function _setTsMode(mode) {
+  tsMode = mode;
+  document.body.classList.remove('ts-elapsed', 'ts-clock');
+  if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
+  if (mode === 'clock') document.body.classList.add('ts-clock');
+  syncOutputPrefixes();
+}
+
+_setLnMode('off');
 
 // Append a line of output to a tab's output panel.
 // Stores raw text (with original ANSI codes) in tab.rawLines for permalink and
@@ -70,6 +158,8 @@ function appendLine(text, cls, tabId) {
   }
 
   out.scrollTop = out.scrollHeight;
+
+  syncOutputPrefixes(out);
 
   if (tab) {
     tab.rawLines.push({ text: rawTextForStorage, cls: cls || '', tsC, tsE: span.dataset.tsE || '' });

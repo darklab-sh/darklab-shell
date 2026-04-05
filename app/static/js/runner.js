@@ -11,7 +11,7 @@ function _resetStalledTimeout(tabId) {
   _stalledTimeouts.set(tabId, setTimeout(() => {
     const t = tabs.find(t => t.id === tabId);
     if (!t || t.killed) return;  // already handled
-    appendLine('\n[connection stalled — command may still be running on the server]', 'notice', tabId);
+    appendLine('[connection stalled — command may still be running on the server]', 'notice', tabId);
     appendLine('[check the history panel for the result once it completes]', 'notice', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
@@ -97,7 +97,7 @@ function _handleKillRequestFailure(err, tabId) {
 
 function _handleRunTransportFailure(err, tabId) {
   _logRunnerError('run request failed', err);
-  appendLine('\n[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
+  appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
   if (tabId === activeTabId) setStatus('fail');
   setTabStatus(tabId, 'fail');
   stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
@@ -174,7 +174,7 @@ function doKill(tabId) {
   }
   t.killed = true;
   stopTimer();
-  appendLine(`\n[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
+  appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
@@ -352,11 +352,11 @@ function runCommand() {
                   appendLine(_previewTruncationNotice(msg.output_line_count, msg.full_output_available), 'notice', tabId);
                 }
                 if (msg.code === 0) {
-                  if (!(t && t.syntheticClear)) appendLine(`\n[process exited with code 0${dur}]`, 'exit-ok', tabId);
+                  if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
                   if (tabId === activeTabId) setStatus('ok');
                   setTabStatus(tabId, 'ok');
                 } else {
-                  appendLine(`\n[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
+                  appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
                   if (tabId === activeTabId) setStatus('fail');
                   setTabStatus(tabId, 'fail');
                 }
@@ -365,7 +365,7 @@ function runCommand() {
                 if (historyPanel.classList.contains('open')) refreshHistoryPanel();
               } else if (msg.type === 'error') {
                 _clearStalledTimeout(tabId);
-                appendLine('\n[error] ' + msg.text, 'exit-fail', tabId);
+                appendLine('[error] ' + msg.text, 'exit-fail', tabId);
                 if (tabId === activeTabId) setStatus('fail');
                 setTabStatus(tabId, 'fail');
                 stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);

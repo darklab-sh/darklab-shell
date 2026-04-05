@@ -230,14 +230,17 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 
 Tab switching is intentionally input-neutral: activating a different tab clears the hidden input and resets history-navigation cursor state instead of restoring prior tab text into the prompt.
 
-### Timestamps: CSS-Driven Display
+### Output Prefixes: Line Numbers And Timestamps
 
-Elapsed and clock timestamps are shown on output lines without any JavaScript DOM re-render. Each `<span>` in the output is given two `data-` attributes at append time:
+Elapsed and clock timestamps are shown on output lines without rebuilding those line nodes. Each appended `.line` receives two timestamp `data-` attributes plus a synchronized `data-prefix` string:
 
 - `data-ts-e` — elapsed offset from `tab.runStart` (e.g. `+12.3s`)
 - `data-ts-c` — wall-clock time (e.g. `14:32:01`)
+- `data-prefix` — compact shared prefix text such as `12 +3.4s`, `12 14:32:01`, or just `12`
 
-The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `content: attr(data-ts-c)`, hidden by default. Adding `body.ts-elapsed` or `body.ts-clock` makes the corresponding pseudo-element visible across all lines instantly with zero JavaScript. `_setTsMode()` in `app.js` toggles the body classes and cycles through `['off', 'elapsed', 'clock']`.
+`appendLine()` stores the timestamp metadata at insert time, and `syncOutputPrefixes()` in `output.js` recomputes `data-prefix` plus a shared `--output-prefix-width` per output container whenever rows are appended or the timestamp / line-number mode changes. CSS still renders the visible prefix through `::before`, but the actual text composition happens in JavaScript so line numbers, timestamps, prompt rows, and exit rows all stay aligned as digit widths change.
+
+Welcome-animation rows are excluded from prefix numbering entirely. They keep their original boot-sequence layout, and the first real output line after welcome still becomes line `1`.
 
 `tab.runStart` is set *after* the `$ cmd` prompt line is appended so the prompt itself has no `data-ts-e` attribute and shows no elapsed stamp.
 
@@ -344,9 +347,9 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 Current totals on this branch:
 
 - `pytest`: 440
-- `vitest`: 131
-- `playwright`: 78
-- total: 649
+- `vitest`: 133
+- `playwright`: 79
+- total: 652
 
 ### Python tests
 
@@ -383,7 +386,7 @@ The browser JS files share a single global scope (by design — no ES modules, n
 - `tabs.test.js` — tab limits, rename, drag-reorder state sync, rename/overflow scroll-button behavior, prompt mounting rules, no-output toasts, export guards, and last-tab reset
 - `welcome.test.js` — welcome animation cancellation, badge behavior, and current DOM/state transitions
 - `app.test.js` — startup theme, timestamp-mode bootstrap behavior, and config/history boot wiring
-- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers
+- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers, including timestamp/line-number mode styling
 
 Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
 
@@ -401,7 +404,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
 - `share.spec.js` — snapshot permalinks plus single-run history permalinks and JSON/HTML views
 - `tabs.spec.js` — max-tabs, rename, drag reorder, neutral-input tab switching, blank-prompt Enter behavior, and last-tab reset behavior
-- `timestamps.spec.js` — timestamp mode cycling and output metadata
+- `timestamps.spec.js` — timestamp mode cycling, output metadata, line-number compatibility, and post-toggle typing flow
 - `ui.spec.js` — theme toggling and FAQ modal behavior
 - `autocomplete.spec.js` — command suggestion interaction
 - `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, prompt-key settle behavior, preferred-command stability, and tab-scoped welcome teardown

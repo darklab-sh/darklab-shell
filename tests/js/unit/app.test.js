@@ -12,6 +12,9 @@ async function loadAppFns({
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
   runCommand: runCommandOverride = vi.fn(),
+  acFiltered: acFilteredOverride = [],
+  acIndex: acIndexOverride = -1,
+  acShow: acShowOverride = () => {},
 } = {}) {
   document.body.className = ''
   document.body.innerHTML = `
@@ -26,6 +29,7 @@ async function loadAppFns({
     <button id="search-prev"></button>
     <button id="search-next"></button>
     <button id="hist-btn"></button>
+    <button id="ln-btn"></button>
     <button id="history-close"></button>
     <button id="hist-clear-all-btn"></button>
     <button id="hist-del-cancel"></button>
@@ -43,9 +47,11 @@ async function loadAppFns({
         <span id="shell-prompt-ghost" class="shell-prompt-ghost"></span>
       </div>
     </div>
+    <div id="ac-dropdown" style="display:none"></div>
     <div id="faq-limits-text"></div>
     <div id="faq-allowed-text"></div>
     <div id="mobile-menu">
+      <button data-action="ln"></button>
       <button data-action="ts"></button>
       <button data-action="search"></button>
       <button data-action="history"></button>
@@ -99,16 +105,29 @@ async function loadAppFns({
   const navigateSearch = vi.fn()
   const logClientError = vi.fn()
   const cmdInput = document.getElementById('cmd')
+  const acDropdown = document.getElementById('ac-dropdown')
   cmdInput.focus = vi.fn()
 
+  class FakeAnsiUp {
+    constructor() {
+      this.use_classes = false
+    }
+
+    ansi_to_html(text) {
+      return text
+    }
+  }
+
   const fns = fromDomScripts([
+    'app/static/js/output.js',
     'app/static/js/app.js',
   ], {
     document,
     localStorage: storage,
     apiFetch,
     APP_CONFIG: {},
-    tsMode: 'off',
+    AnsiUp: FakeAnsiUp,
+    getOutput: () => document.getElementById('history-list'),
     renderMotd: (text) => text,
     updateNewTabBtn: () => {},
     createTab: () => 'tab-1',
@@ -136,9 +155,9 @@ async function loadAppFns({
     pendingKillTabId,
     acHide: () => {},
     acSuggestions: [],
-    acFiltered: [],
-    acIndex: -1,
-    acShow: () => {},
+    acFiltered: acFilteredOverride,
+    acIndex: acIndexOverride,
+    acShow: acShowOverride,
     acAccept: () => {},
     resetCmdHistoryNav: () => {},
     navigateCmdHistory: () => false,
@@ -152,6 +171,7 @@ async function loadAppFns({
     shellPromptWrap: document.getElementById('shell-prompt-wrap'),
     shellPromptText: document.getElementById('shell-prompt-text'),
     shellPromptCaret: document.getElementById('shell-prompt-caret'),
+    acDropdown,
     requestWelcomeSettle: requestWelcomeSettleOverride,
     runCommand: runCommandOverride,
     doKill: doKillOverride,
@@ -162,9 +182,11 @@ async function loadAppFns({
     },
   }, `{
     _setTsMode,
+    _setLnMode,
     confirmHistAction,
     executeHistAction,
     doKill,
+    _getAcIndex: () => acIndex,
   }`)
 
   await Promise.resolve()
@@ -183,6 +205,7 @@ async function loadAppFns({
     interruptPromptLine: interruptPromptLineOverride,
     runCommand: runCommandOverride,
     logClientError,
+    acDropdown,
   }
 }
 
@@ -201,7 +224,54 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ts-clock')).toBe(false)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
     expect(document.querySelector('#mobile-menu [data-action="ts"]').textContent).toBe('timestamps: elapsed')
+  })
+
+  it('_setLnMode updates body classes and button labels', async () => {
+    const { _setLnMode } = await loadAppFns()
+
+    _setLnMode('on')
+
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe('line numbers: on')
+
+    _setLnMode('off')
+
+    expect(document.body.classList.contains('ln-on')).toBe(false)
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
+  })
+
+  it('allows timestamps and line numbers to be enabled at the same time', async () => {
+    const { _setLnMode, _setTsMode } = await loadAppFns()
+
+    _setLnMode('on')
+    _setTsMode('elapsed')
+
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.body.classList.contains('ts-elapsed')).toBe(true)
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
+  })
+
+  it('refocuses the terminal input after toggling timestamps and line numbers', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    document.getElementById('ts-btn').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    document.getElementById('ln-btn').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    document.querySelector('#mobile-menu [data-action="ts"]').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    document.querySelector('#mobile-menu [data-action="ln"]').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
   })
 
   it('_setTsMode marks the timestamps button inactive in off mode', async () => {
@@ -237,6 +307,7 @@ describe('app helpers', () => {
       <button id="search-prev"></button>
       <button id="search-next"></button>
       <button id="hist-btn"></button>
+      <button id="ln-btn"></button>
       <button id="history-close"></button>
       <button id="hist-clear-all-btn"></button>
       <button id="hist-del-cancel"></button>
@@ -250,6 +321,7 @@ describe('app helpers', () => {
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
       <div id="mobile-menu">
+        <button data-action="ln"></button>
         <button data-action="ts"></button>
         <button data-action="search"></button>
         <button data-action="history"></button>
@@ -345,6 +417,53 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
+  it('matches autocomplete suggestions from the beginning of each command only', async () => {
+    const acShow = vi.fn()
+    const apiFetch = vi.fn((url) => {
+      if (url === '/autocomplete') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            suggestions: ['curl http://localhost:5001/health', 'man curl', 'cat /etc/hosts'],
+          }),
+        })
+      }
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            app_name: 'shell.darklab.sh',
+            version: '1.2',
+            default_theme: 'dark',
+            motd: '',
+            command_timeout_seconds: 0,
+            max_output_lines: 0,
+            permalink_retention_days: 0,
+          }),
+        })
+      }
+      if (url === '/allowed-commands' || url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [], items: [] }) })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { cmdInput } = await loadAppFns({
+      acShow,
+      apiFetch,
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    cmdInput.value = 'cur'
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
+
+    acShow.mockClear()
+    cmdInput.value = 'man'
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(acShow).toHaveBeenCalledWith(['man curl'])
+  })
+
   it('renders cursor and selection state from the hidden input', async () => {
     const { cmdInput } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
@@ -393,6 +512,23 @@ describe('app helpers', () => {
 
     expect(interruptPromptLine).toHaveBeenCalledWith('tab-1')
     expect(confirmKill).not.toHaveBeenCalled()
+  })
+
+  it('moves autocomplete selection in visual screen order when the list is above the prompt', async () => {
+    const acFiltered = ['alpha', 'bravo', 'charlie']
+    const { cmdInput, _getAcIndex, acDropdown } = await loadAppFns({
+      acFiltered,
+      acIndex: 2,
+    })
+
+    acDropdown.style.display = 'block'
+    acDropdown.classList.add('ac-up')
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(_getAcIndex()).toBe(1)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(_getAcIndex()).toBe(2)
   })
 
   it('wires the history delete modal buttons and backdrop correctly', async () => {

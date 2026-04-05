@@ -17,7 +17,8 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
 - **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group. Killed processes show a **KILLED** status (amber) distinct from ERROR
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
-- **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered via CSS with no DOM rebuild
+- **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered from shared per-line prefix metadata so existing output updates instantly without rebuilding the line DOM
+- **Line numbers per output line** — toggle visible sequence numbers on each output line using the **line numbers** button in the terminal bar. Uses the same shared prefix metadata as timestamps so numbering stays aligned when timestamp mode changes
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
@@ -78,7 +79,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │       │   ├── app.test.js     # bootstrap wiring, modal controls, search controls
 │       │   ├── runner.test.js  # _formatElapsed, run/kill edge cases, stall recovery
 │       │   ├── history.test.js # starred state, clipboard, delete/clear failures
-│       │   └── output.test.js  # ANSI rendering and output edge cases
+│       │   └── output.test.js  # ANSI rendering, timestamp/line-number mode, and output edge cases
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── helpers.js      # runCommand/openHistory helpers
 │           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
@@ -782,7 +783,7 @@ python3 -m pytest tests/py/ -v
 
 Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
 
-Current totals in this branch: **440 pytest + 131 Vitest + 78 Playwright = 649 tests**.
+Current totals in this branch: **440 pytest + 133 Vitest + 79 Playwright = 652 tests**.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -790,7 +791,7 @@ Current totals in this branch: **440 pytest + 131 Vitest + 78 Playwright = 649 t
 npm run test:unit
 ```
 
-Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, web `clear` handling, prompt-line behavior, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); terminal-style autocomplete rendering and acceptance (autocomplete.js); tab state, rename, drag reorder, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
+Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, web `clear` handling, prompt-line behavior, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); terminal-style autocomplete rendering and acceptance (autocomplete.js); tab state, rename, drag reorder, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering and line-number toggle behavior; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
 
 **Testing notes**
 - Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.

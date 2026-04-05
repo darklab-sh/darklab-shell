@@ -260,7 +260,7 @@ function refreshHistoryPanel() {
             if (previewNotice) {
               appendLine(previewNotice, 'notice', newId);
             }
-            appendLine(`\n[history — exit ${fullRun.exit_code}]`, fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail', newId);
+            appendLine(`[history — exit ${fullRun.exit_code}]`, fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail', newId);
             historyPanel.classList.remove('open');
           })
           .catch(() => {

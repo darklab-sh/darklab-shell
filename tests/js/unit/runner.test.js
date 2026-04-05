@@ -250,7 +250,7 @@ describe('runner helpers', () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     }))
-    expect(appendLine).toHaveBeenLastCalledWith('\n[connection error] Unable to reach the server. Check that it is running and try again.', 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenLastCalledWith('[connection error] Unable to reach the server. Check that it is running and try again.', 'exit-fail', 'tab-1')
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
   })

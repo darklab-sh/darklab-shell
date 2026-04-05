@@ -29,6 +29,10 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 #### Remaining
 - improve inline selection visibility for advanced keyboard flows
 - consider adding additional readline-like shortcuts (`Ctrl+W` done; evaluate `Ctrl+U`, `Ctrl+K`, `Alt+B/F`)
+- add keyboard shortcuts helper command plus FAQ entry
+- add a user options modal for timestamps, line numbers, and other preferences with cookie persistence
+- add phase 2 for tab drag reorder: mobile touch-and-drag behavior
+- research permalink output presentation for line numbers/timestamps when they were enabled at save time
 - run a focused post-refactor UX pass for mobile long-command editing
 
 #### Risks
@@ -81,5 +85,7 @@ Minimize manual version touchpoints during release.
 ## Testing Follow-Ups
 
 - add targeted unit/e2e coverage whenever keyboard editing semantics change
+- add coverage for keyboard shortcuts discovery and preference persistence flows
+- add coverage for permalink rendering options tied to saved timestamp/line-number state
 - keep bad-path tests for welcome interruption, history restore latency, and autocomplete placement regressions
 - continue validating no-output action toasts and permalink/full-output consistency paths

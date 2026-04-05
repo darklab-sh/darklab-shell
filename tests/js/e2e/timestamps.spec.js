@@ -47,4 +47,21 @@ test.describe('timestamp toggle', () => {
     const elapsedLine = page.locator('.tab-panel.active .output .line[data-ts-e]')
     await expect(elapsedLine.first()).toBeVisible()
   })
+
+  test('line numbers work with timestamps and typing continues after toggling display modes', async ({ page }) => {
+    await page.locator('#ln-btn').click()
+    await expect(page.locator('body')).toHaveClass(/ln-on/)
+
+    await page.locator('#ts-btn').click()
+    await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
+
+    await page.keyboard.type(CMD)
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('#status')).toHaveText('EXIT 0')
+
+    const prefixedLine = page.locator('.tab-panel.active .output .line[data-prefix]').first()
+    await expect(prefixedLine).toHaveAttribute('data-prefix', /^\d+(\s+\+\d+\.\ds)?$/)
+    await expect(page.locator('#shell-prompt-wrap')).toHaveAttribute('data-prefix', /^\d+$/)
+  })
 })
