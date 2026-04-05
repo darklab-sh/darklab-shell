@@ -95,7 +95,7 @@ describe('welcome helpers', () => {
 
   it('runWelcome appends command and notice lines and marks completion', async () => {
     const { runWelcome, _isWelcomeActive, _isWelcomeDone, out } = loadWelcomeFns({
-      welcomeData: [{ cmd: 'ping example.com', out: 'line one\nline two' }],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one\nline two' }],
     })
 
     await runWelcome()
@@ -103,7 +103,7 @@ describe('welcome helpers', () => {
     expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|shell\.darklab\.sh/)
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
     expect(out.querySelector('.welcome-command')?.textContent).toContain('anon@shell.darklab.sh:~$')
-    expect(out.querySelectorAll('.welcome-command')[0]?.textContent).toContain('ping example.com')
+    expect(out.querySelectorAll('.welcome-command')[0]?.textContent).toContain('ping darklab.sh')
     expect(out.querySelector('.welcome-command-badge')?.textContent).toContain('try this first')
     expect(out.querySelectorAll('.welcome-hint')).toHaveLength(1)
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Enter runs the command')
@@ -113,7 +113,7 @@ describe('welcome helpers', () => {
 
   it('runWelcome falls back to shell.darklab.sh banner text when /welcome/ascii fails', async () => {
     const { runWelcome, out } = loadWelcomeFns({
-      welcomeData: [{ cmd: 'ping example.com', out: 'line one' }],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
       failAscii: true,
     })
 
@@ -124,7 +124,7 @@ describe('welcome helpers', () => {
 
   it('runWelcome falls back to the static hint when /welcome/hints fails', async () => {
     const { runWelcome, out } = loadWelcomeFns({
-      welcomeData: [{ cmd: 'ping example.com', out: 'line one' }],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
       failHints: true,
     })
 
@@ -136,8 +136,8 @@ describe('welcome helpers', () => {
   it('runWelcome respects welcome_sample_count of 0', async () => {
     const { runWelcome, out } = loadWelcomeFns({
       welcomeData: [
-        { cmd: 'ping example.com', out: 'line one' },
-        { cmd: 'dig example.com A', out: 'line two' },
+        { cmd: 'ping darklab.sh', out: 'line one' },
+        { cmd: 'dig darklab.sh A', out: 'line two' },
       ],
       hintItems: ['Use the history panel to reopen saved runs.'],
       config: { welcome_sample_count: 0, welcome_hint_rotations: 0 },
@@ -152,7 +152,7 @@ describe('welcome helpers', () => {
 
   it('runWelcome respects welcome_hint_rotations of 0', async () => {
     const { runWelcome, out } = loadWelcomeFns({
-      welcomeData: [{ cmd: 'ping example.com', out: 'line one' }],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
       hintItems: ['Hint one', 'Hint two'],
       config: { welcome_hint_rotations: 0, welcome_hint_interval_ms: 0 },
     })
@@ -166,8 +166,8 @@ describe('welcome helpers', () => {
   it('settleWelcome renders the remaining intro immediately', async () => {
     const { runWelcome, settleWelcome, out } = loadWelcomeFns({
       welcomeData: [
-        { cmd: 'ping example.com', out: 'line one', group: 'basics', featured: true },
-        { cmd: 'dig example.com A', out: 'line two', group: 'dns' },
+        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
+        { cmd: 'dig darklab.sh A', out: 'line two', group: 'dns' },
       ],
       hintItems: ['Hint one', 'Hint two'],
       config: {
@@ -193,8 +193,8 @@ describe('welcome helpers', () => {
   it('requestWelcomeSettle fast-forwards the intro even before the welcome plan is built', async () => {
     const { runWelcome, requestWelcomeSettle, out } = loadWelcomeFns({
       welcomeData: [
-        { cmd: 'ping example.com', out: 'line one', group: 'basics', featured: true },
-        { cmd: 'dig example.com A', out: 'line two', group: 'dns' },
+        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
+        { cmd: 'dig darklab.sh A', out: 'line two', group: 'dns' },
       ],
       hintItems: ['Hint one'],
       config: {
@@ -218,7 +218,7 @@ describe('welcome helpers', () => {
   it('requestWelcomeSettle ignores non-owner tabs', async () => {
     const { runWelcome, requestWelcomeSettle, out } = loadWelcomeFns({
       welcomeData: [
-        { cmd: 'ping example.com', out: 'line one', group: 'basics', featured: true },
+        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
       ],
       hintItems: ['Hint one'],
       config: {
@@ -244,8 +244,8 @@ describe('welcome helpers', () => {
     const delays = []
     const { runWelcome } = loadWelcomeFns({
       welcomeData: [
-        { cmd: 'ping example.com', out: 'line one', group: 'basics', featured: true },
-        { cmd: 'dig example.com A', out: 'line two', group: 'dns' },
+        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
+        { cmd: 'dig darklab.sh A', out: 'line two', group: 'dns' },
       ],
       hintItems: ['Hint one'],
       config: {
@@ -275,7 +275,7 @@ describe('welcome helpers', () => {
     const delays = []
     const { runWelcome } = loadWelcomeFns({
       welcomeData: [
-        { cmd: 'ping example.com', out: 'line one', group: 'basics', featured: true },
+        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
       ],
       hintItems: ['Hint one'],
       config: {
@@ -303,7 +303,7 @@ describe('welcome helpers', () => {
 
   it('runWelcome finalizes the typed command in place without leaving a transient live line', async () => {
     const { runWelcome, out } = loadWelcomeFns({
-      welcomeData: [{ cmd: 'ping example.com', out: 'line one', group: 'basics', featured: true }],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
       hintItems: ['Hint one'],
     })
 
@@ -319,17 +319,17 @@ describe('welcome helpers', () => {
     const { _sampleWelcomeBlocks } = loadWelcomeFns()
 
     const sampled = _sampleWelcomeBlocks([
-      { cmd: 'dig example.com A', group: 'dns', featured: false },
-      { cmd: 'ping example.com', group: 'basics', featured: true },
-      { cmd: 'curl -I https://example.com', group: 'web', featured: false },
-      { cmd: 'ping example.com', group: 'basics', featured: true },
+      { cmd: 'dig darklab.sh A', group: 'dns', featured: false },
+      { cmd: 'ping darklab.sh', group: 'basics', featured: true },
+      { cmd: 'curl -I https://darklab.sh', group: 'web', featured: false },
+      { cmd: 'ping darklab.sh', group: 'basics', featured: true },
     ], 3)
 
-    expect(sampled[0].cmd).toBe('ping example.com')
+    expect(sampled[0].cmd).toBe('ping darklab.sh')
     expect(sampled.map(item => item.cmd)).toEqual([
-      'ping example.com',
-      'dig example.com A',
-      'curl -I https://example.com',
+      'ping darklab.sh',
+      'dig darklab.sh A',
+      'curl -I https://darklab.sh',
     ])
   })
 })

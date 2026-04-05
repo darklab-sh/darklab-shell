@@ -6,6 +6,11 @@ let _draggedTabId = null;
 let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 
+function refocusTabsTerminalInput() {
+  if (typeof cmdInput === 'undefined' || !cmdInput || typeof cmdInput.focus !== 'function') return;
+  setTimeout(() => cmdInput.focus(), 0);
+}
+
 function updateTabScrollButtons() {
   const leftBtn = document.getElementById('tabs-scroll-left');
   const rightBtn = document.getElementById('tabs-scroll-right');
@@ -30,6 +35,7 @@ function scrollTabsBar(direction) {
   if (!tabsBar || typeof tabsBar.scrollBy !== 'function') return;
   tabsBar.scrollBy({ left: direction * 220, behavior: 'smooth' });
   setTimeout(updateTabScrollButtons, 180);
+  refocusTabsTerminalInput();
 }
 
 function setupTabScrollControls() {
@@ -466,10 +472,19 @@ function permalinkTab(id) {
     showToast('No output to share yet');
     return;
   }
+  const truncated = APP_CONFIG.max_output_lines > 0
+    && t.rawLines.length >= APP_CONFIG.max_output_lines;
+  const shareContent = t.rawLines.slice();
+  if (truncated) {
+    shareContent.push({
+      text: `[tab output truncated to ${APP_CONFIG.max_output_lines} lines; use the run history permalink for the full output]`,
+      cls: 'notice',
+    });
+  }
   apiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: t.label, content: t.rawLines })
+    body: JSON.stringify({ label: t.label, content: shareContent })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
     navigator.clipboard.writeText(url)

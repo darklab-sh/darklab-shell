@@ -164,7 +164,7 @@ test.describe('tab strip interactions', () => {
 
     await expect(page.locator('#cmd')).toBeFocused()
 
-    await page.keyboard.type('dig example.com A')
-    await expect(page.locator('#cmd')).toHaveValue('dig example.com A')
+    await page.keyboard.type('dig darklab.sh A')
+    await expect(page.locator('#cmd')).toHaveValue('dig darklab.sh A')
   })
 })

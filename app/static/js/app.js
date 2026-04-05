@@ -46,6 +46,11 @@ function syncShellPrompt() {
   if (end < len) shellPromptText.appendChild(document.createTextNode(value.slice(end)));
 }
 
+function refocusTerminalInput() {
+  if (!cmdInput || typeof cmdInput.focus !== 'function') return;
+  setTimeout(() => cmdInput.focus(), 0);
+}
+
 // ── Theme ──
 const savedTheme = localStorage.getItem('theme');
 if (savedTheme === 'light') document.body.classList.add('light');
@@ -69,17 +74,18 @@ function _setTsMode(mode) {
 
 document.getElementById('ts-btn').addEventListener('click', () => {
   _setTsMode(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-  if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+  refocusTerminalInput();
 });
 
 document.getElementById('ln-btn').addEventListener('click', () => {
   _setLnMode(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-  if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+  refocusTerminalInput();
 });
 
 document.getElementById('theme-btn').addEventListener('click', () => {
   document.body.classList.toggle('light');
   localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+  refocusTerminalInput();
 });
 
 // ── Load config from server ──
@@ -170,15 +176,16 @@ mobileMenu.querySelectorAll('button[data-action]').forEach(btn => {
     }
     if (action === 'ts') {
       _setTsMode(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+      refocusTerminalInput();
     }
     if (action === 'ln') {
       _setLnMode(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+      refocusTerminalInput();
     }
     if (action === 'theme') {
       document.body.classList.toggle('light');
       localStorage.setItem('theme', document.body.classList.contains('light') ? 'light' : 'dark');
+      refocusTerminalInput();
     }
     if (action === 'faq') openFaq();
   });
@@ -186,7 +193,10 @@ mobileMenu.querySelectorAll('button[data-action]').forEach(btn => {
 
 // ── FAQ ──
 function openFaq() { document.getElementById('faq-overlay').classList.add('open'); }
-function closeFaq() { document.getElementById('faq-overlay').classList.remove('open'); }
+function closeFaq() {
+  document.getElementById('faq-overlay').classList.remove('open');
+  refocusTerminalInput();
+}
 
 document.getElementById('faq-btn').addEventListener('click', openFaq);
 document.getElementById('faq-overlay').addEventListener('click', e => {

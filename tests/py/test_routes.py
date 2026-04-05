@@ -301,10 +301,10 @@ class TestRunRoute:
     def test_missing_allowlisted_command_returns_synthetic_run(self):
         client = get_client()
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
              mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("app.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         assert '"type": "started"' in body
@@ -539,6 +539,51 @@ class TestShareRoute:
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
         assert b"unique-label-xyz" in resp.data
+
+    def test_get_share_html_does_not_prepend_label_for_structured_snapshot_content(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={
+                "label": "curl http://localhost:5001/config",
+                "content": [
+                    {"text": "$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
+                    {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
+                    {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+
+        resp = client.get(f"/share/{share_id}")
+
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "$ ping -c 4 darklab.sh" in body
+        assert "$ curl http://localhost:5001/config" not in body
+
+    def test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={
+                "label": "prompt-style-test",
+                "content": [
+                    {"text": "anon@shell.darklab.sh:~$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
+                    {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+
+        resp = client.get(f"/share/{share_id}")
+
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "renderPromptEcho" in body
+        assert "prompt-prefix" in body
 
     def test_get_share_html_content_type(self):
         client = get_client()
@@ -796,7 +841,7 @@ class TestRunPermalinkRoute:
             data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
             assert data["command"] == "man curl"
             assert data["output"] == ["preview line"]
-            assert "permalink button below or in the history panel" in data["preview_notice"]
+            assert "history panel's permalink button" in data["preview_notice"]
         finally:
             self._delete_run(run_id)
 

@@ -178,7 +178,7 @@ def _preview_notice(run):
     if run.get("full_output_available"):
         return (
             f"[preview truncated — only the last {shown} lines are shown here, "
-            f"but the full output had {total} lines. Use the permalink button below or in the history panel for complete results]"
+            f"but the full output had {total} lines. Use the history panel's permalink button to view the complete results.]"
         )
     return (
         f"[preview truncated — only the last {shown} lines are shown here, "

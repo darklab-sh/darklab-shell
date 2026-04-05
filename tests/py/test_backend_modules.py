@@ -71,7 +71,7 @@ class TestSplitChainedCommands:
         assert len(parts) == 2
 
     def test_redirect_in(self):
-        parts = split_chained_commands("curl example.com < /etc/hosts")
+        parts = split_chained_commands("curl darklab.sh < /etc/hosts")
         assert len(parts) == 2
 
     def test_empty_parts_stripped(self):
@@ -255,11 +255,11 @@ class TestPathBlockingEdgeCases:
         assert not ok
 
     def test_tmp_in_url_path_allowed(self):
-        ok, _ = _check("curl https://example.com/tmp/file")
+        ok, _ = _check("curl https://darklab.sh/tmp/file")
         assert ok
 
     def test_tmp_in_url_with_port_allowed(self):
-        ok, _ = _check("curl https://example.com:8080/tmp/resource")
+        ok, _ = _check("curl https://darklab.sh:8080/tmp/resource")
         assert ok
 
     def test_data_path_blocked(self):
@@ -267,7 +267,7 @@ class TestPathBlockingEdgeCases:
         assert not ok
 
     def test_data_in_url_path_allowed(self):
-        ok, _ = _check("curl https://example.com/data/file")
+        ok, _ = _check("curl https://darklab.sh/data/file")
         assert ok
 
     def test_tmp_as_scheme_relative_blocked(self):
@@ -281,7 +281,7 @@ class TestPathBlockingEdgeCases:
 class TestIsDeniedMultiWordTool:
     def test_subcommand_specific_deny(self):
         # "gobuster dir -o" deny should NOT fire for "gobuster dns ..."
-        ok, _ = _check("gobuster dns -d example.com", allow=["gobuster"], deny=["gobuster dir -o"])
+        ok, _ = _check("gobuster dns -d darklab.sh", allow=["gobuster"], deny=["gobuster dir -o"])
         assert ok
 
     def test_subcommand_specific_deny_fires_for_correct_subcommand(self):
@@ -311,11 +311,11 @@ class TestRewriteCaseInsensitive:
         assert "--privileged" in cmd
 
     def test_nuclei_uppercase(self):
-        cmd, _ = rewrite_command("NUCLEI -u https://example.com")
+        cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
         assert "-ud /tmp/nuclei-templates" in cmd
 
     def test_wapiti_uppercase(self):
-        cmd, notice = rewrite_command("WAPITI http://example.com")
+        cmd, notice = rewrite_command("WAPITI http://darklab.sh")
         assert "/dev/stdout" in cmd
         assert notice is not None
 
@@ -427,7 +427,7 @@ class TestWelcomeLoading:
         assert result[0]["featured"] is False
 
     def test_entry_with_group_and_featured_metadata(self):
-        path = self._write("- cmd: dig example.com A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
+        path = self._write("- cmd: dig darklab.sh A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
         try:
             with mock.patch("commands.WELCOME_FILE", path):
                 result = load_welcome()
@@ -679,11 +679,11 @@ class TestRewriteIdempotent:
         assert cmd.count("--privileged") == 1
 
     def test_nuclei_already_ud_unchanged(self):
-        cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://example.com")
+        cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
 
     def test_wapiti_already_output_unchanged(self):
-        cmd, notice = rewrite_command("wapiti -u http://example.com -o /tmp/report")
+        cmd, notice = rewrite_command("wapiti -u http://darklab.sh -o /tmp/report")
         assert "/dev/stdout" not in cmd
         assert notice is None
 

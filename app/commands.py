@@ -79,7 +79,7 @@ BUILTIN_FAQ = [
 SHELL_CHAIN_RE = re.compile(r'&&|\|\|?|;;?|`|\$\(|>>?|<')
 
 # Pre-compiled path blocking patterns — negative lookbehind prevents false
-# positives on URLs such as https://example.com/data/ or /tmp/ path segments.
+# positives on URLs such as https://darklab.sh/data/ or /tmp/ path segments.
 _PATH_DATA_RE = re.compile(r'(?<![\w:/])/data\b')
 _PATH_TMP_RE  = re.compile(r'(?<![\w:/])/tmp\b')
 

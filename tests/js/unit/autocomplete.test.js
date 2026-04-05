@@ -77,10 +77,10 @@ describe('autocomplete helpers', () => {
     const input = document.getElementById('cmd')
     const focusSpy = vi.spyOn(input, 'focus')
 
-    acShow(['whois example.com'])
+    acShow(['whois darklab.sh'])
     document.querySelector('.ac-item').dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
 
-    expect(input.value).toBe('whois example.com')
+    expect(input.value).toBe('whois darklab.sh')
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(focusSpy).toHaveBeenCalled()
   })
@@ -113,11 +113,11 @@ describe('autocomplete helpers', () => {
     })
     Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
 
-    acShow(['nmap -sV', 'nslookup example.com'])
+    acShow(['nmap -sV', 'nslookup darklab.sh'])
 
     expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
     const items = [...document.querySelectorAll('.ac-item')].map(el => el.textContent.trim())
-    expect(items[0]).toBe('nslookup example.com')
+    expect(items[0]).toBe('nslookup darklab.sh')
     expect(items[1]).toBe('nmap -sV')
   })
 
@@ -186,7 +186,7 @@ describe('autocomplete helpers', () => {
     })
     Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
 
-    acShow(['nmap -sV', 'nslookup example.com', 'netstat -an'])
+    acShow(['nmap -sV', 'nslookup darklab.sh', 'netstat -an'])
 
     const items = [...document.querySelectorAll('.ac-item')]
     expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
@@ -222,7 +222,7 @@ describe('autocomplete helpers', () => {
     })
     Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
 
-    acShow(['nmap -sV', 'nslookup example.com', 'netstat -an', 'nc -lvnp 4444'])
+    acShow(['nmap -sV', 'nslookup darklab.sh', 'netstat -an', 'nc -lvnp 4444'])
 
     const dropdown = document.getElementById('ac')
     expect(dropdown.classList.contains('ac-up')).toBe(true)

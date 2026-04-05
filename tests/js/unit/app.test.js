@@ -274,6 +274,35 @@ describe('app helpers', () => {
     expect(cmdInput.focus).toHaveBeenCalled()
   })
 
+  it('refocuses the terminal input after toggling theme', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    document.getElementById('theme-btn').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    document.querySelector('#mobile-menu [data-action="theme"]').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('refocuses the terminal input after closing the FAQ modal', async () => {
+    const { cmdInput } = await loadAppFns()
+    const faqOverlay = document.getElementById('faq-overlay')
+
+    document.getElementById('faq-btn').click()
+    expect(faqOverlay.classList.contains('open')).toBe(true)
+
+    document.querySelector('.faq-close').click()
+    expect(faqOverlay.classList.contains('open')).toBe(false)
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    document.getElementById('faq-btn').click()
+    faqOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(faqOverlay.classList.contains('open')).toBe(false)
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
   it('_setTsMode marks the timestamps button inactive in off mode', async () => {
     const { _setTsMode } = await loadAppFns()
     const tsBtn = document.getElementById('ts-btn')
@@ -409,11 +438,11 @@ describe('app helpers', () => {
     expect(shellPromptText.textContent).toBe('')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(true)
 
-    cmdInput.value = 'ping example.com'
+    cmdInput.value = 'ping darklab.sh'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
     cmdInput.dispatchEvent(new Event('input'))
 
-    expect(shellPromptText.textContent).toBe('ping example.com')
+    expect(shellPromptText.textContent).toBe('ping darklab.sh')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
@@ -481,11 +510,11 @@ describe('app helpers', () => {
   it('supports ctrl+w to delete one word to the left', async () => {
     const { cmdInput } = await loadAppFns()
 
-    cmdInput.value = 'dig example.com A'
+    cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true }))
 
-    expect(cmdInput.value).toBe('dig example.com ')
+    expect(cmdInput.value).toBe('dig darklab.sh ')
   })
 
   it('uses Ctrl+C to open kill confirm when active tab is running', async () => {

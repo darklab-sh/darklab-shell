@@ -348,13 +348,13 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-last-1", "sess-last", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                ("run-last-1", "sess-last", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    "run-last-2", "sess-last", "dig example.com A",
+                    "run-last-2", "sess-last", "dig darklab.sh A",
                     "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 1, "[]",
                 )
             )
@@ -364,8 +364,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  [1]  dig example.com A\\n" in body
-        assert f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  [0]  ping example.com\\n" in body
+        assert f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  [1]  dig darklab.sh A\\n" in body
+        assert f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  [0]  ping darklab.sh\\n" in body
 
     def test_fake_who_tty_groups_and_version_render_shell_identity(self):
         client = get_client()
@@ -442,11 +442,11 @@ class TestRunStreaming:
     def test_fake_sudo_reports_web_shell_restriction(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "sudo ping example.com"})
+        resp = client.post("/run", json={"command": "sudo ping darklab.sh"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "sudo: 'ping example.com' is not happening today.\\n" in body
+        assert "sudo: 'ping darklab.sh' is not happening today.\\n" in body
 
     def test_fake_reboot_reports_web_shell_restriction(self):
         client = get_client()
@@ -568,12 +568,12 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-h1", "sess-history", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                ("run-h1", "sess-history", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-h2", "sess-history", "dig example.com A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+                ("run-h2", "sess-history", "dig darklab.sh A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
             )
             conn.commit()
 
@@ -581,8 +581,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "1  ping example.com\\n" in body
-        assert "2  dig example.com A\\n" in body
+        assert "1  ping darklab.sh\\n" in body
+        assert "2  dig darklab.sh A\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_pwd_returns_synthetic_path(self):
@@ -632,12 +632,12 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-1", "sess-ps", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                ("run-1", "sess-ps", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-2", "sess-ps", "dig example.com A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+                ("run-2", "sess-ps", "dig darklab.sh A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
             )
             conn.commit()
 
@@ -649,11 +649,11 @@ class TestRunStreaming:
         assert " 9000 pts/0    -    -        -        ps aux\\n" in body
         assert (
             f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:05+00:00')} "
-            f"{self._local_clock_text('2026-01-01T00:00:06+00:00')} dig example.com A\\n"
+            f"{self._local_clock_text('2026-01-01T00:00:06+00:00')} dig darklab.sh A\\n"
         ) in body
         assert (
             f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:00+00:00')} "
-            f"{self._local_clock_text('2026-01-01T00:00:03+00:00')} ping example.com\\n"
+            f"{self._local_clock_text('2026-01-01T00:00:03+00:00')} ping darklab.sh\\n"
         ) in body
         assert '"type": "exit"' in body
 
@@ -661,10 +661,10 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
              mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("app.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV example.com"}, headers={"X-Session-ID": "sess-missing"})
+            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -675,17 +675,17 @@ class TestRunStreaming:
 
         hist = client.get("/history", headers={"X-Session-ID": "sess-missing"})
         data = json.loads(hist.data)
-        assert [r["command"] for r in data["runs"]] == ["nmap -sV example.com"]
+        assert [r["command"] for r in data["runs"]] == ["nmap -sV darklab.sh"]
 
     def test_run_checks_missing_binary_after_rewrite(self):
         client = get_client()
         client.environ_base["HTTP_X_FORWARDED_FOR"] = "2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa"
 
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV example.com", None)), \
+             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
              mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("app.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200

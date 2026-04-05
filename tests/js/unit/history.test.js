@@ -135,20 +135,20 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig example.com A' },
-      { command: 'curl -I https://example.com' },
-      { command: 'dig example.com A' },
-      { command: 'ping -c 4 example.com' },
+      { command: 'dig darklab.sh A' },
+      { command: 'curl -I https://darklab.sh' },
+      { command: 'dig darklab.sh A' },
+      { command: 'ping -c 4 darklab.sh' },
     ])
 
     expect(getCmdHistory()).toEqual([
-      'dig example.com A',
-      'curl -I https://example.com',
-      'ping -c 4 example.com',
+      'dig darklab.sh A',
+      'curl -I https://darklab.sh',
+      'ping -c 4 darklab.sh',
     ])
 
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(-1)).toBe(true)
     expect(cmdInput.value).toBe('')
   })
@@ -158,17 +158,17 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig example.com A' },
-      { command: 'curl -I https://example.com' },
+      { command: 'dig darklab.sh A' },
+      { command: 'curl -I https://darklab.sh' },
     ])
 
     cmdInput.value = 'pin'
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('curl -I https://example.com')
+    expect(cmdInput.value).toBe('curl -I https://darklab.sh')
     expect(navigateCmdHistory(-1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(-1)).toBe(true)
     expect(cmdInput.value).toBe('pin')
   })
@@ -178,19 +178,19 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig example.com A' },
-      { command: 'curl -I https://example.com' },
+      { command: 'dig darklab.sh A' },
+      { command: 'curl -I https://darklab.sh' },
     ])
 
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
 
     cmdInput.value = 'typed now'
     resetCmdHistoryNav()
 
     expect(navigateCmdHistory(-1)).toBe(false)
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
   })
 })
 
@@ -215,7 +215,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -223,7 +223,7 @@ describe('history panel actions', () => {
       if (url === '/history/run-1?json&preview=1') {
         return Promise.resolve({
           json: () => Promise.resolve({
-            command: 'ping example.com',
+            command: 'ping darklab.sh',
             output: ['ok'],
             exit_code: 0,
           }),
@@ -320,7 +320,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -335,7 +335,7 @@ describe('history panel actions', () => {
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
 
-    confirmHistAction('delete', 'run-1', 'ping example.com')
+    confirmHistAction('delete', 'run-1', 'ping darklab.sh')
     executeHistAction('delete')
     await Promise.resolve()
     await Promise.resolve()
@@ -351,7 +351,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -382,7 +382,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -391,7 +391,7 @@ describe('history panel actions', () => {
         return new Promise((resolve) => {
           resolveRun = () => resolve({
             json: () => Promise.resolve({
-              command: 'ping example.com',
+              command: 'ping darklab.sh',
               output: ['ok'],
               exit_code: 0,
             }),
@@ -421,7 +421,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })

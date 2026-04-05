@@ -160,7 +160,7 @@ class TestAllowedCommandsGroupingEdges:
 class TestAutocompleteLoadingEdges:
     def test_ignores_blank_and_comment_lines(self):
         with tempfile.NamedTemporaryFile("w", delete=False) as f:
-            f.write("# comment\n\nping\ncurl example.com\n")
+            f.write("# comment\n\nping\ncurl darklab.sh\n")
             path = f.name
         try:
             with mock.patch("commands.AUTOCOMPLETE_FILE", path):
@@ -168,7 +168,7 @@ class TestAutocompleteLoadingEdges:
         finally:
             os.unlink(path)
 
-        assert result == ["ping", "curl example.com"]
+        assert result == ["ping", "curl darklab.sh"]
 
     def test_missing_file_returns_empty_list(self):
         with mock.patch("commands.AUTOCOMPLETE_FILE", "/nope.txt"):
@@ -223,17 +223,17 @@ class TestIsCommandAllowedEdges:
         assert "Shell operators" in reason
 
     def test_redirection_is_blocked(self):
-        ok, reason = self._check("curl https://example.com > /tmp/out")
+        ok, reason = self._check("curl https://darklab.sh > /tmp/out")
         assert not ok
         assert "Shell operators" in reason
 
     def test_deny_rule_takes_priority_over_allow(self):
-        ok, _ = self._check("curl -o /dev/stdout https://example.com", allow=["curl"], deny=["curl -o"])
+        ok, _ = self._check("curl -o /dev/stdout https://darklab.sh", allow=["curl"], deny=["curl -o"])
         # This one may expose a design choice depending on your exception handling
         assert ok is True or ok is False
 
     def test_tmp_url_path_is_allowed(self):
-        ok, _ = self._check("curl https://example.com/tmp/file")
+        ok, _ = self._check("curl https://darklab.sh/tmp/file")
         assert ok
 
     def test_local_tmp_path_is_blocked(self):
@@ -276,6 +276,6 @@ class TestFakeCommandResolution:
         assert resolve_fake_command("ps aux") == "ps"
 
     def test_rejects_non_fake_commands(self):
-        assert resolve_fake_command("ping example.com") is None
+        assert resolve_fake_command("ping darklab.sh") is None
         assert resolve_fake_command("rm /tmp/file") is None
         assert resolve_fake_command("") is None

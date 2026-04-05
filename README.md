@@ -417,8 +417,8 @@ This allows all `nmap` invocations except those containing `-sU` or `--script` a
 **`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
 
 ```
-curl -o /dev/null -s -w "%{http_code}" https://example.com
-wget -q -O /dev/null --server-response https://example.com
+curl -o /dev/null -s -w "%{http_code}" https://darklab.sh
+wget -q -O /dev/null --server-response https://darklab.sh
 ```
 
 ### Shell Operator Blocking

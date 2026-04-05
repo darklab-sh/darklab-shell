@@ -181,6 +181,7 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
   .line.exit-fail {{ color: var(--red);   font-weight: 700; margin-top: 8px; }}
   .line.notice    {{ color: #6ab0f5; font-style: italic; }}
   .line.denied    {{ color: var(--amber); font-weight: 700; }}
+  .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
   a {{ color: var(--green); }}
 </style>
 </head>
@@ -210,18 +211,34 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
   const out = document.getElementById('output');
   const plainClasses = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
 
-  // Show the command as the first line
-  const cmdSpan = document.createElement('span');
-  cmdSpan.className = 'line';
-  cmdSpan.style.color = 'var(--green)';
-  cmdSpan.style.marginBottom = '4px';
-  cmdSpan.style.display = 'block';
-  cmdSpan.textContent = '$ ' + {label_json};
-  out.appendChild(cmdSpan);
-  const gapSpan = document.createElement('span');
-  gapSpan.className = 'line';
-  gapSpan.textContent = '';
-  out.appendChild(gapSpan);
+  function renderPromptEcho(text) {{
+    const raw = String(text || '');
+    const firstSpace = raw.indexOf(' ');
+    const prefix = firstSpace === -1 ? raw : raw.slice(0, firstSpace);
+    const remainder = firstSpace === -1 ? '' : raw.slice(firstSpace + 1);
+    return '<span class="prompt-prefix">' + escHtml(prefix) + '</span>'
+      + (remainder ? escHtml(' ' + remainder) : '');
+  }}
+
+  const isStructuredSnapshot = Array.isArray(lines)
+    && lines.some(entry => entry && typeof entry === 'object' && !Array.isArray(entry));
+
+  if (!isStructuredSnapshot) {{
+    // Single-run permalinks add the command header here because their payload is
+    // just output strings. Snapshot permalinks already include real prompt echo
+    // lines in the saved content and should render that transcript verbatim.
+    const cmdSpan = document.createElement('span');
+    cmdSpan.className = 'line';
+    cmdSpan.style.color = 'var(--green)';
+    cmdSpan.style.marginBottom = '4px';
+    cmdSpan.style.display = 'block';
+    cmdSpan.textContent = '$ ' + {label_json};
+    out.appendChild(cmdSpan);
+    const gapSpan = document.createElement('span');
+    gapSpan.className = 'line';
+    gapSpan.textContent = '';
+    out.appendChild(gapSpan);
+  }}
 
   lines.forEach(entry => {{
     const span = document.createElement('span');
@@ -229,7 +246,9 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
     const text = typeof entry === 'string' ? entry : entry.text;
     const cls  = typeof entry === 'string' ? '' : (entry.cls || '');
     span.className = 'line' + (cls ? ' ' + cls : '');
-    if (plainClasses.has(cls)) {{
+    if (cls === 'prompt-echo') {{
+      span.innerHTML = renderPromptEcho(text);
+    }} else if (plainClasses.has(cls)) {{
       span.textContent = text;
     }} else {{
       span.innerHTML = ansi_up.ansi_to_html(text);
@@ -272,9 +291,11 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
       const cls  = typeof entry === 'string' ? '' : (entry.cls || '');
       const tsC  = (entry && entry.tsC) ? entry.tsC : '';
       const tsSpan = tsC ? '<span class="ts">' + escHtml(tsC) + '</span>' : '';
-      const content = plainClsSet.has(cls)
-        ? escHtml(text)
-        : ansi_up.ansi_to_html(text);
+      const content = cls === 'prompt-echo'
+        ? renderPromptEcho(text)
+        : plainClsSet.has(cls)
+          ? escHtml(text)
+          : ansi_up.ansi_to_html(text);
       return '<span class="line' + (cls ? ' ' + cls : '') + '">' + tsSpan + content + '</span>';
     }}).join('\\n');
 
@@ -302,6 +323,7 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
   .line.exit-fail {{ color: #ff3c3c; font-weight: 700; margin-top: 8px; }}
   .line.denied    {{ color: #ffb800; font-weight: 700; }}
   .line.notice    {{ color: #6ab0f5; font-style: italic; }}
+  .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
   .ts {{
     display: inline-block; min-width: 58px; text-align: right;
     color: #505050; font-size: 10px; user-select: none;

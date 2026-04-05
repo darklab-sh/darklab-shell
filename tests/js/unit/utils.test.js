@@ -86,14 +86,14 @@ describe('renderMotd', () => {
   })
 
   it('converts [text](https://url) to an <a> with target and rel', () => {
-    expect(renderMotd('[visit](https://example.com)')).toBe(
-      '<a href="https://example.com" target="_blank" rel="noopener">visit</a>',
+    expect(renderMotd('[visit](https://darklab.sh)')).toBe(
+      '<a href="https://darklab.sh" target="_blank" rel="noopener">visit</a>',
     )
   })
 
   it('also renders http:// links (not just https)', () => {
-    expect(renderMotd('[link](http://example.com)')).toBe(
-      '<a href="http://example.com" target="_blank" rel="noopener">link</a>',
+    expect(renderMotd('[link](http://darklab.sh)')).toBe(
+      '<a href="http://darklab.sh" target="_blank" rel="noopener">link</a>',
     )
   })
 
@@ -113,10 +113,10 @@ describe('renderMotd', () => {
   })
 
   it('renders multiple Markdown constructs in one string', () => {
-    const out = renderMotd('**Welcome** — run `ping` or [docs](https://example.com)\nnew line')
+    const out = renderMotd('**Welcome** — run `ping` or [docs](https://darklab.sh)\nnew line')
     expect(out).toContain('<strong>Welcome</strong>')
     expect(out).toContain('<code>ping</code>')
-    expect(out).toContain('<a href="https://example.com"')
+    expect(out).toContain('<a href="https://darklab.sh"')
     expect(out).toContain('<br>')
   })
 })

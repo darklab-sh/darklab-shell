@@ -3,6 +3,7 @@ import { fromDomScripts } from './helpers/extract.js'
 
 function loadTabsFns({ maxTabs = 3, apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }) } = {}) {
   const cmdInput = document.getElementById('cmd')
+  cmdInput.focus = vi.fn()
   const tabsBar = document.getElementById('tabs-bar')
   const tabPanels = document.getElementById('tab-panels')
   const newTabBtn = document.getElementById('new-tab-btn')
@@ -106,7 +107,7 @@ describe('tabs helpers', () => {
     const id = createTab('tab 1')
     const input = document.getElementById('cmd')
     input.value = 'keep-this'
-    _getTabs()[0].command = 'ping example.com'
+    _getTabs()[0].command = 'ping darklab.sh'
 
     activateTab(id)
 
@@ -220,5 +221,43 @@ describe('tabs helpers', () => {
     input.dispatchEvent(new Event('input', { bubbles: true }))
 
     expect(rightBtn.disabled).toBe(false)
+  })
+
+  it('refocuses the terminal input after clicking the left tab scroll button', () => {
+    const { createTab } = loadTabsFns()
+    createTab('tab 1')
+    createTab('tab 2')
+
+    const tabsBar = document.getElementById('tabs-bar')
+    let scrollLeft = 120
+    Object.defineProperty(tabsBar, 'clientWidth', { configurable: true, get: () => 200 })
+    Object.defineProperty(tabsBar, 'scrollWidth', { configurable: true, get: () => 600 })
+    Object.defineProperty(tabsBar, 'scrollLeft', { configurable: true, get: () => scrollLeft })
+    tabsBar.scrollBy = vi.fn(({ left }) => {
+      scrollLeft = Math.max(0, Math.min(400, scrollLeft + left))
+    })
+
+    const cmdInput = document.getElementById('cmd')
+    document.getElementById('tabs-scroll-left').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('refocuses the terminal input after clicking the right tab scroll button', () => {
+    const { createTab } = loadTabsFns()
+    createTab('tab 1')
+    createTab('tab 2')
+
+    const tabsBar = document.getElementById('tabs-bar')
+    let scrollLeft = 120
+    Object.defineProperty(tabsBar, 'clientWidth', { configurable: true, get: () => 200 })
+    Object.defineProperty(tabsBar, 'scrollWidth', { configurable: true, get: () => 600 })
+    Object.defineProperty(tabsBar, 'scrollLeft', { configurable: true, get: () => scrollLeft })
+    tabsBar.scrollBy = vi.fn(({ left }) => {
+      scrollLeft = Math.max(0, Math.min(400, scrollLeft + left))
+    })
+
+    const cmdInput = document.getElementById('cmd')
+    document.getElementById('tabs-scroll-right').click()
+    expect(cmdInput.focus).toHaveBeenCalled()
   })
 })

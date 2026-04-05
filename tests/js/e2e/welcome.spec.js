@@ -17,7 +17,7 @@ test.describe('welcome animation', () => {
             out: 'welcome should disappear if the user starts typing',
           },
           {
-            cmd: 'dig example.com A',
+            cmd: 'dig darklab.sh A',
             out: 'second sample should appear instantly when welcome settles',
           },
         ]),
@@ -142,7 +142,7 @@ test.describe('welcome animation', () => {
 
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
-    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig example.com A')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
     await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
     await expect(page.locator('#cmd')).toHaveValue('dig ')
   })
@@ -157,7 +157,7 @@ test.describe('welcome animation', () => {
 
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
-    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig example.com A')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
     await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
     await expect(page.locator('#cmd')).toHaveValue(' ')
   })
@@ -172,7 +172,7 @@ test.describe('welcome animation', () => {
 
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
-    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig example.com A')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
     await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
     await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('#cmd')).toBeFocused()

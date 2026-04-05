@@ -29,7 +29,7 @@ test.describe('autocomplete', () => {
 
     const dropdown = page.locator('#ac-dropdown')
     await expect(dropdown).toBeVisible()
-    await expect(dropdown).toContainText('whois example.com')
+    await expect(dropdown).toContainText('whois darklab.sh')
 
     await page.locator('header').click({ position: { x: 16, y: 16 } })
 
