@@ -812,7 +812,7 @@ bandit -r app/ -ll -q
 pip-audit -r app/requirements.txt -r requirements-dev.txt
 ```
 
-These checks run automatically on every push via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`. The `test` stage runs three parallel jobs: `test-py-pytest` (pytest), `test-js-unit` (Vitest, Node 22 image), and `test-js-e2e` (Playwright, Python 3.12 image with Node and Chromium installed). The `build` stage runs a Docker image build on every push to `main`, on any branch when `Dockerfile`, `app/requirements.txt`, `.dockerignore`, or `docker-compose*.yml` change, and is available as a manual trigger otherwise.
+These checks run automatically via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`. The `test` stage runs three parallel jobs: `test-py-pytest` (pytest), `test-js-unit` (Vitest, Node 22 image), and `test-js-e2e` (Playwright, Python 3.12 image with Node and Chromium installed). The `test`, `lint`, and `audit` stages run for both push and merge-request pipelines. The `build` stage runs on pushes to `main`, on merge requests targeting `main`, and on other branches when `Dockerfile`, `app/requirements.txt`, `.dockerignore`, or `docker-compose*.yml` change. It is also available as a manual trigger otherwise.
 
 ---
 
