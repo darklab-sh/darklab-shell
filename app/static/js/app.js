@@ -51,6 +51,167 @@ function refocusTerminalInput() {
   setTimeout(() => cmdInput.focus(), 0);
 }
 
+function isEditableTarget(target) {
+  return !!(target && target.closest && target.closest('input, textarea, [contenteditable="true"]'));
+}
+
+function shouldIgnoreGlobalShortcutTarget(target) {
+  return isEditableTarget(target) && target !== cmdInput;
+}
+
+function createNextTabLabel() {
+  return 'tab ' + (tabs.length + 1);
+}
+
+function createShortcutTab() {
+  if (typeof createTab !== 'function') return;
+  createTab(createNextTabLabel());
+}
+
+function activateRelativeTab(offset) {
+  if (!Array.isArray(tabs) || !tabs.length || typeof activateTab !== 'function') return;
+  const currentIndex = tabs.findIndex(tab => tab.id === activeTabId);
+  const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+  const nextIndex = (baseIndex + offset + tabs.length) % tabs.length;
+  activateTab(tabs[nextIndex].id);
+}
+
+function closeActiveShortcutTab() {
+  if (!activeTabId || typeof closeTab !== 'function') return;
+  closeTab(activeTabId);
+}
+
+function permalinkActiveShortcutTab() {
+  if (!activeTabId || typeof permalinkTab !== 'function') return;
+  permalinkTab(activeTabId);
+}
+
+function copyActiveShortcutTab() {
+  if (!activeTabId || typeof copyTab !== 'function') return;
+  copyTab(activeTabId);
+}
+
+function clearActiveShortcutTab() {
+  if (!activeTabId || typeof clearTab !== 'function') return;
+  if (typeof cancelWelcome === 'function') cancelWelcome(activeTabId);
+  clearTab(activeTabId);
+}
+
+function closeKillOverlay() {
+  killOverlay.style.display = 'none';
+  pendingKillTabId = null;
+  refocusTerminalInput();
+}
+
+function confirmPendingKill() {
+  killOverlay.style.display = 'none';
+  if (pendingKillTabId) {
+    doKill(pendingKillTabId);
+    pendingKillTabId = null;
+  }
+  refocusTerminalInput();
+}
+
+function eventMatchesCode(e, code) {
+  return !!(e && e.code === code);
+}
+
+function eventMatchesLetter(e, letter) {
+  if (eventMatchesCode(e, `Key${letter.toUpperCase()}`)) return true;
+  const key = e && typeof e.key === 'string' ? e.key.toLowerCase() : '';
+  return key === letter.toLowerCase();
+}
+
+function eventMatchesDigit(e, digit) {
+  if (eventMatchesCode(e, `Digit${digit}`)) return true;
+  return !!(e && e.key === String(digit));
+}
+
+function handleTabShortcut(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+  if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
+  if (eventMatchesLetter(e, 't')) {
+    createShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 'w')) {
+    closeActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  if (e.key === 'ArrowRight') {
+    activateRelativeTab(1);
+    e.preventDefault();
+    return true;
+  }
+  if (e.key === 'ArrowLeft') {
+    activateRelativeTab(-1);
+    e.preventDefault();
+    return true;
+  }
+  const matchedDigit = [1, 2, 3, 4, 5, 6, 7, 8, 9].find(digit => eventMatchesDigit(e, digit));
+  if (matchedDigit) {
+    const tabIndex = matchedDigit - 1;
+    if (tabs[tabIndex] && typeof activateTab === 'function') activateTab(tabs[tabIndex].id);
+    e.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+function handleActionShortcut(e) {
+  if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
+  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'p')) {
+    permalinkActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  if (e.altKey && !e.ctrlKey && !e.metaKey && e.shiftKey && eventMatchesLetter(e, 'c')) {
+    copyActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'l' || e.key === 'L')) {
+    clearActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+function isKillOverlayOpen() {
+  return !!(killOverlay && killOverlay.style && killOverlay.style.display === 'flex');
+}
+
+function getCmdSelection(value = cmdInput.value || '') {
+  let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : value.length;
+  let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : value.length;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+function replaceCmdRange(value, start, end, replacement = '') {
+  cmdInput.value = value.slice(0, start) + replacement + value.slice(end);
+  const nextPos = start + replacement.length;
+  cmdInput.setSelectionRange(nextPos, nextPos);
+  cmdInput.dispatchEvent(new Event('input'));
+}
+
+function findWordBoundaryLeft(value, index) {
+  let next = Math.max(0, index);
+  while (next > 0 && /\s/.test(value[next - 1])) next--;
+  while (next > 0 && !/\s/.test(value[next - 1])) next--;
+  return next;
+}
+
+function findWordBoundaryRight(value, index) {
+  let next = Math.min(value.length, index);
+  while (next < value.length && /\s/.test(value[next])) next++;
+  while (next < value.length && !/\s/.test(value[next])) next++;
+  return next;
+}
+
 // ── Theme ──
 const savedTheme = localStorage.getItem('theme');
 if (savedTheme === 'light') document.body.classList.add('light');
@@ -293,7 +454,7 @@ setTimeout(() => {
 }, 0);
 
 document.getElementById('new-tab-btn').addEventListener('click', () => {
-  createTab('tab ' + (tabs.length + 1));
+  createShortcutTab();
 });
 
 // ── Search ──
@@ -354,22 +515,46 @@ histDelOverlay.addEventListener('click', e => {
 
 // ── Kill modal ──
 document.getElementById('kill-cancel').addEventListener('click', () => {
-  killOverlay.style.display = 'none';
-  pendingKillTabId = null;
+  closeKillOverlay();
 });
 document.getElementById('kill-confirm').addEventListener('click', () => {
-  killOverlay.style.display = 'none';
-  if (pendingKillTabId) { doKill(pendingKillTabId); pendingKillTabId = null; }
+  confirmPendingKill();
 });
 killOverlay.addEventListener('click', e => {
-  if (e.target === killOverlay) { killOverlay.style.display = 'none'; pendingKillTabId = null; }
+  if (e.target === killOverlay) closeKillOverlay();
 });
 
 // ── Global keyboard shortcuts ──
+// Current bindings intentionally stay narrow:
+// - Ctrl+C: running => kill confirm, idle => fresh prompt line
+// - welcome settle: printable typing, Enter, Escape
+// - Escape: close FAQ and search UI
+//
+// Planned primary app-safe rollout:
+// - Alt+T / Alt+W for new/close tab
+// - Alt+ArrowLeft / Alt+ArrowRight for tab cycling
+// - Alt+P for permalink, Alt+Shift+C for copy
+// - Enter / Escape for kill-confirm accept / cancel
+// Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain optional
+// fallbacks because interception is environment-dependent.
 document.addEventListener('keydown', e => {
+  if (isKillOverlayOpen()) {
+    if (e.key === 'Enter') {
+      confirmPendingKill();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Escape') {
+      closeKillOverlay();
+      e.preventDefault();
+      return;
+    }
+  }
+  if (handleTabShortcut(e)) return;
+  if (handleActionShortcut(e)) return;
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     if (e.target === cmdInput) return;
-    const editable = e.target && e.target.closest && e.target.closest('input, textarea, [contenteditable="true"]');
+    const editable = isEditableTarget(e.target);
     if (editable) return;
     const activeTab = tabs.find(t => t.id === activeTabId);
     if (activeTab && activeTab.st === 'running') {
@@ -385,7 +570,7 @@ document.addEventListener('keydown', e => {
     && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
     && cmdInput
     && !e.metaKey && !e.ctrlKey && !e.altKey
-    && !e.target.closest('input, textarea, [contenteditable="true"]')
+    && !isEditableTarget(e.target)
     && e.key.length === 1
   ) {
     if (typeof mountShellPrompt === 'function') mountShellPrompt(activeTabId, true);
@@ -425,12 +610,12 @@ document.addEventListener('click', e => {
   if (!mobileMenu.contains(e.target) && e.target !== hamburgerBtn) {
     mobileMenu.classList.remove('open');
   }
-  if (!e.target.closest('.prompt-wrap')) acHide();
+  if (!(e.target && e.target.closest && e.target.closest('.prompt-wrap'))) acHide();
 });
 
 if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('click', e => {
-    if (e.target === runBtn || e.target.closest('#run-btn')) return;
+    if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     cmdInput.focus();
   });
 }
@@ -493,26 +678,63 @@ cmdInput.addEventListener('keydown', e => {
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
     e.preventDefault();
     const value = cmdInput.value;
-    let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : value.length;
-    let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : value.length;
-    if (start > end) [start, end] = [end, start];
+    const { start, end } = getCmdSelection(value);
 
     if (start !== end) {
-      cmdInput.value = value.slice(0, start) + value.slice(end);
-      cmdInput.setSelectionRange(start, start);
-      cmdInput.dispatchEvent(new Event('input'));
+      replaceCmdRange(value, start, end);
       return;
     }
 
     if (start === 0) return;
 
-    let cut = start;
-    while (cut > 0 && /\s/.test(value[cut - 1])) cut--;
-    while (cut > 0 && !/\s/.test(value[cut - 1])) cut--;
+    const cut = findWordBoundaryLeft(value, start);
+    replaceCmdRange(value, cut, start);
+    return;
+  }
 
-    cmdInput.value = value.slice(0, cut) + value.slice(start);
-    cmdInput.setSelectionRange(cut, cut);
-    cmdInput.dispatchEvent(new Event('input'));
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'u' || e.key === 'U')) {
+    e.preventDefault();
+    const value = cmdInput.value;
+    const { start, end } = getCmdSelection(value);
+    if (start !== end) {
+      replaceCmdRange(value, start, end);
+      return;
+    }
+    if (start === 0) return;
+    replaceCmdRange(value, 0, start);
+    return;
+  }
+
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
+    e.preventDefault();
+    const value = cmdInput.value;
+    const { start, end } = getCmdSelection(value);
+    if (start !== end) {
+      replaceCmdRange(value, start, end);
+      return;
+    }
+    if (start >= value.length) return;
+    replaceCmdRange(value, start, value.length);
+    return;
+  }
+
+  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
+    e.preventDefault();
+    const value = cmdInput.value;
+    const { start } = getCmdSelection(value);
+    const next = findWordBoundaryLeft(value, start);
+    cmdInput.setSelectionRange(next, next);
+    syncShellPrompt();
+    return;
+  }
+
+  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
+    e.preventDefault();
+    const value = cmdInput.value;
+    const { end } = getCmdSelection(value);
+    const next = findWordBoundaryRight(value, end);
+    cmdInput.setSelectionRange(next, next);
+    syncShellPrompt();
     return;
   }
 

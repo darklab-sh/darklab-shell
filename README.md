@@ -23,7 +23,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
 - **Terminal-like command flow** — while a command is running, the prompt is hidden; completed commands are echoed inline above their output; pressing **Enter** on a blank line inserts a fresh prompt line; **Ctrl+C** opens kill confirmation when running, or drops to a new prompt line when idle
-- **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
+- **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `keys` shows current and planned keyboard shortcuts, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` render as a terminal-style list aligned to the command start (not a textbox dropdown), with smart above/below placement to avoid pushing the prompt when space is tight. Use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
@@ -518,6 +518,58 @@ The file is fetched once on page load. To update suggestions, edit `conf/auto_co
 
 ---
 
+## Keyboard Shortcuts
+
+Current keyboard behavior:
+
+- `Enter` on a blank prompt adds a fresh prompt line without calling `/run`
+- `Ctrl+C` opens kill confirmation while a command is running, or drops to a fresh prompt line when idle
+- During welcome, printable typing plus `Enter` and `Escape` immediately settle the animation into the live prompt
+- In autocomplete, `Up` / `Down` navigate, `Tab` accepts, `Enter` accepts-or-runs, and `Escape` dismisses
+- With a blank prompt, `Up` / `Down` cycles through recent command history, including history hydrated from the server on first load
+- `Option+T` (`Alt+T`) opens a new tab
+- `Option+W` (`Alt+W`) closes the current tab
+- `Option+Left` / `Option+Right` (`Alt+Left` / `Alt+Right`) cycle between tabs
+- `Option+1` through `Option+9` (`Alt+1` ... `Alt+9`) jump directly to tabs 1 through 9
+- `Option+P` (`Alt+P`) creates a permalink for the active tab
+- `Option+Shift+C` (`Alt+Shift+C`) copies active-tab output
+- `Ctrl+L` clears the active tab
+- In the kill dialog, `Enter` confirms and `Escape` cancels
+- `Ctrl+W` deletes one word to the left
+- `Ctrl+U` deletes from the cursor to the start of the line
+- `Ctrl+K` deletes from the cursor to the end of the line
+- `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) move backward / forward by word
+
+On macOS, `Option` is the key used for the app-safe `Alt` shortcuts above. The `Ctrl+...` bindings are intentional shell-style controls and are separate from browser `Command` shortcuts.
+
+Planned shortcut rollout for the shell-style UI:
+
+| Shortcut | Planned action | Notes |
+|----------|----------------|-------|
+| `Option+T` (`Alt+T`) | New tab | Preferred app-safe binding |
+| `Option+W` (`Alt+W`) | Close current tab | Avoids fighting browser `Ctrl/Cmd+W` |
+| `Option+ArrowRight` (`Alt+ArrowRight`) | Next tab | |
+| `Option+ArrowLeft` (`Alt+ArrowLeft`) | Previous tab | |
+| `Option+1` ... `Option+9` (`Alt+1` ... `Alt+9`) | Jump to tab 1 ... 9 | |
+| `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
+| `Option+P` (`Alt+P`) | Create permalink for active tab | |
+| `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
+| `Ctrl+L` | Clear current tab output | Shell-style convenience |
+| `Ctrl+U` | Delete from cursor to start of line | Planned readline-style editing |
+| `Ctrl+K` | Delete from cursor to end of line | Planned readline-style editing |
+| `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Planned readline-style editing |
+
+Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
+
+Longer-term plan:
+
+- add a dedicated helper command for shortcut discovery, likely `keys`
+- add a user options surface so shortcuts and terminal display preferences can be documented and configured together
+
+The same shortcut reference is also available in-terminal via `keys`.
+
+---
+
 ## Tool Notes
 
 ### mtr
@@ -783,7 +835,7 @@ python3 -m pytest tests/py/ -v
 
 Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
 
-Current totals in this branch: **440 pytest + 133 Vitest + 79 Playwright = 652 tests**.
+Current totals in this branch: **444 pytest + 167 Vitest + 83 Playwright = 694 tests**.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -796,7 +848,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 **Testing notes**
 - Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
 - Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename and reorder behavior, output actions, history clipboard failure, and the boot/stall resilience cases.
+- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, history clipboard failure, and the boot/stall resilience cases.
 - The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
 - For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
 
@@ -806,7 +858,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 npm run test:e2e
 ```
 
-Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
 

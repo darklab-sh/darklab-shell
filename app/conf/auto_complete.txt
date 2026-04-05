@@ -16,6 +16,7 @@ help
 history
 hostname
 id
+keys
 last
 limits
 ls
@@ -56,6 +57,7 @@ man host
 man hostname
 man hping3
 man id
+man keys
 man last
 man limits
 man ls

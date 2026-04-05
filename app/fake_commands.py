@@ -30,13 +30,39 @@ from database import db_connect
 
 README_URL = "https://gitlab.com/darklab.sh/shell.darklab.sh"
 _STARTED_AT = datetime.now(timezone.utc)
+_CURRENT_SHORTCUTS = [
+    ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
+    ("Enter on blank prompt", "append a new empty prompt line"),
+    ("Up / Down on blank prompt", "cycle recent command history"),
+    ("Autocomplete: Up / Down", "move through suggestions"),
+    ("Autocomplete: Tab", "accept the highlighted suggestion"),
+    ("Autocomplete: Enter", "accept highlighted suggestion or run command"),
+    ("Autocomplete: Escape", "dismiss suggestions"),
+    ("Welcome: type / Enter / Escape", "settle the welcome animation immediately"),
+    ("Option+T / Alt+T", "open a new tab"),
+    ("Option+W / Alt+W", "close the current tab"),
+    ("Option+Left/Right", "switch to previous / next tab"),
+    ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
+    ("Option+P / Alt+P", "create a permalink for the active tab"),
+    ("Option+Shift+C", "copy active-tab output"),
+    ("Ctrl+L", "clear the active tab"),
+    ("Kill dialog: Enter / Escape", "confirm / cancel kill"),
+    ("Ctrl+W", "delete one word to the left"),
+    ("Ctrl+U", "delete to the beginning of the line"),
+    ("Ctrl+K", "delete to the end of the line"),
+    ("Option+B/F or Alt+B/F", "move backward / forward by word"),
+]
+_PLANNED_SHORTCUTS = [
+    ("User options modal", "persist shortcut and terminal display preferences"),
+    ("Browser-native fallbacks", "evaluate Ctrl/Cmd+T, Ctrl/Cmd+W, and Ctrl+Tab where reliable"),
+]
 _SPECIAL_FAKE_COMMANDS = {
     "rm -fr /": "rm_root",
     "rm -rf /": "rm_root",
 }
 _FAKE_COMMANDS = {
     "banner", "clear", "date", "env", "help", "history", "hostname",
-    "id", "last", "limits", "ls", "man", "ps", "pwd", "retention",
+    "id", "keys", "last", "limits", "ls", "man", "ps", "pwd", "retention",
     "status", "sudo", "type", "uname", "uptime", "which", "who", "whoami",
     "groups", "tty", "version", "faq",
     "fortune", "reboot",
@@ -54,6 +80,7 @@ _FAKE_COMMAND_HELP = [
     ("history", "Show recent commands from this session."),
     ("hostname", "Show the instance hostname/app name."),
     ("id", "Show a web shell app identity."),
+    ("keys", "Show current and planned keyboard shortcuts."),
     ("last", "Show recent completed runs with timestamps and exit codes."),
     ("limits", "Show configured runtime and retention limits."),
     ("ls", "List the current allowed command catalog."),
@@ -112,6 +139,8 @@ def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, 
         return _run_fake_hostname(), 0
     if root == "id":
         return _run_fake_id(), 0
+    if root == "keys":
+        return _run_fake_keys(), 0
     if root == "last":
         return _run_fake_last(session_id), 0
     if root == "limits":
@@ -226,6 +255,20 @@ def _run_fake_help() -> list[dict[str, str]]:
     lines = ["Web shell helpers:"]
     for name, description in _FAKE_COMMAND_HELP:
         lines.append(f"  {name:<10} {description}")
+    return _text_lines(lines)
+
+
+def _run_fake_keys() -> list[dict[str, str]]:
+    lines = ["Current shortcuts:"]
+    for name, description in _CURRENT_SHORTCUTS:
+        lines.append(f"  {name:<26} {description}")
+    if _PLANNED_SHORTCUTS:
+        lines.append("")
+        lines.append("Planned shortcuts:")
+        for name, description in _PLANNED_SHORTCUTS:
+            lines.append(f"  {name:<26} {description}")
+    lines.append("")
+    lines.append("Note: on macOS, use Option for app-safe tab shortcuts; browser Command shortcuts remain environment-dependent.")
     return _text_lines(lines)
 
 

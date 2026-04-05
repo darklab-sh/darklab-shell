@@ -12,6 +12,14 @@ async function loadAppFns({
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
   runCommand: runCommandOverride = vi.fn(),
+  createTab: createTabOverride = vi.fn(() => 'tab-1'),
+  closeTab: closeTabOverride = vi.fn(),
+  activateTab: activateTabOverride = vi.fn(),
+  permalinkTab: permalinkTabOverride = vi.fn(),
+  copyTab: copyTabOverride = vi.fn(),
+  clearTab: clearTabOverride = vi.fn(),
+  cancelWelcome: cancelWelcomeOverride = vi.fn(),
+  activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
@@ -130,7 +138,7 @@ async function loadAppFns({
     getOutput: () => document.getElementById('history-list'),
     renderMotd: (text) => text,
     updateNewTabBtn: () => {},
-    createTab: () => 'tab-1',
+    createTab: createTabOverride,
     runWelcome: () => {},
     closeFaq: () => {},
     openFaq: () => {},
@@ -163,8 +171,14 @@ async function loadAppFns({
     navigateCmdHistory: () => false,
     logClientError,
     tabs: tabsOverride,
-    activeTabId: 'tab-1',
+    activeTabId,
     confirmKill: confirmKillOverride,
+    closeTab: closeTabOverride,
+    activateTab: activateTabOverride,
+    permalinkTab: permalinkTabOverride,
+    copyTab: copyTabOverride,
+    clearTab: clearTabOverride,
+    cancelWelcome: cancelWelcomeOverride,
     interruptPromptLine: interruptPromptLineOverride,
     _welcomeActive: welcomeActive,
     welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -202,6 +216,13 @@ async function loadAppFns({
     cmdInput,
     requestWelcomeSettle: requestWelcomeSettleOverride,
     confirmKill: confirmKillOverride,
+    createTab: createTabOverride,
+    closeTab: closeTabOverride,
+    activateTab: activateTabOverride,
+    permalinkTab: permalinkTabOverride,
+    copyTab: copyTabOverride,
+    clearTab: clearTabOverride,
+    cancelWelcome: cancelWelcomeOverride,
     interruptPromptLine: interruptPromptLineOverride,
     runCommand: runCommandOverride,
     logClientError,
@@ -517,6 +538,70 @@ describe('app helpers', () => {
     expect(cmdInput.value).toBe('dig darklab.sh ')
   })
 
+  it('supports ctrl+u to delete to the beginning of the line', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig darklab.sh A'
+    cmdInput.setSelectionRange(12, 12)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.value).toBe('sh A')
+    expect(cmdInput.selectionStart).toBe(0)
+    expect(cmdInput.selectionEnd).toBe(0)
+  })
+
+  it('supports ctrl+k to delete to the end of the line', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig darklab.sh A'
+    cmdInput.setSelectionRange(4, 4)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.value).toBe('dig ')
+    expect(cmdInput.selectionStart).toBe(4)
+    expect(cmdInput.selectionEnd).toBe(4)
+  })
+
+  it('supports Alt+B and Alt+F to move by word', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig darklab.sh A'
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(15)
+    expect(cmdInput.selectionEnd).toBe(15)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(4)
+    expect(cmdInput.selectionEnd).toBe(4)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'f', altKey: true, bubbles: true }))
+    expect(cmdInput.selectionStart).toBe(14)
+    expect(cmdInput.selectionEnd).toBe(14)
+  })
+
+  it('supports macOS Option+B and Option+F word movement via physical key codes', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig darklab.sh A'
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: '∫',
+      code: 'KeyB',
+      altKey: true,
+      bubbles: true,
+    }))
+    expect(cmdInput.selectionStart).toBe(15)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'ƒ',
+      code: 'KeyF',
+      altKey: true,
+      bubbles: true,
+    }))
+    expect(cmdInput.selectionStart).toBe(16)
+  })
+
   it('uses Ctrl+C to open kill confirm when active tab is running', async () => {
     const confirmKill = vi.fn()
     const { cmdInput, interruptPromptLine } = await loadAppFns({
@@ -541,6 +626,253 @@ describe('app helpers', () => {
 
     expect(interruptPromptLine).toHaveBeenCalledWith('tab-1')
     expect(confirmKill).not.toHaveBeenCalled()
+  })
+
+  it('supports Alt+T to create a new tab from the terminal prompt', async () => {
+    const createTab = vi.fn(() => 'tab-2')
+    const { cmdInput } = await loadAppFns({
+      createTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+    createTab.mockClear()
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
+
+    expect(createTab).toHaveBeenCalledWith('tab 2')
+  })
+
+  it('supports macOS Option+T to create a new tab via physical key code', async () => {
+    const createTab = vi.fn(() => 'tab-2')
+    const { cmdInput } = await loadAppFns({
+      createTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+    createTab.mockClear()
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: '†',
+      code: 'KeyT',
+      altKey: true,
+      bubbles: true,
+    }))
+
+    expect(createTab).toHaveBeenCalledWith('tab 2')
+  })
+
+  it('supports Alt+W to close the active tab', async () => {
+    const closeTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      closeTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', altKey: true, bubbles: true }))
+
+    expect(closeTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports macOS Option+W to close the active tab via physical key code', async () => {
+    const closeTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      closeTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: '∑',
+      code: 'KeyW',
+      altKey: true,
+      bubbles: true,
+    }))
+
+    expect(closeTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+ArrowLeft and Alt+ArrowRight to cycle between tabs', async () => {
+    const activateTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      activateTab,
+      activeTabId: 'tab-2',
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+        { id: 'tab-3', st: 'idle' },
+      ],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    expect(activateTab).toHaveBeenCalledWith('tab-3')
+
+    activateTab.mockClear()
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }))
+    expect(activateTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+digit to jump directly to a tab', async () => {
+    const activateTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      activateTab,
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+        { id: 'tab-3', st: 'idle' },
+      ],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: '3', altKey: true, bubbles: true }))
+
+    expect(activateTab).toHaveBeenCalledWith('tab-3')
+  })
+
+  it('supports macOS Option+digit tab jumps via physical key code', async () => {
+    const activateTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      activateTab,
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+        { id: 'tab-3', st: 'idle' },
+      ],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: '£',
+      code: 'Digit3',
+      altKey: true,
+      bubbles: true,
+    }))
+
+    expect(activateTab).toHaveBeenCalledWith('tab-3')
+  })
+
+  it('supports Alt+P to create a permalink for the active tab', async () => {
+    const permalinkTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      permalinkTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+
+    expect(permalinkTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports macOS Option+P to create a permalink via physical key code', async () => {
+    const permalinkTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      permalinkTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'π',
+      code: 'KeyP',
+      altKey: true,
+      bubbles: true,
+    }))
+
+    expect(permalinkTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Alt+Shift+C to copy output for the active tab', async () => {
+    const copyTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      copyTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'C',
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+    }))
+
+    expect(copyTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports macOS Option+Shift+C to copy output via physical key code', async () => {
+    const copyTab = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      copyTab,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'Ç',
+      code: 'KeyC',
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+    }))
+
+    expect(copyTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('supports Ctrl+L to clear the active tab', async () => {
+    const clearTab = vi.fn()
+    const cancelWelcome = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      clearTab,
+      cancelWelcome,
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
+
+    expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
+    expect(clearTab).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('does not apply Alt-based tab shortcuts while typing in non-terminal inputs', async () => {
+    const createTab = vi.fn(() => 'tab-2')
+    const activateTab = vi.fn()
+    await loadAppFns({
+      createTab,
+      activateTab,
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+    createTab.mockClear()
+    activateTab.mockClear()
+    const searchInput = document.getElementById('search-input')
+
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+
+    expect(createTab).not.toHaveBeenCalled()
+    expect(activateTab).not.toHaveBeenCalled()
+  })
+
+  it('does not apply action shortcuts while typing in non-terminal inputs', async () => {
+    const permalinkTab = vi.fn()
+    const copyTab = vi.fn()
+    const clearTab = vi.fn()
+    await loadAppFns({
+      permalinkTab,
+      copyTab,
+      clearTab,
+      tabs: [
+        { id: 'tab-1', st: 'idle' },
+        { id: 'tab-2', st: 'idle' },
+      ],
+    })
+    const searchInput = document.getElementById('search-input')
+
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', {
+      key: 'C',
+      altKey: true,
+      shiftKey: true,
+      bubbles: true,
+    }))
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
+
+    expect(permalinkTab).not.toHaveBeenCalled()
+    expect(copyTab).not.toHaveBeenCalled()
+    expect(clearTab).not.toHaveBeenCalled()
   })
 
   it('moves autocomplete selection in visual screen order when the list is above the prompt', async () => {
@@ -609,6 +941,24 @@ describe('app helpers', () => {
     killOverlay2.style.display = 'flex'
     killOverlay2.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(killOverlay2.style.display).toBe('none')
+  })
+
+  it('supports Enter and Escape in the kill confirmation modal', async () => {
+    const doKill = vi.fn()
+    const { cmdInput } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
+    const killOverlay = document.getElementById('kill-overlay')
+
+    killOverlay.style.display = 'flex'
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    expect(doKill).toHaveBeenCalledWith('tab-1')
+    expect(killOverlay.style.display).toBe('none')
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    killOverlay.style.display = 'flex'
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    expect(killOverlay.style.display).toBe('none')
+    expect(cmdInput.focus).toHaveBeenCalled()
   })
 
   it('wires search controls and Escape dismissal correctly', async () => {

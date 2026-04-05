@@ -221,6 +221,26 @@
       </div>
 
       <div class="faq-item">
+        <div class="faq-q">Are there keyboard shortcuts?</div>
+        <div class="faq-a">
+          Yes. Current shell-style shortcuts include:<br><br>
+          <strong>Ctrl+C</strong> — open kill confirmation while a command is running, or drop to a fresh prompt line when idle.<br>
+          <strong>Enter</strong> on a blank prompt — create a new empty prompt line.<br>
+          <strong>Option+T</strong> / <strong>Option+W</strong> (<strong>Alt+T</strong> / <strong>Alt+W</strong>) — open or close the current tab.<br>
+          <strong>Option+←/→</strong> and <strong>Option+1...9</strong> (<strong>Alt+←/→</strong>, <strong>Alt+1...9</strong>) — switch tabs.<br>
+          <strong>Option+P</strong> (<strong>Alt+P</strong>) — create a permalink for the active tab.<br>
+          <strong>Option+Shift+C</strong> (<strong>Alt+Shift+C</strong>) — copy the active tab output.<br>
+          <strong>Ctrl+L</strong> — clear the active tab.<br>
+          <strong>Kill dialog:</strong> <strong>Enter</strong> confirms and <strong>Escape</strong> cancels.<br>
+          <strong>Ctrl+W</strong>, <strong>Ctrl+U</strong>, <strong>Ctrl+K</strong>, <strong>Option+B</strong>, and <strong>Option+F</strong> (<strong>Alt+B</strong>, <strong>Alt+F</strong>) provide readline-style prompt editing.<br>
+          <strong>Welcome screen:</strong> printable typing, <strong>Enter</strong>, and <strong>Escape</strong> all settle the welcome animation immediately.<br>
+          <strong>Autocomplete:</strong> <strong>↑↓</strong> navigate, <strong>Tab</strong> accepts, <strong>Enter</strong> accepts or runs, and <strong>Escape</strong> dismisses.<br><br>
+          On macOS, the app-safe tab/action shortcuts use the <strong>Option</strong> key. The <strong>Ctrl+...</strong> bindings are intentional shell-style controls, not replacements for browser <strong>Command</strong> shortcuts.<br><br>
+          You can also run <code>keys</code> in the terminal for the current shortcut reference and planned follow-up items.
+        </div>
+      </div>
+
+      <div class="faq-item">
         <div class="faq-q">Are my commands visible to other users?</div>
         <div class="faq-a">No. Each browser session is assigned an anonymous ID stored in your browser's local storage. Your run history, starred commands, and saved snapshots are only visible to sessions sharing that ID — in practice, just your own browser tabs. Commands are not broadcast or shared between users.</div>
       </div>

@@ -282,6 +282,7 @@ class TestRunStreaming:
         assert "help       Show web shell helpers available in this app.\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
         assert "hostname   Show the instance hostname/app name.\\n" in body
+        assert "keys       Show current and planned keyboard shortcuts.\\n" in body
         assert "limits     Show configured runtime and retention limits.\\n" in body
         assert "man <cmd>  Show the real man page for an allowed command.\\n" in body
         assert "last       Show recent completed runs with timestamps and exit codes.\\n" in body
@@ -294,6 +295,21 @@ class TestRunStreaming:
         assert "version    Show web shell, app, Flask, and Python version details.\\n" in body
         assert "which <cmd> Locate a web helper or real command.\\n" in body
         assert "who        Show the current web shell user/session.\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_keys_lists_current_and_planned_shortcuts(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "keys"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Current shortcuts:\\n" in body
+        assert "Alt+T" in body
+        assert "Option+Shift+C" in body
+        assert "Ctrl+U" in body
+        assert "Planned shortcuts:\\n" in body
+        assert "browser Command shortcuts remain environment-dependent" in body
         assert '"type": "exit"' in body
 
     def test_fake_banner_renders_ascii_art(self):
@@ -560,6 +576,16 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Web shell helpers:\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
+
+    def test_fake_man_for_keys_topic_returns_web_shell_help(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "man keys"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Web shell helpers:\\n" in body
+        assert "keys       Show current and planned keyboard shortcuts.\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_history_lists_recent_session_commands(self):

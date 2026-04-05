@@ -346,10 +346,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 440
-- `vitest`: 133
-- `playwright`: 79
-- total: 652
+- `pytest`: 444
+- `vitest`: 167
+- `playwright`: 83
+- total: 694
 
 ### Python tests
 
@@ -402,6 +402,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `output.spec.js` — copy/clear/export actions, no-output toasts, and download fidelity
 - `rate-limit.spec.js` — per-session rate limiting
 - `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
+- `shortcuts.spec.js` — macOS-style Option shortcut handling for tabs, copy, and prompt word motion
 - `share.spec.js` — snapshot permalinks plus single-run history permalinks and JSON/HTML views
 - `tabs.spec.js` — max-tabs, rename, drag reorder, neutral-input tab switching, blank-prompt Enter behavior, and last-tab reset behavior
 - `timestamps.spec.js` — timestamp mode cycling, output metadata, line-number compatibility, and post-toggle typing flow
@@ -420,7 +421,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 ### Testing Strategy
 - The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. The file-by-file breakdown and maintenance notes live in [tests/README.md](tests/README.md).
 - Vitest explicitly exercises `session.js`, `autocomplete.js`, and the new `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
-- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, tab rename persistence, and single-run permalink JSON/HTML exports.
+- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, macOS-style Option shortcut handling, tab rename persistence, and single-run permalink JSON/HTML exports.
 
 Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
 

@@ -29,7 +29,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 #### Remaining
 - improve inline selection visibility for advanced keyboard flows
 - consider adding additional readline-like shortcuts (`Ctrl+W` done; evaluate `Ctrl+U`, `Ctrl+K`, `Alt+B/F`)
-- add keyboard shortcuts helper command plus FAQ entry
+- keep the `keys` helper command, FAQ entry, and README shortcut section aligned as bindings ship
 - add a user options modal for timestamps, line numbers, and other preferences with cookie persistence
 - add phase 2 for tab drag reorder: mobile touch-and-drag behavior
 - research permalink output presentation for line numbers/timestamps when they were enabled at save time
@@ -38,6 +38,32 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 #### Risks
 - keyboard/focus edge cases around hidden input + rendered caret
 - mobile virtual keyboard behavior differences by browser
+
+#### Keyboard Shortcut Rollout Spec
+- keep browser-conflicting bindings optional; define app-safe shortcuts as the primary contract
+
+Planned tab bindings:
+- `Alt+T` new tab
+- `Alt+W` close current tab
+- `Alt+ArrowRight` / `Alt+ArrowLeft` next / previous tab
+- `Alt+1` ... `Alt+9` direct tab jump
+
+Planned action bindings:
+- `Enter` / `Escape` confirm / cancel kill dialog
+- `Alt+P` create permalink
+- `Alt+Shift+C` copy active-tab output
+- `Ctrl+L` clear current tab output
+
+Planned readline-style editing:
+- `Ctrl+U` kill to beginning of line
+- `Ctrl+K` kill to end of line
+- `Alt+B` / `Alt+F` move backward / forward by word
+
+Helper-command plan:
+- `keys` is now the dedicated shortcut-discovery helper command
+- keep `keys` printing a `Current shortcuts:` section for shipped behavior
+- keep `keys` printing a `Planned shortcuts:` section while rollout is incomplete
+- keep the note that browser-native combos like `Ctrl/Cmd+T` and `Ctrl/Cmd+W` remain environment-dependent fallbacks
 
 ---
 

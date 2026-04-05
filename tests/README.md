@@ -16,10 +16,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 440
-- `vitest`: 133
-- `playwright`: 79
-- total: 652
+- `pytest`: 444
+- `vitest`: 167
+- `playwright`: 83
+- total: 694
 
 ## Running The Suites
 
@@ -94,6 +94,7 @@ Spec files:
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
+- `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings and prompt word-motion behavior
 - `share.spec.js` - snapshot permalinks, canonical single-run permalinks, and clipboard failure handling
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, and closing behavior
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
