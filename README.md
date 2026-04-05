@@ -98,7 +98,6 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
     ├── permalinks.py           # HTML rendering for /history/<id> and /share/<id> pages
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
-    ├── index.html              # Frontend HTML shell (served by Flask)
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customise the instance
     │   ├── config.yaml         # Application configuration (see Configuration section)
@@ -108,6 +107,8 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
     │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
+    ├── templates/
+    │   └── index.html          # Frontend HTML shell rendered by Flask
     ├── requirements.txt        # Python runtime dependencies
     └── static/
         ├── css/
@@ -238,7 +239,7 @@ Open [http://localhost:8888](http://localhost:8888). Note that without Docker, t
 
 ### First-Time Clone Setup
 
-After cloning, run the following once to activate the pre-commit hook (flake8, pytest, pip-audit, vitest):
+After cloning, run the following once to activate the pre-commit hook (flake8, bandit, pytest, pip-audit, vitest):
 
 ```bash
 git config core.hooksPath .githooks
@@ -802,10 +803,10 @@ For the canonical suite breakdown and maintenance notes, see [tests/README.md](t
 
 ```bash
 # Style and syntax
-flake8 app/app.py tests/py/
+flake8 app/ tests/py/
 
-# Security scan (medium severity and above)
-bandit -r app/app.py -ll -q
+# Security scan
+bandit -r app/ -ll -q
 
 # Dependency vulnerability audit
 pip-audit -r app/requirements.txt -r requirements-dev.txt

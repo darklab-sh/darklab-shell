@@ -107,11 +107,11 @@ def delete_run_artifacts(conn, run_ids):
 
     placeholders = ",".join("?" for _ in ids)
     rows = conn.execute(
-        f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",
+        f"SELECT rel_path FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
         ids,
     ).fetchall()
     conn.execute(
-        f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",
+        f"DELETE FROM run_output_artifacts WHERE run_id IN ({placeholders})",  # nosec B608
         ids,
     )
     for row in rows:

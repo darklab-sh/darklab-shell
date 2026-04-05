@@ -101,7 +101,7 @@ class TestKillRoute:
         data = json.loads(resp.data)
         assert data["killed"] is True
         run_cmd.assert_called_once_with(
-            ["sudo", "-u", "scanner", "kill", "-TERM", "-5678"],
+            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-5678"],
             timeout=5,
         )
         killpg.assert_not_called()

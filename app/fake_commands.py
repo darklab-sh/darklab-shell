@@ -8,12 +8,13 @@ from __future__ import annotations
 from datetime import datetime
 import os
 import re
-import subprocess
+import subprocess  # nosec B404
 
 from commands import (
     command_root,
     load_allowed_commands,
     load_allowed_commands_grouped,
+    resolve_runtime_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
     split_command_argv,
@@ -187,6 +188,9 @@ def _run_fake_man(command: str) -> list[dict[str, str]]:
     missing_man = runtime_missing_command_name("man")
     if missing_man:
         return [{"type": "output", "text": runtime_missing_command_message(missing_man)}]
+    man_bin = resolve_runtime_command("man")
+    if not man_bin:
+        return [{"type": "output", "text": runtime_missing_command_message("man")}]
 
     missing_topic = runtime_missing_command_name(topic)
     if missing_topic:
@@ -194,13 +198,13 @@ def _run_fake_man(command: str) -> list[dict[str, str]]:
 
     try:
         proc = subprocess.run(
-            ["man", "-P", "cat", topic],
+            [man_bin, "-P", "cat", topic],
             capture_output=True,
             text=True,
             env={**os.environ, "MANPAGER": "cat", "PAGER": "cat", "MANWIDTH": "100"},
             timeout=8,
             check=False,
-        )
+        )  # nosec B603
     except Exception as exc:
         return [{"type": "output", "text": f"Failed to render man page for {topic}: {exc}"}]
 

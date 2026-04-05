@@ -5,10 +5,11 @@ Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
-from flask import Flask, Response, request, jsonify, send_file
+from flask import Flask, Response, request, jsonify, send_file, render_template
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
-import subprocess
+import shutil
+import subprocess  # nosec B404
 import json
 import os
 import re
@@ -40,8 +41,11 @@ from fake_commands import resolve_fake_command, execute_fake_command
 from run_output_store import RunOutputCapture, load_full_output_lines
 
 APP_VERSION = "1.2"
+SHELL_BIN = shutil.which("sh") or "/bin/sh"
+SUDO_BIN = shutil.which("sudo") or "/usr/bin/sudo"
+KILL_BIN = shutil.which("kill") or "/bin/kill"
 
-app = Flask(__name__)
+app = Flask(__name__, template_folder="templates")
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
@@ -98,9 +102,6 @@ def _log_response(response):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
-
-HTML = open(os.path.join(os.path.dirname(__file__), "index.html")).read()
-
 
 def get_session_id():
     """Extract the anonymous session ID from the X-Session-ID request header."""
@@ -251,7 +252,7 @@ def favicon():
 @app.route("/")
 def index():
     log.info("PAGE_LOAD", extra={"ip": get_client_ip()})
-    return HTML
+    return render_template("index.html")
 
 
 @app.route("/config")
@@ -541,7 +542,7 @@ def run_command():
     # is registered before any kill request could arrive
     try:
         proc = subprocess.Popen(
-            SCANNER_PREFIX + ["sh", "-c", command] if SCANNER_PREFIX else ["sh", "-c", command],
+            SCANNER_PREFIX + [SHELL_BIN, "-c", command] if SCANNER_PREFIX else [SHELL_BIN, "-c", command],
             shell=False,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
@@ -549,7 +550,7 @@ def run_command():
             bufsize=1,
             universal_newlines=True,
             preexec_fn=os.setsid,
-        )
+        )  # nosec B603
     except Exception as e:
         log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
             "ip": client_ip, "session": session_id, "cmd": original_command,
@@ -577,7 +578,8 @@ def run_command():
                 capture.add_line(f"[notice] {notice}")
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
-            assert proc.stdout is not None  # guaranteed by stdout=PIPE in Popen
+            if proc.stdout is None:
+                raise RuntimeError("Process stdout pipe was not created")
             run_started_dt = datetime.fromisoformat(run_started)
             while True:
                 # Check timeout at the top of every iteration so it fires even
@@ -589,9 +591,9 @@ def run_command():
                             pgid = os.getpgid(proc.pid)
                             if SCANNER_PREFIX:
                                 subprocess.run(
-                                    ["sudo", "-u", "scanner", "kill", "-TERM", f"-{pgid}"],
+                                    [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
                                     timeout=5
-                                )
+                                )  # nosec B603
                             else:
                                 os.killpg(pgid, signal.SIGTERM)
                         except (ProcessLookupError, OSError):
@@ -675,9 +677,9 @@ def kill_command():
             # Processes run as scanner — appuser can't signal them directly.
             # Use sudo kill to send SIGTERM to the entire process group.
             subprocess.run(
-                ["sudo", "-u", "scanner", "kill", "-TERM", f"-{pgid}"],
+                [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
                 timeout=5
-            )
+            )  # nosec B603
         else:
             # Local dev — same user, can kill directly
             os.killpg(pgid, signal.SIGTERM)

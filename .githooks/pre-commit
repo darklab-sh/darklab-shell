@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Pre-commit checks: flake8, pytest, pip-audit
+# Pre-commit checks: flake8, bandit, pytest, pip-audit
 # Install once with: git config core.hooksPath .githooks
 
 set -uo pipefail
@@ -33,6 +33,7 @@ run_check() {
 }
 
 run_check "flake8"    "$PYTHON" -m flake8 app/ tests/py/
+run_check "bandit"    "$PYTHON" -m bandit -r app/ -ll -q
 run_check "pytest"    "$PYTHON" -m pytest tests/py/ -q --tb=short
 run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt
 
