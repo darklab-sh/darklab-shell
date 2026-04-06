@@ -54,9 +54,11 @@ test.describe('timestamp toggle', () => {
 
     await page.locator('#ts-btn').click()
     await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
+    await expect(page.locator('#cmd')).toBeFocused()
+    await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
 
-    await page.keyboard.type(CMD)
-    await page.keyboard.press('Enter')
+    await page.locator('#cmd').fill(CMD)
+    await page.locator('#cmd').press('Enter')
 
     await expect(page.locator('#status')).toHaveText('EXIT 0')
 

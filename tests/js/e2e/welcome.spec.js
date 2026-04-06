@@ -205,14 +205,18 @@ test.describe('welcome animation', () => {
     await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
   })
 
-  test('mobile view switches to the compact welcome path', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.reload()
-    await page.locator('#cmd').waitFor()
+  test.describe('mobile view', () => {
+    test.use({ hasTouch: true })
 
-    await expect(page.locator('.welcome-banner')).toHaveCount(0)
-    await expect(page.locator('.tab-panel.active .output')).toContainText('Ready. Type a command or tap Run. Tab autocompletes.')
-    await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
-    await expect(page.locator('#mobile-run-btn')).toBeVisible()
+    test('switches to the compact welcome path', async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.reload()
+      await page.locator('#cmd').waitFor()
+
+      await expect(page.locator('.welcome-banner')).toHaveCount(0)
+      await expect(page.locator('.tab-panel.active .output')).toContainText('Ready. Type a command or tap Run. Tab autocompletes.')
+      await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
+      await expect(page.locator('#mobile-run-btn')).toBeVisible()
+    })
   })
 })

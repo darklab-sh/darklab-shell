@@ -1105,7 +1105,6 @@ cmdInput.addEventListener('input', () => {
   else resetCmdHistoryNav();
   const val = cmdInput.value;
   if (val.length > 0 && typeof requestWelcomeSettle === 'function') {
-    if (typeof mountShellPrompt === 'function') mountShellPrompt(activeTabId, true);
     requestWelcomeSettle(activeTabId);
   }
   if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
