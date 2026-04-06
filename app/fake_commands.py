@@ -49,7 +49,9 @@ _CURRENT_SHORTCUTS = [
     ("Kill dialog: Enter / Escape", "confirm / cancel kill"),
     ("Ctrl+W", "delete one word to the left"),
     ("Ctrl+U", "delete to the beginning of the line"),
+    ("Ctrl+A", "move to the beginning of the line"),
     ("Ctrl+K", "delete to the end of the line"),
+    ("Ctrl+E", "move to the end of the line"),
     ("Option+B/F or Alt+B/F", "move backward / forward by word"),
 ]
 _PLANNED_SHORTCUTS = [

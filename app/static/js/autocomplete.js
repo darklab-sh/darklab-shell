@@ -7,19 +7,74 @@ let acSuppressInputOnce = false;
 function _positionAutocomplete(itemsCount) {
   if (!acDropdown) return false;
   const wrap = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) || acDropdown.parentElement;
+  const composerHost = (typeof mobileComposerHost !== 'undefined' && mobileComposerHost) || null;
+  const composerRow = (typeof mobileComposerRow !== 'undefined' && mobileComposerRow) || null;
   const prefix = wrap && wrap.querySelector ? wrap.querySelector('.prompt-prefix') : null;
-  const prefixOffset = prefix ? Math.max(0, Math.ceil(prefix.getBoundingClientRect().width) + 8) : 0;
-  const wrapRect = wrap && typeof wrap.getBoundingClientRect === 'function' ? wrap.getBoundingClientRect() : null;
+  const mobileTerminalMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  // Simple CSS mobile mode: #mobile-cmd is visible (≤600px layout, no mobile-terminal-mode)
+  const _mobileCmdEl = !mobileTerminalMode ? document.getElementById('mobile-cmd') : null;
+  const simpleMobileMode = !mobileTerminalMode && !!_mobileCmdEl && !!_mobileCmdEl.offsetParent;
+  const mobileComposerMode = mobileTerminalMode || simpleMobileMode;
+  const anchor = mobileTerminalMode && composerRow ? composerRow : (mobileTerminalMode && composerHost ? composerHost : wrap);
+  acDropdown.classList.toggle('ac-mobile', mobileTerminalMode);
+  if (mobileTerminalMode) {
+    const rect = anchor && typeof anchor.getBoundingClientRect === 'function'
+      ? anchor.getBoundingClientRect()
+      : { top: 0 };
+    const rowH = 22;
+    const desired = Math.min(10, Math.max(1, itemsCount)) * rowH + 10;
+    const targetHeight = Math.max(88, Math.min(260, desired));
+    const available = Math.max(0, rect.top - 12);
+    const maxHeight = Math.max(0, Math.min(200, available));
+    acDropdown.style.position = 'absolute';
+    acDropdown.style.left = '0';
+    acDropdown.style.right = '0';
+    acDropdown.style.width = '100%';
+    acDropdown.style.minWidth = '0';
+    acDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    acDropdown.style.top = 'auto';
+    acDropdown.style.bottom = 'calc(100% + 4px)';
+    acDropdown.classList.add('ac-up');
+    return true;
+  }
+  if (simpleMobileMode) {
+    // Position fixed above #mobile-composer-row (acDropdown lives inside terminal-wrap
+    // which has overflow:hidden, so absolute won't work — fixed escapes it)
+    const simpleAnchor = document.getElementById('mobile-composer-row');
+    const rect = simpleAnchor && typeof simpleAnchor.getBoundingClientRect === 'function'
+      ? simpleAnchor.getBoundingClientRect()
+      : { top: window.innerHeight / 2, left: 0, right: window.innerWidth };
+    const rowH = 22;
+    const desired = Math.min(10, Math.max(1, itemsCount)) * rowH + 10;
+    const targetHeight = Math.max(88, Math.min(260, desired));
+    const available = Math.max(0, rect.top - 12);
+    const maxHeight = Math.max(0, Math.min(220, available));
+    acDropdown.classList.remove('ac-mobile');
+    acDropdown.classList.add('ac-up');
+    acDropdown.style.position = 'fixed';
+    acDropdown.style.left = `${Math.round(rect.left)}px`;
+    acDropdown.style.right = '0';
+    acDropdown.style.width = 'auto';
+    acDropdown.style.minWidth = '0';
+    acDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    acDropdown.style.top = 'auto';
+    acDropdown.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
+    return true;
+  }
+  acDropdown.classList.remove('ac-mobile');
+  const prefixOffset = mobileComposerMode ? 0 : (prefix ? Math.max(0, Math.ceil(prefix.getBoundingClientRect().width) + 8) : 0);
+  const wrapRect = anchor && typeof anchor.getBoundingClientRect === 'function' ? anchor.getBoundingClientRect() : null;
   acDropdown.style.position = 'fixed';
   acDropdown.style.left = `${Math.max(0, Math.round((wrapRect ? wrapRect.left : 0) + prefixOffset))}px`;
   acDropdown.style.right = 'auto';
-  acDropdown.style.minWidth = '24ch';
+  acDropdown.style.minWidth = mobileComposerMode ? '0' : '24ch';
+  acDropdown.style.width = mobileComposerMode && wrapRect ? `${Math.max(220, Math.round(wrapRect.width || 0))}px` : '';
 
-  if (!wrap || typeof wrap.getBoundingClientRect !== 'function') {
+  if (!anchor || typeof anchor.getBoundingClientRect !== 'function') {
     acDropdown.classList.remove('ac-up');
     return false;
   }
-  const rect = wrap.getBoundingClientRect();
+  const rect = anchor.getBoundingClientRect();
   const rowH = 22;
   const desired = Math.min(10, Math.max(1, itemsCount)) * rowH + 10;
   const targetHeight = Math.max(88, Math.min(260, desired));
@@ -28,14 +83,15 @@ function _positionAutocomplete(itemsCount) {
   const safetyPad = 20;
   const canFitBelow = spaceBelow >= (targetHeight + safetyPad);
   const canFitAbove = spaceAbove >= (targetHeight + safetyPad);
-  const showAbove = !canFitBelow && (canFitAbove || spaceAbove > spaceBelow);
+  const showAbove = mobileComposerMode || (!canFitBelow && (canFitAbove || spaceAbove > spaceBelow));
   acDropdown.classList.toggle('ac-up', showAbove);
   const available = showAbove ? spaceAbove : spaceBelow;
-  const edgeBuffer = showAbove ? 20 : 30;
-  const maxHeight = Math.max(0, Math.min(260, available > edgeBuffer ? available - edgeBuffer : available));
+  const edgeBuffer = mobileComposerMode ? 12 : (showAbove ? 20 : 30);
+  const maxHeight = Math.max(0, Math.min(mobileComposerMode ? 200 : 260, available > edgeBuffer ? available - edgeBuffer : available));
+  const visibleHeight = Math.max(0, Math.min(targetHeight, maxHeight || targetHeight));
   acDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
   acDropdown.style.top = showAbove
-    ? `${Math.max(8, Math.round(rect.top - maxHeight - 2))}px`
+    ? `${Math.max(8, Math.round(rect.top - visibleHeight - 2))}px`
     : `${Math.max(8, Math.round(rect.bottom + 2))}px`;
   acDropdown.style.bottom = 'auto';
   return showAbove;
@@ -98,6 +154,7 @@ function acShow(items) {
     acDropdown.appendChild(div);
   });
   acDropdown.style.display = 'block';
+  _positionAutocomplete(items.length);
   _scrollAutocompleteActiveItem(pinToBottom);
 }
 
@@ -108,8 +165,17 @@ function acHide() {
 
 function acAccept(s) {
   cmdInput.value = s;
+  // In simple CSS mobile mode, sync the accepted value back to the visible input
+  const _mobileCmdEl = document.getElementById('mobile-cmd');
+  const isSimpleMobile = _mobileCmdEl && _mobileCmdEl.offsetParent !== null
+                       && !document.body.classList.contains('mobile-terminal-mode');
+  if (isSimpleMobile) _mobileCmdEl.value = s;
   acHide();
-  cmdInput.focus();
+  if (isSimpleMobile) {
+    _mobileCmdEl.focus();
+  } else {
+    cmdInput.focus();
+  }
   acSuppressInputOnce = true;
   cmdInput.dispatchEvent(new Event('input'));
 }

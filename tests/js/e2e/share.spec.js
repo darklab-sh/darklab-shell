@@ -93,4 +93,118 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toContainText('"command":"curl http://localhost:5001/health"')
     await expect(page.locator('body')).toContainText('"exit_code":0')
   })
+
+  test('fresh run permalink supports line-number and timestamp display toggles', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+    const copied = await page.evaluate(() => window.__clipboardText)
+
+    await page.goto(copied)
+
+    await expect(page.locator('#toggle-ln')).toHaveText('line numbers: off')
+    await expect(page.locator('#toggle-ts')).toHaveText('timestamps: off')
+    await expect(page.locator('#toggle-ts')).toBeEnabled()
+
+    await page.locator('#toggle-ln').click()
+    await expect(page.locator('#toggle-ln')).toHaveText('line numbers: on')
+    await expect(page.locator('.perm-prefix').first()).toContainText('1')
+
+    await page.locator('#toggle-ts').click()
+    await expect(page.locator('#toggle-ts')).toHaveText('timestamps: elapsed')
+    await expect
+      .poll(async () => page.locator('.perm-prefix').allTextContents())
+      .toContainEqual(expect.stringContaining('+'))
+  })
+
+  test('snapshot permalink supports line-number and timestamp display toggles', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    const [shareResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
+      page.locator('[data-action="permalink"]').click(),
+    ])
+    const data = await shareResp.json()
+
+    await page.goto(data.url)
+
+    await expect(page.locator('#toggle-ln')).toHaveText('line numbers: off')
+    await expect(page.locator('#toggle-ts')).toHaveText('timestamps: off')
+
+    await page.locator('#toggle-ln').click()
+    await expect(page.locator('#toggle-ln')).toHaveText('line numbers: on')
+    await expect(page.locator('.perm-prefix').first()).toContainText('1')
+
+    await page.locator('#toggle-ts').click()
+    await expect(page.locator('#toggle-ts')).toHaveText('timestamps: elapsed')
+    await expect
+      .poll(async () => page.locator('.perm-prefix').allTextContents())
+      .toContainEqual(expect.stringContaining('+'))
+  })
+
+  test('permalink exports use timestamped filenames for txt and html downloads', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    const [shareResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
+      page.locator('[data-action="permalink"]').click(),
+    ])
+    const data = await shareResp.json()
+
+    await page.goto(data.url)
+
+    const [txtDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('button:has-text("save .txt")').click(),
+    ])
+    expect(txtDownload.suggestedFilename()).toMatch(/^shell\.darklab\.sh-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
+
+    const [htmlDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('button:has-text("save .html")').click(),
+    ])
+    expect(htmlDownload.suggestedFilename()).toMatch(/^shell\.darklab\.sh-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
+  })
+
+  test('permalink exports include prompt echo and current prefix display state', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    const [shareResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
+      page.locator('[data-action="permalink"]').click(),
+    ])
+    const data = await shareResp.json()
+
+    await page.goto(data.url)
+    await page.locator('#toggle-ln').click()
+    await page.locator('#toggle-ts').click()
+
+    const [txtDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('button:has-text("save .txt")').click(),
+    ])
+    const txtStream = await txtDownload.createReadStream()
+    const txtChunks = []
+    for await (const chunk of txtStream) txtChunks.push(chunk)
+    const txt = Buffer.concat(txtChunks).toString('utf8')
+
+    expect(txt).toContain('anon@shell.darklab.sh:~$ curl http://localhost:5001/health')
+    expect(txt).toMatch(/1\s+anon@shell\.darklab\.sh:~\$ curl http:\/\/localhost:5001\/health/)
+    expect(txt).toContain('+')
+
+    const [htmlDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('button:has-text("save .html")').click(),
+    ])
+    const htmlStream = await htmlDownload.createReadStream()
+    const htmlChunks = []
+    for await (const chunk of htmlStream) htmlChunks.push(chunk)
+    const html = Buffer.concat(htmlChunks).toString('utf8')
+
+    expect(html).toContain('prompt-prefix')
+    expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain('perm-prefix')
+    expect(html).toContain('+')
+  })
 })

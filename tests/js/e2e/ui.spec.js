@@ -51,4 +51,49 @@ test.describe('FAQ modal', () => {
     await page.locator('#faq-overlay').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
   })
+
+  test('renders backend-driven FAQ content and allowlist chips', async ({ page }) => {
+    await page.locator('#faq-btn').click()
+    await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
+
+    await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
+    await expect(page.locator('.faq-a').filter({ hasText: 'README on GitLab' }).first()).toBeVisible()
+
+    const firstChip = page.locator('#faq-allowed-text .allowed-chip').first()
+    await expect(firstChip).toBeVisible()
+    const chipText = (await firstChip.textContent()) || ''
+
+    await firstChip.click()
+
+    await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
+    await expect(page.locator('#cmd')).toHaveValue(`${chipText} `)
+  })
+})
+
+test.describe('options modal', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('persists theme, timestamps, and line number preferences across reload', async ({ page }) => {
+    await page.locator('#options-btn').click()
+    await expect(page.locator('#options-overlay')).toHaveClass(/open/)
+
+    await page.locator('input[name="theme-pref"][value="light"]').check()
+    await page.locator('#options-ts-select').selectOption('elapsed')
+    await page.locator('#options-ln-toggle').check()
+    await page.locator('.options-close').click()
+
+    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
+    await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+
+    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
+    await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+  })
 })

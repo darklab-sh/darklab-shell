@@ -205,23 +205,14 @@ test.describe('welcome animation', () => {
     await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
   })
 
-  test('mobile welcome layout keeps the prompt and featured badge horizontally readable', async ({ page }) => {
+  test('mobile view switches to the compact welcome path', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 })
     await page.reload()
     await page.locator('#cmd').waitFor()
 
-    const prompt = page.locator('.welcome-command').nth(0).locator('.wlc-prompt')
-    const badge = page.locator('.welcome-command-badge')
-
-    await expect(prompt).toContainText('anon@shell.darklab.sh:~$')
-    await expect(badge).toContainText('try this first')
-
-    const promptBox = await prompt.boundingBox()
-    const badgeBox = await badge.boundingBox()
-
-    expect(promptBox).not.toBeNull()
-    expect(badgeBox).not.toBeNull()
-    expect(promptBox.width).toBeGreaterThan(promptBox.height * 2)
-    expect(badgeBox.width).toBeGreaterThan(badgeBox.height * 2)
+    await expect(page.locator('.welcome-banner')).toHaveCount(0)
+    await expect(page.locator('.tab-panel.active .output')).toContainText('Ready. Type a command or tap Run. Tab autocompletes.')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
+    await expect(page.locator('#mobile-run-btn')).toBeVisible()
   })
 })

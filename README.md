@@ -19,6 +19,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
 - **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered from shared per-line prefix metadata so existing output updates instantly without rebuilding the line DOM
 - **Line numbers per output line** — toggle visible sequence numbers on each output line using the **line numbers** button in the terminal bar. Uses the same shared prefix metadata as timestamps so numbering stays aligned when timestamp mode changes
+- **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, and fresh run permalinks do the same when full output was captured with structured line metadata
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
@@ -44,7 +45,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
 - **Anonymous session tracking** — the client generates a UUID session ID once (`session.js`) and sends it on every API call via `X-Session-ID`; this keeps history/test data scoped to each browser/tab and allows the server tests to isolate rate-limit buckets
 - **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
-- **FAQ modal** — built-in help with allowed commands grouped by category; click any command chip to load it into the prompt with autocomplete. The retention/limits entry shows live values for command timeout, output line limit, and permalink retention with a note that they are configurable by the operator. Extend with instance-specific entries via `faq.yaml`
+- **FAQ modal** — the modal is now rendered from the backend FAQ dataset returned by `/faq`, so built-in help and custom `faq.yaml` entries share one source of truth. Allowed commands still appear grouped by category with clickable chips, and the retention/limits entry still shows live operator-configured values
 
 ---
 
@@ -431,7 +432,7 @@ When the allowlist is active, the following operators are blocked outright, both
 
 ## Custom FAQ
 
-Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are appended after the built-in FAQ items in the FAQ modal and are re-read on every request — no restart needed.
+Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are appended after the built-in FAQ items returned by `/faq` and are re-read on every request — no restart needed.
 
 **Format:**
 
@@ -443,7 +444,7 @@ Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are a
   answer: "Outbound traffic is limited to 1 Gbps sustained."
 ```
 
-The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Answers are rendered as plain text.
+The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Custom entries are plain text; built-in entries can carry richer modal formatting from the backend while still exposing plain-text answers to the `faq` helper command.
 
 ---
 
@@ -536,6 +537,8 @@ Current keyboard behavior:
 - `Ctrl+L` clears the active tab
 - In the kill dialog, `Enter` confirms and `Escape` cancels
 - `Ctrl+W` deletes one word to the left
+- `Ctrl+A` moves the cursor to the start of the line
+- `Ctrl+E` moves the cursor to the end of the line
 - `Ctrl+U` deletes from the cursor to the start of the line
 - `Ctrl+K` deletes from the cursor to the end of the line
 - `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) move backward / forward by word
@@ -555,6 +558,8 @@ Shipped app-safe shortcuts:
 | `Option+P` (`Alt+P`) | Create permalink for active tab | |
 | `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
 | `Ctrl+L` | Clear current tab output | Shell-style convenience |
+| `Ctrl+A` | Move cursor to start of line | Readline-style editing |
+| `Ctrl+E` | Move cursor to end of line | Readline-style editing |
 | `Ctrl+U` | Delete from cursor to start of line | Readline-style editing |
 | `Ctrl+K` | Delete from cursor to end of line | Readline-style editing |
 | `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Readline-style editing |
@@ -808,7 +813,7 @@ docker compose logs -f
 | `GET` | `/config` | Returns frontend-relevant config values as JSON |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
-| `GET` | `/faq` | Returns custom FAQ entries from `faq.yaml` as JSON |
+| `GET` | `/faq` | Returns the canonical FAQ dataset as JSON: built-in entries plus any custom `faq.yaml` items |
 | `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
 | `GET` | `/welcome/ascii` | Returns the welcome ASCII banner from `ascii.txt` as plain text |
 | `GET` | `/welcome/hints` | Returns rotating welcome footer hints from `app_hints.txt` as JSON |
@@ -835,7 +840,7 @@ python3 -m pytest tests/py/ -v
 
 Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
 
-Current totals in this branch: **444 pytest + 167 Vitest + 89 Playwright = 700 tests**.
+Current totals in this branch: **445 pytest + 170 Vitest + 103 Playwright = 718 tests**.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -848,7 +853,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 **Testing notes**
 - Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
 - Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, kill-modal Enter/Escape behavior, history clipboard failure, and the boot/stall resilience cases.
+- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), permalink line-number/timestamp toggles, permalink export filenames and content, welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, kill-modal Enter/Escape behavior, history clipboard failure, and the boot/stall resilience cases.
 - The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
 - For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
 
@@ -858,7 +863,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 npm run test:e2e
 ```
 
-Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, kill-modal keyboard confirmation, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, permalink line-number/timestamp toggles, permalink export filenames and content, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, kill-modal keyboard confirmation, timestamp toggle, theme switch, backend-driven FAQ modal rendering and allowlist-chip behavior, the new options modal with persisted display preferences, and mobile UX including the compact mobile welcome, visible mobile composer, recent-chip overflow handling, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
 

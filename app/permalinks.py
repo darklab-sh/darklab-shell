@@ -135,11 +135,44 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
     content_lines can be a list of strings (single-run history) or
     a list of {text, cls} objects (tab snapshots with class info)."""
     app_name   = CFG.get("app_name", "shell.darklab.sh")
-    lines_json = json.dumps(content_lines)
+    is_structured_snapshot = any(
+        entry and isinstance(entry, dict)
+        for entry in content_lines
+    )
+    normalized_lines = []
+    if is_structured_snapshot:
+        has_prompt_echo = any(
+            isinstance(entry, dict) and str(entry.get("cls", "")) == "prompt-echo"
+            for entry in content_lines
+        )
+        if not has_prompt_echo:
+            normalized_lines.append({"text": f"$ {label}", "cls": "prompt-echo", "tsC": "", "tsE": ""})
+            normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
+        for entry in content_lines:
+            if isinstance(entry, str):
+                normalized_lines.append({"text": entry, "cls": "", "tsC": "", "tsE": ""})
+            else:
+                normalized_lines.append({
+                    "text": str(entry.get("text", "")),
+                    "cls": str(entry.get("cls", "")),
+                    "tsC": str(entry.get("tsC", "")),
+                    "tsE": str(entry.get("tsE", "")),
+                })
+    else:
+        normalized_lines.append({"text": f"$ {label}", "cls": "prompt-echo", "tsC": "", "tsE": ""})
+        normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
+        for entry in content_lines:
+            normalized_lines.append({"text": str(entry), "cls": "", "tsC": "", "tsE": ""})
+    has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
+    lines_json = json.dumps(normalized_lines)
     label_json = json.dumps(label)
     created_fmt = created[:19].replace("T", " ") + " UTC"
     expiry_html = _expiry_note(created)
     extra_actions = extra_actions or []
+    toggle_ts_attrs = (
+        ' disabled title="timestamps unavailable for this permalink"'
+        if not has_timestamp_metadata else ""
+    )
     extra_action_html = "".join(
         f'<a class="btn" href="{action["href"]}">{action["label"]}</a>'
         for action in extra_actions
@@ -174,6 +207,7 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
           font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
           cursor: pointer; text-decoration: none; transition: border-color .2s, color .2s; }}
   .btn:hover {{ border-color: var(--green-dim); color: var(--green); }}
+  .btn:disabled {{ opacity: 0.35; cursor: not-allowed; }}
   #output {{ flex: 1; padding: 20px; line-height: 1.65; white-space: pre-wrap;
              word-break: break-all; overflow-y: auto; }}
   .line {{ display: block; }}
@@ -181,6 +215,10 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
   .line.exit-fail {{ color: var(--red);   font-weight: 700; margin-top: 8px; }}
   .line.notice    {{ color: #6ab0f5; font-style: italic; }}
   .line.denied    {{ color: var(--amber); font-weight: 700; }}
+  .perm-prefix {{ display: inline-block; min-width: var(--perm-prefix-width, 0ch); margin-right: 14px;
+                  color: #6a6a6a; font-size: 11px; text-align: right; user-select: none;
+                  font-variant-numeric: tabular-nums; }}
+  .perm-content {{ display: inline; }}
   .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
   a {{ color: var(--green); }}
 </style>
@@ -192,6 +230,8 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
   {expiry_html}
   <div class="actions">
     {extra_action_html}
+    <button class="btn" id="toggle-ln">line numbers: off</button>
+    <button class="btn" id="toggle-ts"{toggle_ts_attrs}>timestamps: off</button>
     <a class="btn" href="{json_url}">view json</a>
     <button class="btn" onclick="copyTxt()">copy</button>
     <button class="btn" onclick="saveTxt()">save .txt</button>
@@ -206,10 +246,14 @@ font-size:12px;padding:10px 18px;border-radius:4px;z-index:300;
 transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
 <script>
   const lines = {lines_json};
+  const hasTimestampMetadata = {json.dumps(has_timestamp_metadata)};
   const ansi_up = new AnsiUp();
   ansi_up.use_classes = false;
   const out = document.getElementById('output');
   const plainClasses = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
+  const tsModes = ['off', 'elapsed', 'clock'];
+  let lnMode = 'off';
+  let tsMode = 'off';
 
   function renderPromptEcho(text) {{
     const raw = String(text || '');
@@ -220,41 +264,74 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
       + (remainder ? escHtml(' ' + remainder) : '');
   }}
 
-  const isStructuredSnapshot = Array.isArray(lines)
-    && lines.some(entry => entry && typeof entry === 'object' && !Array.isArray(entry));
-
-  if (!isStructuredSnapshot) {{
-    // Single-run permalinks add the command header here because their payload is
-    // just output strings. Snapshot permalinks already include real prompt echo
-    // lines in the saved content and should render that transcript verbatim.
-    const cmdSpan = document.createElement('span');
-    cmdSpan.className = 'line';
-    cmdSpan.style.color = 'var(--green)';
-    cmdSpan.style.marginBottom = '4px';
-    cmdSpan.style.display = 'block';
-    cmdSpan.textContent = '$ ' + {label_json};
-    out.appendChild(cmdSpan);
-    const gapSpan = document.createElement('span');
-    gapSpan.className = 'line';
-    gapSpan.textContent = '';
-    out.appendChild(gapSpan);
+  function timestampText(entry) {{
+    if (tsMode === 'clock') return entry.tsC || '';
+    if (tsMode === 'elapsed') return entry.tsE || '';
+    return '';
   }}
 
-  lines.forEach(entry => {{
-    const span = document.createElement('span');
-    // Support both plain strings (single-run history) and {{text, cls}} objects (snapshots)
-    const text = typeof entry === 'string' ? entry : entry.text;
-    const cls  = typeof entry === 'string' ? '' : (entry.cls || '');
-    span.className = 'line' + (cls ? ' ' + cls : '');
-    if (cls === 'prompt-echo') {{
-      span.innerHTML = renderPromptEcho(text);
-    }} else if (plainClasses.has(cls)) {{
-      span.textContent = text;
-    }} else {{
-      span.innerHTML = ansi_up.ansi_to_html(text);
-    }}
-    out.appendChild(span);
+  function formatPrefix(index, entry) {{
+    const parts = [];
+    if (lnMode === 'on') parts.push(String(index));
+    const ts = timestampText(entry);
+    if (ts) parts.push(ts);
+    return parts.join(' ');
+  }}
+
+  function displayText(entry, index) {{
+    const prefix = formatPrefix(index + 1, entry);
+    return (prefix ? prefix + '  ' : '') + String(entry.text || '');
+  }}
+
+  function renderOutput() {{
+    out.innerHTML = '';
+    const prefixes = lines.map((entry, index) => formatPrefix(index + 1, entry));
+    const prefixWidth = Math.max(0, ...prefixes.map(prefix => prefix.length));
+    out.style.setProperty('--perm-prefix-width', `${{prefixWidth}}ch`);
+
+    lines.forEach((entry, index) => {{
+      const span = document.createElement('span');
+      const cls = entry.cls || '';
+      span.className = 'line' + (cls ? ' ' + cls : '');
+
+      const prefix = formatPrefix(index + 1, entry);
+      if (prefix) {{
+        const prefixEl = document.createElement('span');
+        prefixEl.className = 'perm-prefix';
+        prefixEl.textContent = prefix;
+        span.appendChild(prefixEl);
+      }}
+
+      const contentEl = document.createElement('span');
+      contentEl.className = 'perm-content';
+      if (cls === 'prompt-echo') {{
+        contentEl.innerHTML = renderPromptEcho(entry.text);
+      }} else if (plainClasses.has(cls)) {{
+        contentEl.textContent = entry.text;
+      }} else {{
+        contentEl.innerHTML = ansi_up.ansi_to_html(entry.text);
+      }}
+      span.appendChild(contentEl);
+      out.appendChild(span);
+    }});
+
+    document.getElementById('toggle-ln').textContent = `line numbers: ${{lnMode}}`;
+    const tsBtn = document.getElementById('toggle-ts');
+    tsBtn.textContent = hasTimestampMetadata ? `timestamps: ${{tsMode}}` : 'timestamps: unavailable';
+  }}
+
+  document.getElementById('toggle-ln').addEventListener('click', () => {{
+    lnMode = lnMode === 'on' ? 'off' : 'on';
+    renderOutput();
   }});
+
+  document.getElementById('toggle-ts').addEventListener('click', () => {{
+    if (!hasTimestampMetadata) return;
+    tsMode = tsModes[(tsModes.indexOf(tsMode) + 1) % tsModes.length];
+    renderOutput();
+  }});
+
+  renderOutput();
 
   function _showToast() {{
     const t = document.getElementById('copy-toast');
@@ -263,15 +340,24 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
   }}
 
   function copyTxt() {{
-    const text = lines.map(e => typeof e === 'string' ? e : e.text).join('\\n');
+    const text = lines.map((entry, index) => displayText(entry, index)).join('\\n');
     navigator.clipboard.writeText(text).then(_showToast);
   }}
 
+  function exportTimestamp() {{
+    return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  }}
+
+  function downloadName(ext) {{
+    const appName = {json.dumps(app_name)};
+    return appName + '-' + exportTimestamp() + '.' + ext;
+  }}
+
   function saveTxt() {{
-    const text = lines.map(e => typeof e === 'string' ? e : e.text).join('\\n');
+    const text = lines.map((entry, index) => displayText(entry, index)).join('\\n');
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([text], {{type: 'text/plain'}}));
-    a.download = 'shell.darklab.sh-export.txt';
+    a.download = downloadName('txt');
     a.click();
     URL.revokeObjectURL(a.href);
   }}
@@ -286,17 +372,20 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
     const label   = {label_json};
     const created = {json.dumps(created_fmt)};
 
-    const linesHtml = lines.map(entry => {{
-      const text = typeof entry === 'string' ? entry : entry.text;
-      const cls  = typeof entry === 'string' ? '' : (entry.cls || '');
-      const tsC  = (entry && entry.tsC) ? entry.tsC : '';
-      const tsSpan = tsC ? '<span class="ts">' + escHtml(tsC) + '</span>' : '';
+    const prefixWidth = Math.max(0, ...lines.map((entry, index) => formatPrefix(index + 1, entry).length));
+    const linesHtml = lines.map((entry, index) => {{
+      const cls = entry.cls || '';
+      const prefix = formatPrefix(index + 1, entry);
+      const prefixSpan = prefix
+        ? '<span class="perm-prefix" style="min-width:' + prefixWidth + 'ch">' + escHtml(prefix) + '</span>'
+        : '';
       const content = cls === 'prompt-echo'
-        ? renderPromptEcho(text)
+        ? renderPromptEcho(entry.text)
         : plainClsSet.has(cls)
-          ? escHtml(text)
-          : ansi_up.ansi_to_html(text);
-      return '<span class="line' + (cls ? ' ' + cls : '') + '">' + tsSpan + content + '</span>';
+          ? escHtml(entry.text)
+          : ansi_up.ansi_to_html(entry.text);
+      return '<span class="line' + (cls ? ' ' + cls : '') + '">' + prefixSpan
+        + '<span class="perm-content">' + content + '</span></span>';
     }}).join('\\n');
 
     const html = `<!DOCTYPE html>
@@ -323,14 +412,13 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
   .line.exit-fail {{ color: #ff3c3c; font-weight: 700; margin-top: 8px; }}
   .line.denied    {{ color: #ffb800; font-weight: 700; }}
   .line.notice    {{ color: #6ab0f5; font-style: italic; }}
-  .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
-  .ts {{
-    display: inline-block; min-width: 58px; text-align: right;
+  .perm-prefix {{
+    display: inline-block; margin-right: 14px;
     color: #505050; font-size: 10px; user-select: none;
-    padding-right: 8px; margin-right: 6px;
-    border-right: 1px solid #1f1f1f;
-    font-variant-numeric: tabular-nums;
+    text-align: right; font-variant-numeric: tabular-nums;
   }}
+  .perm-content {{ display: inline; }}
+  .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
 </style>
 </head>
 <body>
@@ -344,10 +432,9 @@ ${{linesHtml}}
 </body>
 </html>`;
 
-    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     const a = document.createElement('a');
     a.href = URL.createObjectURL(new Blob([html], {{type: 'text/html'}}));
-    a.download = appName + '-' + ts + '.html';
+    a.download = downloadName('html');
     a.click();
     URL.revokeObjectURL(a.href);
   }}

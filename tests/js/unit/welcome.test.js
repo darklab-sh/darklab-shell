@@ -10,6 +10,7 @@ function loadWelcomeFns({
   config = {},
   appendLine = () => {},
   setTimeoutImpl = null,
+  mobile = false,
 } = {}) {
   document.body.innerHTML = `<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>`
   const out = document.getElementById('out')
@@ -28,6 +29,7 @@ function loadWelcomeFns({
     }
     throw new Error(`Unexpected url: ${url}`)
   })
+  const mountShellPrompt = vi.fn()
 
   return {
     ...fromDomScripts([
@@ -50,6 +52,9 @@ function loadWelcomeFns({
       getOutput: () => out,
       cmdInput,
       appendLine,
+      mountShellPrompt,
+      useMobileTerminalViewportMode: () => mobile,
+      requestAnimationFrame: (fn) => fn(),
       Math: Object.create(Math, {
         random: { value: () => 0 },
       }),
@@ -69,6 +74,7 @@ function loadWelcomeFns({
     }`),
     apiFetch,
     out,
+    mountShellPrompt,
   }
 }
 
@@ -331,5 +337,18 @@ describe('welcome helpers', () => {
       'dig darklab.sh A',
       'curl -I https://darklab.sh',
     ])
+  })
+
+  it('uses the compact mobile welcome path and skips network loading', async () => {
+    const { runWelcome, out, apiFetch, mountShellPrompt } = loadWelcomeFns({ mobile: true })
+
+    await runWelcome()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(out.textContent).toContain('Ready. Type a command or tap Run. Tab autocompletes.')
+    expect(out.textContent).toContain('Use the history panel for previous runs and permalinks.')
+    expect(out.textContent).toContain('For the best mobile experience, use Firefox.')
+    expect(out.scrollTop).toBe(0)
+    expect(mountShellPrompt).toHaveBeenCalledWith('tab-1', true)
   })
 })

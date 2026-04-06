@@ -271,7 +271,7 @@ Welcome settle behavior is intentionally keyboard-friendly: printable typing, `E
 
 The route shape is intentional. Frontend-facing config content is exposed through narrow, typed endpoints rather than a generic “serve files from `conf/`” handler:
 
-- `/faq` for `faq.yaml`
+- `/faq` for the canonical FAQ dataset (built-in entries plus `faq.yaml`)
 - `/autocomplete` for `auto_complete.txt`
 - `/welcome` for sampled command metadata from `welcome.yaml`
 - `/welcome/ascii` for plain-text banner art from `ascii.txt`
@@ -346,10 +346,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 444
-- `vitest`: 167
-- `playwright`: 89
-- total: 700
+- `pytest`: 445
+- `vitest`: 170
+- `playwright`: 103
+- total: 718
 
 ### Python tests
 
@@ -398,15 +398,15 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `commands.spec.js` — command execution, denial, and exit-status rendering
 - `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
 - `kill.spec.js` — kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation, and killed-state UI
-- `mobile.spec.js` — hamburger/menu visibility and dismissal
+- `mobile.spec.js` — mobile startup composer visibility, hamburger/menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling
 - `output.spec.js` — copy/clear/export actions, no-output toasts, and download fidelity
 - `rate-limit.spec.js` — per-session rate limiting
 - `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
 - `shortcuts.spec.js` — macOS-style Option shortcut handling for tabs, permalink/copy, clear, and prompt word motion
-- `share.spec.js` — snapshot permalinks plus single-run history permalinks and JSON/HTML views
+- `share.spec.js` — snapshot permalinks plus single-run history permalinks, JSON/HTML views, permalink line-number/timestamp toggles, and permalink export filename/content assertions
 - `tabs.spec.js` — max-tabs, rename, drag reorder, neutral-input tab switching, blank-prompt Enter behavior, and last-tab reset behavior
 - `timestamps.spec.js` — timestamp mode cycling, output metadata, line-number compatibility, and post-toggle typing flow
-- `ui.spec.js` — theme toggling and FAQ modal behavior
+- `ui.spec.js` — theme toggling plus backend-driven FAQ modal rendering, allowlist-chip interaction, and options-modal preference persistence
 - `autocomplete.spec.js` — command suggestion interaction
 - `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, prompt-key settle behavior, preferred-command stability, and tab-scoped welcome teardown
 
@@ -421,7 +421,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 ### Testing Strategy
 - The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. The file-by-file breakdown and maintenance notes live in [tests/README.md](tests/README.md).
 - Vitest explicitly exercises `session.js`, `autocomplete.js`, and the new `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
-- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, macOS-style Option shortcut handling, kill-modal keyboard confirmation, tab rename persistence, and single-run permalink JSON/HTML exports.
+- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, macOS-style Option shortcut handling, kill-modal keyboard confirmation, tab rename persistence, and both snapshot/run permalink JSON/HTML exports plus permalink line-number/timestamp toggles and export filename/content assertions.
 
 Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
 
@@ -431,7 +431,7 @@ Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and r
 
 `./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
 
-- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Persists across restarts. Pruned by `permalink_retention_days`.
+- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews now store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
 
@@ -440,6 +440,8 @@ The storage model is intentionally split:
 - live tabs and normal history restore use `max_output_lines` and the `runs.output_preview` payload, which keeps only the most recent preview lines
 - full-output persistence is controlled by backend-only config keys `persist_full_run_output` and `full_output_max_bytes`
 - `full_output_max_bytes` is enforced on the uncompressed UTF-8 stream before gzip compression, so the limit tracks output volume rather than the final on-disk `.gz` size
+- full-output artifacts for fresh runs are stored as gzip-compressed JSON-lines records, not plain text, so prompt/timestamp/class metadata can be reused by canonical run permalinks
+- artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
 - deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
 
 Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Multi-worker Process Killing above).

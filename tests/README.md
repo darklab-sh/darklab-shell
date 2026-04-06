@@ -16,10 +16,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 444
-- `vitest`: 167
-- `playwright`: 89
-- total: 700
+- `pytest`: 445
+- `vitest`: 170
+- `playwright`: 103
+- total: 718
 
 ## Running The Suites
 
@@ -44,10 +44,10 @@ npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 Pytest lives in `tests/py/` and is organized by backend concern:
 
 - `test_validation.py` - command validation, shell operator blocking, path blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
-- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, shared missing-binary handling, canonical run permalink behavior when full-output artifacts exist, and the backward-compatible `/history/<run_id>/full` alias
+- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, canonical run permalink behavior when full-output artifacts exist, permalink line-number/timestamp toggle behavior, and the backward-compatible `/history/<run_id>/full` alias
 - `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
 - `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
-- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` builtin+custom merge behavior, and module-level utility coverage
+- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` builtin+custom merge behavior and FAQ schema handling, and module-level utility coverage
 - `test_logging.py` - structured logging, formatter output, and log-event assertions
 
 Notes:
@@ -70,7 +70,7 @@ Files and focus:
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, and no-output toast behavior
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, and featured-sample interaction behavior
-- `app.test.js` - bootstrap wiring, modal controls, search controls, startup fallbacks, startup fetch logging, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
+- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
 - `search.test.js` - search helper boundaries and no-op behavior
 - `output.test.js` - output rendering, shared timestamp/line-number prefix support, welcome-prefix exclusion, and no-output edge cases
 
@@ -89,16 +89,16 @@ Spec files:
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
 - `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, and killed-state UI
-- `mobile.spec.js` - mobile menu visibility and dismissal
+- `mobile.spec.js` - mobile startup composer visibility, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
 - `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings including tab actions, permalink/copy, clear, and prompt word-motion behavior
-- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, and clipboard failure handling
+- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, permalink line-number/timestamp toggles, permalink export filename/content assertions, and clipboard failure handling
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, and closing behavior
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
-- `ui.spec.js` - theme toggle and FAQ modal
+- `ui.spec.js` - theme toggle plus backend-driven FAQ modal rendering, close behavior, allowlist-chip interaction, and options-modal preference persistence
 - `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, prompt-key settle behavior, welcome-tab isolation, preferred-command stability, and the mobile welcome layout regression
 - `failure-paths.spec.js` - `/run` denial/rate limit/offline handling, share failure, and history delete/clear failure toasts
 - `boot-resilience.spec.js` - startup fetch fallbacks and core smoke checks

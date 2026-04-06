@@ -167,4 +167,67 @@ test.describe('tab strip interactions', () => {
     await page.keyboard.type('dig darklab.sh A')
     await expect(page.locator('#cmd')).toHaveValue('dig darklab.sh A')
   })
+
+  test('touch dragging reorders tabs and clears mobile drag state on release', async ({ page }) => {
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#new-tab-btn').click()
+
+    const firstTab = page.locator('.tab').nth(0)
+    const thirdTab = page.locator('.tab').nth(2)
+    const firstBox = await firstTab.boundingBox()
+    const thirdBox = await thirdTab.boundingBox()
+    if (!firstBox || !thirdBox) throw new Error('Tab bounding boxes were not available')
+
+    await page.evaluate(({ downX, downY }) => {
+      const tab = document.querySelectorAll('.tab')[2]
+      tab?.dispatchEvent(new PointerEvent('pointerdown', {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 41,
+        pointerType: 'touch',
+        clientX: downX,
+        clientY: downY,
+      }))
+    }, {
+      downX: thirdBox.x + (thirdBox.width / 2),
+      downY: thirdBox.y + (thirdBox.height / 2),
+    })
+
+    await page.evaluate(({ moveX, moveY }) => {
+      document.dispatchEvent(new PointerEvent('pointermove', {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 41,
+        pointerType: 'touch',
+        clientX: moveX,
+        clientY: moveY,
+      }))
+    }, {
+      moveX: firstBox.x + 8,
+      moveY: firstBox.y + (firstBox.height / 2),
+    })
+
+    await expect(page.locator('#tabs-bar')).toHaveClass(/tabs-bar-touch-sorting/)
+    await expect(page.locator('.tab').nth(0)).toHaveClass(/tab-touch-dragging/)
+    await expect(page.locator('.tab').nth(1)).toHaveClass(/tab-drop-before/)
+
+    await page.evaluate(({ upX, upY }) => {
+      document.dispatchEvent(new PointerEvent('pointerup', {
+        bubbles: true,
+        cancelable: true,
+        pointerId: 41,
+        pointerType: 'touch',
+        clientX: upX,
+        clientY: upY,
+      }))
+    }, {
+      upX: firstBox.x + 8,
+      upY: firstBox.y + (firstBox.height / 2),
+    })
+
+    await expect(page.locator('#tabs-bar')).not.toHaveClass(/tabs-bar-touch-sorting/)
+    await expect(page.locator('.tab').first()).toContainText('tab 3')
+    await expect(page.locator('.tab-drop-before, .tab-drop-after')).toHaveCount(0)
+    await expect(page.locator('#cmd')).toBeFocused()
+  })
 })

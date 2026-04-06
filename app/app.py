@@ -31,14 +31,14 @@ from database   import db_connect, delete_run_artifacts
 from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
-    load_faq, load_autocomplete, load_welcome,
+    load_all_faq, load_autocomplete, load_welcome,
     load_ascii_art, load_welcome_hints,
     is_command_allowed, rewrite_command,
     runtime_missing_command_message, runtime_missing_command_name,
 )
 from permalinks import _permalink_error_page, _permalink_page
 from fake_commands import resolve_fake_command, execute_fake_command
-from run_output_store import RunOutputCapture, load_full_output_lines
+from run_output_store import RunOutputCapture, load_full_output_entries
 
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN = shutil.which("sudo") or "/usr/bin/sudo"
@@ -163,11 +163,29 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
         })
 
 
-def _preview_output_from_run(run):
+def _preview_output_entries_from_run(run):
     raw = run.get("output_preview")
     if raw is None:
         raw = run.get("output")
-    return json.loads(raw) if raw else []
+    loaded = json.loads(raw) if raw else []
+    if loaded and isinstance(loaded[0], str):
+        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in loaded]
+    entries = []
+    for item in loaded:
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            entries.append({
+                "text": item["text"],
+                "cls": str(item.get("cls", "")),
+                "tsC": str(item.get("tsC", "")),
+                "tsE": str(item.get("tsE", "")),
+            })
+        elif isinstance(item, str):
+            entries.append({"text": item, "cls": "", "tsC": "", "tsE": ""})
+    return entries
+
+
+def _preview_output_from_run(run):
+    return [entry["text"] for entry in _preview_output_entries_from_run(run)]
 
 
 def _preview_notice(run):
@@ -199,10 +217,17 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
     def generate():
         try:
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
+            run_started_dt = datetime.fromisoformat(run_started)
             for event in events:
                 if event.get("type") == "output":
                     line = event.get("text", "")
-                    capture.add_line(line)
+                    line_dt = datetime.now(timezone.utc)
+                    capture.add_line(
+                        line,
+                        cls=str(event.get("cls", "")),
+                        ts_clock=line_dt.strftime("%H:%M:%S"),
+                        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                    )
                     yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10)})}\n\n"
                 elif event.get("type") == "clear":
                     yield f"data: {json.dumps({'type': 'clear'})}\n\n"
@@ -293,8 +318,8 @@ def allowed_commands():
 
 @app.route("/faq")
 def faq():
-    """Return custom FAQ entries from faq.yaml."""
-    return jsonify({"items": load_faq()})
+    """Return built-in FAQ entries plus any custom faq.yaml entries."""
+    return jsonify({"items": load_all_faq()})
 
 
 @app.route("/autocomplete")
@@ -362,12 +387,20 @@ def get_run(run_id):
     preview_requested = request.args.get("preview") == "1"
     is_full_view = (not preview_requested) and run["full_output_available"] and bool(run.get("rel_path"))
     if is_full_view:
-        run["output"] = load_full_output_lines(run["rel_path"])
+        run["output_entries"] = load_full_output_entries(run["rel_path"])
+        run["output"] = [entry["text"] for entry in run["output_entries"]]
         if run["full_output_truncated"]:
             run["output"].append(
                 f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]"
             )
+            run["output_entries"].append({
+                "text": f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]",
+                "cls": "notice",
+                "tsC": "",
+                "tsE": "",
+            })
     else:
+        run["output_entries"] = _preview_output_entries_from_run(run)
         run["output"] = _preview_output_from_run(run)
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
@@ -377,10 +410,10 @@ def get_run(run_id):
     if "json" in request.args:
         return jsonify(run)
 
-    content_lines = list(run["output"])
+    content_lines = list(run["output_entries"])
     preview_notice = run["preview_notice"]
     if preview_notice:
-        content_lines.append(preview_notice)
+        content_lines.append({"text": preview_notice, "cls": "notice", "tsC": "", "tsE": ""})
 
     return _permalink_page(
         title=f"$ {run['command']}" + (" (full output)" if is_full_view else ""),
@@ -571,15 +604,21 @@ def run_command():
         try:
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
+            run_started_dt = datetime.fromisoformat(run_started)
 
             # If the command was rewritten, surface a notice to the user
             if notice:
-                capture.add_line(f"[notice] {notice}")
+                notice_dt = datetime.now(timezone.utc)
+                capture.add_line(
+                    f"[notice] {notice}",
+                    cls="notice",
+                    ts_clock=notice_dt.strftime("%H:%M:%S"),
+                    ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
+                )
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
-            run_started_dt = datetime.fromisoformat(run_started)
             while True:
                 # Check timeout at the top of every iteration so it fires even
                 # during continuous output, not only during idle heartbeat periods.
@@ -609,7 +648,12 @@ def run_command():
                 if ready:
                     line = proc.stdout.readline()
                     if line:
-                        capture.add_line(line)
+                        line_dt = datetime.now(timezone.utc)
+                        capture.add_line(
+                            line,
+                            ts_clock=line_dt.strftime("%H:%M:%S"),
+                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                        )
                         yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
                     else:
                         # EOF — process has finished

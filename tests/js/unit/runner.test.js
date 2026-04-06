@@ -47,6 +47,7 @@ function loadRunnerFns({
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
+  dismissMobileKeyboardAfterSubmit = () => {},
 } = {}) {
   document.body.innerHTML = `
     <input id="cmd" />
@@ -63,6 +64,7 @@ function loadRunnerFns({
   const runTimer = document.getElementById('run-timer')
   const historyPanel = document.getElementById('history-panel')
   cmdInput.value = cmdValue
+  cmdInput.blur = vi.fn()
 
   const setTabLabel = vi.fn()
   const setTabStatus = vi.fn((id, nextStatus) => {
@@ -102,6 +104,7 @@ function loadRunnerFns({
     welcomeOwnsTab,
     refreshHistoryPanel: () => {},
     showToast,
+    dismissMobileKeyboardAfterSubmit,
     describeFetchError: (err, context = 'server') => {
       const message = err && err.message ? err.message : 'unknown network error'
       if (message === 'Failed to fetch' || message === 'network down') {
@@ -322,6 +325,21 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenLastCalledWith('[rate limited] Too many requests. Please wait a moment.', 'denied', 'tab-1')
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
+  })
+
+  it('runCommand dismisses the mobile keyboard after a successful submit', () => {
+    const dismissMobileKeyboardAfterSubmit = vi.fn()
+    const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
+    const { runCommand } = loadRunnerFns({
+      cmdValue: 'curl http://localhost:5001/health',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      dismissMobileKeyboardAfterSubmit,
+    })
+
+    runCommand()
+
+    expect(dismissMobileKeyboardAfterSubmit).toHaveBeenCalled()
   })
 
   it('runCommand cancels and clears welcome output when the active tab owns welcome', async () => {

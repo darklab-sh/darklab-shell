@@ -3,6 +3,7 @@ import { fromDomScripts } from './helpers/extract.js'
 function loadAutocompleteFns() {
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac')
+  const mobileComposerHost = document.getElementById('mobile-composer-host')
 
   return fromDomScripts([
     'app/static/js/utils.js',
@@ -11,6 +12,7 @@ function loadAutocompleteFns() {
     document,
     cmdInput,
     acDropdown,
+    mobileComposerHost,
   }, `{
     acShow,
     acHide,
@@ -24,6 +26,7 @@ describe('autocomplete helpers', () => {
     document.body.innerHTML = `
       <input id="cmd" />
       <div id="ac"></div>
+      <div id="mobile-composer-host"></div>
     `
   })
 
@@ -192,6 +195,48 @@ describe('autocomplete helpers', () => {
     expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
     expect(items[items.length - 1].className).toBe('ac-item ac-active')
     expect(items[items.length - 1].textContent.trim()).toBe('nmap -sV')
+  })
+
+  it('forces the dropdown above the detached mobile composer and aligns it to the composer width', () => {
+    const { acShow } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'c'
+    document.body.classList.add('mobile-terminal-mode', 'mobile-keyboard-open')
+    const composerHost = document.createElement('div')
+    composerHost.id = 'mobile-composer-host'
+    document.body.appendChild(composerHost)
+    const wrap = document.createElement('div')
+    wrap.className = 'shell-prompt-wrap'
+    wrap.appendChild(document.getElementById('ac'))
+    composerHost.appendChild(wrap)
+
+    const prefix = document.createElement('span')
+    prefix.className = 'prompt-prefix'
+    prefix.textContent = '$'
+    wrap.insertBefore(prefix, document.getElementById('ac'))
+
+    vi.spyOn(composerHost, 'getBoundingClientRect').mockReturnValue({
+      top: 560,
+      bottom: 612,
+      left: 14,
+      right: 361,
+      width: 347,
+      height: 56,
+      x: 14,
+      y: 560,
+      toJSON: () => ({}),
+    })
+    Object.defineProperty(window, 'innerHeight', { value: 812, configurable: true })
+
+    acShow(['curl http://localhost:5001/health', 'curl http://localhost:5001/config'])
+
+    const dropdown = document.getElementById('ac')
+    expect(dropdown.classList.contains('ac-up')).toBe(true)
+    expect(dropdown.classList.contains('ac-mobile')).toBe(true)
+    expect(dropdown.style.position).toBe('absolute')
+    expect(dropdown.style.left).toBe('0px')
+    expect(dropdown.style.right).toBe('0px')
+    expect(dropdown.style.bottom).toBe('calc(100% + 4px)')
   })
 
   it('scrolls to the bottom when the menu opens above so the active item stays visible', () => {

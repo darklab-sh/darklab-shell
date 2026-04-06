@@ -7,11 +7,17 @@ function touchPointerEvent(type, init) {
   return event
 }
 
-function loadTabsFns({ maxTabs = 3, apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }) } = {}) {
+function loadTabsFns({
+  maxTabs = 3,
+  apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
+  welcomeBootPending = undefined,
+} = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
   const tabsBar = document.getElementById('tabs-bar')
   const tabPanels = document.getElementById('tab-panels')
+  const mobileComposerHost = document.getElementById('mobile-composer-host')
+  const mobileComposerRow = document.getElementById('mobile-composer-row')
   const newTabBtn = document.getElementById('new-tab-btn')
   const historyPanel = document.getElementById('history-panel')
   const clipboardWrites = []
@@ -36,6 +42,9 @@ function loadTabsFns({ maxTabs = 3, apiFetch = () => Promise.resolve({ json: () 
     tabsBar,
     tabPanels,
     historyPanel,
+    mobileComposerHost,
+    mobileComposerRow,
+    ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
     APP_CONFIG: { max_tabs: maxTabs, app_name: 'shell.darklab.sh' },
     setStatus: () => {},
     clearSearch: () => {},
@@ -74,13 +83,17 @@ function loadTabsFns({ maxTabs = 3, apiFetch = () => Promise.resolve({ json: () 
 describe('tabs helpers', () => {
   beforeEach(() => {
     document.body.innerHTML = `
-      <input id="cmd" />
+      <div id="shell-input-row" data-mobile-label="$">
+        <input id="cmd" />
+      </div>
       <button id="tabs-scroll-left"></button>
       <button id="tabs-scroll-right"></button>
       <button id="new-tab-btn"></button>
       <div id="history-panel"></div>
       <div id="tabs-bar"></div>
       <div id="tab-panels"></div>
+      <div id="mobile-composer-host"></div>
+      <div id="mobile-composer-row"></div>
       <div id="permalink-toast"></div>
     `
     vi.spyOn(globalThis, 'setTimeout').mockImplementation(() => 0)
@@ -148,6 +161,32 @@ describe('tabs helpers', () => {
 
     setTabStatus(id, 'running')
     mountShellPrompt(id, true)
+
+    expect(output.contains(shellPromptWrap)).toBe(false)
+  })
+
+  it('mountShellPrompt keeps the desktop prompt mirror out of mobile mode', () => {
+    const { createTab, mountShellPrompt, shellPromptWrap } = loadTabsFns()
+    const id = createTab('tab 1')
+    const output = document.querySelector(`.tab-panel[data-id="${id}"] .output`)
+    const mobileComposerHost = document.getElementById('mobile-composer-host')
+    const shellInputRow = document.getElementById('shell-input-row')
+    const mobileComposerRow = document.getElementById('mobile-composer-row')
+
+    document.body.classList.add('mobile-terminal-mode', 'mobile-keyboard-open')
+    mountShellPrompt(id, true)
+
+    expect(mobileComposerHost.contains(shellPromptWrap)).toBe(false)
+    expect(output.contains(shellPromptWrap)).toBe(false)
+    expect(mobileComposerRow.contains(shellInputRow)).toBe(false)
+  })
+
+  it('mountShellPrompt stays hidden during the desktop welcome boot', () => {
+    const { createTab, mountShellPrompt, shellPromptWrap } = loadTabsFns({ welcomeBootPending: true })
+    const id = createTab('tab 1')
+    const output = document.querySelector(`.tab-panel[data-id="${id}"] .output`)
+
+    mountShellPrompt(id)
 
     expect(output.contains(shellPromptWrap)).toBe(false)
   })
@@ -309,6 +348,11 @@ describe('tabs helpers', () => {
       clientX: 20,
       clientY: 12,
     }))
+
+    expect(dragged.classList.contains('tab-touch-dragging')).toBe(true)
+    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(true)
+    expect(document.querySelector(`.tab[data-id="${firstId}"]`)?.classList.contains('tab-drop-before')).toBe(true)
+
     document.dispatchEvent(touchPointerEvent('pointerup', {
       pointerId: 7,
       pointerType: 'touch',
@@ -319,5 +363,7 @@ describe('tabs helpers', () => {
     expect(_getTabs().map(tab => tab.id)).toEqual([thirdId, firstId, secondId])
     expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
     expect(document.getElementById('cmd').focus).toHaveBeenCalled()
+    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(false)
+    expect(document.querySelector('.tab-drop-before, .tab-drop-after')).toBeNull()
   })
 })

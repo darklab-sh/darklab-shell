@@ -96,8 +96,11 @@ function renderHistory() {
     ...cmdHistory.filter(c => starred.has(c)),
     ...cmdHistory.filter(c => !starred.has(c)),
   ];
+  const visible = (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
+    ? sorted.slice(0, 3)
+    : sorted;
 
-  sorted.forEach(cmd => {
+  visible.forEach(cmd => {
     const isStarred = starred.has(cmd);
     const chip = document.createElement('button');
     chip.className = 'hist-chip' + (isStarred ? ' starred' : '');
@@ -126,6 +129,19 @@ function renderHistory() {
     });
     histRow.appendChild(chip);
   });
+
+  if (visible.length < sorted.length) {
+    const overflowChip = document.createElement('button');
+    overflowChip.className = 'hist-chip hist-chip-overflow';
+    overflowChip.textContent = `+${sorted.length - visible.length} more`;
+    overflowChip.title = 'Open history panel';
+    overflowChip.addEventListener('click', () => {
+      if (!historyPanel) return;
+      historyPanel.classList.add('open');
+      if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+    });
+    histRow.appendChild(overflowChip);
+  }
 }
 
 

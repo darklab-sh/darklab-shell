@@ -14,9 +14,10 @@
 
 <header>
   <h1>shell.darklab.sh</h1>
-  <span class="version" id="version-label">v1.2 · real-time</span>
+  <span class="version" id="version-label">real-time</span>
   <div class="header-btns" id="header-btns">
     <button id="hist-btn" title="Run history">⧖ history</button>
+    <button id="options-btn" title="Display and preference options">≡ options</button>
     <button id="theme-btn" title="Toggle theme">◑ theme</button>
     <button id="faq-btn">? FAQ</button>
   </div>
@@ -27,6 +28,7 @@
 <div id="mobile-menu">
   <button data-action="search">⌕ search</button>
   <button data-action="history">⧖ history</button>
+  <button data-action="options">≡ options</button>
   <button data-action="ln">line numbers: off</button>
   <button data-action="ts">timestamps: off</button>
   <button data-action="theme">◑ theme</button>
@@ -75,16 +77,34 @@
   <div id="tab-panels">
     <!-- panels injected here -->
   </div>
+  <!-- Mobile composer – shown on narrow screens, hidden on desktop -->
+  <div id="mobile-composer">
+    <div id="mobile-edit-bar" aria-label="Mobile edit controls">
+      <button type="button" data-mobile-edit="home" aria-label="Move to start">Home</button>
+      <button type="button" data-mobile-edit="left" aria-label="Move left">←</button>
+      <button type="button" data-mobile-edit="right" aria-label="Move right">→</button>
+      <button type="button" data-mobile-edit="end" aria-label="Move to end">End</button>
+      <button type="button" data-mobile-edit="delete-word" aria-label="Delete word">Del Word</button>
+    </div>
+    <div id="mobile-composer-row">
+      <span class="mobile-prompt-label">$</span>
+      <input id="mobile-cmd" type="search"
+             autocomplete="off" autocapitalize="none" autocorrect="off"
+             spellcheck="false" inputmode="text" enterkeyhint="go"
+             placeholder="Type a command" aria-label="Command">
+      <button id="mobile-run-btn" type="button">Run</button>
+    </div>
+  </div>
   <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
     <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
     <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
       <span class="shell-prompt-text" id="shell-prompt-text"></span>
       <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
     </div>
-    <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
   </div>
+  <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
   <div class="shell-input-row" aria-hidden="true">
-    <input id="cmd" type="text" placeholder="" autocomplete="off" spellcheck="false" autofocus aria-label="Command">
+    <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" aria-label="Command">
     <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
   </div>
 </div>
@@ -269,6 +289,56 @@
         </div>
       </div>
 
+    </div>
+  </div>
+</div>
+
+<!-- Options Modal -->
+<div id="options-overlay">
+  <div id="options-modal">
+    <div class="faq-header">
+      <span class="faq-title">OPTIONS</span>
+      <button class="options-close" aria-label="Close options">✕</button>
+    </div>
+    <div class="faq-body options-body">
+      <div class="faq-item">
+        <div class="faq-q">Theme</div>
+        <div class="faq-a options-fieldset" role="radiogroup" aria-label="Theme">
+          <label class="options-choice">
+            <input type="radio" name="theme-pref" value="dark">
+            <span>Dark</span>
+          </label>
+          <label class="options-choice">
+            <input type="radio" name="theme-pref" value="light">
+            <span>Light</span>
+          </label>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Timestamps</div>
+        <div class="faq-a">
+          <select id="options-ts-select" class="options-select" aria-label="Timestamp mode">
+            <option value="off">Off</option>
+            <option value="elapsed">Elapsed</option>
+            <option value="clock">Clock</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Line Numbers</div>
+        <div class="faq-a options-fieldset">
+          <label class="options-choice">
+            <input type="checkbox" id="options-ln-toggle">
+            <span>Show line numbers beside output and the live prompt</span>
+          </label>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Persistence</div>
+        <div class="faq-a">
+          These display preferences are saved in cookies for future sessions on this browser.
+        </div>
+      </div>
     </div>
   </div>
 </div>

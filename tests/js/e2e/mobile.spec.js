@@ -2,11 +2,33 @@ import { test, expect } from '@playwright/test'
 
 const MOBILE = { width: 375, height: 812 }
 
+// Enable touch so useMobileTerminalViewportMode() returns true on the narrow
+// viewport, which triggers the compact welcome and other mobile JS paths.
+test.use({ hasTouch: true })
+
+async function runCommandMobile(page, cmd) {
+  await page.locator('#mobile-cmd').fill(cmd)
+  await page.locator('#mobile-run-btn').click()
+  await page.locator('.status-pill').filter({ hasNotText: 'RUNNING' }).waitFor({ timeout: 15_000 })
+}
+
 test.describe('mobile menu', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize(MOBILE)
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
+    await page.locator('#mobile-composer').waitFor({ state: 'visible' })
+  })
+
+  test('mobile startup uses the compact welcome and keeps the composer visible', async ({ page }) => {
+    await expect(page.locator('.tab-panel.active .output')).toContainText('Ready. Type a command or tap Run. Tab autocompletes.')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
+    // Desktop run button stays hidden; mobile composer is the input affordance
+    await expect(page.locator('#run-btn')).toBeHidden()
+    await expect(page.locator('#mobile-composer')).toBeVisible()
+    // Composer must stay within the viewport
+    const composerBox = await page.locator('#mobile-composer').boundingBox()
+    expect(composerBox).not.toBeNull()
+    expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
   })
 
   test('hamburger button is visible and desktop header buttons are hidden at mobile width', async ({ page }) => {
@@ -33,5 +55,111 @@ test.describe('mobile menu', () => {
     // Click somewhere neutral in the header area
     await page.locator('header').click()
     await expect(page.locator('#mobile-menu')).not.toHaveClass(/open/)
+  })
+
+  test('mobile recent chips collapse to one row and overflow opens history', async ({ page }) => {
+    const commands = [
+      'curl http://localhost:5001/health?mobile=1',
+      'curl http://localhost:5001/health?mobile=2',
+      'curl http://localhost:5001/health?mobile=3',
+      'curl http://localhost:5001/health?mobile=4',
+    ]
+
+    for (const [index, command] of commands.entries()) {
+      await runCommandMobile(page, command)
+      if (index < commands.length - 1) await page.waitForTimeout(250)
+    }
+
+    const chips = page.locator('#history-row .hist-chip')
+    await expect(chips).toHaveCount(4)
+    await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+1 more')
+    await expect(chips.nth(0)).toContainText('mobile=4')
+    await expect(chips.nth(1)).toContainText('mobile=3')
+    await expect(chips.nth(2)).toContainText('mobile=2')
+
+    await page.locator('#history-row .hist-chip-overflow').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+  })
+
+  test('mobile recent chips can load a visible command back into the prompt', async ({ page }) => {
+    const commands = [
+      'curl http://localhost:5001/health?mobile=1',
+      'curl http://localhost:5001/health?mobile=2',
+      'curl http://localhost:5001/health?mobile=3',
+    ]
+
+    for (const [index, command] of commands.entries()) {
+      await runCommandMobile(page, command)
+      if (index < commands.length - 1) await page.waitForTimeout(250)
+    }
+
+    const chip = page.locator('#history-row .hist-chip').first()
+    const commandText = await chip.getAttribute('title')
+    await chip.click()
+
+    await expect(page.locator('#cmd')).toHaveValue(commandText || '')
+    await expect(page.locator('#mobile-composer')).toBeVisible()
+  })
+
+  test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {
+    // Show the edit bar (normally shown only when the keyboard is open)
+    await page.evaluate(() => document.body.classList.add('mobile-keyboard-open'))
+
+    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+
+    await page.locator('#mobile-cmd').evaluate(el => {
+      el.value = 'ping -c 4 example.com'
+      el.focus()
+      el.setSelectionRange(el.value.length, el.value.length)
+      el.dispatchEvent(new Event('input', { bubbles: true }))
+    })
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="left"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(20)
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="home"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(0)
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="right"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(1)
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="end"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(21)
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="delete-word"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect(page.locator('#mobile-cmd')).toHaveValue('ping -c 4 ')
+  })
+
+  test('mobile long commands keep the composer usable', async ({ page }) => {
+    // Simulate keyboard open by setting the CSS variable and class directly
+    await page.evaluate(() => {
+      document.documentElement.style.setProperty('--mobile-keyboard-offset', '280px')
+      document.body.classList.add('mobile-keyboard-open')
+    })
+
+    const longCommand = `curl http://localhost:5001/health?${'x'.repeat(120)}`
+    await page.locator('#mobile-cmd').fill(longCommand)
+
+    await expect(page.locator('#mobile-cmd')).toHaveValue(longCommand)
+    await expect(page.locator('#mobile-composer')).toBeVisible()
+
+    const composerBox = await page.locator('#mobile-composer').boundingBox()
+    expect(composerBox).not.toBeNull()
+    expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
   })
 })

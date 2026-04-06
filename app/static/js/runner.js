@@ -246,6 +246,7 @@ function runCommand() {
   cmdInput.value = '';
   cmdInput.dispatchEvent(new Event('input'));
   cmdInput.focus();
+  if (typeof dismissMobileKeyboardAfterSubmit === 'function') dismissMobileKeyboardAfterSubmit();
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
   const _runTab = tabs.find(t => t.id === activeTabId);
   if (_runTab) _runTab.runStart = Date.now();

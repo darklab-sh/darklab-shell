@@ -12,6 +12,7 @@ Tests for pure utility functions across the app modules:
 Run with: pytest tests/ (from the repo root)
 """
 
+import gzip
 import os
 import sqlite3
 import tempfile
@@ -28,7 +29,7 @@ from commands import (
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
-from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_lines
+from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -509,7 +510,10 @@ class TestRunOutputCapture:
         capture.add_line("three")
         capture.finalize()
 
-        assert list(capture.preview_lines) == ["two", "three"]
+        assert list(capture.preview_lines) == [
+            {"text": "two", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "three", "cls": "", "tsC": "", "tsE": ""},
+        ]
         assert capture.preview_truncated is True
         assert capture.output_line_count == 3
 
@@ -523,9 +527,13 @@ class TestRunOutputCapture:
         artifact_rel_path = capture.artifact_rel_path
         assert artifact_rel_path is not None
         assert load_full_output_lines(artifact_rel_path) == ["alpha", "beta"]
+        assert load_full_output_entries(artifact_rel_path) == [
+            {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "beta", "cls": "", "tsC": "", "tsE": ""},
+        ]
 
     def test_full_output_artifact_respects_byte_cap(self):
-        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=5)
+        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=60)
         capture.add_line("1234")
         capture.add_line("5678")
         capture.finalize()
@@ -535,6 +543,18 @@ class TestRunOutputCapture:
         artifact_rel_path = capture.artifact_rel_path
         assert artifact_rel_path is not None
         assert load_full_output_lines(artifact_rel_path) == ["1234"]
+
+    def test_full_output_artifact_loads_legacy_plain_text_rows(self):
+        artifact_rel_path = "test-run-output-legacy.txt.gz"
+        path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write("legacy one\nlegacy two\n")
+
+        assert load_full_output_entries(artifact_rel_path) == [
+            {"text": "legacy one", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "legacy two", "cls": "", "tsC": "", "tsE": ""},
+        ]
 
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("commands.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):

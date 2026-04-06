@@ -229,6 +229,13 @@ class TestFaqRoute:
         assert "items" in data
         assert isinstance(data["items"], list)
 
+    def test_includes_builtin_faq_entries(self):
+        client = get_client()
+        data = json.loads(client.get("/faq").data)
+        questions = [item.get("question") for item in data["items"]]
+        assert "What is this?" in questions
+        assert "What commands are allowed?" in questions
+
 
 # ── /welcome/ascii ───────────────────────────────────────────────────────────
 
@@ -596,6 +603,25 @@ class TestShareRoute:
         resp = client.get(f"/share/{share_id}")
         assert "text/html" in resp.content_type
 
+    def test_get_share_html_includes_permalink_display_toggles(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={
+                "label": "toggle-test",
+                "content": [
+                    {"text": "line 1", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        resp = client.get(f"/share/{share_id}")
+        body = resp.get_data(as_text=True)
+        assert 'id="toggle-ln"' in body
+        assert 'id="toggle-ts"' in body
+        assert 'timestamps unavailable' not in body
+
 
 # ── /welcome ──────────────────────────────────────────────────────────────────
 
@@ -876,6 +902,33 @@ class TestRunPermalinkRoute:
         try:
             resp = get_client().get(f"/history/{run_id}")
             assert b"preview truncated" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_includes_line_number_toggle_and_disables_timestamps_without_metadata(self):
+        run_id = "permalink-toggle-test-run"
+        self._insert_run(run_id, "ping google.com", ["64 bytes"])
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            body = resp.get_data(as_text=True)
+            assert 'id="toggle-ln"' in body
+            assert 'id="toggle-ts" disabled' in body
+            assert 'timestamps unavailable for this permalink' in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_includes_prompt_echo_and_enabled_timestamps_for_structured_run_output(self):
+        run_id = "permalink-structured-toggle-test-run"
+        structured_preview = [
+            {"text": "64 bytes from 8.8.8.8", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
+        ]
+        self._insert_run(run_id, "ping google.com", structured_preview)
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            body = resp.get_data(as_text=True)
+            assert "$ ping google.com" in body
+            assert 'id="toggle-ts"' in body
+            assert 'timestamps unavailable for this permalink' not in body
         finally:
             self._delete_run(run_id)
 

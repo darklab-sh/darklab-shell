@@ -16,17 +16,21 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `Ctrl+U`, `Ctrl+K`, and `Alt/Option+B` / `Alt/Option+F` add readline-style prompt editing on top of the existing `Ctrl+W` support
 - **Keyboard shortcut discovery** — new `keys` web-shell helper prints the current shortcut set plus remaining planned shortcut work, and is exposed through `help`, `man keys`, autocomplete, the README, and the FAQ modal
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
-- **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop
+- **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
 - **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
 - **Display toggles for output prefixes** — line numbers can now be toggled independently from timestamps, with mobile-menu access and shared prefix alignment across output, prompt, and exit rows
+- **User options modal** — a new options modal lets users set theme, timestamp mode, and line-number display from one place, with cookie-backed persistence across sessions while keeping the existing quick-toggle buttons in sync
+- **Permalink display toggles** — permalink pages now expose line-number toggles for all views and timestamp toggles anywhere saved line metadata exists, including fresh canonical run permalinks backed by structured output persistence
 
 ### Changed
+- **FAQ single source of truth** — built-in FAQ entries now come from the backend alongside custom `faq.yaml` entries, `/faq` now returns the merged canonical FAQ dataset, and the modal renders from that backend response instead of a hard-coded HTML copy
 - **Welcome interruption and settle behavior** — welcome fast-forward now consistently responds to keyboard actions used in the inline-prompt flow and preserves correct prompt mounting after settle
 - **Tab activation model** — switching tabs now keeps the prompt input neutral (no automatic command repopulation), preventing cross-tab draft leakage
 - **Prompt rendering model** — submitted commands are preserved as styled prompt lines in output and running tabs hide the live prompt until completion, matching shell transcript flow more closely
 - **Autocomplete presentation** — dropdown framing was removed in favor of a terminal-style suggestion list that can flip above the prompt when space is tight
 - **Autocomplete matching and navigation** — suggestions now match from the beginning of commands only, keep the active row in view, and use visual Up/Down navigation even when the list is rendered above the prompt
 - **Output actions UX** — `copy` and `save txt` now report a friendly no-output toast when the tab only contains welcome/decorative lines
+- **Run-output persistence format** — fresh run previews and full-output artifacts now preserve structured `{text, cls, tsC, tsE}` entries instead of flattening everything to plain text, allowing canonical run permalinks to keep prompt echo and timestamp metadata while remaining backward-compatible with older plain-text artifacts
 
 ### Fixed
 - **macOS keyboard shortcuts** — app-safe `Option` shortcuts now match physical key codes instead of the produced symbol, preventing `Option+T`, `Option+W`, `Option+Shift+C`, and `Option+B/F` from inserting special characters into the prompt

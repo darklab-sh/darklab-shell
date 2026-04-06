@@ -16,10 +16,37 @@ let _welcomeStatusNodes = [];
 let _welcomePlan = null;
 let _welcomeNextBlockIndex = 0;
 let _welcomeSettleRequested = false;
+let _welcomeBootPending = true;
 const _welcomeWaiters = new Set();
 const _welcomePrompt = 'anon@shell.darklab.sh:~$';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['loading /', 'loading -', 'loading \\', 'loading |'];
+
+function _shouldUseCompactMobileWelcome() {
+  if (typeof useMobileTerminalViewportMode === 'function') {
+    return useMobileTerminalViewportMode();
+  }
+  if (typeof window !== 'undefined' && typeof window.matchMedia === 'function') {
+    return window.matchMedia('(max-width: 600px)').matches;
+  }
+  return false;
+}
+
+function _renderCompactMobileWelcome(tabId) {
+  const out = getOutput(tabId);
+  _appendWelcomeOutput(tabId, 'Ready. Type a command or tap Run. Tab autocompletes.', 'welcome-hint');
+  _appendWelcomeOutput(tabId, 'Use the history panel for previous runs and permalinks.', 'welcome-hint');
+  _appendWelcomeOutput(tabId, 'For the best mobile experience, use Firefox.', 'welcome-hint');
+  if (out) out.scrollTop = 0;
+  _welcomeActive = false;
+  _welcomeDone = false;
+  _welcomeTabId = null;
+  _welcomeBootPending = false;
+  _clearWelcomeLiveLine();
+  _clearWelcomeBanner();
+  _resetWelcomePlan();
+  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId, true);
+}
 
 function welcomeOwnsTab(tabId) {
   return !!tabId && _welcomeTabId === tabId && (_welcomeActive || _welcomeDone);
@@ -147,6 +174,7 @@ function cancelWelcome(tabId = null) {
   _welcomeActive = false;
   _welcomeDone   = false;
   _welcomeTabId = null;
+  _welcomeBootPending = false;
   _flushWelcomeWaiters();
   _clearWelcomeLiveLine();
   _clearWelcomeBanner();
@@ -569,6 +597,7 @@ function settleWelcome(tabId = activeTabId) {
   _welcomeDone = true;
   _ensureWelcomeFinalHint(tabId, _welcomePlan && _welcomePlan.hints);
   _welcomeActive = false;
+  _welcomeBootPending = false;
   if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
   out.scrollTop = out.scrollHeight;
   return true;
@@ -576,10 +605,15 @@ function settleWelcome(tabId = activeTabId) {
 
 async function runWelcome() {
   const tabId = activeTabId;
+  _welcomeBootPending = true;
   _welcomeActive = true;
   _welcomeDone = false;
   _welcomeTabId = activeTabId;
   _welcomeSettleRequested = false;
+  if (_shouldUseCompactMobileWelcome()) {
+    _renderCompactMobileWelcome(tabId);
+    return;
+  }
   if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
 
   const [data, asciiArt, hintData] = await Promise.all([
@@ -599,6 +633,7 @@ async function runWelcome() {
   if (!data || !data.length || !_welcomeActive) {
     _welcomeActive = false;
     _welcomeTabId = null;
+    _welcomeBootPending = false;
     if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
     return;
   }
@@ -688,6 +723,7 @@ async function runWelcome() {
     } else {
       _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
       _welcomeActive = false;
+      _welcomeBootPending = false;
       if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
     }
   }

@@ -2,6 +2,7 @@ import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 async function loadAppFns({
   theme = null,
+  cookies = {},
   apiFetch: apiFetchOverride = null,
   doKill: doKillOverride = vi.fn(),
   pendingKillTabId = null,
@@ -23,19 +24,20 @@ async function loadAppFns({
   acFiltered: acFilteredOverride = [],
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
+  acHide: acHideOverride = () => {},
+  mobileViewport = null,
+  mobileTouch = true,
 } = {}) {
   document.body.className = ''
   document.body.innerHTML = `
     <header><h1></h1></header>
     <button id="ts-btn"></button>
     <button id="theme-btn"></button>
+    <button id="options-btn"></button>
     <button id="faq-btn"></button>
     <button id="hamburger-btn"></button>
     <button id="new-tab-btn"></button>
     <button id="search-toggle-btn"></button>
-    <button id="run-btn"></button>
-    <button id="search-prev"></button>
-    <button id="search-next"></button>
     <button id="hist-btn"></button>
     <button id="ln-btn"></button>
     <button id="history-close"></button>
@@ -48,49 +50,103 @@ async function loadAppFns({
     <div id="version-label"></div>
     <div id="motd"></div>
     <div id="motd-wrap"></div>
-    <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
-      <div id="shell-prompt-line">
-        <span id="shell-prompt-text" class="shell-prompt-text"></span>
-        <span id="shell-prompt-caret"></span>
-        <span id="shell-prompt-ghost" class="shell-prompt-ghost"></span>
+    <div id="mobile-shell" aria-hidden="true"></div>
+    <div class="terminal-wrap">
+      <div id="history-row" class="history-row" style="display:none">
+        <span class="history-label">Recent:</span>
       </div>
+      <div class="terminal-bar">
+        <span class="dot dot-r"></span>
+        <span class="dot dot-y"></span>
+        <span class="dot dot-g"></span>
+        <button id="tabs-scroll-left"></button>
+        <div class="tabs-bar" id="tabs-bar"></div>
+        <button id="tabs-scroll-right"></button>
+        <div class="terminal-bar-btns"></div>
+        <span id="status"></span>
+        <span id="run-timer"></span>
+      </div>
+      <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
+        <span class="prompt-prefix" data-mobile-label="$">anon@shell.darklab.sh:~$</span>
+        <div id="shell-prompt-line">
+          <span id="shell-prompt-text" class="shell-prompt-text"></span>
+          <span id="shell-prompt-caret"></span>
+          <span id="shell-prompt-ghost" class="shell-prompt-ghost"></span>
+        </div>
+        <div id="ac-dropdown" style="display:none"></div>
+        <button id="run-btn" aria-label="Run command">Run</button>
+      </div>
+      <div class="search-bar" id="search-bar" style="display:none">
+        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
+        <div class="search-toggles">
+          <button id="search-case-btn"></button>
+          <button id="search-regex-btn"></button>
+        </div>
+        <span class="search-count" id="search-count"></span>
+        <div class="search-nav">
+          <button id="search-prev"></button>
+          <button id="search-next"></button>
+        </div>
+      </div>
+      <div id="tab-panels"></div>
+      <div id="mobile-composer-host">
+        <div id="mobile-edit-bar">
+          <button data-edit-action="home"></button>
+          <button data-edit-action="left"></button>
+          <button data-edit-action="right"></button>
+          <button data-edit-action="end"></button>
+          <button data-edit-action="delete-word"></button>
+        </div>
+        <div id="mobile-composer-row"></div>
+      </div>
+      <div id="faq-limits-text"></div>
+      <div id="faq-allowed-text"></div>
+      <div id="mobile-menu">
+        <button data-action="ln"></button>
+        <button data-action="ts"></button>
+        <button data-action="search"></button>
+        <button data-action="history"></button>
+        <button data-action="options"></button>
+        <button data-action="theme"></button>
+        <button data-action="faq"></button>
+      </div>
+      <div id="faq-overlay"></div>
+      <button class="faq-close"></button>
+      <div class="faq-body"></div>
+      <div id="options-overlay"></div>
+      <button class="options-close"></button>
+      <div id="options-modal"></div>
+      <select id="options-ts-select">
+        <option value="off">off</option>
+        <option value="elapsed">elapsed</option>
+        <option value="clock">clock</option>
+      </select>
+      <input id="options-ln-toggle" type="checkbox" />
+      <label><input type="radio" name="theme-pref" value="dark" /></label>
+      <label><input type="radio" name="theme-pref" value="light" /></label>
+      <div id="shell-input-row" data-mobile-label="$">
+        <input id="cmd" />
+      </div>
+      <div id="history-panel"></div>
+      <div id="history-list"></div>
+      <div id="kill-overlay"></div>
+      <div id="hist-del-overlay"></div>
+      <div class="prompt-wrap"></div>
     </div>
-    <div id="ac-dropdown" style="display:none"></div>
-    <div id="faq-limits-text"></div>
-    <div id="faq-allowed-text"></div>
-    <div id="mobile-menu">
-      <button data-action="ln"></button>
-      <button data-action="ts"></button>
-      <button data-action="search"></button>
-      <button data-action="history"></button>
-      <button data-action="theme"></button>
-      <button data-action="faq"></button>
-    </div>
-    <div id="faq-overlay"></div>
-    <button class="faq-close"></button>
-    <div class="faq-body"></div>
-    <input id="cmd" />
-    <div id="history-panel"></div>
-    <div id="history-list"></div>
-    <div id="kill-overlay"></div>
-    <div id="hist-del-overlay"></div>
-    <div id="search-bar"></div>
-    <input id="search-input" />
-    <span id="search-count"></span>
-    <button id="search-case-btn"></button>
-    <button id="search-regex-btn"></button>
-    <div class="prompt-wrap"></div>
   `
 
   const storage = new MemoryStorage()
   if (theme !== null) storage.setItem('theme', theme)
+  for (const [name, value] of Object.entries(cookies)) {
+    document.cookie = `${name}=${encodeURIComponent(value)}; path=/`
+  }
 
   const apiFetch = apiFetchOverride || vi.fn((url) => {
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
           app_name: 'shell.darklab.sh',
-          version: '1.2',
+          version: '9.9',
           default_theme: 'dark',
           motd: '',
           command_timeout_seconds: 0,
@@ -115,6 +171,48 @@ async function loadAppFns({
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac-dropdown')
   cmdInput.focus = vi.fn()
+  cmdInput.blur = vi.fn()
+  const shellPromptWrapEl = document.getElementById('shell-prompt-wrap')
+  shellPromptWrapEl.scrollIntoView = vi.fn()
+  const mobileComposerHostEl = document.getElementById('mobile-composer-host')
+  mobileComposerHostEl.scrollIntoView = vi.fn()
+
+  const originalMatchMedia = window.matchMedia
+  const originalVisualViewport = window.visualViewport
+  const originalScrollTo = window.scrollTo
+  const originalMaxTouchPoints = navigator.maxTouchPoints
+  window.scrollTo = vi.fn()
+  if (mobileViewport) {
+    const matchMediaMock = vi.fn(query => {
+      const q = String(query || '')
+      const maxWidth = /max-width:\s*900px/.test(q)
+      const coarse = /pointer:\s*coarse/.test(q)
+      return {
+        matches: mobileTouch ? (maxWidth || coarse) : maxWidth,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      }
+    })
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: matchMediaMock,
+    })
+    if (mobileTouch) {
+      Object.defineProperty(window.navigator, 'maxTouchPoints', {
+        configurable: true,
+        value: 5,
+      })
+    }
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        height: mobileViewport.height,
+        offsetTop: mobileViewport.offsetTop ?? 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    })
+  }
 
   class FakeAnsiUp {
     constructor() {
@@ -144,6 +242,7 @@ async function loadAppFns({
     openFaq: () => {},
     cmdInput,
     runBtn: document.getElementById('run-btn'),
+    shellInputRow: document.getElementById('shell-input-row'),
     searchBar: document.getElementById('search-bar'),
     searchInput: document.getElementById('search-input'),
     searchCaseBtn: document.getElementById('search-case-btn'),
@@ -161,7 +260,7 @@ async function loadAppFns({
     killOverlay: document.getElementById('kill-overlay'),
     pendingHistAction: null,
     pendingKillTabId,
-    acHide: () => {},
+    acHide: acHideOverride,
     acSuggestions: [],
     acFiltered: acFilteredOverride,
     acIndex: acIndexOverride,
@@ -182,9 +281,18 @@ async function loadAppFns({
     interruptPromptLine: interruptPromptLineOverride,
     _welcomeActive: welcomeActive,
     welcomeOwnsTab: welcomeOwnsTabOverride,
-    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+    shellPromptWrap: shellPromptWrapEl,
     shellPromptText: document.getElementById('shell-prompt-text'),
     shellPromptCaret: document.getElementById('shell-prompt-caret'),
+    terminalWrap: document.querySelector('.terminal-wrap'),
+    terminalBar: document.querySelector('.terminal-bar'),
+    histRow: document.getElementById('history-row'),
+    tabPanels: document.getElementById('tab-panels'),
+    mobileShell: document.getElementById('mobile-shell'),
+    mobileComposerHost: document.getElementById('mobile-composer-host'),
+    mobileComposerRow: document.getElementById('mobile-composer-row'),
+    mobileEditBar: document.getElementById('mobile-edit-bar'),
+    mobileComposerHostEl,
     acDropdown,
     requestWelcomeSettle: requestWelcomeSettleOverride,
     runCommand: runCommandOverride,
@@ -206,7 +314,7 @@ async function loadAppFns({
   await Promise.resolve()
   await Promise.resolve()
 
-  return {
+    return {
     ...fns,
     storage,
     apiFetch,
@@ -227,14 +335,43 @@ async function loadAppFns({
     runCommand: runCommandOverride,
     logClientError,
     acDropdown,
+    acHide: acHideOverride,
+    shellPromptWrap: shellPromptWrapEl,
+    restoreViewport: () => {
+      if (originalMatchMedia === undefined) delete window.matchMedia
+      else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
+      if (originalVisualViewport === undefined) delete window.visualViewport
+      else Object.defineProperty(window, 'visualViewport', { configurable: true, value: originalVisualViewport })
+      if (originalScrollTo === undefined) delete window.scrollTo
+      else window.scrollTo = originalScrollTo
+      if (mobileTouch) {
+        if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
+        else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
+      }
+    },
   }
 }
 
 describe('app helpers', () => {
+  beforeEach(() => {
+    ;['pref_theme', 'pref_timestamps', 'pref_line_numbers'].forEach(name => {
+      document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
+    })
+  })
+
   it('applies the saved light theme at startup', async () => {
     await loadAppFns({ theme: 'light' })
 
     expect(document.body.classList.contains('light')).toBe(true)
+  })
+
+  it('applies saved timestamp and line number preferences from cookies at startup', async () => {
+    await loadAppFns({ cookies: { pref_timestamps: 'clock', pref_line_numbers: 'on' } })
+
+    expect(document.body.classList.contains('ts-clock')).toBe(true)
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
   })
 
   it('_setTsMode updates body classes and button labels', async () => {
@@ -467,6 +604,119 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
+  it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
+    const { cmdInput, shellPromptWrap, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const runBtn = document.getElementById('run-btn')
+    const terminalWrap = document.querySelector('.terminal-wrap')
+    const mobileShell = document.getElementById('mobile-shell')
+    const mobileComposerHost = document.getElementById('mobile-composer-host')
+    const mobileComposerRow = document.getElementById('mobile-composer-row')
+    const shellInputRow = document.getElementById('shell-input-row')
+    const promptPrefix = shellInputRow
+    const histRow = document.getElementById('history-row')
+    const terminalBar = document.querySelector('.terminal-bar')
+    const searchBar = document.getElementById('search-bar')
+    const tabPanels = document.getElementById('tab-panels')
+
+    cmdInput.dispatchEvent(new Event('focus'))
+    cmdInput.value = 'curl'
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
+    expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
+    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe('268px')
+    expect(terminalWrap.hidden).toBe(true)
+    expect(mobileShell.hidden).toBe(false)
+    expect(runBtn.hidden).toBe(false)
+    expect(mobileComposerHost.getAttribute('aria-hidden')).toBe('false')
+    expect(shellPromptWrap.getAttribute('aria-hidden')).toBe('true')
+    expect(mobileComposerRow.hidden).toBe(false)
+    expect(mobileShell.contains(histRow)).toBe(true)
+    expect(mobileShell.contains(terminalBar)).toBe(true)
+    expect(mobileShell.contains(searchBar)).toBe(true)
+    expect(mobileShell.contains(tabPanels)).toBe(true)
+    expect(mobileShell.contains(mobileComposerHost)).toBe(true)
+    expect(mobileComposerRow.contains(shellInputRow)).toBe(true)
+    expect(mobileComposerRow.contains(runBtn)).toBe(true)
+    expect(shellInputRow.getAttribute('aria-hidden')).toBe(null)
+    expect(promptPrefix.getAttribute('data-mobile-label')).toBe('$')
+    expect(shellPromptWrap.scrollIntoView).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('does not enter mobile mode on a narrow desktop viewport without touch support', async () => {
+    const { cmdInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      mobileTouch: false,
+    })
+
+    cmdInput.dispatchEvent(new Event('focus'))
+
+    expect(document.body.classList.contains('mobile-terminal-mode')).toBe(false)
+    expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
+
+    restoreViewport()
+  })
+
+  it('populates the version label from the server config', async () => {
+    await loadAppFns()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.getElementById('version-label').textContent).toBe('v9.9 · real-time')
+  })
+
+  it('keeps the mobile run button visible after the keyboard closes', async () => {
+    const { cmdInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const runBtn = document.getElementById('run-btn')
+
+    cmdInput.dispatchEvent(new Event('focus'))
+    expect(runBtn.hidden).toBe(false)
+
+    Object.defineProperty(window, 'visualViewport', {
+      configurable: true,
+      value: {
+        height: 768,
+        offsetTop: 0,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      },
+    })
+    cmdInput.dispatchEvent(new Event('blur'))
+
+    expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
+    expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
+    expect(runBtn.hidden).toBe(false)
+
+    restoreViewport()
+  })
+
+  it('closes transient ui while the mobile keyboard is open', async () => {
+    const acHide = vi.fn()
+    const { cmdInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      acHide,
+    })
+
+    document.getElementById('mobile-menu').classList.add('open')
+    document.getElementById('history-panel').classList.add('open')
+
+    cmdInput.dispatchEvent(new Event('focus'))
+    cmdInput.value = 'curl'
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(document.getElementById('mobile-menu').classList.contains('open')).toBe(false)
+    expect(document.getElementById('history-panel').classList.contains('open')).toBe(false)
+    expect(acHide).toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
   it('matches autocomplete suggestions from the beginning of each command only', async () => {
     const acShow = vi.fn()
     const apiFetch = vi.fn((url) => {
@@ -477,14 +727,14 @@ describe('app helpers', () => {
           }),
         })
       }
-      if (url === '/config') {
-        return Promise.resolve({
-          json: () => Promise.resolve({
-            app_name: 'shell.darklab.sh',
-            version: '1.2',
-            default_theme: 'dark',
-            motd: '',
-            command_timeout_seconds: 0,
+    if (url === '/config') {
+      return Promise.resolve({
+        json: () => Promise.resolve({
+          app_name: 'shell.darklab.sh',
+          version: '9.9',
+          default_theme: 'dark',
+          motd: '',
+          command_timeout_seconds: 0,
             max_output_lines: 0,
             permalink_retention_days: 0,
           }),
@@ -517,15 +767,18 @@ describe('app helpers', () => {
   it('renders cursor and selection state from the hidden input', async () => {
     const { cmdInput } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
+    const shellPromptWrap = document.getElementById('shell-prompt-wrap')
 
     cmdInput.value = 'nothing'
     cmdInput.setSelectionRange(3, 3)
     cmdInput.dispatchEvent(new Event('keyup'))
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent).toBe('h')
+    expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(false)
 
     cmdInput.setSelectionRange(1, 4)
     cmdInput.dispatchEvent(new Event('select'))
     expect(shellPromptText.querySelector('.shell-prompt-selection')?.textContent).toBe('oth')
+    expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(true)
   })
 
   it('supports ctrl+w to delete one word to the left', async () => {
@@ -550,6 +803,17 @@ describe('app helpers', () => {
     expect(cmdInput.selectionEnd).toBe(0)
   })
 
+  it('supports ctrl+a to move to the beginning of the line', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig darklab.sh A'
+    cmdInput.setSelectionRange(9, 9)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'a', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.selectionStart).toBe(0)
+    expect(cmdInput.selectionEnd).toBe(0)
+  })
+
   it('supports ctrl+k to delete to the end of the line', async () => {
     const { cmdInput } = await loadAppFns()
 
@@ -560,6 +824,17 @@ describe('app helpers', () => {
     expect(cmdInput.value).toBe('dig ')
     expect(cmdInput.selectionStart).toBe(4)
     expect(cmdInput.selectionEnd).toBe(4)
+  })
+
+  it('supports ctrl+e to move to the end of the line', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'dig darklab.sh A'
+    cmdInput.setSelectionRange(4, 4)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, bubbles: true }))
+
+    expect(cmdInput.selectionStart).toBe(cmdInput.value.length)
+    expect(cmdInput.selectionEnd).toBe(cmdInput.value.length)
   })
 
   it('supports Alt+B and Alt+F to move by word', async () => {
@@ -600,6 +875,31 @@ describe('app helpers', () => {
       bubbles: true,
     }))
     expect(cmdInput.selectionStart).toBe(16)
+  })
+
+  it('supports the mobile edit bar actions', async () => {
+    const { cmdInput } = await loadAppFns()
+    const press = (selector) => {
+      document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }
+
+    cmdInput.value = 'ping -c 4 example.com'
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+
+    press('[data-edit-action="left"]')
+    expect(cmdInput.selectionStart).toBe(cmdInput.value.length - 1)
+
+    press('[data-edit-action="home"]')
+    expect(cmdInput.selectionStart).toBe(0)
+
+    press('[data-edit-action="right"]')
+    expect(cmdInput.selectionStart).toBe(1)
+
+    press('[data-edit-action="end"]')
+    expect(cmdInput.selectionStart).toBe(cmdInput.value.length)
+
+    press('[data-edit-action="delete-word"]')
+    expect(cmdInput.value).toBe('ping -c 4 ')
   })
 
   it('uses Ctrl+C to open kill confirm when active tab is running', async () => {
@@ -1002,5 +1302,92 @@ describe('app helpers', () => {
     document.getElementById('faq-btn').click()
     document.querySelector('.faq-close').click()
     expect(faqOverlay.classList.contains('open')).toBe(false)
+  })
+
+  it('opens and closes the options overlay through the wired controls', async () => {
+    const { cmdInput } = await loadAppFns()
+    const overlay = document.getElementById('options-overlay')
+
+    document.getElementById('options-btn').click()
+    expect(overlay.classList.contains('open')).toBe(true)
+
+    document.querySelector('.options-close').click()
+    expect(overlay.classList.contains('open')).toBe(false)
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    document.querySelector('#mobile-menu [data-action="options"]').click()
+    expect(overlay.classList.contains('open')).toBe(true)
+
+    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(overlay.classList.contains('open')).toBe(false)
+  })
+
+  it('persists options changes through cookies and syncs quick-toggle state', async () => {
+    await loadAppFns()
+
+    document.getElementById('options-btn').click()
+    document.querySelector('input[name="theme-pref"][value="light"]').click()
+    document.getElementById('options-ts-select').value = 'elapsed'
+    document.getElementById('options-ts-select').dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-ln-toggle').checked = true
+    document.getElementById('options-ln-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+
+    expect(document.body.classList.contains('light')).toBe(true)
+    expect(document.body.classList.contains('ts-elapsed')).toBe(true)
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
+    expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.cookie).toContain('pref_theme=light')
+    expect(document.cookie).toContain('pref_timestamps=elapsed')
+    expect(document.cookie).toContain('pref_line_numbers=on')
+  })
+
+  it('renders backend-driven FAQ items with HTML answers and dynamic sections', async () => {
+    const apiFetch = vi.fn((url) => {
+    if (url === '/config') {
+      return Promise.resolve({
+        json: () => Promise.resolve({
+          app_name: 'shell.darklab.sh',
+          version: '9.9',
+          default_theme: 'dark',
+          motd: '',
+          command_timeout_seconds: 120,
+            max_output_lines: 5000,
+            permalink_retention_days: 365,
+          }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: ['ping', 'curl'],
+            groups: [{ name: 'Network', commands: ['ping', 'curl'] }],
+          }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            items: [
+              { question: 'What is this?', answer: 'plain', answer_html: 'Rich <strong>HTML</strong>' },
+              { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
+              { question: 'Limits?', answer: 'limits', ui_kind: 'limits' },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({ apiFetch })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const questions = [...document.querySelectorAll('.faq-q')].map(el => el.textContent)
+    expect(questions).toContain('What is this?')
+    expect(document.querySelector('.faq-a strong')?.textContent).toBe('HTML')
+    expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Click any command')
+    expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
+    expect(document.querySelectorAll('.allowed-chip')).toHaveLength(2)
   })
 })

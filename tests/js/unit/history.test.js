@@ -109,10 +109,12 @@ describe('command history hydration', () => {
     document.body.innerHTML = `
       <div id="history-row"><span class="history-label">Recent:</span></div>
       <input id="cmd" />
+      <div id="history-panel"></div>
     `
 
     const histRow = document.getElementById('history-row')
     const cmdInput = document.getElementById('cmd')
+    const historyPanel = document.getElementById('history-panel')
 
     return fromDomScripts([
       'app/static/js/history.js',
@@ -122,10 +124,14 @@ describe('command history hydration', () => {
       APP_CONFIG: { recent_commands_limit: 3 },
       histRow,
       cmdInput,
+      historyPanel,
+      refreshHistoryPanel: vi.fn(),
+      useMobileTerminalViewportMode: () => false,
     }, `{
       hydrateCmdHistory,
       navigateCmdHistory,
       resetCmdHistoryNav,
+      renderHistory,
       getCmdHistory: () => cmdHistory.slice(),
     }`)
   }
@@ -191,6 +197,44 @@ describe('command history hydration', () => {
     expect(navigateCmdHistory(-1)).toBe(false)
     expect(navigateCmdHistory(1)).toBe(true)
     expect(cmdInput.value).toBe('dig darklab.sh A')
+  })
+
+  it('limits visible recent chips on mobile and appends an overflow chip', () => {
+    document.body.innerHTML = `
+      <div id="history-row"><span class="history-label">Recent:</span></div>
+      <input id="cmd" />
+      <div id="history-panel"></div>
+    `
+
+    const helpers = fromDomScripts([
+      'app/static/js/history.js',
+    ], {
+      document,
+      localStorage: new MemoryStorage(),
+      APP_CONFIG: { recent_commands_limit: 8 },
+      histRow: document.getElementById('history-row'),
+      cmdInput: document.getElementById('cmd'),
+      historyPanel: document.getElementById('history-panel'),
+      refreshHistoryPanel: vi.fn(),
+      useMobileTerminalViewportMode: () => true,
+    }, `({
+      hydrateCmdHistory,
+    })`)
+
+    helpers.hydrateCmdHistory([
+      { command: 'one' },
+      { command: 'two' },
+      { command: 'three' },
+      { command: 'four' },
+    ])
+
+    const chips = [...document.querySelectorAll('.hist-chip')]
+    expect(chips).toHaveLength(4)
+    expect(chips[0].querySelector('.chip-star')?.textContent).toBe('☆')
+    expect(chips[0].querySelector('span:last-child')?.textContent).toBe('one')
+    expect(chips[1].querySelector('span:last-child')?.textContent).toBe('two')
+    expect(chips[2].querySelector('span:last-child')?.textContent).toBe('three')
+    expect(chips[3].textContent).toBe('+1 more')
   })
 })
 

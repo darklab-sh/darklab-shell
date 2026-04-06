@@ -5,6 +5,7 @@ This module has no dependency on Flask or other app modules — it contains
 pure functions that can be imported and tested in isolation.
 """
 
+from copy import deepcopy
 import os
 import re
 import shlex
@@ -28,6 +29,20 @@ BUILTIN_FAQ = [
             "and vulnerability scanning commands against remote endpoints, with output streamed "
             "in real time. It's designed for testing and troubleshooting remote hosts."
         ),
+        "answer_html": (
+            "shell.darklab.sh is a lightweight web interface for running network diagnostic "
+            "and vulnerability scanning commands against remote endpoints, with output streamed "
+            "in real time. It's designed for testing and troubleshooting remote hosts — things "
+            "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
+            "scans — without needing SSH access to a server. For more detailed information, see "
+            "the <a href=\"https://gitlab.com/darklab.sh/shell.darklab.sh\" target=\"_blank\" "
+            "rel=\"noopener\" style=\"color:var(--green)\">README on GitLab</a>."
+        ),
+    },
+    {
+        "question": "What commands are allowed?",
+        "answer": "Use the grouped allowlist shown in the FAQ modal or run ls in the web shell.",
+        "ui_kind": "allowed_commands",
     },
     {
         "question": "Why does mtr look different here?",
@@ -35,10 +50,21 @@ BUILTIN_FAQ = [
             "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
             "available in a web shell. It runs in --report-wide mode instead."
         ),
+        "answer_html": (
+            "<code>mtr</code> requires a real terminal (TTY) for its live interactive display, "
+            "which isn't available in a web shell. It's automatically run in "
+            "<code>--report-wide</code> mode instead, which runs 10 probe cycles and prints a "
+            "summary table. You can control the cycle count with <code>-c</code>, e.g. "
+            "<code class=\"faq-example\">mtr -c 20 google.com</code>"
+        ),
     },
     {
         "question": "Can I request a new tool?",
         "answer": "Yes. Contact the instance operator to request additional allowlisted tools.",
+        "answer_html": (
+            "Yes! If there's a tool you'd like added, send a request to "
+            "<strong>admin [at] darklab [dot] sh</strong> and we'll consider it for a future update."
+        ),
     },
     {
         "question": "How do tabs and permalinks work?",
@@ -46,30 +72,146 @@ BUILTIN_FAQ = [
             "Each command runs in the active tab. Use additional tabs to keep results visible "
             "side by side. The permalink action saves a shareable view of the visible output."
         ),
+        "answer_html": (
+            "Each command runs in the currently active tab. You can open additional tabs with the "
+            "<strong>+</strong> button to run commands side by side and keep results from "
+            "different sessions visible at the same time. Each tab tracks its own status "
+            "independently. Double-click a tab label to rename it.<br><br>"
+            "The <strong>permalink</strong> button on each tab captures everything currently "
+            "visible in that tab and saves it as a shareable page. The link opens a styled HTML "
+            "view with ANSI color rendering and options to copy to clipboard, save as .html, save "
+            "as .txt, or view raw JSON. Permalinks survive container restarts.<br><br>"
+            "The <strong>⧖ history</strong> panel shows your recent runs. You can load any past "
+            "result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> "
+            "a command to pin it to the top of the list."
+        ),
     },
     {
         "question": "How do I stop a running command?",
         "answer": "Use the Kill button shown while a command is running.",
+        "answer_html": (
+            "Click the <strong style=\"color:var(--red)\">■ Kill</strong> button that appears "
+            "while a command is running. This sends SIGTERM to the entire process group on the "
+            "server, stopping it immediately."
+        ),
     },
     {
         "question": "How do I access search, history and theme on mobile?",
         "answer": "Use the mobile menu in the top-right corner.",
+        "answer_html": (
+            "On small screens the header buttons are replaced by a <strong>☰</strong> menu in the "
+            "top-right corner. Tap it to access search, run history, line numbers, timestamps, "
+            "theme, and this FAQ."
+        ),
     },
     {
         "question": "How do I save or share my results?",
         "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
+        "answer_html": (
+            "There are several options from the action bar below each tab's output:<br><br>"
+            "<strong>permalink</strong> — saves a snapshot of everything visible in the tab and "
+            "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
+            "view the raw data.<br>"
+            "<strong>copy</strong> — copies the full plain-text output to your clipboard.<br>"
+            "<strong>save .html</strong> — downloads a self-contained HTML file with ANSI colors "
+            "preserved, suitable for archiving or sending to someone without a browser link.<br>"
+            "<strong>save .txt</strong> — downloads a plain-text version of the output.<br><br>"
+            "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
+        ),
     },
     {
         "question": "How do I rename a tab?",
         "answer": "Double-click the tab label, then press Enter or click away to confirm.",
+        "answer_html": (
+            "Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click "
+            "anywhere outside to confirm, or <strong>Escape</strong> to cancel. Once renamed, "
+            "running a command won't overwrite the label — the tab keeps your chosen name."
+        ),
     },
     {
         "question": "What do the timestamp options do?",
         "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
+        "answer_html": (
+            "The <strong>timestamps</strong> button in the terminal bar cycles through three modes:"
+            "<br><br><strong>off</strong> — no timestamps shown (default).<br>"
+            "<strong>elapsed</strong> — shows how many seconds after the command started each line "
+            "appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different "
+            "stages of a scan take.<br><strong>clock</strong> — shows the wall-clock time each "
+            "line was received (e.g. <code>14:32:01</code>). Useful for correlating output with "
+            "events elsewhere."
+        ),
+    },
+    {
+        "question": "What do the line number options do?",
+        "answer": "They toggle numbered output lines on and off for easier line-by-line reference.",
+        "answer_html": (
+            "The <strong>line numbers</strong> button in the terminal bar toggles numbered output "
+            "lines on and off.<br><br><strong>off</strong> — no line numbers are shown (default)."
+            "<br><strong>on</strong> — every output line is prefixed with a sequence number so "
+            "you can reference specific rows while reading long scans or copied output."
+        ),
+    },
+    {
+        "question": "Are there keyboard shortcuts?",
+        "answer": (
+            "Yes. Run keys in the web shell for the current shortcut list, including tab, output, "
+            "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
+        ),
+        "answer_html": (
+            "Yes. Current shell-style shortcuts include:<br><br>"
+            "<strong>Ctrl+C</strong> — open kill confirmation while a command is running, or drop "
+            "to a fresh prompt line when idle.<br>"
+            "<strong>Enter</strong> on a blank prompt — create a new empty prompt line.<br>"
+            "<strong>Option+T</strong> / <strong>Alt+T</strong> and <strong>Option+W</strong> / "
+            "<strong>Alt+W</strong> — open or close the current tab.<br>"
+            "<strong>Option+←/→</strong> and <strong>Option+1...9</strong> "
+            "(<strong>Alt+←/→</strong>, <strong>Alt+1...9</strong>) — switch tabs.<br>"
+            "<strong>Option+P</strong> (<strong>Alt+P</strong>) — create a permalink for the "
+            "active tab.<br><strong>Option+Shift+C</strong> (<strong>Alt+Shift+C</strong>) — copy "
+            "the active tab output.<br><strong>Ctrl+L</strong> — clear the active tab.<br>"
+            "<strong>Kill dialog:</strong> <strong>Enter</strong> confirms and "
+            "<strong>Escape</strong> cancels.<br><strong>Ctrl+A</strong>, <strong>Ctrl+E</strong>, "
+            "<strong>Ctrl+W</strong>, <strong>Ctrl+U</strong>, <strong>Ctrl+K</strong>, "
+            "<strong>Option+B</strong>, and <strong>Option+F</strong> (<strong>Alt+B</strong>, "
+            "<strong>Alt+F</strong>) provide readline-style prompt editing.<br>"
+            "<strong>Welcome screen:</strong> printable typing, <strong>Enter</strong>, "
+            "and <strong>Escape</strong> all settle the welcome animation immediately.<br>"
+            "<strong>Autocomplete:</strong> <strong>↑↓</strong> navigate, <strong>Tab</strong> "
+            "accepts, <strong>Enter</strong> accepts or runs, and <strong>Escape</strong> "
+            "dismisses.<br><br>On macOS, the app-safe tab/action shortcuts use the "
+            "<strong>Option</strong> key. The <strong>Ctrl+...</strong> bindings are intentional "
+            "shell-style controls, not replacements for browser <strong>Command</strong> "
+            "shortcuts.<br><br>You can also run <code>keys</code> in the terminal for the current "
+            "shortcut reference and planned follow-up items."
+        ),
     },
     {
         "question": "Are my commands visible to other users?",
         "answer": "No. History and saved data are scoped to your anonymous browser session.",
+        "answer_html": (
+            "No. Each browser session is assigned an anonymous ID stored in your browser's local "
+            "storage. Your run history, starred commands, and saved snapshots are only visible to "
+            "sessions sharing that ID — in practice, just your own browser tabs. Commands are not "
+            "broadcast or shared between users."
+        ),
+    },
+    {
+        "question": "What are the retention and limit settings for this instance?",
+        "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
+        "ui_kind": "limits",
+    },
+    {
+        "question": "What wordlists are available?",
+        "answer": "The SecLists collection is installed at /usr/share/wordlists/seclists/.",
+        "answer_html": (
+            "The full <a href=\"https://github.com/danielmiessler/SecLists\" target=\"_blank\" "
+            "rel=\"noopener\" style=\"color:var(--green)\">SecLists</a> collection is installed at "
+            "<code>/usr/share/wordlists/seclists/</code>. Commonly used lists:<ul>"
+            "<li><code>Discovery/Web-Content/common.txt</code> — fast directory scan</li>"
+            "<li><code>Discovery/Web-Content/big.txt</code> — broader directory scan</li>"
+            "<li><code>Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt</code> — "
+            "thorough directory scan</li></ul>"
+        ),
     },
 ]
 
@@ -146,7 +288,7 @@ def load_faq():
 
 def load_all_faq():
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
-    return [*BUILTIN_FAQ, *load_faq()]
+    return [*(deepcopy(BUILTIN_FAQ)), *load_faq()]
 
 
 def load_welcome():

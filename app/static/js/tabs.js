@@ -7,6 +7,13 @@ let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
 
+function _clearTabDropIndicators() {
+  if (!tabsBar) return;
+  tabsBar.querySelectorAll('.tab-drop-before, .tab-drop-after').forEach(node => {
+    node.classList.remove('tab-drop-before', 'tab-drop-after');
+  });
+}
+
 function refocusTabsTerminalInput() {
   if (typeof cmdInput === 'undefined' || !cmdInput || typeof cmdInput.focus !== 'function') return;
   setTimeout(() => cmdInput.focus(), 0);
@@ -74,6 +81,8 @@ function _reorderDraggedTab(dragged, target, clientX) {
   if (!dragged || !target || !tabsBar || dragged === target) return;
   const rect = target.getBoundingClientRect();
   const after = clientX > rect.left + (rect.width / 2);
+  _clearTabDropIndicators();
+  target.classList.add(after ? 'tab-drop-after' : 'tab-drop-before');
   if (after) {
     if (target.nextSibling !== dragged) tabsBar.insertBefore(dragged, target.nextSibling);
   } else if (target !== dragged.nextSibling) {
@@ -94,6 +103,8 @@ function _cleanupTouchDrag() {
   document.removeEventListener('pointermove', _onTouchDragMove);
   document.removeEventListener('pointerup', _onTouchDragEnd);
   document.removeEventListener('pointercancel', _onTouchDragEnd);
+  _clearTabDropIndicators();
+  tabsBar?.classList.remove('tabs-bar-touch-sorting');
   _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging');
   _touchDragState = null;
 }
@@ -105,6 +116,7 @@ function _onTouchDragMove(e) {
   if (!_touchDragState.active) {
     if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
     _touchDragState.active = true;
+    tabsBar?.classList.add('tabs-bar-touch-sorting');
     _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
   }
   e.preventDefault();
@@ -113,6 +125,8 @@ function _onTouchDragMove(e) {
   if (target) {
     _reorderDraggedTab(dragged, target, e.clientX);
     _touchDragState.moved = true;
+  } else {
+    _clearTabDropIndicators();
   }
   _touchDragAutoScroll(e.clientX);
   updateTabScrollButtons();
@@ -208,11 +222,24 @@ function bindTabDragReorder(tab, id) {
 
 function unmountShellPrompt() {
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
+  const prevParent = shellPromptWrap.parentElement;
   if (shellPromptWrap.parentElement) shellPromptWrap.remove();
+  if (prevParent && prevParent.classList && prevParent.classList.contains('output') && typeof syncOutputPrefixes === 'function') {
+    syncOutputPrefixes(prevParent);
+  }
 }
 
 function mountShellPrompt(tabId, force = false) {
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
+  const mobileMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  if (!force && !mobileMode && typeof _welcomeBootPending !== 'undefined' && _welcomeBootPending) {
+    unmountShellPrompt();
+    return;
+  }
+  if (mobileMode) {
+    unmountShellPrompt();
+    return;
+  }
   const tabState = tabs.find(t => t.id === tabId);
   // Never show a prompt while a command is running in this tab.
   if (tabState && tabState.st === 'running') {
@@ -228,8 +255,23 @@ function mountShellPrompt(tabId, force = false) {
   if (!panel) return;
   const out = panel.querySelector('.output');
   if (!out) return;
-  out.appendChild(shellPromptWrap);
-  out.scrollTop = out.scrollHeight;
+  const useDetachedMobileComposer =
+    typeof mobileComposerHost !== 'undefined'
+    && mobileComposerHost
+    && document.body.classList.contains('mobile-terminal-mode');
+  const target = useDetachedMobileComposer ? mobileComposerHost : out;
+  const prevParent = shellPromptWrap.parentElement;
+  if (prevParent !== target) {
+    if (useDetachedMobileComposer && typeof mobileEditBar !== 'undefined' && mobileEditBar && mobileEditBar.parentElement === target) {
+      target.insertBefore(shellPromptWrap, mobileEditBar);
+    } else {
+      target.appendChild(shellPromptWrap);
+    }
+  }
+  if (!useDetachedMobileComposer) out.scrollTop = out.scrollHeight;
+  if (prevParent && prevParent.classList && prevParent.classList.contains('output') && typeof syncOutputPrefixes === 'function') {
+    syncOutputPrefixes(prevParent);
+  }
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes(out);
 }
 
