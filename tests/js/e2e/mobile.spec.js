@@ -24,11 +24,17 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
     // Desktop run button stays hidden; mobile composer is the input affordance
     await expect(page.locator('#run-btn')).toBeHidden()
+    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
     await expect(page.locator('#mobile-composer')).toBeVisible()
     // Composer must stay within the viewport
     const composerBox = await page.locator('#mobile-composer').boundingBox()
     expect(composerBox).not.toBeNull()
     expect(composerBox.y + composerBox.height).toBeLessThanOrEqual(MOBILE.height)
+  })
+
+  test('mobile edit bar appears when the mobile command input is focused', async ({ page }) => {
+    await page.locator('#mobile-cmd').focus()
+    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
   })
 
   test('hamburger button is visible and desktop header buttons are hidden at mobile width', async ({ page }) => {

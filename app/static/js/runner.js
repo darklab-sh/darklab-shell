@@ -136,6 +136,17 @@ function appendPromptNewline(tabId) {
   appendLine('', 'prompt-echo', tabId);
 }
 
+function focusComposerInputAfterRun() {
+  const visibleInput = (typeof getVisibleMobileComposerInput === 'function')
+    ? getVisibleMobileComposerInput()
+    : null;
+  if (visibleInput && visibleInput !== cmdInput && typeof visibleInput.focus === 'function') {
+    visibleInput.focus();
+    return;
+  }
+  cmdInput.focus();
+}
+
 function interruptPromptLine(tabId = activeTabId) {
   const t = tabs.find(tab => tab.id === tabId);
   if (t && t.st === 'running') return false;
@@ -193,13 +204,13 @@ function runCommand() {
       && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
     ) {
       if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle(activeTabId);
-      cmdInput.focus();
+      focusComposerInputAfterRun();
       return;
     }
     appendPromptNewline(activeTabId);
     cmdInput.value = '';
     cmdInput.dispatchEvent(new Event('input'));
-    cmdInput.focus();
+    focusComposerInputAfterRun();
     setStatus('idle');
     return;
   }
@@ -245,7 +256,7 @@ function runCommand() {
   appendCommandEcho(cmd);
   cmdInput.value = '';
   cmdInput.dispatchEvent(new Event('input'));
-  cmdInput.focus();
+  focusComposerInputAfterRun();
   if (typeof dismissMobileKeyboardAfterSubmit === 'function') dismissMobileKeyboardAfterSubmit();
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
   const _runTab = tabs.find(t => t.id === activeTabId);

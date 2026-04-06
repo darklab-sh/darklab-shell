@@ -164,6 +164,14 @@ function getMobileKeyboardOffset() {
   return Math.max(0, Math.round(window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop));
 }
 
+function isMobileKeyboardOpen(offset = null) {
+  if (!useMobileTerminalViewportMode()) return false;
+  const mobileInputFocused = typeof document !== 'undefined'
+    && document.activeElement
+    && document.activeElement.id === 'mobile-cmd';
+  return mobileInputFocused;
+}
+
 function syncMobilePromptReserve() {
   if (typeof document === 'undefined' || typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   document.documentElement.style.setProperty('--mobile-prompt-reserve', `${Math.ceil(shellPromptWrap.offsetHeight || 0)}px`);
@@ -192,6 +200,7 @@ function syncMobilePromptScroll() {
 let mobilePromptScrollFrame = 0;
 function scheduleMobilePromptScroll() {
   if (!useMobileTerminalViewportMode()) return;
+  if (typeof mobileShell === 'undefined' || !mobileShell) return;
   if (typeof window === 'undefined' || typeof window.requestAnimationFrame !== 'function') {
     syncMobilePromptScroll();
     return;
@@ -205,6 +214,7 @@ function scheduleMobilePromptScroll() {
 
 function ensureMobilePromptVisible() {
   if (!useMobileTerminalViewportMode() || !cmdInput) return;
+  if (typeof mobileShell === 'undefined' || !mobileShell) return;
   if (typeof mobileComposerHost !== 'undefined' && mobileComposerHost) {
     if (typeof mobileComposerHost.scrollIntoView === 'function') {
       mobileComposerHost.scrollIntoView({ block: 'end', inline: 'nearest' });
@@ -224,14 +234,18 @@ function syncMobileViewportState() {
   const hasMobileShell = typeof mobileShell !== 'undefined' && !!mobileShell;
   const activeMobileMode = mobileMode && hasMobileShell;
   const keyboardOffset = getMobileKeyboardOffset();
-  const keyboardOpen = keyboardOffset > 40;
+  const keyboardOpen = isMobileKeyboardOpen(keyboardOffset);
   const wasMobileKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
+  document.documentElement.style.setProperty('--mobile-keyboard-offset', `${keyboardOffset}px`);
+  if (!hasMobileShell) {
+    syncMobilePromptReserve();
+    return;
+  }
   document.body.classList.toggle('mobile-terminal-mode', activeMobileMode);
   document.body.classList.toggle('mobile-chrome-ios', activeMobileMode && isChromeIOS());
   document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
-  document.documentElement.style.setProperty('--mobile-keyboard-offset', `${keyboardOffset}px`);
   syncMobileShellLayout(activeMobileMode);
-  syncMobileComposerLayout(activeMobileMode);
+  if (hasMobileShell) syncMobileComposerLayout(activeMobileMode);
   if (activeMobileMode && keyboardOpen) {
     mobileMenu?.classList.remove('open');
     if (historyPanel?.classList.contains('open')) historyPanel.classList.remove('open');
@@ -455,6 +469,48 @@ function getCmdSelection(value = cmdInput.value || '') {
   return { start, end };
 }
 
+function getComposerInputForMobileEdit() {
+  if (
+    typeof mobileCmdInput !== 'undefined'
+    && mobileCmdInput
+    && typeof mobileCmdInput.getClientRects === 'function'
+    && mobileCmdInput.getClientRects().length > 0
+  ) {
+    return mobileCmdInput;
+  }
+  return cmdInput;
+}
+
+function getVisibleMobileComposerInput() {
+  if (
+    typeof mobileCmdInput !== 'undefined'
+    && mobileCmdInput
+    && typeof mobileCmdInput.getClientRects === 'function'
+    && mobileCmdInput.getClientRects().length > 0
+  ) {
+    return mobileCmdInput;
+  }
+  return cmdInput;
+}
+
+function getInputSelection(input, value = input && input.value ? input.value : '') {
+  let start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+  let end = typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
+  if (start > end) [start, end] = [end, start];
+  return { start, end };
+}
+
+function syncHiddenCommandInputFromVisible(value, start = null, end = null) {
+  if (!cmdInput) return;
+  cmdInput.value = value;
+  if (typeof cmdInput.setSelectionRange === 'function') {
+    const nextStart = typeof start === 'number' ? start : value.length;
+    const nextEnd = typeof end === 'number' ? end : nextStart;
+    cmdInput.setSelectionRange(nextStart, nextEnd);
+  }
+  cmdInput.dispatchEvent(new Event('input'));
+}
+
 function replaceCmdRange(value, start, end, replacement = '') {
   cmdInput.value = value.slice(0, start) + replacement + value.slice(end);
   const nextPos = start + replacement.length;
@@ -492,19 +548,85 @@ function deleteCmdWordLeft() {
 }
 
 function performMobileEditAction(action) {
-  if (!cmdInput) return;
-  if (document.activeElement !== cmdInput && typeof cmdInput.focus === 'function') {
+  const input = getComposerInputForMobileEdit();
+  if (!input) return;
+  if (document.activeElement !== input && typeof input.focus === 'function') {
     try {
-      cmdInput.focus({ preventScroll: true });
+      input.focus({ preventScroll: true });
     } catch (_) {
-      cmdInput.focus();
+      input.focus();
     }
   }
-  if (action === 'left') moveCmdCaret(-1);
-  else if (action === 'right') moveCmdCaret(1);
-  else if (action === 'home') setCmdCaret(0);
-  else if (action === 'end') setCmdCaret((cmdInput.value || '').length);
-  else if (action === 'delete-word') deleteCmdWordLeft();
+
+  // Mobile edit helpers are meant to adjust the existing command in place.
+  // Suppress autocomplete for this synthetic input update so the dropdown
+  // does not pop back up and cover the helper row itself.
+  if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
+  if (typeof acHide === 'function') acHide();
+
+  const value = input.value || '';
+  const { start, end } = getInputSelection(input, value);
+  let nextValue = value;
+  let nextStart = start;
+  let nextEnd = end;
+
+  if (action === 'left') {
+    const pos = Math.max(0, start - 1);
+    nextStart = pos;
+    nextEnd = pos;
+  } else if (action === 'right') {
+    const pos = Math.min(value.length, end + 1);
+    nextStart = pos;
+    nextEnd = pos;
+  } else if (action === 'home') {
+    nextStart = 0;
+    nextEnd = 0;
+  } else if (action === 'end') {
+    nextStart = value.length;
+    nextEnd = value.length;
+  } else if (action === 'delete-word') {
+    if (start !== end) {
+      nextValue = value.slice(0, start) + value.slice(end);
+      nextStart = start;
+      nextEnd = start;
+    } else if (start > 0) {
+      const cut = findWordBoundaryLeft(value, start);
+      nextValue = value.slice(0, cut) + value.slice(start);
+      nextStart = cut;
+      nextEnd = cut;
+    }
+  }
+
+  input.value = nextValue;
+  input.setSelectionRange(nextStart, nextEnd);
+
+  if (input === mobileCmdInput && cmdInput) {
+    syncHiddenCommandInputFromVisible(input.value, nextStart, nextEnd);
+  } else if (
+    input === cmdInput
+    && typeof mobileCmdInput !== 'undefined'
+    && mobileCmdInput
+    && typeof mobileCmdInput.getClientRects === 'function'
+    && mobileCmdInput.getClientRects().length > 0
+  ) {
+    mobileCmdInput.value = input.value;
+    mobileCmdInput.setSelectionRange(nextStart, nextEnd);
+  }
+
+  if (input === cmdInput) {
+    cmdInput.dispatchEvent(new Event('input'));
+  }
+  scheduleMobilePromptScroll();
+
+  if (typeof input.focus === 'function') {
+    setTimeout(() => {
+      try {
+        input.focus({ preventScroll: true });
+      } catch (_) {
+        input.focus();
+      }
+    }, 0);
+  }
 }
 
 function findWordBoundaryLeft(value, index) {
@@ -986,7 +1108,7 @@ document.addEventListener('click', e => {
     mobileMenu.classList.remove('open');
   }
   if (!(e.target && e.target.closest &&
-        (e.target.closest('.prompt-wrap') || e.target.closest('.ac-dropdown')))) acHide();
+        (e.target.closest('.prompt-wrap') || e.target.closest('.ac-dropdown') || e.target.closest('#mobile-composer')))) acHide();
 });
 
 if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
@@ -1008,21 +1130,15 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   });
 }
 
-if (typeof mobileComposerHost !== 'undefined' && mobileComposerHost && cmdInput) {
-  mobileComposerHost.addEventListener('pointerdown', e => {
-    if (useMobileTerminalViewportMode() && e.target !== cmdInput) {
-      e.preventDefault();
-      focusCommandInputFromGesture();
-    }
-  });
-  mobileComposerHost.addEventListener('touchstart', e => {
-    if (useMobileTerminalViewportMode() && e.target !== cmdInput) {
-      e.preventDefault();
-      focusCommandInputFromGesture();
-    }
-  }, { passive: false });
+if (
+  typeof mobileComposerHost !== 'undefined'
+  && mobileComposerHost
+  && cmdInput
+  && typeof mobileShell !== 'undefined'
+  && mobileShell
+) {
   mobileComposerHost.addEventListener('click', e => {
-    if (useMobileTerminalViewportMode() && e.target !== runBtn) {
+    if (useMobileTerminalViewportMode() && e.target === mobileComposerHost) {
       focusCommandInputFromGesture();
     }
   });
@@ -1099,6 +1215,20 @@ cmdInput.addEventListener('input', () => {
   syncShellPrompt();
   syncMobileViewportState();
   ensureMobilePromptVisible();
+  if (
+    typeof mobileCmdInput !== 'undefined'
+    && mobileCmdInput
+    && typeof mobileCmdInput.getClientRects === 'function'
+    && mobileCmdInput.getClientRects().length > 0
+  ) {
+    const value = cmdInput.value;
+    mobileCmdInput.value = value;
+    if (typeof mobileCmdInput.setSelectionRange === 'function') {
+      const start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : value.length;
+      const end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : value.length;
+      mobileCmdInput.setSelectionRange(start, end);
+    }
+  }
   const keepHistoryNav =
     typeof _suspendCmdHistoryNavReset !== 'undefined' && _suspendCmdHistoryNavReset;
   if (keepHistoryNav) _suspendCmdHistoryNavReset = false;
@@ -1306,6 +1436,11 @@ if (mobileCmdInput && mobileRunBtn_ && typeof runCommand === 'function') {
   // Sync mobile input → cmdInput on every keystroke so autocomplete works
   mobileCmdInput.addEventListener('input', () => {
     cmdInput.value = mobileCmdInput.value;
+    if (typeof cmdInput.setSelectionRange === 'function') {
+      const start = typeof mobileCmdInput.selectionStart === 'number' ? mobileCmdInput.selectionStart : mobileCmdInput.value.length;
+      const end = typeof mobileCmdInput.selectionEnd === 'number' ? mobileCmdInput.selectionEnd : mobileCmdInput.value.length;
+      cmdInput.setSelectionRange(start, end);
+    }
     cmdInput.dispatchEvent(new Event('input'));
   });
 
@@ -1320,46 +1455,47 @@ if (mobileCmdInput && mobileRunBtn_ && typeof runCommand === 'function') {
   const mobileEditBar_ = document.getElementById('mobile-edit-bar');
   if (mobileEditBar_) {
     mobileEditBar_.querySelectorAll('button[data-mobile-edit]').forEach(btn => {
-      btn.addEventListener('mousedown', e => {
+      let handledPointerDown = false;
+      const handler = e => {
         e.preventDefault();
-        const action = btn.dataset.mobileEdit;
-        const input = mobileCmdInput;
-        const val = input.value;
-        let pos = typeof input.selectionStart === 'number' ? input.selectionStart : val.length;
-        if (action === 'home') {
-          pos = 0;
-        } else if (action === 'end') {
-          pos = val.length;
-        } else if (action === 'left') {
-          pos = Math.max(0, pos - 1);
-        } else if (action === 'right') {
-          pos = Math.min(val.length, pos + 1);
-        } else if (action === 'delete-word') {
-          // Delete word before cursor
-          let i = pos;
-          while (i > 0 && val[i - 1] === ' ') i--;
-          while (i > 0 && val[i - 1] !== ' ') i--;
-          input.value = val.slice(0, i) + val.slice(pos);
-          input.setSelectionRange(i, i);
-          return;
-        }
-        input.setSelectionRange(pos, pos);
-      });
+        e.stopPropagation();
+        performMobileEditAction(btn.dataset.mobileEdit);
+      };
+      if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
+        btn.addEventListener('pointerdown', e => {
+          handledPointerDown = true;
+          handler(e);
+        });
+        btn.addEventListener('mousedown', e => {
+          if (handledPointerDown) {
+            handledPointerDown = false;
+            e.preventDefault();
+            return;
+          }
+          handler(e);
+        });
+      } else {
+        btn.addEventListener('mousedown', handler);
+        btn.addEventListener('touchstart', handler, { passive: false });
+      }
     });
   }
 }
 
 // Keyboard detection for mobile composer (works when mobile-shell feature is not active)
 function _syncMobileComposerKeyboard() {
-  if (typeof window === 'undefined' || !window.visualViewport) return;
-  const offset = Math.max(0, Math.round(
-    window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop
-  ));
+  if (typeof window === 'undefined') return;
+  const offset = getMobileKeyboardOffset();
   document.documentElement.style.setProperty('--mobile-keyboard-offset', `${offset}px`);
-  document.body.classList.toggle('mobile-keyboard-open', offset > 40);
+  document.body.classList.toggle('mobile-keyboard-open', isMobileKeyboardOpen(offset));
 }
 
 if (typeof window !== 'undefined' && window.visualViewport) {
   window.visualViewport.addEventListener('resize', _syncMobileComposerKeyboard);
   window.visualViewport.addEventListener('scroll', _syncMobileComposerKeyboard);
+}
+
+if (mobileCmdInput) {
+  mobileCmdInput.addEventListener('focus', _syncMobileComposerKeyboard);
+  mobileCmdInput.addEventListener('blur', _syncMobileComposerKeyboard);
 }

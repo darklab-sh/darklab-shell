@@ -13,7 +13,10 @@ function _positionAutocomplete(itemsCount) {
   const mobileTerminalMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
   // Simple CSS mobile mode: #mobile-cmd is visible (≤600px layout, no mobile-terminal-mode)
   const _mobileCmdEl = !mobileTerminalMode ? document.getElementById('mobile-cmd') : null;
-  const simpleMobileMode = !mobileTerminalMode && !!_mobileCmdEl && !!_mobileCmdEl.offsetParent;
+  const simpleMobileMode = !mobileTerminalMode
+    && !!_mobileCmdEl
+    && typeof _mobileCmdEl.getClientRects === 'function'
+    && _mobileCmdEl.getClientRects().length > 0;
   const mobileComposerMode = mobileTerminalMode || simpleMobileMode;
   const anchor = mobileTerminalMode && composerRow ? composerRow : (mobileTerminalMode && composerHost ? composerHost : wrap);
   acDropdown.classList.toggle('ac-mobile', mobileTerminalMode);
@@ -164,15 +167,20 @@ function acHide() {
 }
 
 function acAccept(s) {
+  const visibleInput = (typeof getVisibleMobileComposerInput === 'function')
+    ? getVisibleMobileComposerInput()
+    : null;
   cmdInput.value = s;
-  // In simple CSS mobile mode, sync the accepted value back to the visible input
-  const _mobileCmdEl = document.getElementById('mobile-cmd');
-  const isSimpleMobile = _mobileCmdEl && _mobileCmdEl.offsetParent !== null
-                       && !document.body.classList.contains('mobile-terminal-mode');
-  if (isSimpleMobile) _mobileCmdEl.value = s;
+  if (visibleInput && visibleInput !== cmdInput) {
+    visibleInput.value = s;
+    if (typeof visibleInput.setSelectionRange === 'function') {
+      const end = s.length;
+      visibleInput.setSelectionRange(end, end);
+    }
+  }
   acHide();
-  if (isSimpleMobile) {
-    _mobileCmdEl.focus();
+  if (visibleInput && visibleInput !== cmdInput) {
+    visibleInput.focus();
   } else {
     cmdInput.focus();
   }

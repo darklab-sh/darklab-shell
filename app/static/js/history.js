@@ -122,10 +122,27 @@ function renderHistory() {
     chip.appendChild(starEl);
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
-      cmdInput.value = cmd;
+      const targetInput = (typeof getVisibleMobileComposerInput === 'function')
+        ? getVisibleMobileComposerInput()
+        : cmdInput;
+      if (targetInput) {
+        targetInput.value = cmd;
+        if (typeof targetInput.setSelectionRange === 'function') {
+          const end = cmd.length;
+          targetInput.setSelectionRange(end, end);
+        }
+        targetInput.dispatchEvent(new Event('input'));
+        if (typeof targetInput.focus === 'function') targetInput.focus();
+      }
+      if (cmdInput && targetInput !== cmdInput) {
+        cmdInput.value = cmd;
+        if (typeof cmdInput.setSelectionRange === 'function') {
+          const end = cmd.length;
+          cmdInput.setSelectionRange(end, end);
+        }
+        cmdInput.dispatchEvent(new Event('input'));
+      }
       resetCmdHistoryNav();
-      cmdInput.focus();
-      cmdInput.dispatchEvent(new Event('input'));
     });
     histRow.appendChild(chip);
   });

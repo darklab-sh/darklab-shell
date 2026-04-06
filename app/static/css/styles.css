@@ -1629,28 +1629,28 @@ body.light #mobile-menu { background: #fff; }
   background: var(--green-dim);
 }
 
-#mobile-edit-bar {
-  display: flex;
-  gap: 5px;
-  overflow-x: auto;
-  scrollbar-width: none;
-  padding-bottom: 2px;
-}
+  #mobile-edit-bar {
+    display: none;
+    gap: 5px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    padding-bottom: 2px;
+  }
 
 #mobile-edit-bar::-webkit-scrollbar { display: none; }
 
-#mobile-edit-bar button {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 3px 8px;
-  border-radius: 3px;
-  cursor: pointer;
-  flex-shrink: 0;
-  white-space: nowrap;
-}
+  #mobile-edit-bar button {
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--muted);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    padding: 3px 8px;
+    border-radius: 3px;
+    cursor: pointer;
+    flex-shrink: 0;
+    white-space: nowrap;
+  }
 
 #mobile-edit-bar button:active {
   border-color: var(--green-dim);
@@ -1747,7 +1747,7 @@ body.light #mobile-menu { background: #fff; }
     align-self: center;
   }
   #mobile-edit-bar {
-    display: grid;
+    display: none;
     grid-template-columns: repeat(5, minmax(0, 1fr));
     gap: 6px;
     padding: 6px 0 0;
@@ -1904,9 +1904,6 @@ body.light #mobile-menu { background: #fff; }
   body.mobile-terminal-mode #mobile-shell #history-row {
     background: var(--surface);
   }
-  body.mobile-terminal-mode:not(.mobile-keyboard-open) #mobile-edit-bar {
-    display: none;
-  }
   body.mobile-terminal-mode .terminal-actions {
     display: none;
   }
@@ -1927,9 +1924,42 @@ body.light #mobile-menu { background: #fff; }
     display: none;
   }
 
-  /* Edit bar only visible when keyboard is open */
-  body:not(.mobile-keyboard-open) #mobile-edit-bar {
+  /* Edit bar appears when the mobile keyboard is open. */
+  body.mobile-keyboard-open #mobile-edit-bar {
+    display: flex;
+  }
+
+  #mobile-cmd {
+    font-size: 16px;
+  }
+
+  #mobile-edit-bar {
     display: none;
+    flex-wrap: nowrap;
+    gap: 4px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  #mobile-edit-bar button {
+    flex: 1 1 0;
+    min-width: 0;
+    font-size: 12px;
+    padding: 4px 2px;
+    touch-action: manipulation;
+    -webkit-tap-highlight-color: transparent;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  #mobile-edit-bar button[data-mobile-edit="left"],
+  #mobile-edit-bar button[data-mobile-edit="right"] {
+    font-size: 25px;
+    font-weight: 700;
+    letter-spacing: 0;
+    line-height: 1;
+    padding-top: 2px;
+    padding-bottom: 2px;
   }
 
   /* When keyboard opens, float composer above it */
