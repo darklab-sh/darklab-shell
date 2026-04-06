@@ -17,9 +17,9 @@ The suites are intentionally layered:
 Current totals on this branch:
 
 - `pytest`: 445
-- `vitest`: 170
-- `playwright`: 103
-- total: 718
+- `vitest`: 186
+- `playwright`: 102
+- total: 733
 
 ## Running The Suites
 
@@ -70,7 +70,7 @@ Files and focus:
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, and no-output toast behavior
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, and featured-sample interaction behavior
-- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
+- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
 - `search.test.js` - search helper boundaries and no-op behavior
 - `output.test.js` - output rendering, shared timestamp/line-number prefix support, welcome-prefix exclusion, and no-output edge cases
 
@@ -89,7 +89,7 @@ Spec files:
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
 - `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, and killed-state UI
-- `mobile.spec.js` - mobile startup composer visibility, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling
+- `mobile.spec.js` - mobile startup composer visibility, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery

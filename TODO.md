@@ -42,6 +42,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - mobile keyboard-open behavior: transient overlays/menu/history close while typing, autocomplete renders as a sheet above the composer, and body scroll is locked to the terminal pane
 - version source cleanup: backend version is canonical, frontend header fallback is generic, and `/config` populates the visible version label
 - dedicated mobile composer dock: the mobile shell now uses a visible composer row/host with a touch-focused input, visible Run action, and mobile-only mounting path while the desktop shell remains intact
+- mobile helper-row polish: the compact edit helpers stay hidden until the keyboard is open, sync with the visible mobile input, and avoid letting autocomplete cover the helper row
 
 #### Remaining
 - continue refining inline selection visibility for advanced keyboard flows
@@ -132,7 +133,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
    - modal/drawer mounts
 4. The desktop shell should remain structurally unchanged during this phase.
 5. Create mobile-specific CSS and JS sections rather than continuing to grow desktop mobile override rules.
-6. Current implementation status: the dedicated mobile composer dock exists and is wired into the mobile presentation path, but the wider mobile shell split still needs to be completed.
+6. Current implementation status: the dedicated mobile composer dock exists and is wired into the mobile presentation path, including the helper row, Run/Enter submission, history chips, and autocomplete sync; the wider mobile shell split still needs to be completed.
 
 ##### Phase 2: Real Mobile Composer
 
@@ -344,8 +345,7 @@ Planned readline-style editing:
 Helper-command plan:
 - `keys` is now the dedicated shortcut-discovery helper command
 - keep `keys` printing a `Current shortcuts:` section for shipped behavior
-- keep `keys` printing a `Planned shortcuts:` section while rollout is incomplete
-- keep the note that browser-native combos like `Ctrl/Cmd+T` and `Ctrl/Cmd+W` remain environment-dependent fallbacks
+- keep `keys` printing a `Fallback notes:` section for browser-native combos like `Ctrl/Cmd+T` and `Ctrl/Cmd+W` while those remain environment-dependent
 
 ---
 

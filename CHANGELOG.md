@@ -14,13 +14,14 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `Alt/Option+T`, `Alt/Option+W`, `Alt/Option+ArrowLeft/Right`, and `Alt/Option+1...9` manage tab creation, closing, and navigation
   - `Alt/Option+P`, `Alt/Option+Shift+C`, and `Ctrl+L` trigger permalink, copy, and clear actions for the active tab
   - `Ctrl+U`, `Ctrl+K`, and `Alt/Option+B` / `Alt/Option+F` add readline-style prompt editing on top of the existing `Ctrl+W` support
-- **Keyboard shortcut discovery** — new `keys` web-shell helper prints the current shortcut set plus remaining planned shortcut work, and is exposed through `help`, `man keys`, autocomplete, the README, and the FAQ modal
+- **Keyboard shortcut discovery** — new `keys` web-shell helper prints the current shortcut set plus any remaining browser-native fallback notes, and is exposed through `help`, `man keys`, autocomplete, the README, and the FAQ modal
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
 - **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
 - **Display toggles for output prefixes** — line numbers can now be toggled independently from timestamps, with mobile-menu access and shared prefix alignment across output, prompt, and exit rows
 - **User options modal** — a new options modal lets users set theme, timestamp mode, and line-number display from one place, with cookie-backed persistence across sessions while keeping the existing quick-toggle buttons in sync
 - **Permalink display toggles** — permalink pages now expose line-number toggles for all views and timestamp toggles anywhere saved line metadata exists, including fresh canonical run permalinks backed by structured output persistence
+- **Mobile composer UX** — the visible mobile composer now keeps Run, Enter-to-submit, history chips, autocomplete, and the edit-helper row wired to the same visible input so the touch keyboard path stays in sync
 
 ### Changed
 - **FAQ single source of truth** — built-in FAQ entries now come from the backend alongside custom `faq.yaml` entries, `/faq` now returns the merged canonical FAQ dataset, and the modal renders from that backend response instead of a hard-coded HTML copy
@@ -39,6 +40,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command
 - **Tab-bar resize edge case** — tab overflow controls now recalculate correctly when tab width changes (for example after rename)
 - **Welcome output prefix bleed** — line numbers and timestamps no longer distort the decorative welcome animation or shift its status rows
+- **Mobile helper-row overlap** — the compact `Home` / `←` / `→` / `End` / `Del Word` row now stays hidden until the mobile keyboard is actually open, and helper taps no longer reopen autocomplete over the row
 
 
 ## [1.2] — 2026-04-05

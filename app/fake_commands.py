@@ -55,7 +55,6 @@ _CURRENT_SHORTCUTS = [
     ("Option+B/F or Alt+B/F", "move backward / forward by word"),
 ]
 _PLANNED_SHORTCUTS = [
-    ("User options modal", "persist shortcut and terminal display preferences"),
     ("Browser-native fallbacks", "evaluate Ctrl/Cmd+T, Ctrl/Cmd+W, and Ctrl+Tab where reliable"),
 ]
 _SPECIAL_FAKE_COMMANDS = {
@@ -82,7 +81,7 @@ _FAKE_COMMAND_HELP = [
     ("history", "Show recent commands from this session."),
     ("hostname", "Show the instance hostname/app name."),
     ("id", "Show a web shell app identity."),
-    ("keys", "Show current and planned keyboard shortcuts."),
+    ("keys", "Show current keyboard shortcuts and fallback notes."),
     ("last", "Show recent completed runs with timestamps and exit codes."),
     ("limits", "Show configured runtime and retention limits."),
     ("ls", "List the current allowed command catalog."),
@@ -266,7 +265,7 @@ def _run_fake_keys() -> list[dict[str, str]]:
         lines.append(f"  {name:<26} {description}")
     if _PLANNED_SHORTCUTS:
         lines.append("")
-        lines.append("Planned shortcuts:")
+        lines.append("Fallback notes:")
         for name, description in _PLANNED_SHORTCUTS:
             lines.append(f"  {name:<26} {description}")
     lines.append("")

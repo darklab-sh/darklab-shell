@@ -214,6 +214,13 @@ The visible command surface is terminal-native:
 - blank/whitespace `Enter` does not call `/run`; it appends a new prompt line
 - `Ctrl+C` maps to shell-like behavior: open kill confirm while running, otherwise emit a fresh prompt line
 
+On mobile, the prompt surface is split into a dedicated visible composer:
+
+- `#mobile-cmd` is the visible source-of-truth input on touch-sized viewports
+- the helper row with `Home`, `←`, `→`, `End`, and `Del Word` appears only while the mobile keyboard is open
+- command chips, autocomplete acceptance, and the Run/Enter paths all sync back to the visible mobile input so the desktop mirror stays in step
+- mobile keyboard-open state is driven by the visible mobile input when it exists, with a viewport-offset fallback for the legacy/mobile-shell test harness path
+
 This keeps browser editing semantics and accessibility predictable without relying on `contenteditable`.
 
 ### Tab State
@@ -347,9 +354,9 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 Current totals on this branch:
 
 - `pytest`: 445
-- `vitest`: 170
-- `playwright`: 103
-- total: 718
+- `vitest`: 186
+- `playwright`: 102
+- total: 733
 
 ### Python tests
 

@@ -282,7 +282,7 @@ class TestRunStreaming:
         assert "help       Show web shell helpers available in this app.\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
         assert "hostname   Show the instance hostname/app name.\\n" in body
-        assert "keys       Show current and planned keyboard shortcuts.\\n" in body
+        assert "keys       Show current keyboard shortcuts and fallback notes.\\n" in body
         assert "limits     Show configured runtime and retention limits.\\n" in body
         assert "man <cmd>  Show the real man page for an allowed command.\\n" in body
         assert "last       Show recent completed runs with timestamps and exit codes.\\n" in body
@@ -308,7 +308,7 @@ class TestRunStreaming:
         assert "Alt+T" in body
         assert "Option+Shift+C" in body
         assert "Ctrl+U" in body
-        assert "Planned shortcuts:\\n" in body
+        assert "Fallback notes:\\n" in body
         assert "browser Command shortcuts remain environment-dependent" in body
         assert '"type": "exit"' in body
 
@@ -585,7 +585,7 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert "Web shell helpers:\\n" in body
-        assert "keys       Show current and planned keyboard shortcuts.\\n" in body
+        assert "keys       Show current keyboard shortcuts and fallback notes.\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_history_lists_recent_session_commands(self):

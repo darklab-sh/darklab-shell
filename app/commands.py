@@ -182,7 +182,7 @@ BUILTIN_FAQ = [
             "<strong>Option</strong> key. The <strong>Ctrl+...</strong> bindings are intentional "
             "shell-style controls, not replacements for browser <strong>Command</strong> "
             "shortcuts.<br><br>You can also run <code>keys</code> in the terminal for the current "
-            "shortcut reference and planned follow-up items."
+            "shortcut reference and any remaining browser-native fallback notes."
         ),
     },
     {
