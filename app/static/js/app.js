@@ -166,10 +166,20 @@ function getMobileKeyboardOffset() {
 
 function isMobileKeyboardOpen(offset = null) {
   if (!useMobileTerminalViewportMode()) return false;
-  const mobileInputFocused = typeof document !== 'undefined'
-    && document.activeElement
-    && document.activeElement.id === 'mobile-cmd';
-  return mobileInputFocused;
+  const mobileInputEl = typeof document !== 'undefined'
+    ? document.getElementById('mobile-cmd')
+    : null;
+  const mobileInputVisible = !!(
+    mobileInputEl
+    && typeof mobileInputEl.getClientRects === 'function'
+    && mobileInputEl.getClientRects().length > 0
+  );
+  if (mobileInputVisible) {
+    return typeof document !== 'undefined'
+      && document.activeElement
+      && document.activeElement.id === 'mobile-cmd';
+  }
+  return typeof offset === 'number' ? offset > 40 : false;
 }
 
 function syncMobilePromptReserve() {
