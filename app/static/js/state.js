@@ -36,6 +36,7 @@
   };
   const state = global.APP_STATE || (global.APP_STATE = {});
   Object.assign(state, defaults);
+  const getMobileMenuEl = () => mobileMenu || null;
 
   const bindings = [
     'tabs',
@@ -98,8 +99,8 @@
   global.getTab = (id) => state.tabs.find(t => t.id === id);
 
   global.getComposerInputs = () => ({
-    desktop: (typeof cmdInput !== 'undefined' && cmdInput) || document.getElementById('cmd') || null,
-    mobile: (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) || document.getElementById('mobile-cmd') || null,
+    desktop: (typeof cmdInput !== 'undefined' && cmdInput) || null,
+    mobile: (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) || null,
   });
   global.getVisibleComposerInput = () => {
     const { desktop, mobile } = global.getComposerInputs();
@@ -160,12 +161,12 @@
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => hidePanelOverlay(historyPanel);
   global.isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanel);
-  global.showFaqOverlay = () => showPanelOverlay(document.getElementById('faq-overlay'));
-  global.hideFaqOverlay = () => hidePanelOverlay(document.getElementById('faq-overlay'));
-  global.isFaqOverlayOpen = () => isPanelOverlayOpen(document.getElementById('faq-overlay'));
-  global.showOptionsOverlay = () => showPanelOverlay(document.getElementById('options-overlay'));
-  global.hideOptionsOverlay = () => hidePanelOverlay(document.getElementById('options-overlay'));
-  global.isOptionsOverlayOpen = () => isPanelOverlayOpen(document.getElementById('options-overlay'));
+  global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
+  global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
+  global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
+  global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
+  global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
+  global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
   global.showHistoryDeleteOverlay = () => showModalOverlay(histDelOverlay, 'flex');
   global.hideHistoryDeleteOverlay = () => hideModalOverlay(histDelOverlay);
   global.isHistoryDeleteOverlayOpen = () => isModalOverlayOpen(histDelOverlay, 'flex');
@@ -179,11 +180,11 @@
   };
   global.isHistoryLoadOverlayOpen = () => !!(historyLoadOverlay && historyLoadOverlay.classList && historyLoadOverlay.classList.contains('open'));
   global.showHistoryDeleteNonfav = () => {
-    const btn = document.getElementById('hist-del-nonfav');
+    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
     if (btn && btn.style) btn.style.display = 'inline-block';
   };
   global.hideHistoryDeleteNonfav = () => {
-    const btn = document.getElementById('hist-del-nonfav');
+    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
     if (btn && btn.style) btn.style.display = 'none';
   };
   global.showSearchBar = () => {
@@ -209,20 +210,25 @@
   };
   global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
   global.showTabKillBtn = (tabId) => {
-    const btn = document.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`);
+    const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
     if (btn && btn.style) btn.style.display = 'inline-block';
   };
   global.hideTabKillBtn = (tabId) => {
-    const btn = document.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`);
+    const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
     if (btn && btn.style) btn.style.display = 'none';
   };
   global.showMobileMenu = () => {
+    const mobileMenu = getMobileMenuEl();
     if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('open');
   };
   global.hideMobileMenu = () => {
+    const mobileMenu = getMobileMenuEl();
     if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('open');
   };
-  global.isMobileMenuOpen = () => !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
+  global.isMobileMenuOpen = () => {
+    const mobileMenu = getMobileMenuEl();
+    return !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
+  };
   global.showMotdWrap = () => {
     if (typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style) motdWrap.style.display = 'block';
   };

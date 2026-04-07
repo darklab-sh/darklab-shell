@@ -16,6 +16,8 @@ function loadTabsFns({
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
   const tabsBar = document.getElementById('tabs-bar')
+  const tabsScrollLeftBtn = document.getElementById('tabs-scroll-left')
+  const tabsScrollRightBtn = document.getElementById('tabs-scroll-right')
   const tabPanels = document.getElementById('tab-panels')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
   const mobileComposerRow = document.getElementById('mobile-composer-row')
@@ -41,10 +43,13 @@ function loadTabsFns({
     document,
     cmdInput,
     tabsBar,
+    tabsScrollLeftBtn,
+    tabsScrollRightBtn,
     tabPanels,
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
+    newTabBtn,
     resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
     APP_CONFIG: { max_tabs: maxTabs, app_name: 'shell.darklab.sh' },
@@ -90,9 +95,12 @@ function loadTabsAndOutputFns({
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
   const tabsBar = document.getElementById('tabs-bar')
+  const tabsScrollLeftBtn = document.getElementById('tabs-scroll-left')
+  const tabsScrollRightBtn = document.getElementById('tabs-scroll-right')
   const tabPanels = document.getElementById('tab-panels')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
   const mobileComposerRow = document.getElementById('mobile-composer-row')
+  const newTabBtn = document.getElementById('new-tab-btn')
   const historyPanel = document.getElementById('history-panel')
   const shellPromptWrap = document.createElement('div')
   shellPromptWrap.className = 'shell-prompt-wrap'
@@ -120,10 +128,13 @@ function loadTabsAndOutputFns({
     },
     cmdInput,
     tabsBar,
+    tabsScrollLeftBtn,
+    tabsScrollRightBtn,
     tabPanels,
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
+    newTabBtn,
     resetCmdHistoryNav: () => {},
     APP_CONFIG: { max_tabs: maxTabs, max_output_lines: 100, app_name: 'shell.darklab.sh' },
     setStatus: () => {},

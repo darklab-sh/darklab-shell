@@ -50,7 +50,37 @@ async function loadAppFns({
     <div id="version-label"></div>
     <div id="motd"></div>
     <div id="motd-wrap"></div>
-    <div id="mobile-shell" aria-hidden="true"></div>
+    <div id="mobile-shell" aria-hidden="true">
+      <div id="mobile-shell-chrome"></div>
+      <div id="mobile-shell-transcript"></div>
+      <div id="mobile-shell-composer">
+        <div id="mobile-composer-host">
+          <div id="mobile-edit-bar">
+            <button data-edit-action="home"></button>
+            <button data-edit-action="left"></button>
+            <button data-edit-action="right"></button>
+            <button data-edit-action="end"></button>
+            <button data-edit-action="delete-word"></button>
+          </div>
+          <div id="mobile-composer-row">
+            <span class="mobile-prompt-label">$</span>
+            <input id="mobile-cmd" />
+            <button id="mobile-run-btn"></button>
+          </div>
+        </div>
+      </div>
+      <div id="mobile-shell-overlays">
+        <div id="mobile-menu">
+          <button data-action="ln"></button>
+          <button data-action="ts"></button>
+          <button data-action="search"></button>
+          <button data-action="history"></button>
+          <button data-action="options"></button>
+          <button data-action="theme"></button>
+          <button data-action="faq"></button>
+        </div>
+      </div>
+    </div>
     <div class="terminal-wrap">
       <div id="history-row" class="history-row" style="display:none">
         <span class="history-label">Recent:</span>
@@ -89,29 +119,8 @@ async function loadAppFns({
         </div>
       </div>
       <div id="tab-panels"></div>
-    <div id="mobile-composer-host">
-        <div id="mobile-edit-bar">
-          <button data-edit-action="home"></button>
-          <button data-edit-action="left"></button>
-          <button data-edit-action="right"></button>
-          <button data-edit-action="end"></button>
-          <button data-edit-action="delete-word"></button>
-        </div>
-        <div id="mobile-composer-row">
-          <button id="mobile-run-btn"></button>
-        </div>
-      </div>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
-      <div id="mobile-menu">
-        <button data-action="ln"></button>
-        <button data-action="ts"></button>
-        <button data-action="search"></button>
-        <button data-action="history"></button>
-        <button data-action="options"></button>
-        <button data-action="theme"></button>
-        <button data-action="faq"></button>
-      </div>
       <div id="faq-overlay"></div>
       <button class="faq-close"></button>
       <div class="faq-body"></div>
@@ -131,6 +140,7 @@ async function loadAppFns({
       </div>
       <div id="history-panel"></div>
       <div id="history-list"></div>
+      <div id="permalink-toast"></div>
       <div id="kill-overlay"></div>
       <div id="hist-del-overlay"></div>
       <div class="prompt-wrap"></div>
@@ -172,6 +182,74 @@ async function loadAppFns({
   const logClientError = vi.fn()
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac-dropdown')
+  const domBindings = {
+    hamburgerBtn: document.getElementById('hamburger-btn'),
+    faqBtn: document.getElementById('faq-btn'),
+    faqCloseBtn: document.querySelector('.faq-close'),
+    optionsBtn: document.getElementById('options-btn'),
+    optionsCloseBtn: document.querySelector('.options-close'),
+    newTabBtn: document.getElementById('new-tab-btn'),
+    searchToggleBtn: document.getElementById('search-toggle-btn'),
+    histBtn: document.getElementById('hist-btn'),
+    historyCloseBtn: document.getElementById('history-close'),
+    histClearAllBtn: document.getElementById('hist-clear-all-btn'),
+    histDelCancelBtn: document.getElementById('hist-del-cancel'),
+    histDelNonfavBtn: document.getElementById('hist-del-nonfav'),
+    histDelConfirmBtn: document.getElementById('hist-del-confirm'),
+    killCancelBtn: document.getElementById('kill-cancel'),
+    killConfirmBtn: document.getElementById('kill-confirm'),
+    searchPrevBtn: document.getElementById('search-prev'),
+    searchNextBtn: document.getElementById('search-next'),
+    optionsTsSelect: document.getElementById('options-ts-select'),
+    optionsLnToggle: document.getElementById('options-ln-toggle'),
+    tsBtn: document.getElementById('ts-btn'),
+    lnBtn: document.getElementById('ln-btn'),
+    themeBtn: document.getElementById('theme-btn'),
+    headerTitle: document.querySelector('header h1'),
+    themePrefInputs: document.querySelectorAll('input[name="theme-pref"]'),
+    faqBody: document.querySelector('.faq-body'),
+    faqLimitsText: document.getElementById('faq-limits-text'),
+    faqAllowedText: document.getElementById('faq-allowed-text'),
+    versionLabel: document.getElementById('version-label'),
+    motd: document.getElementById('motd'),
+    motdWrap: document.getElementById('motd-wrap'),
+    status: document.getElementById('status'),
+    histRow: document.getElementById('history-row'),
+    tabsBar: document.getElementById('tabs-bar'),
+    tabPanels: document.getElementById('tab-panels'),
+    mobileShell: document.getElementById('mobile-shell'),
+    mobileShellChrome: document.getElementById('mobile-shell-chrome'),
+    mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
+    mobileShellComposer: document.getElementById('mobile-shell-composer'),
+    mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
+    mobileComposerHost: document.getElementById('mobile-composer-host'),
+    mobileComposerRow: document.getElementById('mobile-composer-row'),
+    mobileEditBar: document.getElementById('mobile-edit-bar'),
+    mobileCmdInput: document.getElementById('mobile-cmd'),
+    mobileRunBtn: document.getElementById('mobile-run-btn'),
+    mobileMenu: document.getElementById('mobile-menu'),
+    searchBar: document.getElementById('search-bar'),
+    searchInput: document.getElementById('search-input'),
+    searchCount: document.getElementById('search-count'),
+    historyPanel: document.getElementById('history-panel'),
+    historyList: document.getElementById('history-list'),
+    historyLoadOverlay: document.getElementById('history-load-overlay'),
+    acDropdown,
+    killOverlay: document.getElementById('kill-overlay'),
+    histDelOverlay: document.getElementById('hist-del-overlay'),
+    faqOverlay: document.getElementById('faq-overlay'),
+    optionsOverlay: document.getElementById('options-overlay'),
+    permalinkToast: document.getElementById('permalink-toast'),
+    runTimer: document.getElementById('run-timer'),
+    searchCaseBtn: document.getElementById('search-case-btn'),
+    searchRegexBtn: document.getElementById('search-regex-btn'),
+    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+    shellPromptLine: document.getElementById('shell-prompt-line'),
+    shellPromptText: document.getElementById('shell-prompt-text'),
+    shellPromptCaret: document.getElementById('shell-prompt-caret'),
+    shellInputRow: document.getElementById('shell-input-row'),
+    runBtn: document.getElementById('run-btn'),
+  }
   cmdInput.focus = vi.fn()
   cmdInput.blur = vi.fn()
   const shellPromptWrapEl = document.getElementById('shell-prompt-wrap')
@@ -240,6 +318,7 @@ async function loadAppFns({
     apiFetch,
     APP_CONFIG: {},
     AnsiUp: FakeAnsiUp,
+    ...domBindings,
     getOutput: () => document.getElementById('history-list'),
     renderMotd: (text) => text,
     updateNewTabBtn: () => {},
@@ -300,9 +379,17 @@ async function loadAppFns({
     histRow: document.getElementById('history-row'),
     tabPanels: document.getElementById('tab-panels'),
     mobileShell: document.getElementById('mobile-shell'),
+    mobileShellChrome: document.getElementById('mobile-shell-chrome'),
+    mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
+    mobileShellComposer: document.getElementById('mobile-shell-composer'),
+    mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
     mobileComposerHost: document.getElementById('mobile-composer-host'),
     mobileComposerRow: document.getElementById('mobile-composer-row'),
     mobileEditBar: document.getElementById('mobile-edit-bar'),
+    mobileMenu: document.getElementById('mobile-menu'),
+    faqOverlay: document.getElementById('faq-overlay'),
+    optionsOverlay: document.getElementById('options-overlay'),
+    permalinkToast: document.getElementById('permalink-toast'),
     mobileComposerHostEl,
     acDropdown,
     requestWelcomeSettle: requestWelcomeSettleOverride,
@@ -624,6 +711,18 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
+  it('does not manually duplicate printable desktop keydown input', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'ab'
+    cmdInput.setSelectionRange(2, 2)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+
+    expect(cmdInput.value).toBe('ab')
+    expect(cmdInput.selectionStart).toBe(2)
+    expect(cmdInput.selectionEnd).toBe(2)
+  })
+
   it('updates the visible cursor when the selection changes without typing', async () => {
     const { cmdInput } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
@@ -648,14 +747,22 @@ describe('app helpers', () => {
     const runBtn = document.getElementById('run-btn')
     const terminalWrap = document.querySelector('.terminal-wrap')
     const mobileShell = document.getElementById('mobile-shell')
+    const mobileShellChrome = document.getElementById('mobile-shell-chrome')
+    const mobileShellTranscript = document.getElementById('mobile-shell-transcript')
+    const mobileShellComposer = document.getElementById('mobile-shell-composer')
+    const mobileShellOverlays = document.getElementById('mobile-shell-overlays')
     const mobileComposerHost = document.getElementById('mobile-composer-host')
     const mobileComposerRow = document.getElementById('mobile-composer-row')
     const shellInputRow = document.getElementById('shell-input-row')
-    const promptPrefix = shellInputRow
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
     const histRow = document.getElementById('history-row')
     const terminalBar = document.querySelector('.terminal-bar')
     const searchBar = document.getElementById('search-bar')
     const tabPanels = document.getElementById('tab-panels')
+    const historyPanel = document.getElementById('history-panel')
+    const faqOverlay = document.getElementById('faq-overlay')
+    const optionsOverlay = document.getElementById('options-overlay')
 
     cmdInput.dispatchEvent(new Event('focus'))
     cmdInput.value = 'curl'
@@ -666,7 +773,7 @@ describe('app helpers', () => {
     expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe('268px')
     expect(terminalWrap.hidden).toBe(true)
     expect(mobileShell.hidden).toBe(false)
-    expect(runBtn.hidden).toBe(false)
+    expect(runBtn.hidden).toBe(true)
     expect(mobileComposerHost.getAttribute('aria-hidden')).toBe('false')
     expect(shellPromptWrap.getAttribute('aria-hidden')).toBe('true')
     expect(mobileComposerRow.hidden).toBe(false)
@@ -675,10 +782,25 @@ describe('app helpers', () => {
     expect(mobileShell.contains(searchBar)).toBe(true)
     expect(mobileShell.contains(tabPanels)).toBe(true)
     expect(mobileShell.contains(mobileComposerHost)).toBe(true)
-    expect(mobileComposerRow.contains(shellInputRow)).toBe(true)
-    expect(mobileComposerRow.contains(runBtn)).toBe(true)
-    expect(shellInputRow.getAttribute('aria-hidden')).toBe(null)
-    expect(promptPrefix.getAttribute('data-mobile-label')).toBe('$')
+    expect(mobileShell.contains(mobileShellChrome)).toBe(true)
+    expect(mobileShell.contains(mobileShellTranscript)).toBe(true)
+    expect(mobileShell.contains(mobileShellComposer)).toBe(true)
+    expect(mobileShell.contains(mobileShellOverlays)).toBe(true)
+    expect(mobileShellChrome.contains(histRow)).toBe(true)
+    expect(mobileShellChrome.contains(terminalBar)).toBe(true)
+    expect(mobileShellChrome.contains(searchBar)).toBe(true)
+    expect(mobileShellTranscript.contains(tabPanels)).toBe(true)
+    expect(mobileShellComposer.contains(mobileComposerHost)).toBe(true)
+    expect(mobileShellOverlays.contains(historyPanel)).toBe(true)
+    expect(mobileShellOverlays.contains(faqOverlay)).toBe(true)
+    expect(mobileShellOverlays.contains(optionsOverlay)).toBe(true)
+    expect(mobileComposerRow.contains(mobileCmdInput)).toBe(true)
+    expect(mobileComposerRow.contains(mobileRunBtn)).toBe(true)
+    expect(mobileComposerRow.contains(shellInputRow)).toBe(false)
+    expect(runBtn.hidden).toBe(true)
+    expect(shellInputRow.hidden).toBe(true)
+    expect(shellInputRow.getAttribute('aria-hidden')).toBe('true')
+    expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('$')
     expect(shellPromptWrap.scrollIntoView).not.toHaveBeenCalled()
 
     restoreViewport()
@@ -713,7 +835,7 @@ describe('app helpers', () => {
     const runBtn = document.getElementById('run-btn')
 
     cmdInput.dispatchEvent(new Event('focus'))
-    expect(runBtn.hidden).toBe(false)
+    expect(runBtn.hidden).toBe(true)
 
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
@@ -728,7 +850,7 @@ describe('app helpers', () => {
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
-    expect(runBtn.hidden).toBe(false)
+    expect(runBtn.hidden).toBe(true)
 
     restoreViewport()
   })

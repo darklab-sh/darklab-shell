@@ -145,8 +145,8 @@ let pendingHistAction = null;
 
 function confirmHistAction(type, id, command) {
   pendingHistAction = { type, id, command };
-  const msg      = document.getElementById('hist-del-msg');
-  const confirm  = document.getElementById('hist-del-confirm');
+  const msg      = histDelMsg;
+  const confirm  = histDelConfirmBtn;
   if (type === 'clear') {
     msg.innerHTML = 'Clear run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
     showHistoryDeleteNonfav();

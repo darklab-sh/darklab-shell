@@ -66,14 +66,22 @@ function loadRunnerFns({
     <span id="status"></span>
     <span id="run-timer"></span>
     <div id="history-panel"></div>
-    <button class="tab-kill-btn" data-tab="tab-1" style="display:inline-block"></button>
-    <div class="tab" data-id="tab-1"><span class="tab-status idle"></span></div>
+    <div id="tabs-bar">
+      <div class="tab" data-id="tab-1"><span class="tab-status idle"></span></div>
+    </div>
+    <div id="tab-panels">
+      <div class="tab-panel" data-id="tab-1">
+        <button class="tab-kill-btn" data-tab="tab-1" style="display:inline-block"></button>
+      </div>
+    </div>
   `
   const cmdInput = document.getElementById('cmd')
   const runBtn = document.getElementById('run-btn')
   const status = document.getElementById('status')
   const runTimer = document.getElementById('run-timer')
   const historyPanel = document.getElementById('history-panel')
+  const tabsBar = document.getElementById('tabs-bar')
+  const tabPanels = document.getElementById('tab-panels')
   cmdInput.value = cmdValue
   cmdInput.blur = vi.fn()
 
@@ -100,6 +108,8 @@ function loadRunnerFns({
     status,
     runTimer,
     historyPanel,
+    tabsBar,
+    tabPanels,
     APP_CONFIG: appConfig,
     _welcomeActive: welcomeActive,
     _welcomeDone: false,

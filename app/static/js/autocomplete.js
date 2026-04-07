@@ -8,7 +8,10 @@ function _positionAutocomplete(itemsCount) {
   const prefix = wrap && wrap.querySelector ? wrap.querySelector('.prompt-prefix') : null;
   const mobileTerminalMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
   // Simple CSS mobile mode: #mobile-cmd is visible (≤600px layout, no mobile-terminal-mode)
-  const _mobileCmdEl = !mobileTerminalMode ? document.getElementById('mobile-cmd') : null;
+  const _mobileCmdEl = !mobileTerminalMode
+    && typeof mobileCmdInput !== 'undefined'
+    ? mobileCmdInput
+    : null;
   const simpleMobileMode = !mobileTerminalMode
     && !!_mobileCmdEl
     && typeof _mobileCmdEl.getClientRects === 'function'
@@ -39,7 +42,7 @@ function _positionAutocomplete(itemsCount) {
   if (simpleMobileMode) {
     // Position fixed above #mobile-composer-row (acDropdown lives inside terminal-wrap
     // which has overflow:hidden, so absolute won't work — fixed escapes it)
-    const simpleAnchor = document.getElementById('mobile-composer-row');
+    const simpleAnchor = typeof mobileComposerRow !== 'undefined' ? mobileComposerRow : null;
     const rect = simpleAnchor && typeof simpleAnchor.getBoundingClientRect === 'function'
       ? simpleAnchor.getBoundingClientRect()
       : { top: window.innerHeight / 2, left: 0, right: window.innerWidth };

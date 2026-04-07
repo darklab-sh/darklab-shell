@@ -286,6 +286,8 @@ describe('history panel actions', () => {
     const historyList = document.getElementById('history-list')
     const historyLoadOverlay = document.getElementById('history-load-overlay')
     const histDelOverlay = document.getElementById('hist-del-overlay')
+    const histDelMsg = document.getElementById('hist-del-msg')
+    const histDelConfirmBtn = document.getElementById('hist-del-confirm')
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
@@ -304,6 +306,8 @@ describe('history panel actions', () => {
         historyLoadOverlay,
         histRow: document.createElement('div'),
         histDelOverlay,
+        histDelMsg,
+        histDelConfirmBtn,
         cmdInput,
         tabs,
         activateTab,

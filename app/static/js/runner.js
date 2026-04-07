@@ -63,7 +63,7 @@ function elapsedSeconds() {
 
 // ── Kill button ──
 function getTabKillBtn(tabId) {
-  return document.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`);
+  return tabPanels ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
 }
 
 function _showTabKillBtnFallback(tabId) {

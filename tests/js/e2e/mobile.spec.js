@@ -30,6 +30,8 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#run-btn')).toBeHidden()
     await expect(page.locator('#mobile-edit-bar')).toBeHidden()
     await expect(page.locator('#mobile-composer')).toBeVisible()
+    await expect(page.locator('#mobile-shell-transcript')).toBeVisible()
+    await expect(page.locator('#mobile-shell-transcript .tab-panels, #mobile-shell-transcript #tab-panels')).toHaveCount(1)
     // Composer must stay within the viewport
     const composerBox = await page.locator('#mobile-composer').boundingBox()
     expect(composerBox).not.toBeNull()

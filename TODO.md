@@ -3,8 +3,8 @@
 ## Status
 
 - Release line: `v1.3` (unreleased)
-- Current focus: shell-style terminal UX hardening and source-of-truth cleanup
-- Last major milestone completed: inline prompt refactor (phases 1-3 shipped)
+- Current focus: Phase 2 real mobile composer
+- Last major milestone completed: Phase 1 mobile shell skeleton
 
 ---
 
@@ -121,43 +121,37 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - ~~autocomplete dropdown visibility now routes through shared helpers instead of ad hoc style toggles~~
 - ~~history loading overlay visibility now routes through shared helpers instead of ad hoc class toggles~~
 - ~~mobile shell visibility now routes through shared helpers instead of direct hidden + aria-hidden writes~~
+- ~~module boundary annotation across browser scripts~~
+- ~~shared action path cleanup across tabs.js, welcome.js, and app.js~~
 - ~~unit test harness updated: `state.js` prepended to all eval'd scripts; `fromDomScripts` accepts an `initCode` string so test loaders can call `setTabs(tabs); setActiveTabId(activeTabId)` to seed shared state; `STATE_SRC` cached at module level~~
-- ~~205 unit tests passing (11 test files, no regressions)~~
+- ~~206 unit tests passing (11 test files, no regressions)~~
 
-**Remaining items**
-1. ~~Extract a clear shared state layer~~ — done (see above)
-2. ~~Identify and document module boundaries~~ — done; each browser script now has a short shared/shared-UI boundary comment at the top
-3. ~~Refactor `submitCommand` to be callable without desktop prompt DOM~~ — done; `_mobileSubmit` still routes through `runCommand()` for now so the hidden desktop input stays in sync, but the command engine itself is already DOM-free
-4. Define remaining explicit interfaces:
-   - ~~submit command~~ — `submitCommand(rawCmd)` in runner.js
-   - ~~update current input value~~ — `setComposerValue()` now centralizes desktop/mobile composer sync
-   - ~~open/close overlays~~ — shared helpers in `state.js` now handle kill, history, FAQ, options, and history-delete surfaces
-   - ~~search/history row visibility~~ — shared helpers in `state.js` now handle search bar and recent-history row visibility
-   - ~~run timer / kill button visibility~~ — shared helpers in `state.js` now handle run timer and per-tab kill button visibility
-   - ~~mobile menu visibility~~ — shared helpers in `state.js` now handle mobile menu open/close state
-   - ~~MOTD wrapper visibility~~ — shared helpers in `state.js` now handle the startup MOTD wrapper toggle
-   - ~~autocomplete dropdown visibility~~ — shared helpers in `state.js` now handle autocomplete dropdown visibility
-   - ~~history loading overlay visibility~~ — shared helpers in `state.js` now handle the history loading overlay visibility
-   - ~~mobile shell visibility~~ — shared helpers in `state.js` now handle shell/composer row visibility and aria-hidden state
-   - ~~append output~~ — `appendLine(text, cls, tabId)` in output.js
-   - ~~switch tab/session~~ — `activateTab(id)` in tabs.js
-   - ~~refresh history~~ — `refreshHistoryPanel()` in history.js
-5. Keep this refactor behavior-preserving before any mobile surface changes — ongoing constraint, all changes so far are non-breaking
+**Phase 0 Complete**
+
+The shared state layer, composer/overlay helpers, shared DOM binding cache, grouped mobile shell layout helpers, and tab-node helpers are all in place. The browser modules now rely on those shared helpers instead of ad hoc prompt or overlay state. The remaining work has moved into Phase 2 and beyond.
 
 ##### Phase 1: Mobile Shell Skeleton
 
-1. Add a dedicated mobile root container in the template instead of reusing the desktop terminal structure.
-2. Render desktop and mobile shells side-by-side in the DOM if needed, but show only one surface at a time by breakpoint/device mode.
-3. Mobile shell should contain:
-   - compact header
-   - recent-command rail
-   - transcript viewport
-   - composer block
-   - autocomplete sheet mount
-   - modal/drawer mounts
-4. The desktop shell should remain structurally unchanged during this phase.
-5. Create mobile-specific CSS and JS sections rather than continuing to grow desktop mobile override rules.
-6. ~~Current implementation status: the dedicated mobile composer dock exists and is wired into the mobile presentation path, including the helper row, Run/Enter submission, history chips, and autocomplete sync; the wider mobile shell split still needs to be completed.~~
+**Completed**
+
+- ~~Add a dedicated mobile root container in the template instead of reusing the desktop terminal structure.~~
+- ~~Render desktop and mobile shells side-by-side in the DOM if needed, but show only one surface at a time by breakpoint/device mode.~~
+- ~~Mobile shell should contain:~~
+  - compact header
+  - recent-command rail
+  - transcript viewport
+  - composer block
+  - autocomplete sheet mount
+  - modal/drawer mounts
+  - mobile menu overlay
+- ~~The desktop shell should remain structurally unchanged during this phase.~~
+- ~~Create mobile-specific CSS and JS sections rather than continuing to grow desktop mobile override rules.~~
+- ~~Current implementation status: the dedicated mobile composer dock exists and is wired into the mobile presentation path, including the helper row, Run/Enter submission, history chips, and autocomplete sync; the wider mobile shell split still needs to be completed.~~
+- ~~Current implementation status: the template now includes a real `mobile-shell` root plus dedicated `mobile-shell-chrome`, `mobile-shell-transcript`, `mobile-shell-composer`, and `mobile-shell-overlays` mounts, with the mobile composer dock and menu nested inside the mobile shell; the current layout code resolves the shell, composer, and overlay refs through one combined mobile UI helper, binds and sets up the mobile composer interactions through helper functions, caches the shared top-level controls in `dom.js`, centralises tab-node lookups behind small tab helpers, and lets the shared state layer trust those cached bindings directly, while still moving the sections through grouped shell helpers in both directions and using a grouped visibility helper for the composer/prompt swap, and the remaining work is to finish the mobile-first layout and move the last desktop-shaped assumptions out of the way.~~
+
+**Status**
+
+Phase 1 is complete. The dedicated mobile shell root, chrome/transcript/composer/overlay mounts, shell-owned mobile menu, and shared mobile UI helpers are in place. Remaining mobile work now moves into Phase 2 and beyond.
 
 ##### Phase 2: Real Mobile Composer
 
