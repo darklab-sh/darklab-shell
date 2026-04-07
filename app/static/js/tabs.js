@@ -566,6 +566,15 @@ function clearTab(id, { preserveRunState = false } = {}) {
   if (id === activeTabId && (!preserveRunState || !wasRunning)) {
     mountShellPrompt(id);
   }
+  if (id === activeTabId
+    && (!preserveRunState || !wasRunning)
+    && typeof setComposerValue === 'function'
+    && !(typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-terminal-mode'))) {
+    setComposerValue('', 0, 0);
+  }
   if (!preserveRunState || !wasRunning) {
     setTabStatus(id, 'idle');
     if (id === activeTabId) { setStatus('idle'); clearSearch(); }
@@ -629,12 +638,16 @@ function copyTab(id) {
   const lines = _getExportableRawLines(t);
   if (!lines.length) {
     showToast('No output to copy yet');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
     return;
   }
   const text = lines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
   copyTextToClipboard(text)
     .then(() => showToast('Copied to clipboard'))
-    .catch(() => showToast('Failed to copy', 'error'));
+    .catch(() => showToast('Failed to copy', 'error'))
+    .finally(() => {
+      if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+    });
 }
 
 // ── Plain text save ──
@@ -645,6 +658,7 @@ function saveTab(id) {
   const lines = _getExportableRawLines(t);
   if (!lines.length) {
     showToast('No output to export');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
     return;
   }
   // Strip ANSI escape codes for plain text export
@@ -656,6 +670,7 @@ function saveTab(id) {
   a.download = `${APP_CONFIG.app_name || 'shell'}-${ts}.txt`;
   a.click();
   URL.revokeObjectURL(a.href);
+  if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
 }
 
 // ── HTML snapshot export ──
@@ -663,9 +678,10 @@ function saveTab(id) {
 // as inline spans, and clock timestamps shown alongside each line.
 async function exportTabHtml(id) {
   const t = getTab(id);
-  if (!t || !t.rawLines.length) { showToast('No output to export'); return; }
+  if (!t || !t.rawLines.length) { showToast('No output to export'); if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true }); return; }
   if (!window.ExportHtmlUtils) {
     showToast('Failed to export html', 'error');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
     return;
   }
 
@@ -706,6 +722,8 @@ async function exportTabHtml(id) {
     URL.revokeObjectURL(a.href);
   } catch {
     showToast('Failed to export html', 'error');
+  } finally {
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
   }
 }
 

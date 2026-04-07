@@ -863,12 +863,12 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **466 pytest + 233 Vitest + 126 Playwright = 825 tests**.
+Current totals in this branch: **466 pytest + 238 Vitest + 126 Playwright = 830 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
 - `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
-- `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, tab isolation, permalink preference cookies, and close-running-tab behavior
+- `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, and history-panel action-button close behavior
 
 Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
 

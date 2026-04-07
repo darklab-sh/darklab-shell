@@ -74,8 +74,10 @@ test.describe('history drawer', () => {
 
     // Star both runs
     await openHistoryWithEntries(page)
-    const entries = page.locator('.history-entry')
+    let entries = page.locator('.history-entry')
     await entries.nth(0).locator('[data-action="star"]').click()
+    await openHistory(page)
+    entries = page.locator('.history-entry')
     await entries.nth(1).locator('[data-action="star"]').click()
     await closeHistory(page)
 

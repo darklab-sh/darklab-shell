@@ -20,6 +20,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Bundled local ansi_up** — the browser-facing `ansi_up` asset is now copied from the checked-in repo build into the image at build time, with the repo copy still serving as the local/docker-compose fallback
 - **Template-backed permalink pages** — the live `/history/<id>` and `/share/<id>` pages now share Jinja templates plus shared CSS/JS instead of carrying duplicated inline HTML/CSS in `permalinks.py`, which makes the permalink UI easier to maintain while keeping the downloadable HTML export path self-contained
 - **Shared HTML export helper** — tab `save html` and permalink export now share browser-side HTML/CSS helpers instead of duplicating export markup in two places, and downloaded tab exports embed vendor fonts at export time so the saved file stays portable
+- **Mobile keyboard helper row race** — the mobile helper row now stays visible when viewport resize lands before the focus event, preventing the intermittent gray gap/scroll shift on touch keyboards
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
 - **FAQ markup syntax** — custom `faq.yaml` entries can now use lightweight markup for bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt
@@ -74,6 +75,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Tab-bar resize edge case** — tab overflow controls now recalculate correctly when tab width changes (for example after rename)
 - **Welcome output prefix bleed** — line numbers and timestamps no longer distort the decorative welcome animation or shift its status rows
 - **Mobile helper-row overlap** — the compact `Home` / `←` / `→` / `End` / `Del Word` row now stays hidden until the mobile keyboard is actually open, and helper taps no longer reopen autocomplete over the row
+- **Mobile composer hit-target fix** — taps on the lower half of the mobile composer now focus the input reliably, which stops the intermittent keyboard-open scroll shift in Chrome and Safari
+- **History drawer action close** — clicking any button in the history drawer now closes the panel immediately
 - **Batched live output** — large output bursts now flush in small chunks so the browser can repaint during fast commands, and the live terminal only stays pinned to the bottom while the user has not scrolled away
 - **Shared Run guard** — desktop and mobile Run buttons now disable together while a command is active, preventing duplicate submits from either input path
 
@@ -135,9 +138,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
 - **`SHARE_CREATED` info** — share (permalink snapshot) creation is logged at INFO with IP, share ID, and label
 - **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
-  - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
+  - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior including search-bar close handling, copy/save/html export refocus, and clearing un-ran composer input; no browser required
   - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
-  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html with embedded-font export assertions), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
+  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer and action-button close behavior, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html with embedded-font export assertions and focus-return checks), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, mobile menu, and the mobile composer hit-target regression; `workers: 1` prevents rate-limit collisions between tests
   - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
   - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
@@ -222,7 +225,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **App modularisation** — `app.py` split into `commands.py`, `config.py`, `database.py`, `permalinks.py`, and `process.py` for cleaner separation of concerns
 - **Permalink error pages** — improved human-readable retention period in 404 messages; `_format_retention()` decomposes days into years, months, and days
 - **Clear button** — now cancels a running welcome animation in addition to clearing tab output
-- **README / ARCHITECTURE** — updated to reflect current test counts and the expanded Vitest/Playwright coverage areas
+- **README / ARCHITECTURE** — updated to reflect current test counts and the expanded Vitest/Playwright coverage areas, including the mobile composer hit-target regression and history drawer action close behavior
 
 ### Fixed
 - `tab.renamed` flag prevents command labels from overwriting user-chosen tab names

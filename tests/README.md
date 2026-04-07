@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals on this branch:
 
 - `pytest`: 466
-- `vitest`: 233
+- `vitest`: 238
 - `playwright`: 126
-- total: 825
+- total: 830
 
 ## Running The Suites
 
@@ -69,12 +69,12 @@ Files and focus:
 - `config.test.js` - frontend fallback config coverage for keys mirrored from `/config`
 - `utils.test.js` - escaping and MOTD rendering
 - `runner.test.js` - elapsed formatting, kill flow, friendly network/server error handling, rate-limit handling, fake-command SSE handling including web-shell `clear`, prompt blank-line behavior, run-button disable/enable guarding, and stall recovery
-- `history.test.js` - starred state helpers, startup hydration for blank-input command recall, clipboard fallback handling, history action failures, and the restore-loading overlay for history-to-tab preview fetches
+- `history.test.js` - starred state helpers, startup hydration for blank-input command recall, clipboard fallback handling, history-panel action-button close behavior, history action failures, and the restore-loading overlay for history-to-tab preview fetches
 - `session.test.js` - session ID persistence and `apiFetch()` header injection
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
-- `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, and currentRunStartIndex alignment when old raw lines are pruned from the front
+- `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, currentRunStartIndex alignment when old raw lines are pruned from the front, refocus behavior after copy/save/html export actions, and clearing un-ran composer input
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, featured-sample interaction behavior, and mobile banner loading
-- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, and the shared mobile focus/blur helpers
+- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, and the shared mobile focus/blur helpers
 - `search.test.js` - search helper boundaries and no-op behavior
 - `output.test.js` - output rendering, batched live flushing, shared timestamp/line-number prefix support, welcome-prefix exclusion, no-output edge cases, and self-contained HTML export font embedding
 

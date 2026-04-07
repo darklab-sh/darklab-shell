@@ -24,6 +24,7 @@ function loadTabsFns({
   const runBtn = document.getElementById('run-btn')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
   const mobileComposerRow = document.getElementById('mobile-composer-row')
+  const mobileCmdInput = document.getElementById('mobile-cmd')
   const newTabBtn = document.getElementById('new-tab-btn')
   const historyPanel = document.getElementById('history-panel')
   const clipboardWrites = []
@@ -53,6 +54,7 @@ function loadTabsFns({
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
+    mobileCmdInput,
     newTabBtn,
     resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
@@ -85,6 +87,7 @@ function loadTabsFns({
     setTabLabel,
     copyTab,
     saveTab,
+    exportTabHtml,
     permalinkTab,
     _getTabs: () => getTabs(),
     _getActiveTabId: () => getActiveTabId(),
@@ -174,6 +177,7 @@ function loadTabsAndOutputFns({
 
 describe('tabs helpers', () => {
   beforeEach(() => {
+    document.body.className = ''
     document.body.innerHTML = `
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
@@ -186,6 +190,7 @@ describe('tabs helpers', () => {
       <div id="tab-panels"></div>
       <div id="mobile-composer-host"></div>
       <div id="mobile-composer-row"></div>
+      <input id="mobile-cmd" />
       <div id="permalink-toast"></div>
     `
     vi.spyOn(globalThis, 'setTimeout').mockImplementation(() => 0)
@@ -270,6 +275,34 @@ describe('tabs helpers', () => {
     expect(tab.historyRunId).toBe('history-1')
     expect(tab.followOutput).toBe(true)
     expect(document.querySelector(`.tab-panel[data-id="${id}"]`).contains(shellPromptWrap)).toBe(false)
+  })
+
+  it('clearTab clears the active un-ran composer input along with the tab output', () => {
+    const { createTab, clearTab, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const cmdInput = document.getElementById('cmd')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    output.innerHTML = '<div>before</div>'
+    cmdInput.value = 'pending command'
+    mobileCmdInput.value = 'pending mobile command'
+    tab.rawLines = [{ text: 'before', cls: '', tsC: '', tsE: '' }]
+
+    clearTab(id)
+
+    expect(output.innerHTML).toBe('')
+    expect(tab.rawLines).toEqual([])
+    expect(cmdInput.value).toBe('')
+
+    document.body.classList.add('mobile-terminal-mode')
+    cmdInput.value = 'desktop should stay untouched in mobile mode'
+    mobileCmdInput.value = 'pending mobile command'
+
+    clearTab(id)
+
+    expect(cmdInput.value).toBe('desktop should stay untouched in mobile mode')
+    expect(mobileCmdInput.value).toBe('pending mobile command')
   })
 
   it('closing a running tab kills it and activates a neighboring tab', () => {
@@ -528,6 +561,36 @@ describe('tabs helpers', () => {
     copyTab(id)
 
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to copy yet')
+  })
+
+  it('refocuses the terminal input after copy, save, and html export actions', async () => {
+    const { createTab, copyTab, saveTab, exportTabHtml, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const cmdInput = document.getElementById('cmd')
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    copyTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    saveTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    expect(cmdInput.focus).toHaveBeenCalled()
+
+    cmdInput.focus.mockClear()
+    window.ExportHtmlUtils = {
+      escapeExportHtml: s => s,
+      renderExportPromptEcho: s => s,
+      fetchVendorFontFacesCss: () => Promise.resolve(''),
+      buildTerminalExportHtml: () => '<html><body>export</body></html>',
+      exportTimestamp: () => '2026-01-01-00-00-00',
+    }
+    await exportTabHtml(id)
+    expect(cmdInput.focus).toHaveBeenCalled()
+    delete window.ExportHtmlUtils
   })
 
   it('saveTab shows a toast when there is only welcome output', () => {

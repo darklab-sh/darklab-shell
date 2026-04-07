@@ -55,7 +55,23 @@ function refocusTerminalInput() {
 }
 
 function focusCommandInputFromGesture() {
-  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return;
+  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
+    const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
+    if (mobileInput && typeof focusComposerInput === 'function') {
+      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
+      focusComposerInput(mobileInput, { preventScroll: true });
+      return;
+    }
+    if (mobileInput && typeof mobileInput.focus === 'function') {
+      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
+      try {
+        mobileInput.focus({ preventScroll: true });
+      } catch (_) {
+        mobileInput.focus();
+      }
+    }
+    return;
+  }
   if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
 }
 
@@ -158,6 +174,20 @@ function _bindMobileComposerInteractions(uiRefs) {
       focusCommandInputFromGesture();
     }
   });
+  composerRefs.host.addEventListener('pointerdown', e => {
+    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
+      e.preventDefault();
+      e.stopPropagation();
+      focusCommandInputFromGesture();
+    }
+  });
+  composerRefs.host.addEventListener('touchstart', e => {
+    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
+      e.preventDefault();
+      e.stopPropagation();
+      focusCommandInputFromGesture();
+    }
+  }, { passive: false });
   if (composerRefs.row) {
     composerRefs.row.addEventListener('pointerdown', e => {
       if (useMobileTerminalViewportMode() && e.target !== runBtn) {
@@ -649,14 +679,41 @@ function syncMobileComposerKeyboard() {
   syncMobileViewportHeight();
 }
 
+let _mobileComposerKeyboardSyncTimer = null;
+function queueMobileComposerKeyboardSync(delay = 120) {
+  if (typeof window === 'undefined') return;
+  if (_mobileComposerKeyboardSyncTimer) clearTimeout(_mobileComposerKeyboardSyncTimer);
+  _mobileComposerKeyboardSyncTimer = setTimeout(() => {
+    _mobileComposerKeyboardSyncTimer = null;
+    syncMobileComposerKeyboard();
+  }, delay);
+}
+
 function bindMobileComposerKeyboardListeners(mobileInput) {
   if (!mobileInput || typeof window === 'undefined') return;
+  const closeMobileKeyboard = (delay = 120) => {
+    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay });
+  };
   if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
-    window.visualViewport.addEventListener('resize', syncMobileComposerKeyboard);
-    window.visualViewport.addEventListener('scroll', syncMobileComposerKeyboard);
+    window.visualViewport.addEventListener('resize', () => {
+      syncMobileComposerKeyboard();
+      queueMobileComposerKeyboardSync();
+    });
+    window.visualViewport.addEventListener('scroll', () => {
+      syncMobileComposerKeyboard();
+      queueMobileComposerKeyboardSync();
+    });
   }
-  mobileInput.addEventListener('focus', syncMobileComposerKeyboard);
-  mobileInput.addEventListener('blur', syncMobileComposerKeyboard);
+  mobileInput.addEventListener('focus', () => {
+    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
+    syncMobileComposerKeyboard();
+    queueMobileComposerKeyboardSync();
+  });
+  mobileInput.addEventListener('blur', () => {
+    closeMobileKeyboard();
+    syncMobileComposerKeyboard();
+    queueMobileComposerKeyboardSync();
+  });
 }
 
 function bindMobileComposerSubmitAndInputListeners(mobileInput) {
@@ -665,6 +722,7 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
     if (!useMobileTerminalViewportMode()) return;
     e.preventDefault();
     e.stopPropagation();
+    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
     if (typeof focusComposerInput === 'function') {
       focusComposerInput(mobileInput, { preventScroll: true });
     } else if (typeof mobileInput.focus === 'function') {
@@ -679,6 +737,7 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
     if (!useMobileTerminalViewportMode()) return;
     e.preventDefault();
     e.stopPropagation();
+    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
     if (typeof focusComposerInput === 'function') {
       focusComposerInput(mobileInput, { preventScroll: true });
     } else if (typeof mobileInput.focus === 'function') {
@@ -1542,6 +1601,7 @@ function setupMobileComposer() {
         && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
       if (interactiveTarget) return;
       if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
+        if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay: 120 });
         blurVisibleComposerInputIfMobile();
       }
     };

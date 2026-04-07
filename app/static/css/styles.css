@@ -444,6 +444,9 @@ body.light.mobile-terminal-mode #mobile-composer-host {
 }
 
 body.mobile-terminal-mode {
+  position: fixed;
+  inset: 0;
+  width: 100%;
   height: var(--mobile-viewport-height, 100svh);
   min-height: 0;
   overflow: hidden;
@@ -918,6 +921,9 @@ body.light .terminal-bar { background: #d9d7d1; }
 body.light .ac-dropdown { background: #eeece7; }
 body.light #faq-modal { background: #eeece7; }
 body.light #options-modal { background: #eeece7; }
+body.light .faq-a {
+  color: var(--text);
+}
 body.light .prompt-prefix,
 body.light .wlc-prompt,
 body.light .mobile-prompt-label {

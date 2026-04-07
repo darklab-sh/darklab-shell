@@ -295,6 +295,7 @@ function refreshHistoryPanel() {
         if (!wasStarred && !cmdHistory.includes(run.command)) {
           cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
         }
+        hideHistoryPanel();
         refreshHistoryPanel();
         renderHistory(); // keep chips in sync
       });
@@ -305,6 +306,7 @@ function refreshHistoryPanel() {
           .catch(() => showToast('Failed to copy command', 'error'));
         const btn = entry.querySelector('[data-action="copy"]');
         if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
+        hideHistoryPanel();
       });
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
@@ -314,9 +316,11 @@ function refreshHistoryPanel() {
           .catch(() => showToast('Failed to copy link', 'error'));
         const btn = entry.querySelector('[data-action="permalink"]');
         if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
+        hideHistoryPanel();
       });
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
         confirmHistAction('delete', run.id, run.command);
+        hideHistoryPanel();
         const btn = entry.querySelector('[data-action="delete"]');
         if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });

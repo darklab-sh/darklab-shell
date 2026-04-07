@@ -385,9 +385,9 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 Current totals on this branch:
 
 - `pytest`: 466
-- `vitest`: 233
+- `vitest`: 238
 - `playwright`: 126
-- total: 825
+- total: 830
 
 ### Testing Architecture
 
@@ -402,7 +402,7 @@ Current totals on this branch:
 
 - The jsdom harness mirrors production load order by prepending `app/static/js/state.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
 
-- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, and close-running-tab / clear-preserve behavior.
+- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, the lower-composer tap hit-target fix, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, close-running-tab / clear-preserve behavior, and history-panel action-button close behavior.
 
 - The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 

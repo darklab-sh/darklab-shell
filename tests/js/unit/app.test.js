@@ -413,6 +413,7 @@ async function loadAppFns({
     _setTsMode,
     _setLnMode,
     handleComposerInputChange,
+    syncMobileComposerKeyboardState,
     focusVisibleComposerInput,
     blurVisibleComposerInput,
     blurVisibleComposerInputIfMobile,
@@ -836,6 +837,29 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
+  it('keeps the mobile keyboard helper row visible when the viewport resize lands before focus', async () => {
+    const { syncMobileComposerKeyboardState, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+
+    document.body.classList.add('mobile-terminal-mode')
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+
+    syncMobileComposerKeyboardState(0, { active: true })
+    syncMobileComposerKeyboardState(268, { active: true })
+    expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
+    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe('268px')
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
+    expect(document.getElementById('mobile-edit-bar').hidden).toBe(false)
+
+    restoreViewport()
+  })
+
   it('does not programmatically focus the mobile composer', async () => {
     const { refocusTerminalInput, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
@@ -864,6 +888,23 @@ describe('app helpers', () => {
     visibleInput.dispatchEvent(ev)
 
     expect(visibleInput.focus).toHaveBeenCalledWith({ preventScroll: true })
+
+    restoreViewport()
+  })
+
+  it('focuses the mobile composer host with preventScroll when the user taps the lower composer area', async () => {
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileComposerHost = document.getElementById('mobile-composer-host')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+    Object.assign(ev, { pointerType: 'touch' })
+    mobileComposerHost.dispatchEvent(ev)
+
+    expect(mobileCmdInput.focus).toHaveBeenCalledWith({ preventScroll: true })
 
     restoreViewport()
   })
@@ -1664,6 +1705,7 @@ describe('app helpers', () => {
     const searchBar = document.getElementById('search-bar')
     const searchInput = document.getElementById('search-input')
 
+    cmdInput.focus.mockClear()
     searchBar.style.display = 'none'
     document.getElementById('search-toggle-btn').click()
     expect(searchBar.style.display).toBe('flex')
@@ -1681,6 +1723,7 @@ describe('app helpers', () => {
     expect(clearSearch).toHaveBeenCalled()
 
     searchBar.style.display = 'none'
+    cmdInput.focus.mockClear()
     document.getElementById('search-toggle-btn').click()
     document.getElementById('search-toggle-btn').click()
     expect(clearSearch).toHaveBeenCalledTimes(3)

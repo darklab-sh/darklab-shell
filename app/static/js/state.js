@@ -3,6 +3,7 @@
 // storage lives here so the app can move away from prompt-specific globals in
 // a controlled way.
 (function initSharedState(global) {
+  let _mobileKeyboardVisibilityTimer = null;
   const defaults = {
     tabs: [],
     activeTabId: null,
@@ -168,34 +169,56 @@
     if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
     const nextOffset = typeof offset === 'number' ? offset : 0;
     document.documentElement?.style?.setProperty('--mobile-keyboard-offset', `${nextOffset}px`);
-    const mobileInput = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-    const focusedMobileInput = !!(mobileInput && document.activeElement === mobileInput);
-    const wasKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
     if (!active) {
       state._mobileKeyboardOffsetBaseline = nextOffset;
-      document.body.classList.remove('mobile-keyboard-open');
-      return false;
-    }
-    if (!focusedMobileInput) {
-      state._mobileKeyboardOffsetBaseline = nextOffset;
+      if (_mobileKeyboardVisibilityTimer) {
+        clearTimeout(_mobileKeyboardVisibilityTimer);
+        _mobileKeyboardVisibilityTimer = null;
+      }
       document.body.classList.remove('mobile-keyboard-open');
       return false;
     }
     if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
       state._mobileKeyboardOffsetBaseline = nextOffset;
     }
-    const baseline = typeof state._mobileKeyboardOffsetBaseline === 'number' ? state._mobileKeyboardOffsetBaseline : nextOffset;
-    const keyboardOpen = active && nextOffset > baseline + 40;
-    document.body.classList.toggle('mobile-keyboard-open', keyboardOpen);
-    if (keyboardOpen && !wasKeyboardOpen) {
-      if (typeof hideMobileMenu === 'function') hideMobileMenu();
-      if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof hideHistoryPanel === 'function') {
-        hideHistoryPanel();
-      }
-      if (typeof acHide === 'function') acHide();
+    return document.body.classList.contains('mobile-keyboard-open');
+  };
+  global.setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
+    if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
+    if (_mobileKeyboardVisibilityTimer) {
+      clearTimeout(_mobileKeyboardVisibilityTimer);
+      _mobileKeyboardVisibilityTimer = null;
     }
-    if (!keyboardOpen) state._mobileKeyboardOffsetBaseline = nextOffset;
-    return keyboardOpen;
+
+    const applyOpen = () => {
+      const wasKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
+      document.body.classList.toggle('mobile-keyboard-open', !!open);
+      if (open && !wasKeyboardOpen) {
+        if (typeof hideMobileMenu === 'function') hideMobileMenu();
+        if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof hideHistoryPanel === 'function') {
+          hideHistoryPanel();
+        }
+        if (typeof acHide === 'function') acHide();
+      }
+      return !!open;
+    };
+
+    if (open) {
+      return applyOpen();
+    }
+
+    const closeDelay = Math.max(0, Number(delay) || 0);
+    if (closeDelay === 0) {
+      return applyOpen();
+    }
+
+    _mobileKeyboardVisibilityTimer = setTimeout(() => {
+      _mobileKeyboardVisibilityTimer = null;
+      const mobileInput = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+      if (mobileInput && document.activeElement === mobileInput) return;
+      document.body.classList.remove('mobile-keyboard-open');
+    }, closeDelay);
+    return false;
   };
   global.setComposerValue = (value, start = null, end = null, { dispatch = true } = {}) => {
     const nextValue = String(value ?? '');
@@ -253,6 +276,19 @@
   global.hidePanelOverlay = (el) => {
     if (el && el.classList) el.classList.remove('open');
   };
+  global.refocusComposerAfterAction = ({ preventScroll = true } = {}) => {
+    const isMobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+    const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+    if (!isMobileMode && target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
+      return true;
+    }
+    if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll })) return true;
+    if (typeof refocusTerminalInput === 'function') {
+      refocusTerminalInput();
+      return false;
+    }
+    return false;
+  };
   global.togglePanelOverlay = (el, force = null) => {
     if (!el || !el.classList) return false;
     const next = force === null ? !el.classList.contains('open') : !!force;
@@ -277,7 +313,10 @@
   global.hideKillOverlay = () => hideModalOverlay(killOverlay);
   global.isKillOverlayOpen = () => isModalOverlayOpen(killOverlay, 'flex');
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
-  global.hideHistoryPanel = () => hidePanelOverlay(historyPanel);
+  global.hideHistoryPanel = () => {
+    hidePanelOverlay(historyPanel);
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+  };
   global.isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanel);
   global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
   global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
@@ -310,6 +349,13 @@
   };
   global.hideSearchBar = () => {
     if (searchBar && searchBar.style) searchBar.style.display = 'none';
+    const refocused = typeof refocusComposerAfterAction === 'function'
+      ? refocusComposerAfterAction({ preventScroll: true })
+      : false;
+    if (!refocused && !(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
+      && typeof cmdInput !== 'undefined' && cmdInput && typeof cmdInput.focus === 'function') {
+      cmdInput.focus();
+    }
   };
   global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display !== 'none');
   global.showHistoryRow = () => {

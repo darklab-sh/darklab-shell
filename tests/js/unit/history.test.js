@@ -298,6 +298,8 @@ describe('history panel actions', () => {
         'app/static/js/history.js',
       ], {
         document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 8 },
         apiFetch,
         navigator: { clipboard },
         location,
@@ -319,6 +321,10 @@ describe('history panel actions', () => {
         _saveStarred,
         refreshHistoryPanel: () => {},
         renderHistory: () => {},
+        hideHistoryPanel: vi.fn(() => {
+          historyPanel.classList.remove('open')
+          if (typeof cmdInput.focus === 'function') cmdInput.focus()
+        }),
         confirmHistAction: () => {},
         executeHistAction: () => {},
       }, `{
@@ -341,6 +347,8 @@ describe('history panel actions', () => {
     const originalExecCommand = document.execCommand
     document.execCommand = vi.fn(() => true)
     const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard })
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.focus = vi.fn()
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -353,6 +361,8 @@ describe('history panel actions', () => {
 
     expect(document.execCommand).toHaveBeenCalledWith('copy')
     expect(document.getElementById('permalink-toast').textContent).toBe('Command copied to clipboard')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(cmdInput.focus).toHaveBeenCalled()
 
     entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clipboard.writeText).toHaveBeenCalledTimes(2)
@@ -363,6 +373,31 @@ describe('history panel actions', () => {
     expect(document.execCommand).toHaveBeenCalledTimes(2)
     expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
     document.execCommand = originalExecCommand
+  })
+
+  it('closes the history panel when a history action button is clicked', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel()
+    const historyPanel = document.getElementById('history-panel')
+    historyPanel.classList.add('open')
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    entry.querySelector('[data-action="star"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+
+    historyPanel.classList.add('open')
+    entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+
+    historyPanel.classList.add('open')
+    entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+
+    historyPanel.classList.add('open')
+    entry.querySelector('[data-action="delete"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
   })
 
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {
