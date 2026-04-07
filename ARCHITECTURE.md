@@ -366,79 +366,24 @@ Current totals on this branch:
 - `playwright`: 107
 - total: 759
 
-### Python tests
+### Testing Architecture
 
-- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites, and shared runtime-command availability helpers. These tests mock `load_allowed_commands` or runtime lookups so they do not depend on the actual `conf/allowed_commands.txt` file or installed binaries.
-- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_ascii_mobile_art()`, `load_welcome_hints()`, run-output artifact capture/read helpers, autocomplete loading, database init/migration, and retention behavior.
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, canonical single-run permalink behavior with full-output artifacts, preview forcing via `?preview=1`, the `/history/<run_id>/full` alias, `/welcome/ascii`, `/welcome/ascii-mobile`, and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
-- **`test_run_history_share.py` / `test_request_kill_and_commands.py`** — focused route flows for persistence, kill behavior, web-shell helper execution, constrained `man` rendering, helper-resolution coverage for the expanded command set, shared missing-binary handling, and artifact cleanup on run delete/clear.
-- **`test_logging.py`** — structured logging formatters, setup, and application log events.
+- The project uses a three-layer test strategy:
+  - `pytest` for backend contracts, route behavior, persistence, loaders, and logging
+  - `Vitest` for client-side helpers and DOM-bound browser logic in jsdom
+  - `Playwright` for the integrated browser UI against a live Flask server
 
-**Rate limiting in tests.** `app.config["RATELIMIT_ENABLED"] = False` is set in every `get_client()` helper, but Flask-Limiter 4.x with `memory://` storage still increments counters even when this flag is set dynamically at runtime — it only truly disables the limit check, not the counter itself. Test classes that POST to `/run` multiple times (e.g. `TestCmdRewriteEvent`, `TestRunSpawnErrorEvent`) therefore use a dedicated `X-Forwarded-For` IP from the RFC 5737 TEST-NET-3 range (`203.0.113.x`) via the request headers. This gives each class its own isolated rate-limit bucket so accumulated hits from one class cannot exhaust the limit and cause spurious 429s in later classes within the same test run. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
+- That split is deliberate. Backend coverage stays fast and deterministic, browser-module logic gets isolated without bundling the app, and only browser-specific integration risks are left to Playwright.
 
-**Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
+- The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage.
 
-### JS unit tests (Vitest)
+- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage.
 
-The browser JS files share a single global scope (by design — no ES modules, no bundler). This makes tree-shaking impossible but the functions themselves can still be unit-tested by loading each file's source into an isolated execution context via `new Function(src + '\nreturn {fn1, fn2}')(localStorage, APP_CONFIG)`.
+- Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does.
 
-**How it works (`tests/js/unit/helpers/extract.js`):**
-1. Read the raw source of the browser JS file with `fs.readFileSync`
-2. Wrap it in `new Function('localStorage', 'APP_CONFIG', src + '\nreturn {...}')(...)`
-3. `new Function` executes in global scope — DOM-referencing functions (`renderHistory`, `showToast`, etc.) are *defined* but never *called*, so they don't throw even without a real DOM
-4. The requested function names are extracted and returned to the test
+- Suite-specific coverage inventories, focused run commands, and maintenance notes are intentionally centralized in [tests/README.md](tests/README.md) rather than duplicated here.
 
-`localStorage` is passed as a parameter (not captured from the outer scope) so the function bodies operate on a self-contained `MemoryStorage` instance defined in `extract.js`, rather than trying to access a browser global. This avoids a jsdom quirk: when jsdom is initialized without a non-opaque origin URL, the `localStorage` object exists but its methods (`getItem`, `setItem`, `removeItem`, `clear`) are all absent. Rather than fighting this with `environmentOptions`, `MemoryStorage` is a minimal but complete in-memory Storage implementation that's fully self-contained. `APP_CONFIG` is passed as a minimal stub `{ recent_commands_limit: 20 }` — it satisfies references inside function bodies without requiring the full `/config` API response.
-
-`fromScript` returns `{ ...fns, _storage }` so tests that need to pre-populate or inspect localStorage can do so via `_storage.setItem(...)` / `_storage.getItem(...)` instead of the jsdom global.
-
-**What is tested:**
-- `utils.test.js` — HTML escaping, regex escaping, and MOTD rendering helpers
-- `runner.test.js` — elapsed formatting plus kill/status helpers
-- `history.test.js` — starred-command localStorage helpers, startup hydration of blank-input command recall from `/history`, and history restore overlay/failure behavior
-- `session.test.js` — anonymous session ID persistence and `apiFetch()` header injection
-- `autocomplete.test.js` — terminal-style suggestion list placement (above/below), highlighting, acceptance, and dismissal
-- `tabs.test.js` — tab limits, rename, drag-reorder state sync, rename/overflow scroll-button behavior, prompt mounting rules, no-output toasts, export guards, and last-tab reset
-- `welcome.test.js` — welcome animation cancellation, badge behavior, and current DOM/state transitions
-- `app.test.js` — startup theme, timestamp-mode bootstrap behavior, mobile Run-button sync, and config/history boot wiring
-- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers, including batched live output rendering and timestamp/line-number mode styling
-
-Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
-
-### JS e2e tests (Playwright)
-
-Playwright tests exercise the full UI against a real Flask server. `playwright.config.js` starts Flask on port 5001 via `webServer` using the `.venv` Python interpreter run from the `app/` directory (matching `conftest.py`'s `chdir` logic).
-
-**What is tested:**
-- `commands.spec.js` — command execution, denial, and exit-status rendering
-- `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
-- `kill.spec.js` — kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation, and killed-state UI
-- `mobile.spec.js` — mobile startup composer visibility, hamburger/menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, mobile Run-button disable/reenable behavior, and long-command caret scrolling
-- `output.spec.js` — copy/clear/export actions, no-output toasts, and download fidelity
-- `rate-limit.spec.js` — per-session rate limiting
-- `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
-- `shortcuts.spec.js` — macOS-style Option shortcut handling for tabs, permalink/copy, clear, and prompt word motion
-- `share.spec.js` — snapshot permalinks plus single-run history permalinks, JSON/HTML views, permalink line-number/timestamp toggles, and permalink export filename/content assertions
-- `tabs.spec.js` — max-tabs, rename, drag reorder, neutral-input tab switching, blank-prompt Enter behavior, and last-tab reset behavior
-- `timestamps.spec.js` — timestamp mode cycling, output metadata, line-number compatibility, and post-toggle typing flow
-- `ui.spec.js` — theme toggling plus backend-driven FAQ modal rendering, allowlist-chip interaction, and options-modal preference persistence
-- `autocomplete.spec.js` — command suggestion interaction
-- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, prompt-key settle behavior, preferred-command stability, mobile welcome banner coverage, and tab-scoped welcome teardown
-
-**Implementation notes learned during setup:**
-- `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
-- `openHistory()` must wait for `#history-list > *` to appear — `refreshHistoryPanel()` fires an async `/history` fetch after the panel becomes visible. Use `openHistoryWithEntries()` in tests that expect entries: the server writes the run to SQLite *after* sending the SSE exit event, so the first `/history` fetch may race with the DB commit; `openHistoryWithEntries()` retries by closing and re-opening the panel if no `.history-entry` is found.
-- The history panel must be closed with `#history-close` (the in-panel close button), not by re-clicking `#hist-btn`. When the panel is open it overlays the toolbar, and the panel header intercepts pointer events on `#hist-btn`, causing Playwright to retry the click until timeout.
-- Test commands use `curl http://localhost:5001/health` and `curl http://localhost:5001/config`. These are in the allowlist, complete in under 50 ms, always exit 0, and create real history entries. `echo` is not in the allowlist and cannot be used.
-- Search tests look for `localhost` (from the echoed command line) rather than for text in the actual command output; the echo line is always rendered before the run starts, making the assertion immune to rate-limit contamination from adjacent tests.
-- `data-ts-e` (elapsed) is only set on lines appended while a run is active; the initial command echo line has no elapsed value and must not be used to assert for that attribute.
-
-### Testing Strategy
-- The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. The file-by-file breakdown and maintenance notes live in [tests/README.md](tests/README.md).
-- Vitest explicitly exercises `session.js`, `autocomplete.js`, and the `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
-- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, macOS-style Option shortcut handling, kill-modal keyboard confirmation, tab rename persistence, and both snapshot/run permalink JSON/HTML exports plus permalink line-number/timestamp toggles and export filename/content assertions.
-
-Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
+For the full appendix of suite contents and day-to-day testing notes, see [tests/README.md](tests/README.md).
 
 ---
 
@@ -456,6 +401,7 @@ The storage model is intentionally split:
 - full-output persistence is controlled by backend-only config keys `persist_full_run_output` and `full_output_max_bytes`
 - `full_output_max_bytes` is enforced on the uncompressed UTF-8 stream before gzip compression, so the limit tracks output volume rather than the final on-disk `.gz` size
 - full-output artifacts for fresh runs are stored as gzip-compressed JSON-lines records, not plain text, so prompt/timestamp/class metadata can be reused by canonical run permalinks
+- the main-page permalink button now upgrades to the persisted full artifact when one exists, so `/share/<id>` and `/history/<run_id>` both surface the same complete result when available
 - artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
 - deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
 

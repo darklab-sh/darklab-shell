@@ -22,10 +22,13 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **User options modal** — a new options modal lets users set theme, timestamp mode, and line-number display from one place, with cookie-backed persistence across sessions while keeping the existing quick-toggle buttons in sync
 - **Permalink display toggles** — permalink pages now expose line-number toggles for all views and timestamp toggles anywhere saved line metadata exists, including fresh canonical run permalinks backed by structured output persistence
 - **Mobile composer UX** — the visible mobile composer now keeps Run, Enter-to-submit, history chips, autocomplete, and the edit-helper row wired to the same visible input so the touch keyboard path stays in sync
-- **Mobile welcome banner** — mobile now uses the desktop welcome timing/status flow with `ascii_mobile.txt`, skips the `welcome.yaml` sample-command phase, and keeps rotating hints
+- **Mobile welcome assets** — added `ascii_mobile.txt` and `/welcome/ascii-mobile` for the dedicated mobile banner path
 
 ### Changed
 - **FAQ single source of truth** — built-in FAQ entries now come from the backend alongside custom `faq.yaml` entries, `/faq` now returns the merged canonical FAQ dataset, and the modal renders from that backend response instead of a hard-coded HTML copy
+- **Mobile welcome flow** — touch-sized screens now use `ascii_mobile.txt` with the same staged status and rotating-hint timing as desktop, while skipping the sampled-command phase from `welcome.yaml`
+- **Full-output permalink behavior** — tab permalink snapshots now fetch the full persisted run output when it exists, so the main-page permalink button can share the complete result instead of the preview-only tab state
+- **Live-output rendering** — fast bursts now flush in small batches so the browser can repaint during large commands, and the live terminal follows the bottom only while the user remains at the tail
 - **Welcome interruption and settle behavior** — welcome fast-forward now consistently responds to keyboard actions used in the inline-prompt flow and preserves correct prompt mounting after settle
 - **Tab activation model** — switching tabs now keeps the prompt input neutral (no automatic command repopulation), preventing cross-tab draft leakage
 - **Prompt rendering model** — submitted commands are preserved as styled prompt lines in output and running tabs hide the live prompt until completion, matching shell transcript flow more closely
@@ -36,6 +39,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ### Fixed
 - **macOS keyboard shortcuts** — app-safe `Option` shortcuts now match physical key codes instead of the produced symbol, preventing `Option+T`, `Option+W`, `Option+Shift+C`, and `Option+B/F` from inserting special characters into the prompt
+- **Mobile permalink copy flow** — the `/share/...` permalink page now hides its copy toast correctly on mobile and falls back to `execCommand('copy')` when the Clipboard API is unavailable
+- **Mobile helper-row styling** — the touch helper buttons keep their dark-theme appearance on Chrome and Safari mobile instead of falling back to light browser defaults
+- **Mobile Run guard** — the mobile Run button now disables while a command is active, matching the desktop Run control and preventing duplicate submits
+- **Cursor mirroring** — holding desktop arrow keys now updates the visible prompt cursor immediately instead of waiting for key release
+- **Prefix toggle layout** — enabling line numbers or timestamps no longer reflows wrapped output or jumps the live tail to a mid-buffer line
+- **Permalink truncation notices** — fresh permalinks no longer show stale preview-truncated warnings when the full persisted output is available
 - **Welcome skip edge case** — pressing Enter while welcome is active no longer leaves a stray legacy prompt marker in output
 - **Prompt cursor rendering** — prompt caret visibility now remains stable after welcome interruption, normal settle, and follow-up command execution
 - **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command

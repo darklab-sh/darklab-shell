@@ -34,7 +34,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
 - **Full-output permalinks for long runs** — when full-output persistence is enabled, run permalinks automatically serve the complete saved output of that run, while loading a run back into a terminal tab still uses the capped preview so the UI stays fast
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
-- **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, shares that full output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI color) buttons
+- **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, fetches and shares that full saved output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
 - **HTML export** — download a tab's output as a self-contained HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
@@ -838,40 +838,24 @@ docker compose logs -f
 
 ### Running Tests
 
-**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging:
+Run the three suites directly:
 
 ```bash
 python3 -m pytest tests/py/ -v
-```
-
-Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
-
-Current totals in this branch: **453 pytest + 199 Vitest + 107 Playwright = 759 tests**.
-
-**JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
-
-```bash
 npm run test:unit
-```
-
-Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, web `clear` handling, prompt-line behavior, run-button disable/enable guarding, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); terminal-style autocomplete rendering and acceptance (autocomplete.js); tab state, rename, drag reorder, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, desktop/mobile banner loading, fallback paths, and completion behavior (welcome.js); search helpers; output rendering, batched live flushing, and line-number toggle behavior; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
-
-**Testing notes**
-- Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
-- Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), permalink line-number/timestamp toggles, permalink export filenames and content, welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome banner flow, mobile Run-button disable/reenable behavior, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, kill-modal Enter/Escape behavior, history clipboard failure, and the boot/stall resilience cases.
-- The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
-- For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
-
-**JS e2e tests** (Playwright) — exercises the full UI against a live Flask server:
-
-```bash
 npm run test:e2e
 ```
 
-Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, permalink line-number/timestamp toggles, permalink export filenames and content, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, kill-modal keyboard confirmation, timestamp toggle, theme switch, backend-driven FAQ modal rendering and allowlist-chip behavior, the new options modal with persisted display preferences, and mobile UX including the mobile welcome banner, visible mobile composer, mobile Run-button disable/reenable behavior, recent-chip overflow handling, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Current totals in this branch: **453 pytest + 199 Vitest + 107 Playwright = 759 tests**.
 
-For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
+The testing model is intentionally layered:
+- `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
+- `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
+- `Playwright` covers the integrated UI against a live Flask server
+
+Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
+
+The canonical testing guide lives in [tests/README.md](tests/README.md). It contains the full file-by-file appendix, focused run commands, suite-specific notes, and maintenance conventions. `ARCHITECTURE.md` only keeps the architectural rationale for how the suites are split and why they are implemented the way they are.
 
 ### Linting & Security Scanning
 

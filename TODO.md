@@ -8,45 +8,45 @@
 
 ---
 
-## Active Workstreams
+## Open TODOs
 
 ### 1) Shell-Style Input Refactor (Stabilization)
 
 #### Objective
 Keep the new terminal-native prompt flow stable across desktop/mobile and remove remaining legacy assumptions.
 
-#### Implemented
-- hidden real input remains source of truth
-- inline rendered prompt with caret/selection mirroring
-- prompt unmounts while command is running
-- command echo lines preserve prompt styling in output
-- welcome settle/skip integrated with inline prompt model
-- blank `Enter` and `Ctrl+C` shell-like behaviors
-- tab switch input neutrality (no command repopulation)
-- tab overflow arrows and drag reorder
-- mobile touch-and-drag tab reorder with visual lift/drop indicators
-- terminal-style autocomplete placement (above/below)
-- app-safe keyboard shortcuts for tab lifecycle and tab actions
-- readline-style editing for `Ctrl+W`, `Ctrl+U`, `Ctrl+K`, `Alt/Option+B`, and `Alt/Option+F`
-- readline-style cursor movement for `Ctrl+A` and `Ctrl+E`
-- `keys` helper command plus FAQ/README shortcut documentation
-- macOS-friendly `Option` shortcut handling and E2E coverage
-- user options modal with cookie-persisted theme, timestamp, and line-number preferences
-- permalink viewer toggles for line numbers on all permalinks and timestamps on metadata-backed permalinks
-- structured run-output persistence for fresh history permalinks so line metadata survives into `/history/<run_id>`
-- first-pass inline selection visibility improvements for shell-style Shift+Arrow editing
-- permalink export coverage for filenames and view-state-aware txt/html content
-- mobile shell-input hygiene: disabled autocap/autocorrect/spellcheck, mobile prompt visibility syncing via `visualViewport`, and keyboard dismissal after submit
-- mobile composer refinement: visible mobile Run action and shortened live prompt chrome while the keyboard is open
-- detached mobile composer host: live prompt now mounts outside the transcript while the keyboard is open and drops back into the output flow afterward
-- mobile keyboard-open behavior: transient overlays/menu/history close while typing, autocomplete renders as a sheet above the composer, and body scroll is locked to the terminal pane
-- version source cleanup: backend version is canonical, frontend header fallback is generic, and `/config` populates the visible version label
-- dedicated mobile composer dock: the mobile shell now uses a visible composer row/host with a touch-focused input, visible Run action, and mobile-only mounting path while the desktop shell remains intact
-- mobile helper-row polish: the compact edit helpers stay hidden until the keyboard is open, sync with the visible mobile input, and avoid letting autocomplete cover the helper row
-- batched live-output rendering: fast bursts flush in small chunks so the browser can repaint, and the terminal follows the bottom only while the user has not scrolled away
-- shared Run-button guard: desktop and mobile Run controls disable together while a command is active so duplicate submits are blocked consistently
+#### Completed
+- ~~hidden real input remains source of truth~~
+- ~~inline rendered prompt with caret/selection mirroring~~
+- ~~prompt unmounts while command is running~~
+- ~~command echo lines preserve prompt styling in output~~
+- ~~welcome settle/skip integrated with inline prompt model~~
+- ~~blank `Enter` and `Ctrl+C` shell-like behaviors~~
+- ~~tab switch input neutrality (no command repopulation)~~
+- ~~tab overflow arrows and drag reorder~~
+- ~~mobile touch-and-drag tab reorder with visual lift/drop indicators~~
+- ~~terminal-style autocomplete placement (above/below)~~
+- ~~app-safe keyboard shortcuts for tab lifecycle and tab actions~~
+- ~~readline-style editing for `Ctrl+W`, `Ctrl+U`, `Ctrl+K`, `Alt/Option+B`, and `Alt/Option+F`~~
+- ~~readline-style cursor movement for `Ctrl+A` and `Ctrl+E`~~
+- ~~`keys` helper command plus FAQ/README shortcut documentation~~
+- ~~macOS-friendly `Option` shortcut handling and E2E coverage~~
+- ~~user options modal with cookie-persisted theme, timestamp, and line-number preferences~~
+- ~~permalink viewer toggles for line numbers on all permalinks and timestamps on metadata-backed permalinks~~
+- ~~structured run-output persistence for fresh history permalinks so line metadata survives into `/history/<run_id>`~~
+- ~~first-pass inline selection visibility improvements for shell-style Shift+Arrow editing~~
+- ~~permalink export coverage for filenames and view-state-aware txt/html content~~
+- ~~mobile shell-input hygiene: disabled autocap/autocorrect/spellcheck, mobile prompt visibility syncing via `visualViewport`, and keyboard dismissal after submit~~
+- ~~mobile composer refinement: visible mobile Run action and shortened live prompt chrome while the keyboard is open~~
+- ~~detached mobile composer host: live prompt now mounts outside the transcript while the keyboard is open and drops back into the output flow afterward~~
+- ~~mobile keyboard-open behavior: transient overlays/menu/history close while typing, autocomplete renders as a sheet above the composer, and body scroll is locked to the terminal pane~~
+- ~~version source cleanup: backend version is canonical, frontend header fallback is generic, and `/config` populates the visible version label~~
+- ~~dedicated mobile composer dock: the mobile shell now uses a visible composer row/host with a touch-focused input, visible Run action, and mobile-only mounting path while the desktop shell remains intact~~
+- ~~mobile helper-row polish: the compact edit helpers stay hidden until the keyboard is open, sync with the visible mobile input, and avoid letting autocomplete cover the helper row~~
+- ~~batched live-output rendering: fast bursts flush in small chunks so the browser can repaint, and the terminal follows the bottom only while the user has not scrolled away~~
+- ~~shared Run-button guard: desktop and mobile Run controls disable together while a command is active so duplicate submits are blocked consistently~~
 
-#### Remaining
+#### Open items
 - continue refining inline selection visibility for advanced keyboard flows
 - keep the `keys` helper command, FAQ entry, and README shortcut section aligned as bindings ship
 
@@ -135,7 +135,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
    - modal/drawer mounts
 4. The desktop shell should remain structurally unchanged during this phase.
 5. Create mobile-specific CSS and JS sections rather than continuing to grow desktop mobile override rules.
-6. Current implementation status: the dedicated mobile composer dock exists and is wired into the mobile presentation path, including the helper row, Run/Enter submission, history chips, and autocomplete sync; the wider mobile shell split still needs to be completed.
+6. ~~Current implementation status: the dedicated mobile composer dock exists and is wired into the mobile presentation path, including the helper row, Run/Enter submission, history chips, and autocomplete sync; the wider mobile shell split still needs to be completed.~~
 
 ##### Phase 2: Real Mobile Composer
 
@@ -209,14 +209,14 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 
 ##### Phase 6: Mobile Welcome Flow
 
-1. Keep the mobile welcome banner abbreviated and timing-aligned with desktop.
-2. Rework it to fit the dedicated mobile shell:
-   - compact text block at top of transcript
-   - recent commands directly below
-   - composer visible immediately
-3. Mobile welcome should never own the composer lifecycle.
-4. Typing, tapping the composer, or choosing a recent command should always bypass welcome immediately.
-5. Keep the mobile banner and status rows within the visible viewport on Chrome and Safari mobile without reintroducing browser-specific wording.
+1. ~~Keep the mobile welcome banner abbreviated and timing-aligned with desktop.~~
+2. ~~Rework it to fit the dedicated mobile shell:~~
+   - ~~compact text block at top of transcript~~
+   - ~~recent commands directly below~~
+   - ~~composer visible immediately~~
+3. ~~Mobile welcome should never own the composer lifecycle.~~
+4. ~~Typing, tapping the composer, or choosing a recent command should always bypass welcome immediately.~~
+5. ~~Keep the mobile banner and status rows within the visible viewport on Chrome and Safari mobile without reintroducing browser-specific wording.~~
 
 ##### Phase 7: Mobile Overlay And Action System
 
@@ -351,35 +351,6 @@ Helper-command plan:
 
 ---
 
-### 2) FAQ Single Source Of Truth
-
-#### Status
-Shipped. Built-in FAQ entries now live in the backend alongside custom `faq.yaml` entries, and `/faq` is the canonical source for both the modal and terminal `faq` helper output.
-
-#### Result
-One canonical backend FAQ dataset now renders:
-- rich HTML in modal
-- plain text in `faq` helper command
-
-#### Follow-Up
-- keep modal-only `answer_html` content aligned with the plain-text `answer` used by the `faq` helper command
-- extend the same backend FAQ schema if future modal sections need new dynamic render kinds
-
----
-
-### 3) Version Source Cleanup
-
-#### Status
-Shipped. The backend `/config` response is the canonical version source, the initial header label is generic, and the frontend updates the visible version label only after config loads.
-
-#### Result
-One release version touchpoint remains:
-- `app/config.py` defines the backend version
-- `/config` exposes it to the frontend
-- the UI falls back to a generic `real-time` label until config loads
-
----
-
 ## Documentation Follow-Ups
 
 - keep README feature list aligned with inline prompt behavior and tab UX
@@ -396,3 +367,28 @@ One release version touchpoint remains:
 - keep coverage for permalink rendering options in sync as run-permalink metadata support expands
 - keep bad-path tests for welcome interruption, history restore latency, and autocomplete placement regressions
 - continue validating no-output action toasts and permalink/full-output consistency paths
+
+---
+
+## Completed
+
+### FAQ Single Source Of Truth
+
+Built-in FAQ entries now live in the backend alongside custom `faq.yaml` entries, and `/faq` is the canonical source for both the modal and terminal `faq` helper output.
+
+Result:
+- rich HTML in modal
+- plain text in `faq` helper command
+
+Follow-up:
+- keep modal-only `answer_html` content aligned with the plain-text `answer` used by the `faq` helper command
+- extend the same backend FAQ schema if future modal sections need new dynamic render kinds
+
+### Version Source Cleanup
+
+The backend `/config` response is the canonical version source, the initial header label is generic, and the frontend updates the visible version label only after config loads.
+
+Result:
+- `app/config.py` defines the backend version
+- `/config` exposes it to the frontend
+- the UI falls back to a generic `real-time` label until config loads

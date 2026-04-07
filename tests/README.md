@@ -2,6 +2,8 @@
 
 This directory contains the project’s test suites and the practical notes for running and extending them.
 
+This is the canonical testing document for the repository. Keep the detailed suite inventory and maintenance notes here, and keep `README.md` and `ARCHITECTURE.md` limited to summary-level testing guidance plus links back to this file.
+
 ## What Lives Here
 
 - `tests/py/` - pytest coverage for backend validation, Flask routes, database helpers, and structured logging
@@ -39,7 +41,9 @@ npm run test:unit -- tests/js/unit/history.test.js tests/js/unit/runner.test.js
 npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 ```
 
-## Python Tests
+## Test Appendix
+
+### Python Tests
 
 Pytest lives in `tests/py/` and is organized by backend concern:
 
@@ -56,7 +60,7 @@ Notes:
 - Some tests patch `commands.load_allowed_commands`, while route tests patch the `app` namespace. Patch the name where the code resolves it, not necessarily where the function was defined.
 - The backend tests are designed to run without Docker. Redis is mocked or intentionally absent where appropriate.
 
-## Vitest
+### Vitest
 
 Vitest lives in `tests/js/unit/` and uses jsdom plus the extraction helpers in `tests/js/unit/helpers/extract.js`.
 
@@ -80,7 +84,7 @@ Notes:
 - `history.js` and `tabs.js` rely on DOM globals and clipboard APIs. When testing failure branches, use deterministic mocks and assert the visible toast text or DOM state.
 - `runner.js` has both pure helper tests and DOM-bound tests. The DOM-bound tests exercise fetch denial, rate limits, and stall recovery.
 
-## Playwright
+### Playwright
 
 Playwright lives in `tests/js/e2e/` and uses a real Flask server started by `playwright.config.js`.
 
