@@ -1,7 +1,6 @@
-// ── Shared DOM references ──
+// ── Shared utility module ──
 // Declared here once so all subsequent modules can reference them as globals.
-// All elements exist in the DOM by the time these scripts are parsed (scripts
-// load at the end of <body> after all HTML is rendered).
+// All elements exist in the DOM by the time these scripts are parsed at the end of <body>.
 const cmdInput    = document.getElementById('cmd');
 const runBtn      = document.getElementById('run-btn');
 const shellPromptWrap = document.getElementById('shell-prompt-wrap');

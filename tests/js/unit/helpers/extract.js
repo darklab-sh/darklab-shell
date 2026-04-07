@@ -23,6 +23,7 @@ import { fileURLToPath } from 'url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../../../')
+const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/state.js'), 'utf8')
 
 /** Minimal but complete in-memory Storage implementation. */
 export class MemoryStorage {
@@ -42,7 +43,7 @@ export class MemoryStorage {
  * Returned object: { [name]: fn, ..., _storage: MemoryStorage }
  */
 export function fromScript(relPath, ...names) {
-  const src = readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
+  const src = STATE_SRC + '\n' + readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
   const returnExpr = `\nreturn { ${names.join(', ')} };`
   const storage = new MemoryStorage()
   // Pass a minimal APP_CONFIG stub so references inside function bodies don't
@@ -59,7 +60,7 @@ export function fromScript(relPath, ...names) {
  * requested named bindings.
  */
 export function fromDomScript(relPath, globals, ...names) {
-  const src = readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
+  const src = STATE_SRC + '\n' + readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
   const globalNames = Object.keys(globals)
   const globalValues = Object.values(globals)
   const returnExpr = `\nreturn { ${names.join(', ')} };`
@@ -70,9 +71,13 @@ export function fromDomScript(relPath, globals, ...names) {
 /**
  * Load one or more browser JS files into a custom execution context and return
  * a custom object literal expression.
+ *
+ * @param {string} [initCode] - Optional JS snippet injected after state.js but
+ *   before the script files. Injected globals are in scope, so callers can
+ *   seed shared state: e.g. `'setTabs(tabs); setActiveTabId(activeTabId);'`.
  */
-export function fromDomScripts(relPaths, globals, returnExpr) {
-  const src = relPaths
+export function fromDomScripts(relPaths, globals, returnExpr, initCode = '') {
+  const src = STATE_SRC + '\n' + initCode + '\n' + relPaths
     .map(relPath => readFileSync(resolve(REPO_ROOT, relPath), 'utf8'))
     .join('\n')
   const globalNames = Object.keys(globals)

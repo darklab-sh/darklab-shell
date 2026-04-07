@@ -1,4 +1,4 @@
-// ── ANSI renderer ──
+// ── Shared output logic ──
 const ansi_up = new AnsiUp();
 ansi_up.use_classes = false;
 
@@ -118,7 +118,7 @@ function _stickOutputToBottom(out, tab) {
   if (tab) {
     const token = tab._outputFollowToken;
     setTimeout(() => {
-      if (!tabs.find(t => t.id === tab.id) || tab._outputFollowToken !== token) return;
+      if (!getTab(tab.id) || tab._outputFollowToken !== token) return;
       out.scrollTop = out.scrollHeight;
       tab.suppressOutputScrollTracking = false;
     }, 16);
@@ -139,7 +139,7 @@ function _flushPendingOutputBatch(tabId) {
   state.handle = null;
 
   const out = getOutput(tabId);
-  const tab = tabs.find(t => t.id === tabId);
+  const tab = getTab(tabId);
   if (!out || !tab) {
     _cancelPendingOutputBatch(tabId);
     return;
@@ -187,7 +187,7 @@ function _refreshFollowingOutputsAfterLayout() {
 }
 
 function _maybeMountDeferredPrompt(tabId) {
-  const tab = tabs.find(t => t.id === tabId);
+  const tab = getTab(tabId);
   if (!tab || !tab.deferPromptMount || tab.st === 'running') return;
   const state = _pendingOutputBatches.get(tabId);
   if (state && (state.scheduled || state.items.length > 0)) return;
@@ -282,7 +282,7 @@ function appendLine(text, cls, tabId) {
   const out = getOutput(id);
   if (!out) return;
 
-  const tab = tabs.find(t => t.id === id);
+  const tab = getTab(id);
   const now = Date.now();
   const runStart = tab?.runStart || 0;
   const state = _getPendingOutputBatch(id);

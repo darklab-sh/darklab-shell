@@ -103,24 +103,46 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 
 ##### Phase 0: State And Boundary Cleanup
 
-1. Extract a clear shared state layer for:
-   - active tab/session id
-   - current command value
-   - run state
-   - welcome state
-   - autocomplete state
-   - history metadata
-   - preferences
-2. Identify which current modules are desktop-rendering modules versus actual shared logic modules.
-3. Refactor code so shared command/history/permalink operations are callable without assuming a desktop prompt DOM exists.
-4. Define explicit interfaces for:
-   - submit command
-   - update current input value
-   - open/close overlays
-   - append output
-   - switch tab/session
-   - refresh history
-5. Keep this refactor behavior-preserving before any mobile surface changes.
+**Completed**
+- ~~`app/static/js/state.js` introduced: single `APP_STATE` object backed by `Object.defineProperty` descriptors so every module can still read/write state vars as plain globals while the actual storage is centralised~~
+- ~~all 36 module-level `let` state declarations removed from autocomplete.js, history.js, runner.js, search.js, tabs.js, welcome.js — they now live only in state.js~~
+- ~~`getAppState()` / `resetAppState()` helpers exposed for the browser and unit test harness~~
+- ~~tab accessor helpers added: `getTabs()`, `setTabs(v)`, `getActiveTabId()`, `setActiveTabId(v)`, `getActiveTab()`, `getTab(id)` — replace 25 inline `tabs.find(t => t.id === …)` call sites across runner.js, tabs.js, output.js, app.js, history.js~~
+- ~~`setTabs()` / `setActiveTabId()` used at the two reassignment sites in tabs.js (syncTabOrderFromDom, activateTab)~~
+- ~~all redundant `typeof fn === 'function'` guards removed from app.js, runner.js, tabs.js, welcome.js (scripts load in a defined order; guards were dead code)~~
+- ~~`submitCommand(rawCmd)` extracted from `runCommand()` as the shared DOM-free entry point for command execution; returns `true` (submitted), `false` (rejected/blocked), or `'settle'` (empty welcome input); `runCommand()` is now the desktop wrapper that reads cmdInput and handles input cleanup based on the return signal~~
+- ~~`_clearDesktopInput()` helper extracted; `dismissMobileKeyboardAfterSubmit` moved to `runCommand()` caller~~
+- ~~desktop input mirroring now routes through `setComposerValue()` instead of a hand-rolled mobile sync branch~~
+- ~~overlay helpers centralized in `state.js` for kill confirmation, history panel, FAQ, options, and history-delete surfaces~~
+- ~~search bar and recent-history row visibility now route through shared helpers instead of ad hoc style toggles~~
+- ~~run timer and per-tab kill button visibility now route through shared helpers instead of ad hoc style toggles~~
+- ~~mobile menu open/close state now routes through shared helpers instead of ad hoc class toggles~~
+- ~~MOTD wrapper visibility now routes through a shared helper instead of an ad hoc startup toggle~~
+- ~~autocomplete dropdown visibility now routes through shared helpers instead of ad hoc style toggles~~
+- ~~history loading overlay visibility now routes through shared helpers instead of ad hoc class toggles~~
+- ~~mobile shell visibility now routes through shared helpers instead of direct hidden + aria-hidden writes~~
+- ~~unit test harness updated: `state.js` prepended to all eval'd scripts; `fromDomScripts` accepts an `initCode` string so test loaders can call `setTabs(tabs); setActiveTabId(activeTabId)` to seed shared state; `STATE_SRC` cached at module level~~
+- ~~205 unit tests passing (11 test files, no regressions)~~
+
+**Remaining items**
+1. ~~Extract a clear shared state layer~~ — done (see above)
+2. ~~Identify and document module boundaries~~ — done; each browser script now has a short shared/shared-UI boundary comment at the top
+3. ~~Refactor `submitCommand` to be callable without desktop prompt DOM~~ — done; `_mobileSubmit` still routes through `runCommand()` for now so the hidden desktop input stays in sync, but the command engine itself is already DOM-free
+4. Define remaining explicit interfaces:
+   - ~~submit command~~ — `submitCommand(rawCmd)` in runner.js
+   - ~~update current input value~~ — `setComposerValue()` now centralizes desktop/mobile composer sync
+   - ~~open/close overlays~~ — shared helpers in `state.js` now handle kill, history, FAQ, options, and history-delete surfaces
+   - ~~search/history row visibility~~ — shared helpers in `state.js` now handle search bar and recent-history row visibility
+   - ~~run timer / kill button visibility~~ — shared helpers in `state.js` now handle run timer and per-tab kill button visibility
+   - ~~mobile menu visibility~~ — shared helpers in `state.js` now handle mobile menu open/close state
+   - ~~MOTD wrapper visibility~~ — shared helpers in `state.js` now handle the startup MOTD wrapper toggle
+   - ~~autocomplete dropdown visibility~~ — shared helpers in `state.js` now handle autocomplete dropdown visibility
+   - ~~history loading overlay visibility~~ — shared helpers in `state.js` now handle the history loading overlay visibility
+   - ~~mobile shell visibility~~ — shared helpers in `state.js` now handle shell/composer row visibility and aria-hidden state
+   - ~~append output~~ — `appendLine(text, cls, tabId)` in output.js
+   - ~~switch tab/session~~ — `activateTab(id)` in tabs.js
+   - ~~refresh history~~ — `refreshHistoryPanel()` in history.js
+5. Keep this refactor behavior-preserving before any mobile surface changes — ongoing constraint, all changes so far are non-breaking
 
 ##### Phase 1: Mobile Shell Skeleton
 

@@ -1,8 +1,4 @@
-// ── Autocomplete ──
-let acSuggestions = [];
-let acFiltered = [];
-let acIndex = -1;
-let acSuppressInputOnce = false;
+// ── Shared autocomplete logic ──
 
 function _positionAutocomplete(itemsCount) {
   if (!acDropdown) return false;
@@ -133,7 +129,7 @@ function _scrollAutocompleteActiveItem(forceBottom = false) {
 
 function acShow(items) {
   acDropdown.innerHTML = '';
-  if (!items.length) { acDropdown.style.display = 'none'; return; }
+  if (!items.length) { hideAcDropdown(); return; }
   const previousIndex = acIndex;
   const showAbove = _positionAutocomplete(items.length);
   const pinToBottom = showAbove && previousIndex < 0;
@@ -156,13 +152,13 @@ function acShow(items) {
     div.addEventListener('mousedown', e => { e.preventDefault(); acAccept(s); });
     acDropdown.appendChild(div);
   });
-  acDropdown.style.display = 'block';
+  showAcDropdown();
   _positionAutocomplete(items.length);
   _scrollAutocompleteActiveItem(pinToBottom);
 }
 
 function acHide() {
-  acDropdown.style.display = 'none';
+  hideAcDropdown();
   acIndex = -1;
 }
 
@@ -170,14 +166,7 @@ function acAccept(s) {
   const visibleInput = (typeof getVisibleMobileComposerInput === 'function')
     ? getVisibleMobileComposerInput()
     : null;
-  cmdInput.value = s;
-  if (visibleInput && visibleInput !== cmdInput) {
-    visibleInput.value = s;
-    if (typeof visibleInput.setSelectionRange === 'function') {
-      const end = s.length;
-      visibleInput.setSelectionRange(end, end);
-    }
-  }
+  setComposerValue(s, s.length, s.length);
   acHide();
   if (visibleInput && visibleInput !== cmdInput) {
     visibleInput.focus();
@@ -185,5 +174,4 @@ function acAccept(s) {
     cmdInput.focus();
   }
   acSuppressInputOnce = true;
-  cmdInput.dispatchEvent(new Event('input'));
 }

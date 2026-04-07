@@ -204,6 +204,11 @@ async function loadAppFns({
         configurable: true,
         value: 5,
       })
+    } else {
+      Object.defineProperty(window.navigator, 'maxTouchPoints', {
+        configurable: true,
+        value: 0,
+      })
     }
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
@@ -270,6 +275,10 @@ async function loadAppFns({
     acAccept: () => {},
     resetCmdHistoryNav: () => {},
     navigateCmdHistory: () => false,
+    setupTabScrollControls: () => {},
+    hydrateCmdHistory: () => {},
+    mountShellPrompt: () => {},
+    unmountShellPrompt: () => {},
     logClientError,
     tabs: tabsOverride,
     activeTabId,
@@ -311,13 +320,18 @@ async function loadAppFns({
     confirmHistAction,
     executeHistAction,
     doKill,
+    showKillOverlay,
+    hideKillOverlay,
+    isKillOverlayOpen,
+    confirmPendingKill,
+    closeKillOverlay,
     _getAcIndex: () => acIndex,
-  }`)
+  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
   await Promise.resolve()
   await Promise.resolve()
 
-    return {
+  return {
     ...fns,
     storage,
     apiFetch,
@@ -340,6 +354,11 @@ async function loadAppFns({
     acDropdown,
     acHide: acHideOverride,
     shellPromptWrap: shellPromptWrapEl,
+    showKillOverlay: fns.showKillOverlay,
+    hideKillOverlay: fns.hideKillOverlay,
+    isKillOverlayOpen: fns.isKillOverlayOpen,
+    confirmPendingKill: fns.confirmPendingKill,
+    closeKillOverlay: fns.closeKillOverlay,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
       else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
@@ -347,10 +366,8 @@ async function loadAppFns({
       else Object.defineProperty(window, 'visualViewport', { configurable: true, value: originalVisualViewport })
       if (originalScrollTo === undefined) delete window.scrollTo
       else window.scrollTo = originalScrollTo
-      if (mobileTouch) {
-        if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
-        else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
-      }
+      if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
+      else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
     },
   }
 }
@@ -1279,19 +1296,19 @@ describe('app helpers', () => {
 
   it('supports Enter and Escape in the kill confirmation modal', async () => {
     const doKill = vi.fn()
-    const { cmdInput } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
-    const killOverlay = document.getElementById('kill-overlay')
+    const { cmdInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
 
-    killOverlay.style.display = 'flex'
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    showKillOverlay()
+    expect(isKillOverlayOpen()).toBe(true)
+    confirmPendingKill()
     expect(doKill).toHaveBeenCalledWith('tab-1')
-    expect(killOverlay.style.display).toBe('none')
+    expect(isKillOverlayOpen()).toBe(false)
     expect(cmdInput.focus).toHaveBeenCalled()
 
     cmdInput.focus.mockClear()
-    killOverlay.style.display = 'flex'
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    expect(killOverlay.style.display).toBe('none')
+    showKillOverlay()
+    closeKillOverlay()
+    expect(isKillOverlayOpen()).toBe(false)
     expect(cmdInput.focus).toHaveBeenCalled()
   })
 

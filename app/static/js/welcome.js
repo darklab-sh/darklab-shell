@@ -1,4 +1,4 @@
-// ── Welcome typeout animation ──
+// ── Desktop UI module ──
 // Fetches welcome content from /welcome, /welcome/ascii, and /welcome/hints
 // for desktop, and from /welcome/ascii-mobile plus /welcome/hints for the
 // mobile variant. Renders the intro into the initial tab with status lines,
@@ -6,17 +6,6 @@
 // Calling cancelWelcome() (e.g. when the user runs a command) stops the
 // animation immediately; runner.js also calls clearTab to wipe partial output.
 
-let _welcomeActive = false;
-let _welcomeDone   = false;  // true once the animation has fully completed
-let _welcomeTabId = null;
-let _welcomeBanner = null;
-let _welcomeLiveLine = null;
-let _welcomeHintNode = null;
-let _welcomeStatusNodes = [];
-let _welcomePlan = null;
-let _welcomeNextBlockIndex = 0;
-let _welcomeSettleRequested = false;
-let _welcomeBootPending = true;
 const _welcomeWaiters = new Set();
 const _welcomePrompt = 'anon@shell.darklab.sh:~$';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
@@ -249,7 +238,7 @@ async function _runWelcomeAnimation(tabId, {
       _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
       _welcomeActive = false;
       _welcomeBootPending = false;
-      if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+      if (tabId === activeTabId) mountShellPrompt(tabId);
     }
   }
 
@@ -266,7 +255,7 @@ function cancelWelcome(tabId = null) {
   _clearWelcomeLiveLine();
   _clearWelcomeBanner();
   _resetWelcomePlan();
-  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) {
+  if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
     setTimeout(() => {
       if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
@@ -387,14 +376,12 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
     if (!interactive) return;
     if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
     if (!cmdInput) return;
-    cmdInput.value = cmd;
     cmdInput.focus();
-    if (typeof cmdInput.setSelectionRange === 'function') {
-      const end = cmdInput.value.length;
-      cmdInput.setSelectionRange(end, end);
-    }
+    setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
     // Defer so the document click handler has already run before autocomplete updates.
-    setTimeout(() => cmdInput.dispatchEvent(new Event('input')), 0);
+    setTimeout(() => {
+      if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
+    }, 0);
   }
   if (interactive) {
     cmdText.addEventListener('click', loadCommand);
@@ -437,13 +424,11 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
     function loadCommand() {
       if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
       if (!cmdInput) return;
-      cmdInput.value = cmd;
       cmdInput.focus();
-      if (typeof cmdInput.setSelectionRange === 'function') {
-        const end = cmdInput.value.length;
-        cmdInput.setSelectionRange(end, end);
-      }
-      setTimeout(() => cmdInput.dispatchEvent(new Event('input')), 0);
+      setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
+      setTimeout(() => {
+        if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
+      }, 0);
     }
     boundCmdText.addEventListener('click', loadCommand);
     boundCmdText.addEventListener('keydown', e => {
@@ -591,7 +576,7 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
   if (!current) return;
   used.add(current);
   await _showWelcomeHint(tabId, current, true);
-  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) {
+  if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
     if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
     if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
@@ -610,7 +595,7 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
   }
 
   _welcomeActive = false;
-  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+  if (tabId === activeTabId) mountShellPrompt(tabId);
 }
 
 function _ensureFeaturedWelcomeBadge(line, cmd) {
@@ -643,11 +628,11 @@ function _ensureWelcomeFinalHint(tabId, hints) {
     line.textContent = `# ${String(hints[0]).trim()}`;
     getOutput(tabId)?.appendChild(line);
     _welcomeHintNode = line;
-    if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId, true);
+    if (tabId === activeTabId) mountShellPrompt(tabId, true);
     return;
   }
   _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
-  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId, true);
+  if (tabId === activeTabId) mountShellPrompt(tabId, true);
 }
 
 function settleWelcome(tabId = activeTabId) {
@@ -685,7 +670,7 @@ function settleWelcome(tabId = activeTabId) {
   _ensureWelcomeFinalHint(tabId, _welcomePlan && _welcomePlan.hints);
   _welcomeActive = false;
   _welcomeBootPending = false;
-  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+  if (tabId === activeTabId) mountShellPrompt(tabId);
   out.scrollTop = out.scrollHeight;
   return true;
 }
@@ -697,16 +682,16 @@ async function runWelcome() {
   _welcomeDone = false;
   _welcomeTabId = activeTabId;
   _welcomeSettleRequested = false;
-  if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
+  unmountShellPrompt();
 
   if (_shouldUseMobileWelcomeSequence()) {
     const [asciiArt, hintData] = await Promise.all([
       apiFetch('/welcome/ascii-mobile').then(r => r.text()).catch(err => {
-        if (typeof logClientError === 'function') logClientError('failed to load /welcome/ascii-mobile', err);
+        logClientError('failed to load /welcome/ascii-mobile', err);
         return '';
       }),
       apiFetch('/welcome/hints').then(r => r.json()).catch(err => {
-        if (typeof logClientError === 'function') logClientError('failed to load /welcome/hints', err);
+        logClientError('failed to load /welcome/hints', err);
         return null;
       }),
     ]);
@@ -720,22 +705,22 @@ async function runWelcome() {
     if (!_welcomeActive && !_welcomeDone) {
       _welcomeTabId = null;
       _welcomeBootPending = false;
-      if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+      if (tabId === activeTabId) mountShellPrompt(tabId);
     }
     return;
   }
 
   const [data, asciiArt, hintData] = await Promise.all([
     apiFetch('/welcome').then(r => r.json()).catch(err => {
-      if (typeof logClientError === 'function') logClientError('failed to load /welcome', err);
+      logClientError('failed to load /welcome', err);
       return null;
     }),
     apiFetch('/welcome/ascii').then(r => r.text()).catch(err => {
-      if (typeof logClientError === 'function') logClientError('failed to load /welcome/ascii', err);
+      logClientError('failed to load /welcome/ascii', err);
       return '';
     }),
     apiFetch('/welcome/hints').then(r => r.json()).catch(err => {
-      if (typeof logClientError === 'function') logClientError('failed to load /welcome/hints', err);
+      logClientError('failed to load /welcome/hints', err);
       return null;
     }),
   ]);
@@ -743,7 +728,7 @@ async function runWelcome() {
     _welcomeActive = false;
     _welcomeTabId = null;
     _welcomeBootPending = false;
-    if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+    if (tabId === activeTabId) mountShellPrompt(tabId);
     return;
   }
   const SAMPLE_COUNT   = Math.max(0, Number(APP_CONFIG.welcome_sample_count ?? 5) || 0);

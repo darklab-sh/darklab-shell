@@ -1,6 +1,4 @@
-// ── Tab state ──
-let tabs = [];
-let activeTabId = null;
+// ── Desktop UI module ──
 let _tabsScrollControlsBound = false;
 let _draggedTabId = null;
 let _dragMoved = false;
@@ -64,7 +62,7 @@ function syncTabOrderFromDom() {
   const orderedIds = [...tabsBar.querySelectorAll('.tab')].map(node => node.dataset.id);
   if (!orderedIds.length) return;
   const byId = new Map(tabs.map(tab => [tab.id, tab]));
-  tabs = orderedIds.map(id => byId.get(id)).filter(Boolean);
+  setTabs(orderedIds.map(id => byId.get(id)).filter(Boolean));
 }
 
 function _tabFromClientX(clientX, excludeId = null) {
@@ -232,7 +230,7 @@ function unmountShellPrompt() {
 function mountShellPrompt(tabId, force = false) {
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const mobileMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
-  if (!force && !mobileMode && typeof _welcomeBootPending !== 'undefined' && _welcomeBootPending) {
+  if (!force && !mobileMode && _welcomeBootPending) {
     unmountShellPrompt();
     return;
   }
@@ -240,7 +238,7 @@ function mountShellPrompt(tabId, force = false) {
     unmountShellPrompt();
     return;
   }
-  const tabState = tabs.find(t => t.id === tabId);
+  const tabState = getTab(tabId);
   if (!force && tabState && tabState.deferPromptMount) {
     unmountShellPrompt();
     return;
@@ -250,8 +248,7 @@ function mountShellPrompt(tabId, force = false) {
     unmountShellPrompt();
     return;
   }
-  if (!force && typeof _welcomeActive !== 'undefined' && _welcomeActive
-      && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(tabId)) {
+  if (!force && _welcomeActive && welcomeOwnsTab(tabId)) {
     unmountShellPrompt();
     return;
   }
@@ -337,7 +334,7 @@ function createTab(label) {
   const outputEl = panel.querySelector('.output');
   if (outputEl) {
     outputEl.addEventListener('scroll', () => {
-      const t = tabs.find(tab => tab.id === id);
+      const t = getTab(id);
       if (!t || t.suppressOutputScrollTracking) return;
       const nearBottom = outputEl.scrollTop + outputEl.clientHeight >= outputEl.scrollHeight - 8;
       t.followOutput = nearBottom;
@@ -390,11 +387,11 @@ function createTab(label) {
 }
 
 function activateTab(id) {
-  activeTabId = id;
+  setActiveTabId(id);
   document.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
   document.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.id === id));
   mountShellPrompt(id);
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   setStatus(t ? (t.st || 'idle') : 'idle');
   ensureActiveTabVisible(id);
   updateTabScrollButtons();
@@ -402,7 +399,7 @@ function activateTab(id) {
   const input = document.getElementById('cmd');
   if (input) {
     input.value = '';
-    if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
+    resetCmdHistoryNav();
     input.dispatchEvent(new Event('input'));
     input.focus();
   }
@@ -443,7 +440,7 @@ function closeTab(id) {
 function setTabStatus(id, st) {
   const dot = document.querySelector(`.tab[data-id="${id}"] .tab-status`);
   if (dot) dot.className = `tab-status ${st}`;
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   if (t) t.st = st;
   if (id === activeTabId) {
     if (st === 'running') unmountShellPrompt();
@@ -454,7 +451,7 @@ function setTabStatus(id, st) {
 function setTabLabel(id, label) {
   const lbl = document.querySelector(`.tab[data-id="${id}"] .tab-label`);
   if (lbl) lbl.textContent = label.length > 28 ? label.slice(0, 26) + '…' : label;
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   if (t) t.label = label;
 }
 
@@ -466,7 +463,7 @@ function clearTab(id) {
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
   const out = getOutput(id);
   if (out) out.innerHTML = '';
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   if (t) {
     t._outputFollowToken = (t._outputFollowToken || 0) + 1;
     t.suppressOutputScrollTracking = false;
@@ -500,7 +497,7 @@ function _getExportableRawLines(tab) {
 
 // ── Copy to clipboard ──
 function copyTab(id) {
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   const lines = _getExportableRawLines(t);
   if (!lines.length) {
     showToast('No output to copy yet');
@@ -516,7 +513,7 @@ function copyTab(id) {
 // Reads from rawLines rather than DOM innerText so that CSS ::before timestamp
 // content and ANSI escape codes don't appear in the saved file.
 function saveTab(id) {
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   const lines = _getExportableRawLines(t);
   if (!lines.length) {
     showToast('No output to export');
@@ -537,7 +534,7 @@ function saveTab(id) {
 // Generates a self-contained HTML file with terminal styling, ANSI colors
 // rendered as inline spans, and clock timestamps shown alongside each line.
 function exportTabHtml(id) {
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   if (!t || !t.rawLines.length) { showToast('No output to export'); return; }
 
   const appName = APP_CONFIG.app_name || 'shell.darklab.sh';
@@ -609,7 +606,7 @@ ${linesHtml}
 
 // ── Tab rename ──
 function startTabRename(id, labelEl) {
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   if (!t) return;
   const original = t.label;
 
@@ -701,7 +698,7 @@ function _extractLatestFullRunShareContent(tab, fullRun) {
 }
 
 async function permalinkTab(id) {
-  const t = tabs.find(t => t.id === id);
+  const t = getTab(id);
   if (!t || !t.rawLines.length) {
     showToast('No output to share yet');
     return;

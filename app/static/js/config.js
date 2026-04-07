@@ -1,4 +1,4 @@
-// ── App config ──
+// ── Shared utility module ──
 // Default values used until the /config endpoint responds.
 // app.js overwrites APP_CONFIG with the server response on page load.
 let APP_CONFIG = {

@@ -26,7 +26,7 @@ function loadOutputFns({ appConfig = {} } = {}) {
     _setTsMode,
     _setLnMode,
     _getTabs: () => tabs,
-  }`)
+  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 }
 
 describe('appendLine', () => {

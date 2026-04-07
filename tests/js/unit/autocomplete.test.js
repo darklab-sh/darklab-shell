@@ -13,6 +13,10 @@ function loadAutocompleteFns() {
     cmdInput,
     acDropdown,
     mobileComposerHost,
+    acSuggestions: [],
+    acFiltered: [],
+    acIndex: -1,
+    acSuppressInputOnce: false,
   }, `{
     acShow,
     acHide,

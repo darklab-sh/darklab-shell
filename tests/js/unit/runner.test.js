@@ -44,6 +44,7 @@ function loadRunnerFns({
   createTab = () => 'tab-2',
   addToHistory = () => {},
   appendLine = () => {},
+  welcomeActive = false,
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
@@ -100,7 +101,7 @@ function loadRunnerFns({
     runTimer,
     historyPanel,
     APP_CONFIG: appConfig,
-    _welcomeActive: false,
+    _welcomeActive: welcomeActive,
     _welcomeDone: false,
     searchBar: document.createElement('div'),
     addToHistory,
@@ -112,6 +113,7 @@ function loadRunnerFns({
     clearTab,
     cancelWelcome,
     welcomeOwnsTab,
+    requestWelcomeSettle: () => {},
     refreshHistoryPanel: () => {},
     showToast,
     dismissMobileKeyboardAfterSubmit,
@@ -129,9 +131,10 @@ function loadRunnerFns({
   }, `{
     setStatus,
     doKill,
+    submitCommand,
     runCommand,
     _getPendingKillTabId: () => pendingKillTabId,
-  }`)
+  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
   return {
     ...fns,
@@ -478,5 +481,56 @@ describe('runner helpers', () => {
 
     expect(showToast).toHaveBeenCalledWith('Failed to send kill request; command may still be running')
     expect(appendLine).toHaveBeenCalledWith('[kill request failed] Unable to reach the server. Check that it is running and try again.', 'notice', 'tab-1')
+  })
+})
+
+describe('submitCommand return contract', () => {
+  it('returns true on empty input (blank Enter)', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+    })
+    expect(submitCommand('   ')).toBe(true)
+  })
+
+  it("returns 'settle' on empty input during active welcome", () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      welcomeActive: true,
+      welcomeOwnsTab: () => true,
+    })
+    expect(submitCommand('')).toBe('settle')
+  })
+
+  it('returns false when shell operators are rejected', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+    })
+    expect(submitCommand('ping x | cat /etc/passwd')).toBe(false)
+  })
+
+  it('returns false when /tmp path is denied', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+    })
+    expect(submitCommand('cat /tmp/secret')).toBe(false)
+  })
+
+  it('returns true when a valid command is submitted', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+    })
+    expect(submitCommand('ping darklab.sh')).toBe(true)
+  })
+
+  it('returns false when the tab limit is reached', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+      createTab: () => null, // signals tab limit reached
+    })
+    expect(submitCommand('ping darklab.sh')).toBe(false)
   })
 })

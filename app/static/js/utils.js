@@ -1,4 +1,4 @@
-// ── Utilities ──
+// ── Shared utility module ──
 
 function escapeHtml(t) {
   return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');

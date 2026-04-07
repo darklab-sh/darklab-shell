@@ -45,6 +45,7 @@ function loadTabsFns({
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
+    resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
     APP_CONFIG: { max_tabs: maxTabs, app_name: 'shell.darklab.sh' },
     setStatus: () => {},
@@ -74,8 +75,8 @@ function loadTabsFns({
     copyTab,
     saveTab,
     permalinkTab,
-    _getTabs: () => tabs,
-    _getActiveTabId: () => activeTabId,
+    _getTabs: () => getTabs(),
+    _getActiveTabId: () => getActiveTabId(),
   }`)
 
   return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap }
@@ -123,6 +124,7 @@ function loadTabsAndOutputFns({
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
+    resetCmdHistoryNav: () => {},
     APP_CONFIG: { max_tabs: maxTabs, max_output_lines: 100, app_name: 'shell.darklab.sh' },
     setStatus: () => {},
     clearSearch: () => {},
@@ -141,7 +143,7 @@ function loadTabsAndOutputFns({
   }, `{
     createTab,
     mountShellPrompt,
-    _getTabs: () => tabs,
+    _getTabs: () => getTabs(),
     _stickOutputToBottom,
     _maybeMountDeferredPrompt,
   }`)
