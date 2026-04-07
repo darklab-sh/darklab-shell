@@ -167,4 +167,18 @@ test.describe('keyboard shortcuts', () => {
     expect(selection.start).toBe(16)
     expect(selection.end).toBe(16)
   })
+
+  test('desktop prompt cursor follows repeated caret moves while arrowing across the command', async ({ page }) => {
+    const input = page.locator('#cmd')
+    await input.fill('curl darklab.sh')
+    await input.focus()
+
+    const promptCaret = page.locator('#shell-prompt-text .shell-caret-char')
+
+    for (const [pos, ch] of [[0, 'c'], [1, 'u'], [2, 'r'], [3, 'l']]) {
+      await input.evaluate((el, nextPos) => el.setSelectionRange(nextPos, nextPos), pos)
+      await page.evaluate(() => document.dispatchEvent(new Event('selectionchange')))
+      await expect(promptCaret).toHaveText(ch)
+    }
+  })
 })

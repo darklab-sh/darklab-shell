@@ -1,8 +1,8 @@
 // ── Welcome typeout animation ──
-// Fetches welcome content from /welcome, /welcome/ascii, and /welcome/hints and
-// renders it into the initial
-// tab with a mix of status lines, typed commands, inline comment hints, and a
-// closing hint row.
+// Fetches welcome content from /welcome, /welcome/ascii, and /welcome/hints
+// for desktop, and from /welcome/ascii-mobile plus /welcome/hints for the
+// mobile variant. Renders the intro into the initial tab with status lines,
+// typed commands, inline comment hints, and a closing hint row.
 // Calling cancelWelcome() (e.g. when the user runs a command) stops the
 // animation immediately; runner.js also calls clearTab to wipe partial output.
 
@@ -22,7 +22,7 @@ const _welcomePrompt = 'anon@shell.darklab.sh:~$';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['loading /', 'loading -', 'loading \\', 'loading |'];
 
-function _shouldUseCompactMobileWelcome() {
+function _shouldUseMobileWelcomeSequence() {
   if (typeof useMobileTerminalViewportMode === 'function') {
     return useMobileTerminalViewportMode();
   }
@@ -30,22 +30,6 @@ function _shouldUseCompactMobileWelcome() {
     return window.matchMedia('(max-width: 600px)').matches;
   }
   return false;
-}
-
-function _renderCompactMobileWelcome(tabId) {
-  const out = getOutput(tabId);
-  _appendWelcomeOutput(tabId, 'Ready. Type a command or tap Run. Tab autocompletes.', 'welcome-hint');
-  _appendWelcomeOutput(tabId, 'Use the history panel for previous runs and permalinks.', 'welcome-hint');
-  _appendWelcomeOutput(tabId, 'For the best mobile experience, use Firefox.', 'welcome-hint');
-  if (out) out.scrollTop = 0;
-  _welcomeActive = false;
-  _welcomeDone = false;
-  _welcomeTabId = null;
-  _welcomeBootPending = false;
-  _clearWelcomeLiveLine();
-  _clearWelcomeBanner();
-  _resetWelcomePlan();
-  if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId, true);
 }
 
 function welcomeOwnsTab(tabId) {
@@ -167,6 +151,109 @@ async function _runWelcomeStatusSequence(labels, intervalMs, staggerMs = null) {
   }
 
   await Promise.all(settlePromises);
+}
+
+async function _runWelcomeAnimation(tabId, {
+  asciiArt = '',
+  blocks = [],
+  hints = [],
+  includeBlocks = true,
+} = {}) {
+  const out = getOutput(tabId);
+  if (!out) return false;
+
+  _renderWelcomeAsciiStream(tabId, asciiArt);
+  if (!_welcomeActive) return false;
+
+  const statusLabels = Array.isArray(APP_CONFIG.welcome_status_labels)
+    ? APP_CONFIG.welcome_status_labels
+        .map(label => String(label || '').trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 6)
+    : [];
+
+  const effectiveStatusLabels = statusLabels.length
+    ? statusLabels
+    : ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'];
+  const introBlocks = includeBlocks ? blocks : [];
+  _welcomePlan = {
+    asciiArt,
+    statusLabels: effectiveStatusLabels,
+    blocks: introBlocks,
+    hints,
+  };
+  if (_welcomeSettleRequested) {
+    settleWelcome(tabId);
+    return true;
+  }
+
+  const INTER_BLOCK_MS = APP_CONFIG.welcome_inter_block_ms ?? 1500;
+  const POST_STATUS_PAUSE_MS = Math.max(0, Number(APP_CONFIG.welcome_post_status_pause_ms ?? 220) || 0);
+  const STATUS_MS = Math.max(820, Math.floor(INTER_BLOCK_MS * 0.78));
+  const STATUS_STAGGER_MS = Math.max(140, Math.floor(INTER_BLOCK_MS * 0.28));
+  const CHAR_MS = APP_CONFIG.welcome_char_ms ?? 10;
+  const JITTER = APP_CONFIG.welcome_jitter_ms ?? 10;
+  const POST_CMD_MS = APP_CONFIG.welcome_post_cmd_ms ?? 700;
+  const FIRST_PROMPT_IDLE_MS = Math.max(0, Number(APP_CONFIG.welcome_first_prompt_idle_ms ?? 2100) || 0);
+  const HINT_INTERVAL_MS = Math.max(0, Number(APP_CONFIG.welcome_hint_interval_ms ?? 4200) || 0);
+  const HINT_ROTATIONS = Math.max(0, Number(APP_CONFIG.welcome_hint_rotations ?? 2) || 0);
+
+  await _runWelcomeStatusSequence(effectiveStatusLabels, STATUS_MS, STATUS_STAGGER_MS);
+  if (!_welcomeActive) return false;
+  if (_welcomeSettleRequested) {
+    settleWelcome(tabId);
+    return true;
+  }
+  _setWelcomeBannerSettled(true);
+  await _sleep(Math.max(POST_STATUS_PAUSE_MS, Math.floor(INTER_BLOCK_MS * 0.24)));
+  if (!_welcomeActive) return false;
+  if (_welcomeSettleRequested) {
+    settleWelcome(tabId);
+    return true;
+  }
+
+  for (const [blockIndex, block] of introBlocks.entries()) {
+    if (!_welcomeActive) break;
+    if (_welcomeSettleRequested) {
+      settleWelcome(tabId);
+      return true;
+    }
+
+    const currentOut = getOutput(tabId);
+    if (!currentOut) break;
+    _welcomeNextBlockIndex = blockIndex;
+
+    if (!await _typeWelcomeCommand(tabId, block.cmd, {
+      charMs: CHAR_MS,
+      jitterMs: JITTER,
+      postMs: POST_CMD_MS,
+      startDelayMs: blockIndex === 0 ? Math.max(FIRST_PROMPT_IDLE_MS, Math.floor(INTER_BLOCK_MS * 0.72)) : INTER_BLOCK_MS,
+      commentText: block.out || null,
+    })) return false;
+    _welcomeNextBlockIndex = blockIndex + 1;
+
+    if (blockIndex === 0) {
+      const commands = getOutput(tabId)?.querySelectorAll('.welcome-command');
+      const featuredLine = commands && commands[commands.length - 1];
+      if (featuredLine) {
+        _ensureFeaturedWelcomeBadge(featuredLine, block.cmd);
+      }
+    }
+  }
+
+  if (_welcomeActive) {
+    _welcomeDone = true;
+    if (hints.length) {
+      void _runWelcomeHintFeed(tabId, hints, HINT_INTERVAL_MS, HINT_ROTATIONS);
+    } else {
+      _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
+      _welcomeActive = false;
+      _welcomeBootPending = false;
+      if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+    }
+  }
+
+  return true;
 }
 
 function cancelWelcome(tabId = null) {
@@ -610,11 +697,33 @@ async function runWelcome() {
   _welcomeDone = false;
   _welcomeTabId = activeTabId;
   _welcomeSettleRequested = false;
-  if (_shouldUseCompactMobileWelcome()) {
-    _renderCompactMobileWelcome(tabId);
+  if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
+
+  if (_shouldUseMobileWelcomeSequence()) {
+    const [asciiArt, hintData] = await Promise.all([
+      apiFetch('/welcome/ascii-mobile').then(r => r.text()).catch(err => {
+        if (typeof logClientError === 'function') logClientError('failed to load /welcome/ascii-mobile', err);
+        return '';
+      }),
+      apiFetch('/welcome/hints').then(r => r.json()).catch(err => {
+        if (typeof logClientError === 'function') logClientError('failed to load /welcome/hints', err);
+        return null;
+      }),
+    ]);
+    const hints = (hintData && Array.isArray(hintData.items)) ? hintData.items : [];
+    await _runWelcomeAnimation(tabId, {
+      asciiArt,
+      blocks: [],
+      hints,
+      includeBlocks: false,
+    });
+    if (!_welcomeActive && !_welcomeDone) {
+      _welcomeTabId = null;
+      _welcomeBootPending = false;
+      if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
+    }
     return;
   }
-  if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
 
   const [data, asciiArt, hintData] = await Promise.all([
     apiFetch('/welcome').then(r => r.json()).catch(err => {
@@ -637,94 +746,13 @@ async function runWelcome() {
     if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
     return;
   }
-  const CHAR_MS        = APP_CONFIG.welcome_char_ms        ?? 10;
-  const JITTER         = APP_CONFIG.welcome_jitter_ms      ?? 10;
-  const POST_CMD_MS    = APP_CONFIG.welcome_post_cmd_ms    ?? 700;
-  const INTER_BLOCK_MS = APP_CONFIG.welcome_inter_block_ms ?? 1500;
-  const FIRST_PROMPT_IDLE_MS = Math.max(0, Number(APP_CONFIG.welcome_first_prompt_idle_ms ?? 2100) || 0);
-  const POST_STATUS_PAUSE_MS = Math.max(0, Number(APP_CONFIG.welcome_post_status_pause_ms ?? 220) || 0);
   const SAMPLE_COUNT   = Math.max(0, Number(APP_CONFIG.welcome_sample_count ?? 5) || 0);
-  const HINT_INTERVAL_MS = Math.max(0, Number(APP_CONFIG.welcome_hint_interval_ms ?? 4200) || 0);
-  const HINT_ROTATIONS = Math.max(0, Number(APP_CONFIG.welcome_hint_rotations ?? 2) || 0);
-  const statusLabels = Array.isArray(APP_CONFIG.welcome_status_labels)
-    ? APP_CONFIG.welcome_status_labels
-        .map(label => String(label || '').trim().toUpperCase())
-        .filter(Boolean)
-        .slice(0, 6)
-    : [];
-
-  _renderWelcomeAsciiStream(tabId, asciiArt);
-  if (!_welcomeActive) return;
-
-  const effectiveStatusLabels = statusLabels.length
-    ? statusLabels
-    : ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'];
   const sampledBlocks = SAMPLE_COUNT > 0 ? _sampleWelcomeBlocks(data, SAMPLE_COUNT) : [];
   const hints = (hintData && Array.isArray(hintData.items)) ? hintData.items : [];
-  _welcomePlan = {
+  await _runWelcomeAnimation(tabId, {
     asciiArt,
-    statusLabels: effectiveStatusLabels,
     blocks: sampledBlocks,
     hints,
-  };
-  if (_welcomeSettleRequested) {
-    settleWelcome(tabId);
-    return;
-  }
-  const STATUS_MS = Math.max(820, Math.floor(INTER_BLOCK_MS * 0.78));
-  const STATUS_STAGGER_MS = Math.max(140, Math.floor(INTER_BLOCK_MS * 0.28));
-  await _runWelcomeStatusSequence(effectiveStatusLabels, STATUS_MS, STATUS_STAGGER_MS);
-  if (!_welcomeActive) return;
-  if (_welcomeSettleRequested) {
-    settleWelcome(tabId);
-    return;
-  }
-  _setWelcomeBannerSettled(true);
-  await _sleep(Math.max(POST_STATUS_PAUSE_MS, Math.floor(INTER_BLOCK_MS * 0.24)));
-  if (!_welcomeActive) return;
-  if (_welcomeSettleRequested) {
-    settleWelcome(tabId);
-    return;
-  }
-
-  for (const [blockIndex, block] of sampledBlocks.entries()) {
-    if (!_welcomeActive) break;
-    if (_welcomeSettleRequested) {
-      settleWelcome(tabId);
-      return;
-    }
-
-    const out = getOutput(tabId);
-    if (!out) break;
-    _welcomeNextBlockIndex = blockIndex;
-
-    if (!await _typeWelcomeCommand(tabId, block.cmd, {
-      charMs: CHAR_MS,
-      jitterMs: JITTER,
-      postMs: POST_CMD_MS,
-      startDelayMs: blockIndex === 0 ? Math.max(FIRST_PROMPT_IDLE_MS, Math.floor(INTER_BLOCK_MS * 0.72)) : INTER_BLOCK_MS,
-      commentText: block.out || null,
-    })) return;
-    _welcomeNextBlockIndex = blockIndex + 1;
-
-    if (blockIndex === 0) {
-      const commands = getOutput(tabId)?.querySelectorAll('.welcome-command');
-      const featuredLine = commands && commands[commands.length - 1];
-      if (featuredLine) {
-        _ensureFeaturedWelcomeBadge(featuredLine, block.cmd);
-      }
-    }
-  }
-
-  if (_welcomeActive) {
-    _welcomeDone   = true;
-    if (hints.length) {
-      void _runWelcomeHintFeed(tabId, hints, HINT_INTERVAL_MS, HINT_ROTATIONS);
-    } else {
-      _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
-      _welcomeActive = false;
-      _welcomeBootPending = false;
-      if (typeof mountShellPrompt === 'function' && tabId === activeTabId) mountShellPrompt(tabId);
-    }
-  }
+    includeBlocks: true,
+  });
 }

@@ -209,14 +209,14 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 
 ##### Phase 6: Mobile Welcome Flow
 
-1. Keep the compact mobile welcome approach.
+1. Keep the mobile welcome banner abbreviated and timing-aligned with desktop.
 2. Rework it to fit the dedicated mobile shell:
    - compact text block at top of transcript
    - recent commands directly below
    - composer visible immediately
 3. Mobile welcome should never own the composer lifecycle.
 4. Typing, tapping the composer, or choosing a recent command should always bypass welcome immediately.
-5. The Firefox note can remain until Chrome behavior is genuinely equivalent.
+5. Keep the mobile banner and status rows within the visible viewport on Chrome and Safari mobile without reintroducing browser-specific wording.
 
 ##### Phase 7: Mobile Overlay And Action System
 
@@ -286,7 +286,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - mobile overlay manager behavior
 
 **Playwright coverage to add:**
-- mobile shell first load in compact welcome mode
+- mobile shell first load uses the abbreviated mobile welcome banner
 - composer focus and keyboard-open state transitions
 - suggestion tap acceptance
 - long-command edit and caret movement

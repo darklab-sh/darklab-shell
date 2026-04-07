@@ -33,6 +33,22 @@ test.describe('welcome animation', () => {
         ].join('\n'),
       })
     })
+    await page.route('**/welcome/ascii-mobile', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: [
+          '.----[ shell.darklab.sh :: mobile console ]----.',
+          '|                                              |',
+          '|   __  __   ___   ___   ___   ___   ___       |',
+          "|  |  \\/  | / _ \\ / _ \\ / _ \\ / _ \\ / _ \\      |",
+          '|  | |\\/| || (_) | (_) | (_) | (_) | (_) |     |',
+          '|  |_|  |_| \\___/ \\___/ \\___/ \\___/ \\___/      |',
+          '|                                              |',
+          "'----[ status: ready ]----[ prompt: anon@shell.darklab.sh:~$ ]----'",
+        ].join('\n'),
+      })
+    })
     await page.route('**/welcome/hints', route => {
       route.fulfill({
         status: 200,
@@ -208,14 +224,15 @@ test.describe('welcome animation', () => {
   test.describe('mobile view', () => {
     test.use({ hasTouch: true })
 
-    test('switches to the compact welcome path', async ({ page }) => {
+    test('switches to the mobile welcome path with the mobile banner', async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 })
       await page.reload()
       await page.locator('#cmd').waitFor()
 
-      await expect(page.locator('.welcome-banner')).toHaveCount(0)
-      await expect(page.locator('.tab-panel.active .output')).toContainText('Ready. Type a command or tap Run. Tab autocompletes.')
-      await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
+      await expect(page.locator('.welcome-ascii-art')).toContainText('mobile console')
+      await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
+      await expect(page.locator('.welcome-command')).toHaveCount(0)
+      await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
       await expect(page.locator('#mobile-run-btn')).toBeVisible()
     })
   })

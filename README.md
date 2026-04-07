@@ -21,7 +21,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Line numbers per output line** — toggle visible sequence numbers on each output line using the **line numbers** button in the terminal bar. Uses the same shared prefix metadata as timestamps so numbering stays aligned when timestamp mode changes
 - **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, and fresh run permalinks do the same when full output was captured with structured line metadata
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
-- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
+- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and skips the sampled commands from `welcome.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
 - **Mobile composer dock** — on touch-sized screens the app uses a visible mobile composer with a Run button, a compact helper row that appears only while the keyboard is open, and shared syncing for command chips and autocomplete
 - **Terminal-like command flow** — while a command is running, the prompt is hidden and the Run action is disabled; completed commands are echoed inline above their output; pressing **Enter** on a blank line inserts a fresh prompt line; **Ctrl+C** opens kill confirmation when running, or drops to a new prompt line when idle
@@ -111,6 +111,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
     │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
+    │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
     │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
     ├── templates/
@@ -156,6 +157,7 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 | `conf/allowed_commands.txt` | Immediately — re-read on every request |
 | `conf/faq.yaml` | Immediately — re-read on every request |
 | `conf/ascii.txt` | On next page load — fetched once by the browser on load |
+| `conf/ascii_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/app_hints.txt` | On next page load — fetched once by the browser on load |
 | `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
 | `conf/auto_complete.txt` | On next page load — fetched once by the browser |
@@ -458,6 +460,8 @@ When the page first loads, the terminal can render a staged welcome sequence:
 - curated sampled commands and their sample output from `app/conf/welcome.yaml`
 - rotating footer hints loaded from `app/conf/app_hints.txt`
 
+On touch-sized screens the welcome flow uses `app/conf/ascii_mobile.txt` instead of the wide desktop banner and keeps the same status and hint timing while skipping the sampled command blocks.
+
 If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt` or `app_hints.txt` are absent, those parts are skipped as well.
 
 **Format:**
@@ -489,7 +493,7 @@ Notes:
 - App hints rotate only briefly; they are not an endless carousel
 - If the user runs a command before the welcome sequence completes, it stops immediately and clears the partial output in that same tab only
 
-The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, or `conf/app_hints.txt` and reload the page to see changes without restarting the server.
+The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, `conf/ascii_mobile.txt`, or `conf/app_hints.txt` and reload the page to see changes without restarting the server.
 
 ---
 
@@ -817,6 +821,7 @@ docker compose logs -f
 | `GET` | `/faq` | Returns the canonical FAQ dataset as JSON: built-in entries plus any custom `faq.yaml` items |
 | `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
 | `GET` | `/welcome/ascii` | Returns the welcome ASCII banner from `ascii.txt` as plain text |
+| `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome banner from `ascii_mobile.txt` as plain text |
 | `GET` | `/welcome/hints` | Returns rotating welcome footer hints from `app_hints.txt` as JSON |
 | `GET` | `/history` | Returns last N completed runs for the current session as JSON |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
@@ -839,9 +844,9 @@ docker compose logs -f
 python3 -m pytest tests/py/ -v
 ```
 
-Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
+Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
 
-Current totals in this branch: **449 pytest + 198 Vitest + 106 Playwright = 753 tests**.
+Current totals in this branch: **453 pytest + 199 Vitest + 107 Playwright = 759 tests**.
 
 **JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
 
@@ -849,12 +854,12 @@ Current totals in this branch: **449 pytest + 198 Vitest + 106 Playwright = 753 
 npm run test:unit
 ```
 
-Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, web `clear` handling, prompt-line behavior, run-button disable/enable guarding, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); terminal-style autocomplete rendering and acceptance (autocomplete.js); tab state, rename, drag reorder, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering, batched live flushing, and line-number toggle behavior; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
+Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, web `clear` handling, prompt-line behavior, run-button disable/enable guarding, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); terminal-style autocomplete rendering and acceptance (autocomplete.js); tab state, rename, drag reorder, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, desktop/mobile banner loading, fallback paths, and completion behavior (welcome.js); search helpers; output rendering, batched live flushing, and line-number toggle behavior; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
 
 **Testing notes**
 - Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
 - Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), permalink line-number/timestamp toggles, permalink export filenames and content, welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, mobile Run-button disable/reenable behavior, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, kill-modal Enter/Escape behavior, history clipboard failure, and the boot/stall resilience cases.
+- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), permalink line-number/timestamp toggles, permalink export filenames and content, welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome banner flow, mobile Run-button disable/reenable behavior, delete-non-favorites, tab rename and reorder behavior, output actions, macOS-style keyboard shortcuts, kill-modal Enter/Escape behavior, history clipboard failure, and the boot/stall resilience cases.
 - The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
 - For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
 
@@ -864,7 +869,7 @@ Vitest covers the client-side failure and edge paths that matter most: `escapeHt
 npm run test:e2e
 ```
 
-Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, permalink line-number/timestamp toggles, permalink export filenames and content, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, kill-modal keyboard confirmation, timestamp toggle, theme switch, backend-driven FAQ modal rendering and allowlist-chip behavior, the new options modal with persisted display preferences, and mobile UX including the compact mobile welcome, visible mobile composer, mobile Run-button disable/reenable behavior, recent-chip overflow handling, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, permalink line-number/timestamp toggles, permalink export filenames and content, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/max-tabs, macOS-style keyboard shortcuts, kill-modal keyboard confirmation, timestamp toggle, theme switch, backend-driven FAQ modal rendering and allowlist-chip behavior, the new options modal with persisted display preferences, and mobile UX including the mobile welcome banner, visible mobile composer, mobile Run-button disable/reenable behavior, recent-chip overflow handling, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
 
 For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
 

@@ -251,6 +251,19 @@ class TestWelcomeAsciiRoute:
         assert b"/$$" in resp.data
 
 
+class TestWelcomeAsciiMobileRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii-mobile")
+        assert resp.status_code == 200
+
+    def test_returns_plain_text_banner(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii-mobile")
+        assert resp.mimetype == "text/plain"
+        assert resp.data
+
+
 # ── /welcome/hints ───────────────────────────────────────────────────────────
 
 class TestWelcomeHintsRoute:

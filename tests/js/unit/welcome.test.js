@@ -4,8 +4,10 @@ import { fromDomScripts } from './helpers/extract.js'
 function loadWelcomeFns({
   welcomeData = [],
   asciiArt = 'ASCII ART',
+  mobileAsciiArt = 'MOBILE ASCII ART',
   hintItems = [],
   failAscii = false,
+  failMobileAscii = false,
   failHints = false,
   config = {},
   appendLine = () => {},
@@ -22,6 +24,10 @@ function loadWelcomeFns({
     if (url === '/welcome/ascii') {
       if (failAscii) return Promise.reject(new Error('ascii down'))
       return Promise.resolve({ text: () => Promise.resolve(asciiArt) })
+    }
+    if (url === '/welcome/ascii-mobile') {
+      if (failMobileAscii) return Promise.reject(new Error('mobile ascii down'))
+      return Promise.resolve({ text: () => Promise.resolve(mobileAsciiArt) })
     }
     if (url === '/welcome/hints') {
       if (failHints) return Promise.reject(new Error('hints down'))
@@ -339,16 +345,21 @@ describe('welcome helpers', () => {
     ])
   })
 
-  it('uses the compact mobile welcome path and skips network loading', async () => {
-    const { runWelcome, out, apiFetch, mountShellPrompt } = loadWelcomeFns({ mobile: true })
+  it('uses the mobile welcome path with the mobile banner and no sample commands', async () => {
+    const { runWelcome, out, apiFetch, mountShellPrompt } = loadWelcomeFns({
+      mobile: true,
+      hintItems: ['Use the history panel to reopen saved runs.'],
+    })
 
     await runWelcome()
 
-    expect(apiFetch).not.toHaveBeenCalled()
-    expect(out.textContent).toContain('Ready. Type a command or tap Run. Tab autocompletes.')
-    expect(out.textContent).toContain('Use the history panel for previous runs and permalinks.')
-    expect(out.textContent).toContain('For the best mobile experience, use Firefox.')
-    expect(out.scrollTop).toBe(0)
+    expect(apiFetch).toHaveBeenCalledWith('/welcome/ascii-mobile')
+    expect(apiFetch).toHaveBeenCalledWith('/welcome/hints')
+    expect(apiFetch).not.toHaveBeenCalledWith('/welcome')
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toContain('MOBILE ASCII ART')
+    expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
+    expect(out.querySelectorAll('.welcome-command')).toHaveLength(0)
+    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Use the history panel')
     expect(mountShellPrompt).toHaveBeenCalledWith('tab-1', true)
   })
 })

@@ -1202,6 +1202,13 @@ if (cmdInput) {
   });
 }
 
+if (typeof document !== 'undefined') {
+  document.addEventListener('selectionchange', () => {
+    if (!cmdInput || document.activeElement !== cmdInput) return;
+    syncShellPrompt();
+  });
+}
+
 // ── Autocomplete ──
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];

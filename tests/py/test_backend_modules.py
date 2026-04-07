@@ -25,7 +25,7 @@ import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
-    load_welcome, load_ascii_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
+    load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
@@ -476,7 +476,7 @@ class TestWelcomeLoading:
         assert result == []
 
 
-# ── load_ascii_art / load_welcome_hints ──────────────────────────────────────
+# ── load_ascii_art / load_ascii_mobile_art / load_welcome_hints ──────────────
 
 class TestWelcomeAssetLoading:
     def test_missing_ascii_file_returns_empty_string(self):
@@ -490,6 +490,20 @@ class TestWelcomeAssetLoading:
         try:
             with mock.patch("commands.ASCII_FILE", path):
                 assert load_ascii_art() == "  banner"
+        finally:
+            os.unlink(path)
+
+    def test_missing_mobile_ascii_file_returns_empty_string(self):
+        with mock.patch("commands.ASCII_MOBILE_FILE", "/nonexistent/ascii_mobile.txt"):
+            assert load_ascii_mobile_art() == ""
+
+    def test_mobile_ascii_art_trims_only_trailing_whitespace(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("  mobile banner  \n\n")
+            path = f.name
+        try:
+            with mock.patch("commands.ASCII_MOBILE_FILE", path):
+                assert load_ascii_mobile_art() == "  mobile banner"
         finally:
             os.unlink(path)
 

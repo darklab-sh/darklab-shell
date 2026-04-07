@@ -32,7 +32,7 @@ from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
     load_all_faq, load_autocomplete, load_welcome,
-    load_ascii_art, load_welcome_hints,
+    load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     is_command_allowed, rewrite_command,
     runtime_missing_command_message, runtime_missing_command_name,
 )
@@ -341,6 +341,12 @@ def get_welcome():
 def get_welcome_ascii():
     """Return the ASCII banner art used by the welcome animation."""
     return Response(load_ascii_art(), mimetype="text/plain")
+
+
+@app.route("/welcome/ascii-mobile")
+def get_welcome_ascii_mobile():
+    """Return the compact ASCII banner art used by mobile welcome."""
+    return Response(load_ascii_mobile_art(), mimetype="text/plain")
 
 
 @app.route("/welcome/hints")

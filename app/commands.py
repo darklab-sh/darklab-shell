@@ -19,6 +19,7 @@ AUTOCOMPLETE_FILE     = os.path.join(_CONF, "auto_complete.txt")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
+ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 
 BUILTIN_FAQ = [
@@ -318,6 +319,14 @@ def load_ascii_art():
     if not os.path.exists(ASCII_FILE):
         return ""
     with open(ASCII_FILE) as f:
+        return f.read().rstrip()
+
+
+def load_ascii_mobile_art():
+    """Read ascii_mobile.txt and return the compact mobile banner art."""
+    if not os.path.exists(ASCII_MOBILE_FILE):
+        return ""
+    with open(ASCII_MOBILE_FILE) as f:
         return f.read().rstrip()
 
 

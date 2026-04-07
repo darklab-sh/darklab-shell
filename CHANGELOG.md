@@ -22,6 +22,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **User options modal** — a new options modal lets users set theme, timestamp mode, and line-number display from one place, with cookie-backed persistence across sessions while keeping the existing quick-toggle buttons in sync
 - **Permalink display toggles** — permalink pages now expose line-number toggles for all views and timestamp toggles anywhere saved line metadata exists, including fresh canonical run permalinks backed by structured output persistence
 - **Mobile composer UX** — the visible mobile composer now keeps Run, Enter-to-submit, history chips, autocomplete, and the edit-helper row wired to the same visible input so the touch keyboard path stays in sync
+- **Mobile welcome banner** — mobile now uses the desktop welcome timing/status flow with `ascii_mobile.txt`, skips the `welcome.yaml` sample-command phase, and keeps rotating hints
 
 ### Changed
 - **FAQ single source of truth** — built-in FAQ entries now come from the backend alongside custom `faq.yaml` entries, `/faq` now returns the merged canonical FAQ dataset, and the modal renders from that backend response instead of a hard-coded HTML copy

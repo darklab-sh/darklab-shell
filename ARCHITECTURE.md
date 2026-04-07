@@ -258,7 +258,7 @@ Welcome-animation rows are excluded from prefix numbering entirely. They keep th
 
 ### Welcome Animation
 
-`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, `requestWelcomeSettle(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout:
+`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, `requestWelcomeSettle(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout, and it has a desktop branch plus a mobile branch:
 
 1. fetch `/welcome/ascii` and stream the ASCII banner from `conf/ascii.txt`
 2. render fake startup-status rows using `APP_CONFIG.welcome_status_labels`
@@ -267,6 +267,8 @@ Welcome-animation rows are excluded from prefix numbering entirely. They keep th
 5. show the first prompt, let it idle for at least `welcome_first_prompt_idle_ms`, then type the featured example
 6. attach click and keyboard handlers to the sampled command text and the featured `TRY THIS FIRST` badge so they load into the prompt without executing
 7. fetch `/welcome/hints` and rotate footer hints briefly while the welcome tab is still idle, using `welcome_hint_interval_ms` and `welcome_hint_rotations`
+
+On touch-sized viewports the same timing/config pipeline runs with `/welcome/ascii-mobile` and `conf/ascii_mobile.txt`, but the sampled-command phase is skipped so the mobile welcome stays abbreviated while still showing the desktop-style status and rotating hint rows.
 
 The implementation still types character-by-character using short timed waits, but it now mixes in overlapping loading spinners for the status rows, a staged handoff into the first prompt, and finite hint rotation.
 
@@ -287,6 +289,7 @@ The route shape is intentional. Frontend-facing config content is exposed throug
 - `/autocomplete` for `auto_complete.txt`
 - `/welcome` for sampled command metadata from `welcome.yaml`
 - `/welcome/ascii` for plain-text banner art from `ascii.txt`
+- `/welcome/ascii-mobile` for the mobile banner art from `ascii_mobile.txt`
 - `/welcome/hints` for hint strings from `app_hints.txt`
 - `/config` for normalized values from `config.yaml`
 
@@ -358,16 +361,16 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 449
-- `vitest`: 198
-- `playwright`: 106
-- total: 753
+- `pytest`: 453
+- `vitest`: 199
+- `playwright`: 107
+- total: 759
 
 ### Python tests
 
 - **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites, and shared runtime-command availability helpers. These tests mock `load_allowed_commands` or runtime lookups so they do not depend on the actual `conf/allowed_commands.txt` file or installed binaries.
-- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_welcome_hints()`, run-output artifact capture/read helpers, autocomplete loading, database init/migration, and retention behavior.
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, canonical single-run permalink behavior with full-output artifacts, preview forcing via `?preview=1`, the `/history/<run_id>/full` alias, `/welcome/ascii` and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
+- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_ascii_mobile_art()`, `load_welcome_hints()`, run-output artifact capture/read helpers, autocomplete loading, database init/migration, and retention behavior.
+- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, canonical single-run permalink behavior with full-output artifacts, preview forcing via `?preview=1`, the `/history/<run_id>/full` alias, `/welcome/ascii`, `/welcome/ascii-mobile`, and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
 - **`test_run_history_share.py` / `test_request_kill_and_commands.py`** — focused route flows for persistence, kill behavior, web-shell helper execution, constrained `man` rendering, helper-resolution coverage for the expanded command set, shared missing-binary handling, and artifact cleanup on run delete/clear.
 - **`test_logging.py`** — structured logging formatters, setup, and application log events.
 
@@ -420,7 +423,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `timestamps.spec.js` — timestamp mode cycling, output metadata, line-number compatibility, and post-toggle typing flow
 - `ui.spec.js` — theme toggling plus backend-driven FAQ modal rendering, allowlist-chip interaction, and options-modal preference persistence
 - `autocomplete.spec.js` — command suggestion interaction
-- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, prompt-key settle behavior, preferred-command stability, and tab-scoped welcome teardown
+- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, prompt-key settle behavior, preferred-command stability, mobile welcome banner coverage, and tab-scoped welcome teardown
 
 **Implementation notes learned during setup:**
 - `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.

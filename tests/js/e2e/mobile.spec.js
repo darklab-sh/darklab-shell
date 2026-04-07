@@ -4,7 +4,7 @@ const MOBILE = { width: 375, height: 812 }
 const LONG_CMD = 'ping -c 4 8.8.8.8'
 
 // Enable touch so useMobileTerminalViewportMode() returns true on the narrow
-// viewport, which triggers the compact welcome and other mobile JS paths.
+// viewport, which triggers the mobile welcome and other mobile JS paths.
 test.use({ hasTouch: true })
 
 async function runCommandMobile(page, cmd) {
@@ -20,9 +20,12 @@ test.describe('mobile menu', () => {
     await page.locator('#mobile-composer').waitFor({ state: 'visible' })
   })
 
-  test('mobile startup uses the compact welcome and keeps the composer visible', async ({ page }) => {
-    await expect(page.locator('.tab-panel.active .output')).toContainText('Ready. Type a command or tap Run. Tab autocompletes.')
-    await expect(page.locator('.tab-panel.active .output')).toContainText('For the best mobile experience, use Firefox.')
+  test('mobile startup uses the mobile welcome and keeps the composer visible', async ({ page }) => {
+    await expect(page.locator('.welcome-banner')).toBeVisible()
+    await expect(page.locator('.welcome-ascii-art')).toBeVisible()
+    await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
+    await expect(page.locator('.welcome-command')).toHaveCount(0)
+    await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
     // Desktop run button stays hidden; mobile composer is the input affordance
     await expect(page.locator('#run-btn')).toBeHidden()
     await expect(page.locator('#mobile-edit-bar')).toBeHidden()

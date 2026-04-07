@@ -607,6 +607,23 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
+  it('updates the visible cursor when the selection changes without typing', async () => {
+    const { cmdInput } = await loadAppFns()
+    const shellPromptText = document.getElementById('shell-prompt-text')
+
+    cmdInput.value = 'curl darklab.sh'
+    cmdInput.setSelectionRange(4, 4)
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => cmdInput,
+    })
+    document.dispatchEvent(new Event('selectionchange'))
+
+    expect(shellPromptText.textContent).toContain('curl')
+    expect(shellPromptText.textContent).toContain('darklab.sh')
+    expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
+  })
+
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
     const { cmdInput, shellPromptWrap, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
