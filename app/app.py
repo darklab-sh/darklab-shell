@@ -196,7 +196,10 @@ def _preview_notice(run):
     if run.get("full_output_available"):
         return (
             f"[preview truncated — only the last {shown} lines are shown here, "
-            f"but the full output had {total} lines. To view the full output, use either permalink button now; after another command, use this command's history permalink.]"
+            "but the full output had "
+            f"{total} lines. To view the full output, use either permalink "
+            "button now; after another command, use this command's history "
+            "permalink.]"
         )
     return (
         f"[preview truncated — only the last {shown} lines are shown here, "

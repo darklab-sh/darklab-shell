@@ -867,7 +867,11 @@ class TestRunPermalinkRoute:
             data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
             assert data["command"] == "man curl"
             assert data["output"] == ["preview line"]
-            assert "To view the full output, use either permalink button now; after another command, use this command's history permalink" in data["preview_notice"]
+            assert (
+                "To view the full output, use either permalink button now; "
+                "after another command, use this command's history permalink"
+                in data["preview_notice"]
+            )
         finally:
             self._delete_run(run_id)
 
