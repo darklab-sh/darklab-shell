@@ -661,86 +661,52 @@ function saveTab(id) {
 // ── HTML snapshot export ──
 // Generates a themed HTML file with terminal styling, ANSI colors rendered
 // as inline spans, and clock timestamps shown alongside each line.
-function exportTabHtml(id) {
+async function exportTabHtml(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) { showToast('No output to export'); return; }
+  if (!window.ExportHtmlUtils) {
+    showToast('Failed to export html', 'error');
+    return;
+  }
 
-  const appName = APP_CONFIG.app_name || 'shell.darklab.sh';
-  const exportedAt = new Date().toLocaleString();
+  try {
+    const appName = APP_CONFIG.app_name || 'shell.darklab.sh';
+    const exportedAt = new Date().toLocaleString();
+    const themeClass = document.body.classList.contains('light') ? 'light' : '';
 
-  const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {
-    const tsSpan = tsC ? `<span class="ts">${escapeHtml(tsC)}</span>` : '';
-    let content;
-    if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
-      content = escapeHtml(text);
-    } else {
-      content = ansi_up.ansi_to_html(text);
-    }
-    return `<span class="line${cls ? ' ' + cls : ''}">${tsSpan}${content}</span>`;
-  }).join('\n');
+    const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {
+      const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
+      let content;
+      if (cls === 'prompt-echo') {
+        content = ExportHtmlUtils.renderExportPromptEcho(text);
+      } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
+        content = ExportHtmlUtils.escapeExportHtml(text);
+      } else {
+        content = ansi_up.ansi_to_html(text);
+      }
+      return `<span class="line${cls ? ' ' + cls : ''}">${tsSpan}${content}</span>`;
+    }).join('\n');
 
-  const html = `<!DOCTYPE html>
-<html lang="en">
-<head>
-<meta charset="UTF-8">
-<title>${escapeHtml(t.label)} \u2014 ${escapeHtml(appName)}</title>
-<style>
-  @font-face {
-    font-family: 'JetBrains Mono';
-    src: url('/vendor/fonts/JetBrainsMono-400.ttf') format('truetype');
-    font-weight: 400;
-    font-style: normal;
-  }
-  @font-face {
-    font-family: 'JetBrains Mono';
-    src: url('/vendor/fonts/JetBrainsMono-700.ttf') format('truetype');
-    font-weight: 700;
-    font-style: normal;
-  }
-  body {
-    background: #0d0d0d; color: #e0e0e0;
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    padding: 28px 32px; margin: 0; line-height: 1.65;
-  }
-  .header {
-    margin-bottom: 20px; padding-bottom: 14px;
-    border-bottom: 1px solid #1f1f1f;
-  }
-  .app-name { color: #39ff14; font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }
-  .meta { color: #606060; font-size: 11px; }
-  .output { white-space: pre-wrap; word-break: break-all; }
-  .line { display: block; }
-  .line.exit-ok   { color: #39ff14; font-weight: 700; margin-top: 8px; }
-  .line.exit-fail { color: #ff3c3c; font-weight: 700; margin-top: 8px; }
-  .line.denied    { color: #ffb800; font-weight: 700; }
-  .line.notice    { color: #6ab0f5; font-style: italic; }
-  .ts {
-    display: inline-block; min-width: 58px; text-align: right;
-    color: #505050; font-size: 10px; user-select: none;
-    padding-right: 8px; margin-right: 6px;
-    border-right: 1px solid #1f1f1f;
-    font-variant-numeric: tabular-nums;
-  }
-</style>
-</head>
-<body>
-<div class="header">
-  <div class="app-name">${escapeHtml(appName)}</div>
-  <div class="meta">${escapeHtml(t.label)} &nbsp;·&nbsp; exported ${escapeHtml(exportedAt)}</div>
-</div>
-<div class="output">
-${linesHtml}
-</div>
-</body>
-</html>`;
+    const fontFacesCss = await ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => '');
+    const html = ExportHtmlUtils.buildTerminalExportHtml({
+      appName,
+      title: t.label,
+      metaHtml: `exported ${ExportHtmlUtils.escapeExportHtml(exportedAt)}`,
+      linesHtml,
+      themeClass,
+      fontFacesCss,
+    });
 
-  const blob = new Blob([html], { type: 'text/html' });
-  const a = document.createElement('a');
-  const fileTs = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  a.href = URL.createObjectURL(blob);
-  a.download = `${appName}-${fileTs}.html`;
-  a.click();
-  URL.revokeObjectURL(a.href);
+    const blob = new Blob([html], { type: 'text/html' });
+    const a = document.createElement('a');
+    const fileTs = ExportHtmlUtils.exportTimestamp();
+    a.href = URL.createObjectURL(blob);
+    a.download = `${appName}-${fileTs}.html`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  } catch {
+    showToast('Failed to export html', 'error');
+  }
 }
 
 // ── Tab rename ──

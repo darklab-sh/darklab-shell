@@ -99,8 +99,8 @@ test.describe('output actions', () => {
     const html = Buffer.concat(chunks).toString('utf8')
 
     expect(html).toContain('curl http://localhost:5001/health')
-    expect(html).toContain('/vendor/fonts/JetBrainsMono-400.ttf')
-    expect(html).toContain('/vendor/fonts/JetBrainsMono-700.ttf')
+    expect(html).toContain('data:font/ttf;base64,')
+    expect(html).not.toContain('/vendor/fonts/')
     expect(html).not.toContain('fonts.googleapis.com')
     expect(html).not.toContain('fonts.gstatic.com')
   })

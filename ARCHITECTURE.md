@@ -25,8 +25,10 @@ logging_setup.py — GELFFormatter, _TextFormatter, configure_logging(cfg)
     ↑
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
-permalinks.py  — HTML rendering for permalink pages
+permalinks.py  — Flask context/render helpers for permalink pages
+templates/     — Jinja templates for the main shell and permalink pages
 run_output_store.py — preview/full-output capture and artifact helpers
+export_html.js — shared browser-side HTML export helpers for tab downloads and permalink save HTML
     ↑
 app.py         — Flask app, rate limiter, all route handlers
 
@@ -383,9 +385,9 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 Current totals on this branch:
 
 - `pytest`: 466
-- `vitest`: 232
+- `vitest`: 233
 - `playwright`: 126
-- total: 824
+- total: 825
 
 ### Testing Architecture
 
@@ -401,6 +403,8 @@ Current totals on this branch:
 - The jsdom harness mirrors production load order by prepending `app/static/js/state.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
 
 - Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, and close-running-tab / clear-preserve behavior.
+
+- The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 
 - Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does.
 

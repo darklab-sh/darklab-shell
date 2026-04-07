@@ -148,7 +148,13 @@ function _syncTabRawLines(tab, rawLine) {
   if (!tab || !rawLine) return;
   tab.rawLines.push(rawLine);
   const max = APP_CONFIG.max_output_lines;
-  if (max > 0 && tab.rawLines.length > max) tab.rawLines.splice(0, tab.rawLines.length - max);
+  if (max > 0 && tab.rawLines.length > max) {
+    const removed = tab.rawLines.length - max;
+    tab.rawLines.splice(0, removed);
+    if (typeof tab.currentRunStartIndex === 'number' && tab.currentRunStartIndex >= 0) {
+      tab.currentRunStartIndex = Math.max(0, tab.currentRunStartIndex - removed);
+    }
+  }
 }
 
 function _flushPendingOutputBatch(tabId) {
