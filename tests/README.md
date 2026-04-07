@@ -20,8 +20,8 @@ Current totals on this branch:
 
 - `pytest`: 453
 - `vitest`: 199
-- `playwright`: 107
-- total: 759
+- `playwright`: 114
+- total: 766
 
 ## Running The Suites
 
@@ -99,7 +99,7 @@ Spec files:
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
 - `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings including tab actions, permalink/copy, clear, and prompt word-motion behavior
-- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, permalink line-number/timestamp toggles, permalink export filename/content assertions, and clipboard failure handling
+- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, permalink line-number/timestamp toggles, preference-cookie defaults on load, permalink export filename/content assertions, and clipboard failure handling
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, and closing behavior
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
 - `ui.spec.js` - theme toggle plus backend-driven FAQ modal rendering, close behavior, allowlist-chip interaction, and options-modal preference persistence

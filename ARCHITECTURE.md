@@ -363,8 +363,8 @@ Current totals on this branch:
 
 - `pytest`: 453
 - `vitest`: 199
-- `playwright`: 107
-- total: 759
+- `playwright`: 114
+- total: 766
 
 ### Testing Architecture
 

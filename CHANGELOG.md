@@ -38,6 +38,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Run-output persistence format** — fresh run previews and full-output artifacts now preserve structured `{text, cls, tsC, tsE}` entries instead of flattening everything to plain text, allowing canonical run permalinks to keep prompt echo and timestamp metadata while remaining backward-compatible with older plain-text artifacts
 
 ### Fixed
+- **Prompt alignment** — when line numbers or timestamps are enabled, the new prompt stays aligned under the output gutter instead of leaving the prompt prefix pinned flush left
+- **Tab isolation and close-running-tab kill** — running one tab no longer blocks the others, and closing a running tab now kills that tab before switching away
+- **Permalink preference defaults** — permalink pages now honor saved line-number and timestamp cookies on load
 - **macOS keyboard shortcuts** — app-safe `Option` shortcuts now match physical key codes instead of the produced symbol, preventing `Option+T`, `Option+W`, `Option+Shift+C`, and `Option+B/F` from inserting special characters into the prompt
 - **Mobile permalink copy flow** — the `/share/...` permalink page now hides its copy toast correctly on mobile and falls back to `execCommand('copy')` when the Clipboard API is unavailable
 - **Mobile helper-row styling** — the touch helper buttons keep their dark-theme appearance on Chrome and Safari mobile instead of falling back to light browser defaults

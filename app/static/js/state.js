@@ -30,6 +30,7 @@
     _welcomeNextBlockIndex: 0,
     _welcomeSettleRequested: false,
     _welcomeBootPending: true,
+    _mobileKeyboardOffsetBaseline: null,
     timerInterval: null,
     timerStart: null,
     pendingKillTabId: null,
@@ -65,6 +66,7 @@
     '_welcomeNextBlockIndex',
     '_welcomeSettleRequested',
     '_welcomeBootPending',
+    '_mobileKeyboardOffsetBaseline',
     'timerInterval',
     'timerStart',
     'pendingKillTabId',
@@ -132,6 +134,11 @@
       : global.getVisibleComposerInput();
     return global.focusComposerInput(target, { preventScroll });
   };
+  global.getMobileKeyboardOffsetBaseline = () => state._mobileKeyboardOffsetBaseline;
+  global.setMobileKeyboardOffsetBaseline = (value) => {
+    state._mobileKeyboardOffsetBaseline = typeof value === 'number' ? value : null;
+    return state._mobileKeyboardOffsetBaseline;
+  };
   global.blurVisibleComposerInput = () => {
     const target = (typeof getVisibleComposerInput === 'function')
       ? getVisibleComposerInput()
@@ -151,8 +158,33 @@
     if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
     const nextOffset = typeof offset === 'number' ? offset : 0;
     document.documentElement?.style?.setProperty('--mobile-keyboard-offset', `${nextOffset}px`);
-    const keyboardOpen = active && typeof isMobileKeyboardOpen === 'function' ? isMobileKeyboardOpen(nextOffset) : false;
+    const mobileInput = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
+    const focusedMobileInput = !!(mobileInput && document.activeElement === mobileInput);
+    const wasKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
+    if (!active) {
+      state._mobileKeyboardOffsetBaseline = nextOffset;
+      document.body.classList.remove('mobile-keyboard-open');
+      return false;
+    }
+    if (!focusedMobileInput) {
+      state._mobileKeyboardOffsetBaseline = nextOffset;
+      document.body.classList.remove('mobile-keyboard-open');
+      return false;
+    }
+    if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
+      state._mobileKeyboardOffsetBaseline = nextOffset;
+    }
+    const baseline = typeof state._mobileKeyboardOffsetBaseline === 'number' ? state._mobileKeyboardOffsetBaseline : nextOffset;
+    const keyboardOpen = active && nextOffset > baseline + 40;
     document.body.classList.toggle('mobile-keyboard-open', keyboardOpen);
+    if (keyboardOpen && !wasKeyboardOpen) {
+      if (typeof hideMobileMenu === 'function') hideMobileMenu();
+      if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof hideHistoryPanel === 'function') {
+        hideHistoryPanel();
+      }
+      if (typeof acHide === 'function') acHide();
+    }
+    if (!keyboardOpen) state._mobileKeyboardOffsetBaseline = nextOffset;
     return keyboardOpen;
   };
   global.setComposerValue = (value, start = null, end = null, { dispatch = true } = {}) => {
@@ -289,6 +321,13 @@
     const next = !!disabled;
     if (runBtn) runBtn.disabled = next;
     if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = next;
+  };
+  global.syncRunButtonDisabled = () => {
+    const active = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    const disabled = !!(active && active.st === 'running');
+    if (runBtn) runBtn.disabled = disabled;
+    if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = disabled;
+    return disabled;
   };
   global.isRunButtonDisabled = () => !!((runBtn && runBtn.disabled) || (typeof mobileRunBtn !== 'undefined' && mobileRunBtn && mobileRunBtn.disabled));
   global.showTabKillBtn = (tabId) => {

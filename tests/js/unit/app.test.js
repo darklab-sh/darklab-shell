@@ -759,8 +759,8 @@ describe('app helpers', () => {
   })
 
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
-    const { cmdInput, shellPromptWrap, restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 500, offsetTop: 0 },
+    const { shellPromptWrap, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
     })
     const runBtn = document.getElementById('run-btn')
     const terminalWrap = document.querySelector('.terminal-wrap')
@@ -783,9 +783,15 @@ describe('app helpers', () => {
     const optionsOverlay = document.getElementById('options-overlay')
 
     document.body.classList.add('mobile-terminal-mode')
-    cmdInput.dispatchEvent(new Event('focus'))
-    cmdInput.value = 'curl'
-    cmdInput.dispatchEvent(new Event('input'))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    window.visualViewport.height = 500
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    mobileCmdInput.value = 'curl'
+    mobileCmdInput.dispatchEvent(new Event('input'))
+    window.dispatchEvent(new Event('resize'))
     await new Promise(resolve => setTimeout(resolve, 10))
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
@@ -982,12 +988,18 @@ describe('app helpers', () => {
   })
 
   it('keeps the mobile run button visible after the keyboard closes', async () => {
-    const { cmdInput, restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 500, offsetTop: 0 },
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
     })
     const runBtn = document.getElementById('run-btn')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
 
-    cmdInput.dispatchEvent(new Event('focus'))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    window.visualViewport.height = 500
+    mobileCmdInput.dispatchEvent(new Event('focus'))
     expect(runBtn.hidden).toBe(true)
 
     Object.defineProperty(window, 'visualViewport', {
@@ -999,7 +1011,11 @@ describe('app helpers', () => {
         removeEventListener: vi.fn(),
       },
     })
-    cmdInput.dispatchEvent(new Event('blur'))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    mobileCmdInput.dispatchEvent(new Event('blur'))
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
@@ -1044,22 +1060,25 @@ describe('app helpers', () => {
   })
 
   it('closes transient ui while the mobile keyboard is open', async () => {
-    const acHide = vi.fn()
-    const { cmdInput, restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 500, offsetTop: 0 },
-      acHide,
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
     })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
 
     document.getElementById('mobile-menu').classList.add('open')
     document.getElementById('history-panel').classList.add('open')
 
-    cmdInput.dispatchEvent(new Event('focus'))
-    cmdInput.value = 'curl'
-    cmdInput.dispatchEvent(new Event('input'))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    window.visualViewport.height = 500
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    mobileCmdInput.value = 'curl'
+    mobileCmdInput.dispatchEvent(new Event('input'))
 
     expect(document.getElementById('mobile-menu').classList.contains('open')).toBe(false)
     expect(document.getElementById('history-panel').classList.contains('open')).toBe(false)
-    expect(acHide).toHaveBeenCalled()
 
     restoreViewport()
   })

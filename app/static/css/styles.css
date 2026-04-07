@@ -425,22 +425,14 @@ body.light.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 
 body.mobile-terminal-mode #mobile-composer-host {
   display: block;
-  position: fixed;
-  bottom: 0;
-  left: 0;
-  right: 0;
+  position: relative;
   z-index: 40;
   background: linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98));
-  border-top: 1px solid var(--border);
   padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open #mobile-composer-host {
-  bottom: calc(var(--mobile-keyboard-offset) + 8px);
-  left: 12px;
-  right: 12px;
-  border: 1px solid var(--border);
-  border-radius: 4px;
+  border-top: 1px solid var(--border-bright);
 }
 
 body.light.mobile-terminal-mode #mobile-composer-host {
@@ -448,13 +440,14 @@ body.light.mobile-terminal-mode #mobile-composer-host {
 }
 
 body.mobile-terminal-mode {
-  height: 100vh;
-  height: 100svh;
+  height: var(--mobile-viewport-height, 100svh);
   min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  gap: 0;
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open {
-  overflow: hidden;
   touch-action: none;
 }
 
@@ -575,6 +568,9 @@ body.ts-clock .output .shell-prompt-wrap::before {
 body.ln-on .output .line-content,
 body.ts-elapsed .output .line-content,
 body.ts-clock .output .line-content,
+body.ln-on .output .shell-prompt-wrap > .prompt-prefix,
+body.ts-elapsed .output .shell-prompt-wrap > .prompt-prefix,
+body.ts-clock .output .shell-prompt-wrap > .prompt-prefix,
 body.ln-on .output .shell-prompt-line,
 body.ts-elapsed .output .shell-prompt-line,
 body.ts-clock .output .shell-prompt-line {
@@ -1641,7 +1637,7 @@ body.mobile-terminal-mode #mobile-menu::before {
   flex-shrink: 0;
   gap: 4px;
   background: var(--surface);
-  border-top: 1px solid var(--border);
+  border-top: none;
   padding: 8px 12px calc(10px + env(safe-area-inset-bottom));
 }
 
@@ -1747,26 +1743,28 @@ body.mobile-terminal-mode #mobile-menu::before {
   }
   body.mobile-terminal-mode #mobile-shell {
     display: flex;
-    flex: 1 1 auto;
+    flex: 1;
     min-height: 0;
     flex-direction: column;
-    gap: 12px;
+    gap: 0;
+    overflow: hidden;
   }
   body.mobile-terminal-mode #mobile-shell-chrome {
     display: flex;
-    flex: 1 1 auto;
-    min-height: 0;
+    flex: 0 0 auto;
     flex-direction: column;
-    gap: 12px;
+    overflow: hidden;
   }
   body.mobile-terminal-mode #mobile-shell-transcript {
-    display: block;
-    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    flex: 1;
     min-height: 0;
+    overflow: hidden;
   }
   body.mobile-terminal-mode #mobile-shell-composer {
     display: block;
-    flex-shrink: 0;
+    flex: 0 0 auto;
   }
   body.mobile-terminal-mode #mobile-shell-overlays {
     display: block;
@@ -1775,21 +1773,12 @@ body.mobile-terminal-mode #mobile-menu::before {
   body.mobile-terminal-mode #mobile-shell-transcript #tab-panels {
     flex: 1 1 auto;
     min-height: 0;
-    padding-bottom: var(--mobile-composer-height, 80px);
-  }
-  body.mobile-terminal-mode.mobile-keyboard-open {
-    overflow: hidden;
-    touch-action: none;
   }
   body.mobile-terminal-mode #mobile-composer-host {
     display: block;
-    position: fixed;
-    bottom: 0;
-    left: 0;
-    right: 0;
+    position: relative;
     z-index: 40;
     background: linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98));
-    border-top: 1px solid var(--border);
     padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
   }
   body.mobile-terminal-mode #mobile-edit-bar,
@@ -1821,12 +1810,7 @@ body.mobile-terminal-mode #mobile-menu::before {
     display: flex;
   }
   body.mobile-terminal-mode.mobile-keyboard-open #mobile-composer-host {
-    bottom: calc(var(--mobile-keyboard-offset) + 8px);
-    left: 12px;
-    right: 12px;
-    border: 1px solid var(--border);
-    border-radius: 4px;
-    padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
+    border-top: 1px solid var(--border-bright);
   }
   body.mobile-terminal-mode #mobile-shell #history-row {
     background: var(--surface);
@@ -1987,10 +1971,6 @@ body.mobile-terminal-mode #mobile-menu::before {
     padding-bottom: 2px;
   }
 
-  /* Light breathing room at bottom of scrollable output on mobile */
-  body.mobile-terminal-mode .output {
-    padding-bottom: 16px;
-  }
 
   /* Light theme adjustments */
   body.light #mobile-cmd {

@@ -3,8 +3,8 @@
 ## Status
 
 - Release line: `v1.3` (unreleased)
-- Current focus: Phase 3 mobile transcript and output model
-- Last major milestone completed: Phase 2 real mobile composer
+- Current focus: Phase 10 migration and cleanup
+- Last major milestone completed: Phase 9 browser hardening
 
 ---
 
@@ -49,6 +49,11 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 #### Open items
 - continue refining inline selection visibility for advanced keyboard flows
 - keep the `keys` helper command, FAQ entry, and README shortcut section aligned as bindings ship
+- mobile follow-ups to consider if a concrete need appears:
+  - tab reorder on touch
+  - history drawer touch refinements, including larger hit targets and swipe-to-close
+  - history delete / kill modal close-focus behavior
+  - mobile-only preferences such as compact mode and transcript density
 
 #### Dedicated Mobile UI Plan
 
@@ -124,11 +129,11 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - ~~module boundary annotation across browser scripts~~
 - ~~shared action path cleanup across tabs.js, welcome.js, and app.js~~
 - ~~unit test harness updated: `state.js` prepended to all eval'd scripts; `fromDomScripts` accepts an `initCode` string so test loaders can call `setTabs(tabs); setActiveTabId(activeTabId)` to seed shared state; `STATE_SRC` cached at module level~~
-- ~~226 unit tests passing (11 test files, no regressions)~~
+- ~~227 unit tests passing (11 test files, no regressions)~~
 
 **Phase 0 Complete**
 
-The shared state layer, composer/overlay helpers, shared DOM binding cache, grouped mobile shell layout helpers, and tab-node helpers are all in place. The browser modules now rely on those shared helpers instead of ad hoc prompt or overlay state. The remaining work has moved into Phase 2 and beyond.
+The shared state layer, composer/overlay helpers, shared DOM binding cache, grouped mobile shell layout helpers, and tab-node helpers are all in place. The browser modules now rely on those shared helpers instead of ad hoc prompt or overlay state. The remaining work has moved into Phase 10 and beyond.
 
 ##### Phase 1: Mobile Shell Skeleton
 
@@ -151,7 +156,7 @@ The shared state layer, composer/overlay helpers, shared DOM binding cache, grou
 
 **Status**
 
-Phase 1 is complete. The dedicated mobile shell root, chrome/transcript/composer/overlay mounts, shell-owned mobile menu, and shared mobile UI helpers are in place. Remaining mobile work now moves into Phase 3 and beyond.
+Phase 1 is complete. The dedicated mobile shell root, chrome/transcript/composer/overlay mounts, shell-owned mobile menu, and shared mobile UI helpers are in place. Remaining mobile work now moves into Phase 10 and beyond.
 
 ##### Phase 2: Real Mobile Composer
 
@@ -166,28 +171,23 @@ Phase 1 is complete. The dedicated mobile shell root, chrome/transcript/composer
 
 **Status**
 
-Phase 2 is complete. The dedicated visible mobile composer, shared visible-input resolver, and mobile keyboard/focus helpers are in place. The next mobile work now starts in Phase 3 with the transcript and output model, then autocomplete, session/navigation, and mobile overlay polish.
+Phase 2 is complete. The dedicated visible mobile composer, shared visible-input resolver, and mobile keyboard/focus helpers are in place. The active-tab-aware run-button guard and close-running-tab kill/reset path are also complete. The next mobile work now starts in Phase 10 with migration and cleanup, while any extra touch polish stays in the open follow-up bucket below.
 
-##### Phase 3: Mobile Transcript And Output Model
+##### Phase 3: Mobile Transcript And Output Model (Complete)
 
-**Current state (Phase 3 start):**
-- `#mobile-shell-transcript` receives `#tab-panels` via DOM reparenting at runtime; output routing (`appendLine`, `getOutput`) is already shared
-- `#mobile-composer-host` becomes `position: fixed` only when `body.mobile-keyboard-open` is set; at rest it is `position: relative` inside the flex column
-- `padding-bottom: 100px` on `.output` when keyboard is open is a hardcoded magic number (also `74px` for Chrome iOS at rest)
-- Keyboard detection uses `visualViewport` resize events; blur-without-dismiss edge cases are known but not yet addressed
+**Completed**
+- ~~`#mobile-shell-transcript` receives `#tab-panels` via DOM reparenting at runtime; output routing (`appendLine`, `getOutput`) is already shared~~
+- ~~`#mobile-composer-host` is now `position: fixed` at all times in mobile mode; keyboard-open only adjusts `bottom`/`left`/`right`/`border-radius`~~
+- ~~`body.mobile-terminal-mode .output` uses `padding-bottom: var(--mobile-composer-height, 80px)` so content is never hidden behind the fixed composer~~
+- ~~`syncMobileComposerHeight()` measures `#mobile-composer-host.offsetHeight` and writes to `--mobile-composer-height` on `documentElement`; called from `syncMobileViewportState` and `syncMobileComposerKeyboard` (on visualViewport resize/scroll and input focus/blur)~~
+- ~~hardcoded `100px` and Chrome iOS `74px` rules removed~~
+- ~~`isMobileKeyboardOpen` now checks viewport offset first (`offset > 40`) before falling back to focus-based detection — handles blur-without-dismiss (keyboard stays geometrically open after focus leaves the input)~~
+- ~~`Timestamps and line numbers both default to 'off'` via `getPreference('pref_timestamps') || 'off'` at app.js:998-999; no code change needed~~
+- ~~Independent transcript scroll on long-output and long-command cases was re-tested manually in Safari and Chrome after the fixed-composer change~~
 
-**Work items:**
+**Status**
 
-~~1. Make the composer always fixed at the bottom of the mobile shell:~~
-   - ~~`#mobile-composer-host` is now `position: fixed` at all times in mobile mode; keyboard-open only adjusts `bottom`/`left`/`right`/`border-radius`~~
-   - ~~`body.mobile-terminal-mode .output` uses `padding-bottom: var(--mobile-composer-height, 80px)` so content is never hidden behind the fixed composer~~
-~~2. Replace hardcoded `padding-bottom: 100px` / `74px` magic numbers with dynamic spacing:~~
-   - ~~`syncMobileComposerHeight()` measures `#mobile-composer-host.offsetHeight` and writes to `--mobile-composer-height` on `documentElement`; called from `syncMobileViewportState` and `syncMobileComposerKeyboard` (on visualViewport resize/scroll and input focus/blur)~~
-   - ~~hardcoded `100px` and Chrome iOS `74px` rules removed~~
-~~3. Address keyboard detection edge cases:~~
-   - ~~`isMobileKeyboardOpen` now checks viewport offset first (`offset > 40`) before falling back to focus-based detection — handles blur-without-dismiss (keyboard stays geometrically open after focus leaves the input)~~
-~~4. Confirm mobile defaults for timestamps and line numbers — both default to `'off'` via `getPreference('pref_timestamps') || 'off'` at app.js:998-999; no code change needed~~
-5. Re-test independent transcript scroll on long-output and long-command cases in Safari and Chrome after the fixed-composer change (manual verification)
+Phase 3 is complete. Transcript/output layout, fixed composer spacing, and keyboard-detection reliability are in place, and the remaining mobile work now continues in Phase 10 and beyond.
 
 ##### Phase 4: Mobile Autocomplete
 
@@ -223,8 +223,8 @@ Phase 2 is complete. The dedicated visible mobile composer, shared visible-input
 
 **Remaining:**
 
-- Reorder on touch: not yet addressed (deferred, depends on Phase 9 testing)
-- History drawer touch refinement: large row targets / permalink/copy/delete on touch is pending Phase 7 (overlay polish)
+- Reorder on touch: not yet addressed
+- History drawer touch refinement: large row targets / permalink/copy/delete on touch
 
 ##### Phase 6: Mobile Welcome Flow
 
@@ -253,8 +253,8 @@ Phase 2 is complete. The dedicated visible mobile composer, shared visible-input
 
 **Remaining:**
 
-- History drawer touch refinement: larger action button hit areas, swipe-to-close (Phase 9 candidate)
-- History delete modal and kill modal close currently call `refocusTerminalInput()` — on mobile this may or may not be desired; revisit during Phase 9 testing
+- History drawer touch refinement: larger action button hit areas, swipe-to-close
+- History delete modal and kill modal close currently call `refocusTerminalInput()` — on mobile this may or may not be desired; revisit if we decide to change the close-focus policy later
 
 ##### Phase 8: Mobile Preference And Display Policy
 
@@ -271,9 +271,9 @@ Phase 2 is complete. The dedicated visible mobile composer, shared visible-input
 
 **Remaining:**
 
-- Mobile-only preferences (compact mode, transcript density) deferred until Phase 9 testing reveals concrete needs
+- Mobile-only preferences (compact mode, transcript density) remain a possible future follow-up if a concrete need appears
 
-##### Phase 9: Browser Hardening
+##### Phase 9: Browser Hardening (Complete)
 
 1. Treat iOS Safari as the primary mobile reference browser.
 2. Treat iOS Chrome as a supported-but-quirky secondary target because it still rides WebKit but adds its own heuristics.
@@ -286,6 +286,8 @@ Phase 2 is complete. The dedicated visible mobile composer, shared visible-input
    - permalink/copy/export actions
    - long command editing
 4. Document known limitations only after exhausting clean fixes, not as a substitute for product quality.
+
+Phase 9 is complete. Browser hardening and the manual mobile matrix have been exercised, and the remaining mobile refinement items are now treated as general follow-ups rather than phase-locked work.
 
 ##### Phase 10: Migration And Cleanup
 

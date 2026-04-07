@@ -32,6 +32,16 @@ function _clearTabDropIndicators() {
   });
 }
 
+function _getNeighborTabIdAfterClose(idx, closingId) {
+  if (!Array.isArray(tabs) || !tabs.length) return null;
+  const next = tabs[idx + 1];
+  if (next && next.id !== closingId) return next.id;
+  const prev = tabs[idx - 1];
+  if (prev && prev.id !== closingId) return prev.id;
+  const fallback = tabs.find(tab => tab && tab.id !== closingId);
+  return fallback ? fallback.id : null;
+}
+
 function refocusTabsTerminalInput() {
   if (typeof focusAnyComposerInput !== 'function') return;
   setTimeout(() => focusAnyComposerInput(), 0);
@@ -52,6 +62,10 @@ function updateTabScrollButtons() {
 }
 
 function ensureActiveTabVisible(tabId) {
+  if (typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')) return;
   const tabEl = _getTabEl(tabId);
   if (!tabEl || typeof tabEl.scrollIntoView !== 'function') return;
   tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
@@ -382,6 +396,7 @@ function createTab(label) {
     followOutput: true,
     suppressOutputScrollTracking: false,
     deferPromptMount: false,
+    closing: false,
     killed: false,
     pendingKill: false,
     st: 'idle',
@@ -403,17 +418,39 @@ function activateTab(id) {
   ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
-  const input = cmdInput;
-  if (input) {
-    input.value = '';
-    resetCmdHistoryNav();
-    input.dispatchEvent(new Event('input'));
-    input.focus();
+  if (typeof setComposerValue === 'function') {
+    setComposerValue('', 0, 0);
+  } else if (cmdInput) {
+    cmdInput.value = '';
+    cmdInput.dispatchEvent(new Event('input'));
   }
+  resetCmdHistoryNav();
+  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
 }
 
 function closeTab(id) {
   cancelWelcome(id);
+  const idx = tabs.findIndex(t => t.id === id);
+  if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
+  const closingTab = tabs[idx];
+  if (closingTab) {
+    closingTab._outputFollowToken = (closingTab._outputFollowToken || 0) + 1;
+    closingTab.suppressOutputScrollTracking = false;
+    closingTab.deferPromptMount = false;
+  }
+  if (closingTab && closingTab.st === 'running') {
+    closingTab.closing = true;
+    if (typeof doKill === 'function') doKill(id);
+    if (activeTabId === id && tabs.length > 1) {
+      const nextId = _getNeighborTabIdAfterClose(idx, id);
+      if (nextId) activateTab(nextId);
+    }
+    if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+    updateNewTabBtn();
+    updateTabScrollButtons();
+    return;
+  }
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
     clearTab(id);
@@ -426,19 +463,26 @@ function closeTab(id) {
     t.pendingKill = false;
     return;
   }
-  const idx = tabs.findIndex(t => t.id === id);
-  if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
-  const closingTab = tabs[idx];
-  if (closingTab) {
-    closingTab._outputFollowToken = (closingTab._outputFollowToken || 0) + 1;
-    closingTab.suppressOutputScrollTracking = false;
-    closingTab.deferPromptMount = false;
-  }
   tabs.splice(idx, 1);
   _getTabEl(id)?.remove();
   _getTabPanelEl(id)?.remove();
   if (activeTabId === id) {
-    activateTab(tabs[Math.min(idx, tabs.length - 1)].id);
+    const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
+    if (nextId) activateTab(nextId);
+    if (typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-terminal-mode')
+      && typeof window !== 'undefined'
+      && typeof window.scrollTo === 'function') {
+      setTimeout(() => {
+        try {
+          window.scrollTo({ top: 0, behavior: 'auto' });
+        } catch (_) {
+          // jsdom does not implement scrollTo; browsers do.
+        }
+      }, 0);
+    }
   }
   updateNewTabBtn();
   updateTabScrollButtons();
@@ -452,6 +496,7 @@ function setTabStatus(id, st) {
   if (id === activeTabId) {
     if (st === 'running') unmountShellPrompt();
     else mountShellPrompt(id);
+    if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   }
 }
 
@@ -485,10 +530,37 @@ function clearTab(id) {
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
+    t.closing = false;
   }
   if (id === activeTabId) mountShellPrompt(id);
   setTabStatus(id, 'idle');
   if (id === activeTabId) { setStatus('idle'); clearSearch(); }
+}
+
+function finalizeClosingTab(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  if (idx < 0) return false;
+  const tab = tabs[idx];
+  if (!tab || !tab.closing) return false;
+
+  if (tabs.length === 1) {
+    tab.closing = false;
+    clearTab(id);
+    setTabLabel(id, 'tab 1');
+    return true;
+  }
+
+  tabs.splice(idx, 1);
+  _getTabEl(id)?.remove();
+  _getTabPanelEl(id)?.remove();
+  if (activeTabId === id && tabs.length) {
+    const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
+    if (nextId) activateTab(nextId);
+  }
+  updateNewTabBtn();
+  updateTabScrollButtons();
+  if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  return true;
 }
 
 function _getExportableRawLines(tab) {

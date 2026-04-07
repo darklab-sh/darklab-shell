@@ -125,6 +125,7 @@ function loadRunnerFns({
     tabPanels,
     mobileCmdInput: document.getElementById('mobile-cmd'),
     mobileRunBtn: document.getElementById('mobile-run-btn'),
+    syncRunButtonDisabled: undefined,
     APP_CONFIG: appConfig,
     _welcomeActive: welcomeActive,
     _welcomeDone: false,

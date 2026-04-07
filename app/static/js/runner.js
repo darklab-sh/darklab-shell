@@ -77,6 +77,10 @@ function _hideTabKillBtnFallback(tabId) {
 }
 
 function _setRunButtonDisabled(disabled) {
+  if (typeof syncRunButtonDisabled === 'function') {
+    syncRunButtonDisabled();
+    return;
+  }
   if (typeof setRunButtonDisabled === 'function') {
     setRunButtonDisabled(disabled);
     return;
@@ -367,6 +371,10 @@ function submitCommand(rawCmd) {
                   t.killed = false;
                   stopTimer();
                   _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+                  if (t.closing && typeof finalizeClosingTab === 'function') {
+                    finalizeClosingTab(tabId);
+                    if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  }
                   if (isHistoryPanelOpen()) refreshHistoryPanel();
                   return;
                 }
@@ -386,6 +394,11 @@ function submitCommand(rawCmd) {
                 }
                 if (t) t.syntheticClear = false;
                 _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+                if (t && t.closing && typeof finalizeClosingTab === 'function') {
+                  finalizeClosingTab(tabId);
+                  if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  return;
+                }
                 if (isHistoryPanelOpen()) refreshHistoryPanel();
                 if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
               } else if (msg.type === 'error') {

@@ -13,6 +13,21 @@ async function runCommandMobile(page, cmd) {
   await page.locator('.status-pill').filter({ hasNotText: 'RUNNING' }).waitFor({ timeout: 15_000 })
 }
 
+async function openMobileKeyboard(page) {
+  await page.locator('#mobile-cmd').focus()
+  await page.evaluate(() => {
+    const vv = window.visualViewport
+    if (!vv) return
+    try {
+      Object.defineProperty(vv, 'height', {
+        configurable: true,
+        value: 500,
+      })
+    } catch (_) {}
+    window.dispatchEvent(new Event('resize'))
+  })
+}
+
 test.describe('mobile menu', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize(MOBILE)
@@ -26,9 +41,9 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
     await expect(page.locator('.welcome-command')).toHaveCount(0)
     await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
-    // Desktop run button stays hidden; the focused mobile composer exposes the helper row
+    // Desktop run button stays hidden; the mobile helper row stays hidden until the keyboard opens
     await expect(page.locator('#run-btn')).toBeHidden()
-    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
     await expect(page.locator('#mobile-composer')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript .tab-panels, #mobile-shell-transcript #tab-panels')).toHaveCount(1)
@@ -39,8 +54,45 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile edit bar appears when the mobile command input is focused', async ({ page }) => {
-    await page.locator('#mobile-cmd').focus()
+    await openMobileKeyboard(page)
     await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+  })
+
+  test('clicking the mobile transcript closes the keyboard and helper row', async ({ page }) => {
+    await openMobileKeyboard(page)
+    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+
+    await page.locator('#mobile-shell-transcript').tap()
+    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+  })
+
+  test('mobile tab action buttons still work while the keyboard is open', async ({ page }) => {
+    await openMobileKeyboard(page)
+    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+
+    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=actions')
+    await page.locator('.tab-panel.active [data-action="clear"]').click()
+
+    await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
+  })
+
+  test('creating a new mobile tab keeps focus on the visible composer', async ({ page }) => {
+    const startScrollY = await page.evaluate(() => window.scrollY)
+    await page.locator('#new-tab-btn').click()
+
+    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(startScrollY + 12)
+  })
+
+  test('closing a mobile tab after output returns to the active tab without jumping the page', async ({ page }) => {
+    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=close-scroll')
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#mobile-cmd').fill('curl http://localhost:5001/health?mobile=close-scroll-2')
+    await page.locator('#mobile-run-btn').click()
+    await page.locator('.tab').nth(1).locator('.tab-close').click()
+
+    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(12)
   })
 
   test('hamburger button is visible and desktop header buttons are hidden at mobile width', async ({ page }) => {

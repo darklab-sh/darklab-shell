@@ -59,6 +59,19 @@ test.describe('kill running command', () => {
     await expect(page.locator('#kill-overlay')).toBeHidden()
   })
 
+  test('closing the only running tab kills the command and resets the shell', async ({ page }) => {
+    await page.locator('#cmd').fill(LONG_CMD)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await page.locator('.tab .tab-close').click()
+
+    await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
+    await expect(page.locator('.tab .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('.tab-panel .output .line')).toHaveCount(0)
+    await expect(page.locator('.tab-kill-btn')).toBeHidden()
+  })
+
   test('Enter confirms kill while the kill confirmation modal is open', async ({ page }) => {
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')

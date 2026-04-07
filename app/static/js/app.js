@@ -282,23 +282,15 @@ function getMobileKeyboardOffset() {
 
 function isMobileKeyboardOpen(offset = null) {
   if (!useMobileTerminalViewportMode()) return false;
-  // Viewport shrinkage is the most reliable signal and handles blur-without-dismiss
-  // edge cases (keyboard still geometrically open after focus leaves the input).
-  if (typeof offset === 'number' && offset > 40) return true;
   const mobileInputEl = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
-  const mobileInputVisible = !!(
-    mobileInputEl
-    && typeof mobileInputEl.getClientRects === 'function'
-    && mobileInputEl.getClientRects().length > 0
-  );
-  // Fall back to focus-based detection when viewport hasn't shrunk
-  // (e.g., hardware keyboards or viewports that don't resize on focus).
-  if (mobileInputVisible) {
-    return typeof document !== 'undefined'
-      && document.activeElement
-      && document.activeElement === mobileInputEl;
-  }
-  return false;
+  const mobileInputFocused = !!(mobileInputEl && typeof document !== 'undefined' && document.activeElement === mobileInputEl);
+  if (!mobileInputFocused) return false;
+  const keyboardBaseline = typeof getMobileKeyboardOffsetBaseline === 'function'
+    ? getMobileKeyboardOffsetBaseline()
+    : null;
+  const baseline = typeof keyboardBaseline === 'number' ? keyboardBaseline : 0;
+  if (typeof offset === 'number') return offset > baseline + 40;
+  return true;
 }
 
 function syncMobileViewportState() {
@@ -316,7 +308,7 @@ function syncMobileViewportState() {
   else document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
-  if (activeMobileMode) syncMobileComposerHeight();
+  if (activeMobileMode) syncMobileViewportHeight();
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -630,19 +622,17 @@ function performMobileEditAction(action) {
   if (typeof focusAnyComposerInput === 'function') setTimeout(() => focusAnyComposerInput({ preventScroll: true }), 0);
 }
 
-function syncMobileComposerHeight() {
-  if (typeof document === 'undefined') return;
-  const host = (typeof mobileComposerHost !== 'undefined' && mobileComposerHost) || null;
-  if (!host) return;
-  const h = host.offsetHeight;
-  if (h > 0) document.documentElement.style.setProperty('--mobile-composer-height', `${h}px`);
+function syncMobileViewportHeight() {
+  if (typeof document === 'undefined' || typeof window === 'undefined') return;
+  const h = window.visualViewport ? Math.round(window.visualViewport.height) : window.innerHeight;
+  document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
 }
 
 function syncMobileComposerKeyboard() {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();
   if (typeof syncMobileComposerKeyboardState === 'function') syncMobileComposerKeyboardState(offset);
-  syncMobileComposerHeight();
+  syncMobileViewportHeight();
 }
 
 function bindMobileComposerKeyboardListeners(mobileInput) {
@@ -1418,6 +1408,20 @@ function setupMobileComposer() {
   bindMobileComposerSubmitAndInputListeners(mobileInput);
   bindMobileEditBarListeners(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer ? _mobileUiLayoutRefs.composer.editBar : null);
   bindMobileComposerKeyboardListeners(mobileInput);
+  if (mobileShellTranscript) {
+    const closeKeyboardFromTranscript = e => {
+      const interactiveTarget = e && e.target && e.target.closest
+        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
+      if (interactiveTarget) return;
+      if (e && typeof e.preventDefault === 'function') e.preventDefault();
+      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
+      if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
+        blurVisibleComposerInputIfMobile();
+      }
+    };
+    mobileShellTranscript.addEventListener('pointerdown', closeKeyboardFromTranscript);
+    mobileShellTranscript.addEventListener('touchstart', closeKeyboardFromTranscript, { passive: false });
+  }
 }
 
 setupMobileComposer();

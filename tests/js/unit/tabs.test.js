@@ -12,6 +12,7 @@ function loadTabsFns({
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
+  doKill = vi.fn(),
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -19,6 +20,7 @@ function loadTabsFns({
   const tabsScrollLeftBtn = document.getElementById('tabs-scroll-left')
   const tabsScrollRightBtn = document.getElementById('tabs-scroll-right')
   const tabPanels = document.getElementById('tab-panels')
+  const runBtn = document.getElementById('run-btn')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
   const mobileComposerRow = document.getElementById('mobile-composer-row')
   const newTabBtn = document.getElementById('new-tab-btn')
@@ -46,6 +48,7 @@ function loadTabsFns({
     tabsScrollLeftBtn,
     tabsScrollRightBtn,
     tabPanels,
+    runBtn,
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
@@ -56,6 +59,7 @@ function loadTabsFns({
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
+    doKill,
     cancelWelcome: () => {},
     apiFetch,
     location: { origin: 'https://example.test' },
@@ -84,7 +88,7 @@ function loadTabsFns({
     _getActiveTabId: () => getActiveTabId(),
   }`)
 
-  return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap }
+  return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap, doKill }
 }
 
 function loadTabsAndOutputFns({
@@ -98,6 +102,7 @@ function loadTabsAndOutputFns({
   const tabsScrollLeftBtn = document.getElementById('tabs-scroll-left')
   const tabsScrollRightBtn = document.getElementById('tabs-scroll-right')
   const tabPanels = document.getElementById('tab-panels')
+  const runBtn = document.getElementById('run-btn')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
   const mobileComposerRow = document.getElementById('mobile-composer-row')
   const newTabBtn = document.getElementById('new-tab-btn')
@@ -131,6 +136,7 @@ function loadTabsAndOutputFns({
     tabsScrollLeftBtn,
     tabsScrollRightBtn,
     tabPanels,
+    runBtn,
     historyPanel,
     mobileComposerHost,
     mobileComposerRow,
@@ -234,6 +240,40 @@ describe('tabs helpers', () => {
     expect(_getTabs()[0].killed).toBe(false)
     expect(_getTabs()[0].pendingKill).toBe(false)
     expect(document.querySelector('.tab-label').textContent).toBe('tab 1')
+  })
+
+  it('closing a running tab kills it and activates a neighboring tab', () => {
+    const { createTab, activateTab, closeTab, _getTabs, doKill } = loadTabsFns()
+    const firstId = createTab('tab 1')
+    const secondId = createTab('tab 2')
+
+    activateTab(secondId)
+    const runningTab = _getTabs().find(tab => tab.id === secondId)
+    runningTab.st = 'running'
+    runningTab.runId = 'run-2'
+
+    closeTab(secondId)
+
+    expect(doKill).toHaveBeenCalledWith(secondId)
+    expect(_getTabs().map(tab => tab.id)).toEqual([firstId, secondId])
+    expect(_getTabs().find(tab => tab.id === secondId).closing).toBe(true)
+    expect(document.querySelector('.tab.active').dataset.id).toBe(firstId)
+    expect(document.getElementById('cmd').focus).toHaveBeenCalled()
+  })
+
+  it('closing the only running tab kills it and keeps the tab shell ready', () => {
+    const { createTab, closeTab, _getTabs, doKill } = loadTabsFns()
+    const id = createTab('tab 1')
+    const runningTab = _getTabs()[0]
+    runningTab.st = 'running'
+    runningTab.runId = 'run-1'
+
+    closeTab(id)
+
+    expect(doKill).toHaveBeenCalledWith(id)
+    expect(_getTabs()).toHaveLength(1)
+    expect(_getTabs()[0].closing).toBe(true)
+    expect(_getTabs()[0].st).toBe('running')
   })
 
   it('mountShellPrompt does not render prompt when tab is running even when forced', () => {

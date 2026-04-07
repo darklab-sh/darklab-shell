@@ -1,7 +1,7 @@
-# Phase 0 Handoff — Dedicated Mobile UI Plan
+# Handoff — Dedicated Mobile UI Plan
 
 Current branch: `v1.3`
-All 226 unit tests passing (`npm run test:unit`).
+All 227 unit tests passing (`npm run test:unit`).
 No uncommitted regressions — all changes are behavior-preserving.
 
 ---
@@ -78,7 +78,7 @@ Two explicit interfaces now sit on top of the shared state layer:
 
 - `state.js` source is read once at module load (`STATE_SRC` constant) and prepended to every eval'd script in `fromScript`, `fromDomScript`, and `fromDomScripts`.
 - `fromDomScripts` accepts an optional 4th `initCode` string that runs after state.js but before the script files, with injected globals in scope. Test loaders that inject `tabs` and `activeTabId` as parameters call `setTabs(tabs); setActiveTabId(activeTabId);` in initCode so `getTab()` / `getActiveTab()` find the right objects.
-- 226 unit tests across 11 files, all passing.
+- 227 unit tests across 11 files, all passing.
 
 ---
 
@@ -86,7 +86,7 @@ Two explicit interfaces now sit on top of the shared state layer:
 
 The shared state layer, composer/overlay helpers, DOM binding cache, module boundary comments, and tab-node helpers are all in place. The browser modules now rely on those shared helpers instead of ad hoc prompt or overlay state.
 
-The remaining implementation work now starts in Phase 3 with the mobile transcript and output model. Phase 2 is complete.
+The remaining implementation work now starts in Phase 10 with migration and cleanup. Phase 2 is complete.
 
 ---
 
@@ -94,29 +94,20 @@ The remaining implementation work now starts in Phase 3 with the mobile transcri
 
 The template now includes a real `mobile-shell` root plus dedicated `mobile-shell-chrome`, `mobile-shell-transcript`, `mobile-shell-composer`, and `mobile-shell-overlays` mounts, and the mobile composer dock plus mobile menu are nested inside the shell as first-class mobile-owned UI instead of as separate runtime-moved siblings. The browser can therefore activate a structured mobile shell path instead of relying only on the desktop terminal wrapper. The current mobile behavior is still preserved, and the layout logic now resolves the shell, composer, and overlay refs through one combined mobile UI helper, binds and sets up the mobile composer interactions through helper functions, caches the shared top-level controls in `dom.js`, centralises tab-node lookups behind small tab helpers, and lets the shared state layer trust those cached bindings directly, while still moving the shell sections through grouped helpers in both directions and using a grouped visibility helper for the composer/prompt swap so the boundary is easier to extend.
 
-Phase 1 is complete. Phase 2 is complete as well. The remaining mobile work now starts in Phase 3 with the transcript and output model, followed by autocomplete, session/navigation, and overlay polish in later phases.
+Phase 1 is complete. Phase 2 is complete as well. The remaining mobile work now starts in Phase 10 with migration and cleanup, while any additional touch polish is now treated as a follow-up rather than a phase-locked item.
 
 ---
 
-## Phase 3 In Progress
+## Phase 3 Complete — Mobile Transcript And Output Model
 
-Phase 3 addresses the mobile transcript and output model. Work completed so far:
+Phase 3 covered the transcript/output model work:
 
-**Always-fixed composer (`app/static/css/styles.css`):**
-- `#mobile-composer-host` is now `position: fixed; bottom: 0; left: 0; right: 0;` in all `body.mobile-terminal-mode` states, not only when keyboard is open
-- On keyboard open (`body.mobile-terminal-mode.mobile-keyboard-open`), the rule only adjusts `bottom`, `left`, `right`, `border`, and `border-radius` — no longer needs to set `position: fixed` (already inherited)
-- `body.mobile-terminal-mode .output { padding-bottom: var(--mobile-composer-height, 80px) }` replaces the old `body.mobile-keyboard-open .output { padding-bottom: 100px }` magic number and now applies at all times in mobile mode
-- Chrome iOS `74px` `padding-bottom` on `#tab-panels` removed (`.output` padding covers this)
+- `#mobile-shell-transcript` receives `#tab-panels` via DOM reparenting at runtime, while output routing stays shared
+- `#mobile-composer-host` stays fixed in mobile mode and uses the dynamic `--mobile-composer-height` spacing variable
+- `isMobileKeyboardOpen(offset)` checks the viewport offset first so blur-without-dismiss cases do not bounce the composer back open
+- timestamps and line numbers default off at startup, so the mobile transcript starts cleanly
 
-**Dynamic composer height (`app/static/js/app.js`):**
-- `syncMobileComposerHeight()` — measures `mobileComposerHost.offsetHeight` and writes to `document.documentElement` CSS var `--mobile-composer-height`
-- Called from `syncMobileViewportState()` (every layout sync) and from `syncMobileComposerKeyboard()` (on visualViewport resize/scroll and input focus/blur)
-
-**Keyboard detection reliability (`app/static/js/app.js`):**
-- `isMobileKeyboardOpen(offset)` now checks `offset > 40` first before checking `document.activeElement`
-- This handles blur-without-dismiss: when user taps away but keyboard is still geometrically open, `visualViewport` hasn't reduced yet but the active-element check would have incorrectly returned false
-
-**Phase 3 complete.** Timestamps and line numbers confirmed off-by-default at `app.js:998-999`. Transcript scroll testing is manual (Safari/Chrome device test).
+The manual browser checks for long-output scroll, long-command editing, and keyboard transitions are complete. The remaining refinement items now sit in Phase 10 and the open follow-up bucket instead of phase-locked work.
 
 ---
 
@@ -134,13 +125,13 @@ All six phases now substantially implemented. Summary of key changes:
 
 **Phase 8 (preferences):** FAQ and options modals become bottom sheets in mobile-terminal-mode (`border-radius: 14px 14px 0 0; width: 100%; max-height: 88svh`); options choice rows and select enlarged for touch.
 
-**All 226 unit tests passing throughout.**
+**All 227 unit tests passing throughout.**
 
-**Remaining work (Phase 9 — browser hardening):**
-- Manual testing in iOS Safari and iOS Chrome
-- Keyboard open/close, focus-on-tap, autocomplete tap, session create/switch/close
-- Long command editing and transcript scroll with compositor always fixed
-- After testing: targeted fixes for any regressions found
+## Phase 9 Complete — Browser Hardening
+
+Phase 9 manual browser hardening has been exercised across the mobile matrix. The key checks covered keyboard open/close, focus-on-tap, autocomplete tap acceptance, recent command taps, history restore, permalink/copy/export actions, and long command editing in iOS Safari, iOS Chrome, Android Chrome, plus a narrow desktop width sanity check.
+
+The remaining touch refinements are now general follow-ups rather than phase-locked work. Phase 10 migration and cleanup is the next planning block.
 
 ---
 
@@ -172,7 +163,7 @@ user taps Run  →  _mobileSubmit() in app.js
                   → submitCommand(val)
 ```
 
-`_mobileSubmit` now routes through the shared visible-submit helper directly. The visible mobile composer is the source of truth for the command text, `focusVisibleComposerInput()` / `blurVisibleComposerInput()` keep visible-input focus and blur on one path, `handleComposerInputChange()` lives in the shared state layer for both desktop and mobile input updates, and the shared composer-value accessor keeps the mobile and desktop inputs aligned while the transition continues. Phase 2 is complete. Phase 3 is in progress — the always-fixed composer, dynamic height variable, and keyboard detection reliability improvements are done.
+`_mobileSubmit` now routes through the shared visible-submit helper directly. The visible mobile composer is the source of truth for the command text, `focusVisibleComposerInput()` / `blurVisibleComposerInput()` keep visible-input focus and blur on one path, `handleComposerInputChange()` lives in the shared state layer for both desktop and mobile input updates, and the shared composer-value accessor keeps the mobile and desktop inputs aligned while the transition continues. The active-tab-aware run-button guard and the close-running-tab kill/reset path are complete too. Phase 2 is complete. Phase 3 is in progress — the always-fixed composer, dynamic height variable, and keyboard detection reliability improvements are done.
 
 ### Test harness pattern for new test files
 
@@ -199,7 +190,7 @@ The `initCode` string (4th arg) runs after state.js, before your script, with in
 
 ### Running tests
 ```bash
-npm run test:unit        # vitest run (all 226 unit tests)
+npm run test:unit        # vitest run (all 227 unit tests)
 npm run test:unit:watch  # vitest watch mode
 ```
 

@@ -19,7 +19,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
 - **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered from shared per-line prefix metadata so existing output updates instantly without rebuilding the line DOM
 - **Line numbers per output line** — toggle visible sequence numbers on each output line using the **line numbers** button in the terminal bar. Uses the same shared prefix metadata as timestamps so numbering stays aligned when timestamp mode changes
-- **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, and fresh run permalinks do the same when full output was captured with structured line metadata
+- **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, fresh run permalinks do the same when full output was captured with structured line metadata, and both permalink page types honor the browser’s saved line-number and timestamp preferences on load
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and skips the sampled commands from `welcome.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
@@ -659,9 +659,9 @@ On mobile, the search, history, theme, and FAQ buttons are accessible via the **
 
 There are two types of permalink:
 
-**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. This is the recommended way to share results.
+**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. It also honors the browser’s saved line-number and timestamp preferences on load. This is the recommended way to share results.
 
-**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite.
+**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite. It also honors the browser’s saved line-number and timestamp preferences on load.
 
 **Full output alias** (`/history/<run_id>/full`) — backward-compatible alias to the same run permalink. This exists so older links and tests continue to resolve cleanly.
 
@@ -846,7 +846,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **453 pytest + 199 Vitest + 107 Playwright = 759 tests**.
+Current totals in this branch: **453 pytest + 199 Vitest + 114 Playwright = 766 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
