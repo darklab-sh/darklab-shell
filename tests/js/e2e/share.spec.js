@@ -268,6 +268,8 @@ test.describe('permalink / share', () => {
     expect(html).toContain('curl http://localhost:5001/health')
     expect(html).toContain('perm-prefix')
     expect(html).toContain('+')
+    expect(html).toContain('data:font/ttf;base64,')
+    expect(html).not.toContain('/vendor/fonts/')
   })
 
   test('mobile permalink page toast hides after copy', async ({ page }) => {

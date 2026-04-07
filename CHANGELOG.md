@@ -18,6 +18,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Shortcut helper cleanup** — the old `keys` helper alias and fallback-notes wording were removed so `shortcuts` is the only supported name in help, autocomplete, docs, and in-terminal output
 - **Bundled local fonts** — JetBrains Mono and Syne are now served through local vendor routes backed by build-time font downloads, with repo fallbacks for local dev, so the shell and permalink pages no longer make external font requests on load
 - **Bundled local ansi_up** — the browser-facing `ansi_up` asset is now copied from the checked-in repo build into the image at build time, with the repo copy still serving as the local/docker-compose fallback
+- **Template-backed permalink pages** — the live `/history/<id>` and `/share/<id>` pages now share Jinja templates plus shared CSS/JS instead of carrying duplicated inline HTML/CSS in `permalinks.py`, which makes the permalink UI easier to maintain while keeping the downloadable HTML export path self-contained
+- **Shared HTML export helper** — tab `save html` and permalink export now share browser-side HTML/CSS helpers instead of duplicating export markup in two places, and downloaded tab exports embed vendor fonts at export time so the saved file stays portable
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
 - **FAQ markup syntax** — custom `faq.yaml` entries can now use lightweight markup for bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt
@@ -65,6 +67,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Cursor mirroring** — holding desktop arrow keys now updates the visible prompt cursor immediately instead of waiting for key release
 - **Prefix toggle layout** — enabling line numbers or timestamps no longer reflows wrapped output or jumps the live tail to a mid-buffer line
 - **Permalink truncation notices** — fresh permalinks no longer show stale preview-truncated warnings when the full persisted output is available
+- **Tab output truncation alignment** — long outputs now keep `currentRunStartIndex` aligned when old raw lines are pruned from the front, so shared permalinks do not splice stale output fragments into the saved view
 - **Welcome skip edge case** — pressing Enter while welcome is active no longer leaves a stray legacy prompt marker in output
 - **Prompt cursor rendering** — prompt caret visibility now remains stable after welcome interruption, normal settle, and follow-up command execution
 - **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command
@@ -134,7 +137,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
   - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
   - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
-  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html with local vendor font assertions), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
+  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html with embedded-font export assertions), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
   - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
   - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
@@ -205,7 +208,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Timestamps** — terminal bar button cycles through three modes: off / elapsed (seconds since command started) / clock (wall-clock time); implemented via CSS body classes, no per-line overhead
 - **Tab rename** — double-click any tab label to edit it inline; renamed tabs are not overwritten when a new command runs
 - **Copy output** — one-click copy of the current tab's full plain-text output to clipboard
-- **HTML export** — saves a self-contained `.html` file with ANSI color rendering, timestamps, and offline-ready styling
+- **HTML export** — saves a self-contained `.html` file with ANSI color rendering, timestamps, embedded fonts, and offline-ready styling
 - **History starring** — star (★) any run in the history panel to pin it to the top of the list; stars persist across page reloads via localStorage
 - **Permalink expiry notes** — snapshot and run permalink pages now show how long until the link expires (based on `permalink_retention_days`) using a human-readable duration
 - **Version label** — `APP_VERSION` constant in `app.py` exposed via `/config`; displayed in the header as `vX.Y · real-time`

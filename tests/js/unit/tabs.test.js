@@ -9,6 +9,7 @@ function touchPointerEvent(type, init) {
 
 function loadTabsFns({
   maxTabs = 3,
+  maxOutputLines = 100,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
@@ -55,7 +56,7 @@ function loadTabsFns({
     newTabBtn,
     resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
-    APP_CONFIG: { max_tabs: maxTabs, app_name: 'shell.darklab.sh' },
+    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'shell.darklab.sh' },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
@@ -94,6 +95,7 @@ function loadTabsFns({
 
 function loadTabsAndOutputFns({
   maxTabs = 3,
+  maxOutputLines = 100,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   clipboardWrite = () => Promise.resolve(),
 } = {}) {
@@ -143,7 +145,7 @@ function loadTabsAndOutputFns({
     mobileComposerRow,
     newTabBtn,
     resetCmdHistoryNav: () => {},
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: 100, app_name: 'shell.darklab.sh' },
+    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'shell.darklab.sh' },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
@@ -164,6 +166,7 @@ function loadTabsAndOutputFns({
     _getTabs: () => getTabs(),
     _stickOutputToBottom,
     _maybeMountDeferredPrompt,
+    _syncTabRawLines,
   }`)
 
   return { ...fns, shellPromptWrap }
@@ -399,6 +402,22 @@ describe('tabs helpers', () => {
     mountShellPrompt(id)
 
     expect(output.contains(shellPromptWrap)).toBe(false)
+  })
+
+  it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {
+    const { createTab, _getTabs, _syncTabRawLines } = loadTabsAndOutputFns({ maxOutputLines: 3 })
+
+    createTab('tab 1')
+    const tab = _getTabs()[0]
+    tab.currentRunStartIndex = 2
+
+    _syncTabRawLines(tab, { text: 'one', cls: '', tsC: '', tsE: '' })
+    _syncTabRawLines(tab, { text: 'two', cls: '', tsC: '', tsE: '' })
+    _syncTabRawLines(tab, { text: 'three', cls: '', tsC: '', tsE: '' })
+    _syncTabRawLines(tab, { text: 'four', cls: '', tsC: '', tsE: '' })
+
+    expect(tab.rawLines.map(line => line.text)).toEqual(['two', 'three', 'four'])
+    expect(tab.currentRunStartIndex).toBe(1)
   })
 
   it('setTabLabel truncates the rendered label but preserves the full label in state', () => {

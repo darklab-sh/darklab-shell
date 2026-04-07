@@ -640,8 +640,8 @@ class TestShareRoute:
         client.set_cookie("pref_theme", "light")
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
-        assert 'class="light"' in body
-        assert "body.light" in body
+        assert 'class="permalink-page light"' in body
+        assert '/static/css/styles.css' in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()

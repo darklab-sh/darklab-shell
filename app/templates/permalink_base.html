@@ -1,0 +1,30 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ page_title }}</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="stylesheet" href="/static/css/fonts.css">
+<link rel="stylesheet" href="/static/css/styles.css">
+<script src="/vendor/ansi_up.js"></script>
+<script src="/static/js/export_html.js"></script>
+{% block extra_head %}{% endblock %}
+</head>
+<body class="permalink-page{% if theme_class == 'light' %} light{% endif %}">
+<header class="permalink-header">
+  <div class="permalink-header-copy">
+    <h1 class="permalink-title">{{ app_name }}</h1>
+    {% block header_meta %}{% endblock %}
+  </div>
+  <div class="permalink-actions">
+    {% block header_actions %}{% endblock %}
+  </div>
+</header>
+<main id="output" class="output permalink-output">
+  {% block output %}{% endblock %}
+</main>
+{% block footer %}{% endblock %}
+{% block scripts %}{% endblock %}
+</body>
+</html>

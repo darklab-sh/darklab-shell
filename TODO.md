@@ -4,22 +4,13 @@
 
 - Release line: `v1.3` (unreleased)
 - Current focus: No active refactor work
-- Last major milestone completed: Shell-Style Input Refactor
+- Last major milestone completed: Shared HTML Export Styling Cleanup
 
 ---
 
 ## Open TODOs
 
-### Follow-ups
-
-- **Permalink page template refactor**
-  - Move the `/share/<id>` and `/history/<run_id>` HTML chrome out of `app/permalinks.py` and into a Jinja template.
-  - Reuse the shared `static/css/styles.css` rules where possible instead of maintaining a large block of inlined CSS inside `permalinks.py`.
-  - Keep permalink pages server-rendered and self-contained at request time; do not turn them into client-fetched shells.
-  - Preserve the current theme behavior, line-number/timestamp toggles, copy/save actions, and JSON/raw-data links.
-  - Keep the downloadable/exported HTML path fully rendered so saved share pages remain portable and do not depend on the live app after download.
-  - Update route tests and permalink/export tests to confirm the refactor keeps the same visible behavior.
-  - Refresh the docs and release notes to describe the template split and any shared style changes.
+No open follow-ups.
 
 ---
 
@@ -31,6 +22,37 @@
 - ~~The remaining mobile work now lives in Phase 10 cleanup and the follow-up bucket above.~~
 - ~~Unit coverage already in place: `tests/js/unit/app.test.js`, `tests/js/unit/autocomplete.test.js`, `tests/js/unit/history.test.js`, `tests/js/unit/runner.test.js`, `tests/js/unit/tabs.test.js`, `tests/js/unit/welcome.test.js`.~~
 - ~~Playwright coverage already in place: `tests/js/e2e/mobile.spec.js`, `tests/js/e2e/share.spec.js`, `tests/js/e2e/kill.spec.js`, `tests/js/e2e/tabs.spec.js`.~~
+
+### Permalink Page Template Refactor
+
+- ~~Split the live permalink rendering into Jinja templates:~~
+  - ~~a shared permalink base/layout template for header, action row, output mount, and toast~~
+  - ~~a small error template for missing `/share/<id>` and `/history/<run_id>` pages~~
+- ~~Move reusable permalink page chrome and theme rules into shared CSS instead of maintaining the full live-page stylesheet inside `app/permalinks.py`.~~
+- ~~Keep permalink pages server-rendered and self-contained at request time; do not turn them into client-fetched shells.~~
+- ~~Extract the repeated permalink-page data shaping in `permalinks.py` into smaller helpers:~~
+  - ~~theme selection~~
+  - ~~line normalization / prompt-echo injection~~
+  - ~~timestamp-availability detection~~
+  - ~~action-button / extra-action context building~~
+- ~~Preserve the current behavior exactly:~~
+  - ~~current theme parity with the main shell~~
+  - ~~line-number and timestamp toggles~~
+  - ~~copy / `save .txt` / `save .html` actions~~
+  - ~~`view json` and back-to-shell links~~
+  - ~~snapshot/run permalink title, metadata, expiry note, and prompt rendering~~
+- ~~Keep the downloadable/exported HTML path fully rendered and portable:~~
+  - ~~do not make saved `.html` depend on live app routes after download~~
+  - ~~keep embedded fonts / inline CSS / inline JS decisions explicit for the export path, even if the live permalink page moves to shared templates and shared CSS~~
+- ~~Keep vendor asset behavior intact for the live page:~~
+  - ~~local `ansi_up` browser build~~
+  - ~~local vendor font routes for the hosted permalink page~~
+- ~~Add regression coverage for both permalink classes and both render paths:~~
+  - ~~`/share/<id>` and `/history/<run_id>`~~
+  - ~~missing/expired permalink error pages~~
+  - ~~live page theme parity and toggle availability~~
+  - ~~exported `.html` output staying portable and free of external asset fetches~~
+- ~~Refresh docs and release notes to describe the template split, the remaining inline export path, and any shared style changes.~~
 
 ### FAQ Single Source Of Truth
 

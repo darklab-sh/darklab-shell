@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 
 import process
 import database
+import app as shell_app
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
@@ -817,27 +818,32 @@ class TestExpiryNote:
 class TestPermalinkErrorPage:
     def test_returns_404_status(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         assert resp.status_code == 404
 
     def test_includes_noun_in_body(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            resp = _permalink_error_page("run")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("run")
         assert b"run" in resp.data
 
     def test_includes_app_name(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         assert b"my-shell" in resp.data
 
     def test_mentions_retention_when_configured(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         assert b"30 days" in resp.data or b"1 month" in resp.data
 
     def test_no_retention_mention_when_unlimited(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         # Unlimited mode should not mention an automatic deletion period
         assert b"retention" not in resp.data.lower()
 

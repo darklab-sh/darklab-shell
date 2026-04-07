@@ -36,7 +36,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
 - **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, fetches and shares that full saved output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (themed HTML export with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
-- **HTML export** — download a tab's output as a themed HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar. It uses app-hosted vendor fonts when opened alongside the app and falls back to browser monospace fonts offline
+- **HTML export** — download a tab's output as a themed HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar. The downloaded file embeds fonts at export time so it stays portable, and the live app still serves the same vendor fonts for on-page rendering
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
@@ -102,7 +102,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── database.py             # SQLite connection, schema init, retention pruning
     ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
-    ├── permalinks.py           # HTML rendering for /history/<id> and /share/<id> pages
+    ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customise the instance
@@ -116,7 +116,10 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
     ├── templates/
-    │   └── index.html          # Frontend HTML shell rendered by Flask
+    │   ├── index.html          # Frontend HTML shell rendered by Flask
+    │   ├── permalink_base.html # Shared shell for permalink pages
+    │   ├── permalink.html      # Live permalink page template
+    │   └── permalink_error.html # Missing/expired permalink template
     ├── requirements.txt        # Python runtime dependencies
     └── static/
         ├── css/
@@ -131,6 +134,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
             ├── output.js       # ANSI rendering and line management
             ├── search.js       # In-output search (with case-sensitive and regex modes)
             ├── autocomplete.js # Command autocomplete dropdown
+            ├── export_html.js  # Shared export HTML builder / embedded-font helper
             ├── history.js      # Command history chips and drawer (with starring)
             ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
@@ -859,7 +863,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **466 pytest + 232 Vitest + 126 Playwright = 824 tests**.
+Current totals in this branch: **466 pytest + 233 Vitest + 126 Playwright = 825 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
@@ -869,6 +873,8 @@ The testing model is intentionally layered:
 Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
 
 The canonical testing guide lives in [tests/README.md](tests/README.md). It contains the full file-by-file appendix, focused run commands, suite-specific notes, and maintenance conventions. `ARCHITECTURE.md` only keeps the architectural rationale for how the suites are split and why they are implemented the way they are.
+
+The permalink/export refactor was primarily about removing duplicated static HTML/CSS/JS and moving the shared page chrome and export styling into reusable templates and helpers, so the live permalink view and downloadable export stay easier to maintain together.
 
 ### Linting & Security Scanning
 

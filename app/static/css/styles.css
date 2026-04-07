@@ -1260,7 +1260,8 @@ mark.search-hl { background: rgba(255,184,0,0.35); color: inherit; border-radius
 mark.search-hl.current { background: rgba(255,184,0,0.7); }
 
 /* ── Permalink toast ── */
-#permalink-toast {
+#permalink-toast,
+#copy-toast {
   position: fixed;
   bottom: 24px;
   left: 50%;
@@ -1278,36 +1279,132 @@ mark.search-hl.current { background: rgba(255,184,0,0.7); }
   opacity: 0;
   visibility: hidden;
 }
-#permalink-toast.toast-success {
+#permalink-toast.toast-success,
+#copy-toast.toast-success {
   background: #1a1a1a;
   border-color: var(--green-dim);
   color: var(--green);
 }
-#permalink-toast.toast-error {
+#permalink-toast.toast-error,
+#copy-toast.toast-error {
   background: #1f1212;
   border-color: rgba(255, 60, 60, 0.45);
   color: var(--red);
 }
-#permalink-toast.show {
+#permalink-toast.show,
+#copy-toast.show {
   transform: translateX(-50%) translateY(0);
   opacity: 1;
   visibility: visible;
 }
-body.light #permalink-toast {
+body.light #permalink-toast,
+body.light #copy-toast {
   background: #e4e2dc;
   border-color: var(--border-bright);
   color: var(--text);
   box-shadow: 0 12px 28px rgba(0,0,0,0.18);
 }
-body.light #permalink-toast.toast-success {
+body.light #permalink-toast.toast-success,
+body.light #copy-toast.toast-success {
   background: #e4e2dc;
   border-color: var(--green-dim);
   color: var(--green-dim);
 }
-body.light #permalink-toast.toast-error {
+body.light #permalink-toast.toast-error,
+body.light #copy-toast.toast-error {
   background: #e4e2dc;
   border-color: rgba(204,34,0,0.38);
   color: var(--red);
+}
+
+/* ── Permalink pages ── */
+body.permalink-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0;
+  gap: 0;
+  overflow: hidden;
+}
+body.permalink-page::before {
+  display: none;
+}
+body.permalink-page .permalink-header {
+  display: flex;
+  align-items: baseline;
+  gap: 14px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border);
+  background: #111;
+  flex-wrap: wrap;
+}
+body.light.permalink-page .permalink-header {
+  background: #d9d7d1;
+}
+body.permalink-page .permalink-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+body.permalink-page .permalink-title {
+  font-family: var(--font-display);
+  font-size: 20px;
+  font-weight: 300;
+  letter-spacing: 4px;
+  color: var(--green);
+  text-shadow: 0 0 16px var(--green-glow);
+}
+body.permalink-page .permalink-meta,
+body.permalink-page .permalink-expiry {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
+}
+body.permalink-page .permalink-expiry {
+  color: var(--amber);
+}
+body.permalink-page .permalink-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+  align-items: flex-start;
+}
+body.permalink-page .permalink-output {
+  flex: 1;
+  padding: 16px 20px 20px;
+  line-height: 1.65;
+  white-space: pre-wrap;
+  word-break: break-all;
+  overflow-y: auto;
+  overflow-wrap: anywhere;
+  min-height: 0;
+}
+body.permalink-page .output:empty::before {
+  content: none;
+}
+body.permalink-page .perm-prefix {
+  display: inline-block;
+  min-width: var(--perm-prefix-width, 0ch);
+  margin-right: 14px;
+  color: var(--muted);
+  font-size: 10px;
+  user-select: none;
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+body.permalink-page .perm-content {
+  display: inline;
+}
+body.permalink-page .permalink-error-heading {
+  color: var(--amber);
+  font-weight: 700;
+  margin-bottom: 12px;
+}
+body.permalink-page .permalink-error-detail {
+  color: var(--muted);
 }
 
 /* ── Run History panel ── */
