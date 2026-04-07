@@ -26,9 +26,9 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
     await expect(page.locator('.welcome-command')).toHaveCount(0)
     await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
-    // Desktop run button stays hidden; mobile composer is the input affordance
+    // Desktop run button stays hidden; the focused mobile composer exposes the helper row
     await expect(page.locator('#run-btn')).toBeHidden()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
     await expect(page.locator('#mobile-composer')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript .tab-panels, #mobile-shell-transcript #tab-panels')).toHaveCount(1)

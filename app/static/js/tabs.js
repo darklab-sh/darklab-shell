@@ -33,8 +33,8 @@ function _clearTabDropIndicators() {
 }
 
 function refocusTabsTerminalInput() {
-  if (typeof cmdInput === 'undefined' || !cmdInput || typeof cmdInput.focus !== 'function') return;
-  setTimeout(() => cmdInput.focus(), 0);
+  if (typeof focusAnyComposerInput !== 'function') return;
+  setTimeout(() => focusAnyComposerInput(), 0);
 }
 
 function updateTabScrollButtons() {
@@ -160,9 +160,7 @@ function _onTouchDragEnd(e) {
   updateTabScrollButtons();
   ensureActiveTabVisible(activeTabId);
   _tabDragSuppressClickUntil = Date.now() + 220;
-  if (state.id === activeTabId && typeof cmdInput !== 'undefined' && cmdInput) {
-    cmdInput.focus();
-  }
+  if (state.id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
 }
 
 function _startTouchTabDrag(tab, id, e) {
@@ -229,9 +227,7 @@ function bindTabDragReorder(tab, id) {
       updateTabScrollButtons();
       ensureActiveTabVisible(activeTabId);
       _tabDragSuppressClickUntil = Date.now() + 160;
-      if (id === activeTabId && typeof cmdInput !== 'undefined' && cmdInput) {
-        cmdInput.focus();
-      }
+      if (id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
     }
     _draggedTabId = null;
     _dragMoved = false;
@@ -355,7 +351,7 @@ function createTab(label) {
     if (id !== activeTabId) return;
     if (e.target.closest('.term-action-btn')) return;
     if (e.target.closest('.welcome-command-loadable')) return;
-    if (typeof cmdInput !== 'undefined' && cmdInput) cmdInput.focus();
+    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
   });
   panel.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
@@ -735,6 +731,6 @@ async function permalinkTab(id) {
       .catch(() => showToast('Failed to copy link', 'error'));
   }).catch(() => showToast('Failed to create permalink', 'error'))
     .finally(() => {
-      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
     });
 }

@@ -3,8 +3,8 @@
 ## Status
 
 - Release line: `v1.3` (unreleased)
-- Current focus: Phase 2 real mobile composer
-- Last major milestone completed: Phase 1 mobile shell skeleton
+- Current focus: Phase 3 mobile transcript and output model
+- Last major milestone completed: Phase 2 real mobile composer
 
 ---
 
@@ -124,7 +124,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - ~~module boundary annotation across browser scripts~~
 - ~~shared action path cleanup across tabs.js, welcome.js, and app.js~~
 - ~~unit test harness updated: `state.js` prepended to all eval'd scripts; `fromDomScripts` accepts an `initCode` string so test loaders can call `setTabs(tabs); setActiveTabId(activeTabId)` to seed shared state; `STATE_SRC` cached at module level~~
-- ~~206 unit tests passing (11 test files, no regressions)~~
+- ~~226 unit tests passing (11 test files, no regressions)~~
 
 **Phase 0 Complete**
 
@@ -151,42 +151,40 @@ The shared state layer, composer/overlay helpers, shared DOM binding cache, grou
 
 **Status**
 
-Phase 1 is complete. The dedicated mobile shell root, chrome/transcript/composer/overlay mounts, shell-owned mobile menu, and shared mobile UI helpers are in place. Remaining mobile work now moves into Phase 2 and beyond.
+Phase 1 is complete. The dedicated mobile shell root, chrome/transcript/composer/overlay mounts, shell-owned mobile menu, and shared mobile UI helpers are in place. Remaining mobile work now moves into Phase 3 and beyond.
 
 ##### Phase 2: Real Mobile Composer
 
-1. Replace the mobile mirrored prompt with a dedicated visible input component:
-   - likely a single-line `input` initially
-   - optionally promote to auto-growing `textarea` if long commands are easier to edit that way
-2. Composer should include:
-   - prompt label
-   - native input field
-   - Run button
-   - optional clear/edit affordances only if still needed after switching to native input
-3. Submitted commands should still echo into transcript using the existing prompt echo styling.
-4. Mobile input should own:
-   - keyboard open/close lifecycle
-   - focus policy
-   - autocorrect/autocapitalize/autocomplete/spellcheck settings
-   - selection/caret behavior
-5. Remove mobile dependence on the hidden desktop prompt mirror once parity is reached.
+**Completed**
+
+- ~~The mobile composer now submits through the shared `submitVisibleComposerCommand()` helper directly, with mobile-specific keyboard dismissal and no desktop-style refocus on mobile.~~
+- ~~Touch focus lands on the visible mobile composer through the shared `getVisibleComposerInput()` resolver instead of the hidden desktop input.~~
+- ~~Autocomplete acceptance keeps focus on that visible composer.~~
+- ~~The shared `focusVisibleComposerInput()` / `blurVisibleComposerInput()` helpers keep visible-input behavior on one path.~~
+- ~~`handleComposerInputChange()` keeps desktop and mobile input updates on one path while the value-sync layer keeps the hidden desktop input compatible during the transition.~~
+- ~~The mobile composer text now also flows through `getComposerValue()` so the submit path reads the shared visible composer value only through the shared submit helper boundary.~~
+
+**Status**
+
+Phase 2 is complete. The dedicated visible mobile composer, shared visible-input resolver, and mobile keyboard/focus helpers are in place. The next mobile work now starts in Phase 3 with the transcript and output model, then autocomplete, session/navigation, and mobile overlay polish.
 
 ##### Phase 3: Mobile Transcript And Output Model
 
-1. Build a mobile transcript renderer optimized for readability and touch scrolling.
-2. Preserve existing output semantics:
+1. Replace the mobile mirrored prompt with a dedicated transcript renderer optimized for readability and touch scrolling:
+   - likely a single-line `input` initially
+   - preserve existing output semantics:
    - prompt echo lines
    - stdout/stderr styling
    - exit lines
    - timestamps/line numbers when enabled
-3. Decide mobile defaults for timestamps and line numbers:
+2. Decide mobile defaults for timestamps and line numbers:
    - likely off by default
    - still configurable in options
-4. Ensure transcript and composer are fully independent:
+3. Ensure transcript and composer are fully independent:
    - transcript scrolls
    - composer stays fixed
    - keyboard does not obscure transcript or composer
-5. Re-test long-output and long-command cases in both Safari and Chrome.
+4. Re-test long-output and long-command cases in both Safari and Chrome.
 
 ##### Phase 4: Mobile Autocomplete
 

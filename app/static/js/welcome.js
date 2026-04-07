@@ -258,11 +258,11 @@ function cancelWelcome(tabId = null) {
   if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
     setTimeout(() => {
-      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
       if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
     }, 0);
   }
-  if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
   if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   return true;
 }
@@ -375,8 +375,7 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
   function loadCommand() {
     if (!interactive) return;
     if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-    if (!cmdInput) return;
-    cmdInput.focus();
+    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
     setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
     // Defer so the document click handler has already run before autocomplete updates.
     setTimeout(() => {
@@ -423,8 +422,7 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
     const boundCmdText = line.querySelector('.welcome-command-text');
     function loadCommand() {
       if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-      if (!cmdInput) return;
-      cmdInput.focus();
+      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
       setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
       setTimeout(() => {
         if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
@@ -578,7 +576,7 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
   await _showWelcomeHint(tabId, current, true);
   if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
-    if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
     if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   }
 

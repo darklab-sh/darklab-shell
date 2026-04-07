@@ -104,10 +104,56 @@
   });
   global.getVisibleComposerInput = () => {
     const { desktop, mobile } = global.getComposerInputs();
-    const visibleMobile = mobile
-      && typeof mobile.getClientRects === 'function'
-      && mobile.getClientRects().length > 0;
-    return visibleMobile ? mobile : desktop;
+    const mobileShellActive = !!(typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-terminal-mode'));
+    if (mobileShellActive && mobile) return mobile;
+    return desktop;
+  };
+  global.getComposerValue = () => {
+    const input = global.getVisibleComposerInput();
+    return input ? input.value : '';
+  };
+  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
+    const target = input || global.getVisibleComposerInput();
+    if (!target || typeof target.focus !== 'function') return false;
+    try {
+      if (preventScroll) target.focus({ preventScroll: true });
+      else target.focus();
+    } catch (_) {
+      target.focus();
+    }
+    return true;
+  };
+  global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
+    const target = (typeof getVisibleComposerInput === 'function')
+      ? getVisibleComposerInput()
+      : global.getVisibleComposerInput();
+    return global.focusComposerInput(target, { preventScroll });
+  };
+  global.blurVisibleComposerInput = () => {
+    const target = (typeof getVisibleComposerInput === 'function')
+      ? getVisibleComposerInput()
+      : global.getVisibleComposerInput();
+    if (!target || typeof target.blur !== 'function') return false;
+    target.blur();
+    return true;
+  };
+  global.blurVisibleComposerInputIfMobile = () => {
+    if (typeof useMobileTerminalViewportMode !== 'function' || !useMobileTerminalViewportMode()) return false;
+    return global.blurVisibleComposerInput();
+  };
+  global.focusAnyComposerInput = ({ preventScroll = false } = {}) => {
+    return global.focusVisibleComposerInput({ preventScroll });
+  };
+  global.syncMobileComposerKeyboardState = (offset = null, { active = true } = {}) => {
+    if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
+    const nextOffset = typeof offset === 'number' ? offset : 0;
+    document.documentElement?.style?.setProperty('--mobile-keyboard-offset', `${nextOffset}px`);
+    const keyboardOpen = active && typeof isMobileKeyboardOpen === 'function' ? isMobileKeyboardOpen(nextOffset) : false;
+    document.body.classList.toggle('mobile-keyboard-open', keyboardOpen);
+    return keyboardOpen;
   };
   global.setComposerValue = (value, start = null, end = null, { dispatch = true } = {}) => {
     const nextValue = String(value ?? '');
@@ -128,6 +174,36 @@
       if (dispatchTarget) dispatchTarget.dispatchEvent(new Event('input'));
     }
     return nextValue;
+  };
+  global.handleComposerInputChange = (sourceInput) => {
+    if (!sourceInput) return;
+    if (typeof syncShellPrompt === 'function') syncShellPrompt();
+    if (typeof syncMobileViewportState === 'function') syncMobileViewportState();
+    const value = sourceInput.value;
+    const start = typeof sourceInput.selectionStart === 'number' ? sourceInput.selectionStart : value.length;
+    const end = typeof sourceInput.selectionEnd === 'number' ? sourceInput.selectionEnd : value.length;
+    global.setComposerValue(value, start, end, { dispatch: false });
+    const keepHistoryNav = typeof _suspendCmdHistoryNavReset !== 'undefined' && _suspendCmdHistoryNavReset;
+    if (keepHistoryNav) _suspendCmdHistoryNavReset = false;
+    else if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
+    if (value.length > 0 && typeof requestWelcomeSettle === 'function') {
+      requestWelcomeSettle(activeTabId);
+    }
+    if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
+      acSuppressInputOnce = false;
+      if (typeof acHide === 'function') acHide();
+      return;
+    }
+    acIndex = -1;
+    if (!value.trim()) {
+      if (typeof acHide === 'function') acHide();
+      return;
+    }
+    const q = value.toLowerCase();
+    acFiltered = (typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
+      .filter(s => s.toLowerCase().startsWith(q))
+      .slice(0, 12);
+    if (typeof acShow === 'function') acShow(acFiltered);
   };
   global.showPanelOverlay = (el) => {
     if (el && el.classList) el.classList.add('open');
@@ -209,6 +285,12 @@
     if (runTimer) runTimer.textContent = '';
   };
   global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
+  global.setRunButtonDisabled = (disabled) => {
+    const next = !!disabled;
+    if (runBtn) runBtn.disabled = next;
+    if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = next;
+  };
+  global.isRunButtonDisabled = () => !!((runBtn && runBtn.disabled) || (typeof mobileRunBtn !== 'undefined' && mobileRunBtn && mobileRunBtn.disabled));
   global.showTabKillBtn = (tabId) => {
     const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
     if (btn && btn.style) btn.style.display = 'inline-block';

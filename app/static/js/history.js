@@ -116,10 +116,7 @@ function renderHistory() {
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
       setComposerValue(cmd, cmd.length, cmd.length);
-      const targetInput = (typeof getVisibleComposerInput === 'function')
-        ? getVisibleComposerInput()
-        : (typeof getVisibleMobileComposerInput === 'function' ? getVisibleMobileComposerInput() : cmdInput);
-      if (targetInput && typeof targetInput.focus === 'function') targetInput.focus();
+      if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
       resetCmdHistoryNav();
     });
     histRow.appendChild(chip);

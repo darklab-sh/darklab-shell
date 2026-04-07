@@ -7,16 +7,7 @@ function _positionAutocomplete(itemsCount) {
   const composerRow = (typeof mobileComposerRow !== 'undefined' && mobileComposerRow) || null;
   const prefix = wrap && wrap.querySelector ? wrap.querySelector('.prompt-prefix') : null;
   const mobileTerminalMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
-  // Simple CSS mobile mode: #mobile-cmd is visible (≤600px layout, no mobile-terminal-mode)
-  const _mobileCmdEl = !mobileTerminalMode
-    && typeof mobileCmdInput !== 'undefined'
-    ? mobileCmdInput
-    : null;
-  const simpleMobileMode = !mobileTerminalMode
-    && !!_mobileCmdEl
-    && typeof _mobileCmdEl.getClientRects === 'function'
-    && _mobileCmdEl.getClientRects().length > 0;
-  const mobileComposerMode = mobileTerminalMode || simpleMobileMode;
+  const mobileComposerMode = mobileTerminalMode;
   const anchor = mobileTerminalMode && composerRow ? composerRow : (mobileTerminalMode && composerHost ? composerHost : wrap);
   acDropdown.classList.toggle('ac-mobile', mobileTerminalMode);
   if (mobileTerminalMode) {
@@ -37,30 +28,6 @@ function _positionAutocomplete(itemsCount) {
     acDropdown.style.top = 'auto';
     acDropdown.style.bottom = 'calc(100% + 4px)';
     acDropdown.classList.add('ac-up');
-    return true;
-  }
-  if (simpleMobileMode) {
-    // Position fixed above #mobile-composer-row (acDropdown lives inside terminal-wrap
-    // which has overflow:hidden, so absolute won't work — fixed escapes it)
-    const simpleAnchor = typeof mobileComposerRow !== 'undefined' ? mobileComposerRow : null;
-    const rect = simpleAnchor && typeof simpleAnchor.getBoundingClientRect === 'function'
-      ? simpleAnchor.getBoundingClientRect()
-      : { top: window.innerHeight / 2, left: 0, right: window.innerWidth };
-    const rowH = 22;
-    const desired = Math.min(10, Math.max(1, itemsCount)) * rowH + 10;
-    const targetHeight = Math.max(88, Math.min(260, desired));
-    const available = Math.max(0, rect.top - 12);
-    const maxHeight = Math.max(0, Math.min(220, available));
-    acDropdown.classList.remove('ac-mobile');
-    acDropdown.classList.add('ac-up');
-    acDropdown.style.position = 'fixed';
-    acDropdown.style.left = `${Math.round(rect.left)}px`;
-    acDropdown.style.right = '0';
-    acDropdown.style.width = 'auto';
-    acDropdown.style.minWidth = '0';
-    acDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
-    acDropdown.style.top = 'auto';
-    acDropdown.style.bottom = `${Math.round(window.innerHeight - rect.top + 4)}px`;
     return true;
   }
   acDropdown.classList.remove('ac-mobile');
@@ -139,11 +106,14 @@ function acShow(items) {
   if (showAbove && acIndex < 0) acIndex = 0;
   if (acIndex >= items.length) acIndex = items.length - 1;
   const renderItems = showAbove ? [...items].reverse() : items;
+  const currentValue = (typeof getComposerValue === 'function')
+    ? getComposerValue()
+    : cmdInput.value;
   renderItems.forEach((s, i) => {
     const originalIndex = showAbove ? (items.length - 1 - i) : i;
     const div = document.createElement('div');
     div.className = 'ac-item' + (originalIndex === acIndex ? ' ac-active' : '');
-    const val = cmdInput.value;
+    const val = currentValue;
     const idx = s.toLowerCase().indexOf(val.toLowerCase());
     if (idx >= 0 && val) {
       div.innerHTML = escapeHtml(s.slice(0, idx))
@@ -166,15 +136,8 @@ function acHide() {
 }
 
 function acAccept(s) {
-  const visibleInput = (typeof getVisibleMobileComposerInput === 'function')
-    ? getVisibleMobileComposerInput()
-    : null;
   setComposerValue(s, s.length, s.length);
   acHide();
-  if (visibleInput && visibleInput !== cmdInput) {
-    visibleInput.focus();
-  } else {
-    cmdInput.focus();
-  }
+  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
   acSuppressInputOnce = true;
 }

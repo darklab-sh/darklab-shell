@@ -13,6 +13,8 @@ async function loadAppFns({
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
   runCommand: runCommandOverride = vi.fn(),
+  submitComposerCommand: submitComposerCommandOverride = vi.fn(),
+  submitVisibleComposerCommand: submitVisibleComposerCommandOverride = vi.fn(),
   createTab: createTabOverride = vi.fn(() => 'tab-1'),
   closeTab: closeTabOverride = vi.fn(),
   activateTab: activateTabOverride = vi.fn(),
@@ -22,6 +24,7 @@ async function loadAppFns({
   cancelWelcome: cancelWelcomeOverride = vi.fn(),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
+  acSuggestions: acSuggestionsOverride = [],
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
   acHide: acHideOverride = () => {},
@@ -256,6 +259,10 @@ async function loadAppFns({
   shellPromptWrapEl.scrollIntoView = vi.fn()
   const mobileComposerHostEl = document.getElementById('mobile-composer-host')
   mobileComposerHostEl.scrollIntoView = vi.fn()
+  const mobileCmdInput = document.getElementById('mobile-cmd')
+  cmdInput.focus = vi.fn()
+  mobileCmdInput.focus = vi.fn()
+  mobileCmdInput.blur = vi.fn()
 
   const originalMatchMedia = window.matchMedia
   const originalVisualViewport = window.visualViewport
@@ -347,7 +354,7 @@ async function loadAppFns({
     pendingHistAction: null,
     pendingKillTabId,
     acHide: acHideOverride,
-    acSuggestions: [],
+    acSuggestions: acSuggestionsOverride,
     acFiltered: acFilteredOverride,
     acIndex: acIndexOverride,
     acShow: acShowOverride,
@@ -394,6 +401,8 @@ async function loadAppFns({
     acDropdown,
     requestWelcomeSettle: requestWelcomeSettleOverride,
     runCommand: runCommandOverride,
+    submitComposerCommand: submitComposerCommandOverride,
+    submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
     doKill: doKillOverride,
     Event,
     setTimeout: (fn) => {
@@ -403,6 +412,13 @@ async function loadAppFns({
   }, `{
     _setTsMode,
     _setLnMode,
+    handleComposerInputChange,
+    focusVisibleComposerInput,
+    blurVisibleComposerInput,
+    blurVisibleComposerInputIfMobile,
+    refocusTerminalInput,
+    getVisibleComposerInput,
+    getComposerValue,
     setRunButtonDisabled,
     confirmHistAction,
     executeHistAction,
@@ -437,6 +453,8 @@ async function loadAppFns({
     cancelWelcome: cancelWelcomeOverride,
     interruptPromptLine: interruptPromptLineOverride,
     runCommand: runCommandOverride,
+    submitComposerCommand: submitComposerCommandOverride,
+    submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
     logClientError,
     acDropdown,
     acHide: acHideOverride,
@@ -764,9 +782,11 @@ describe('app helpers', () => {
     const faqOverlay = document.getElementById('faq-overlay')
     const optionsOverlay = document.getElementById('options-overlay')
 
+    document.body.classList.add('mobile-terminal-mode')
     cmdInput.dispatchEvent(new Event('focus'))
     cmdInput.value = 'curl'
     cmdInput.dispatchEvent(new Event('input'))
+    await new Promise(resolve => setTimeout(resolve, 10))
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
@@ -802,6 +822,139 @@ describe('app helpers', () => {
     expect(shellInputRow.getAttribute('aria-hidden')).toBe('true')
     expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('$')
     expect(shellPromptWrap.scrollIntoView).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('refocuses the visible mobile composer instead of the hidden desktop input', async () => {
+    const { refocusTerminalInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const cmdInput = document.getElementById('cmd')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    refocusTerminalInput()
+
+    expect(mobileCmdInput.focus).toHaveBeenCalled()
+    expect(cmdInput.focus).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('prefers the mobile composer as the visible input while mobile mode is active', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(getVisibleComposerInput()).toBe(mobileCmdInput)
+    expect(getVisibleComposerInput()).not.toBe(cmdInput)
+
+    restoreViewport()
+  })
+
+  it('focuses the visible mobile composer through the shared focus helper', async () => {
+    const { focusVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(focusVisibleComposerInput({ preventScroll: true })).toBe(true)
+    expect(mobileCmdInput.focus).toHaveBeenCalled()
+    expect(cmdInput.focus).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('focuses the desktop composer through the shared visible helper', async () => {
+    const { focusVisibleComposerInput } = await loadAppFns()
+    const cmdInput = document.getElementById('cmd')
+
+    expect(focusVisibleComposerInput({ preventScroll: true })).toBe(true)
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('blurs the visible mobile composer through the shared blur helper', async () => {
+    const { blurVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(blurVisibleComposerInput()).toBe(true)
+    expect(mobileCmdInput.blur).toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('blurs the mobile composer through the shared mobile blur helper', async () => {
+    const { blurVisibleComposerInputIfMobile, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(blurVisibleComposerInputIfMobile()).toBe(true)
+    expect(mobileCmdInput.blur).toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('reads the visible mobile composer value through the shared accessor', async () => {
+    const { getComposerValue, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    mobileCmdInput.value = 'curl darklab.sh'
+
+    expect(getComposerValue()).toBe('curl darklab.sh')
+
+    restoreViewport()
+  })
+
+  it('syncs mobile composer input through the shared input handler', async () => {
+    const acShow = vi.fn()
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    mobileCmdInput.value = 'curl'
+    mobileCmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(cmdInput.value).toBe('curl')
+    expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
+
+    restoreViewport()
+  })
+
+  it('exposes the shared composer input handler for visible mobile input changes', async () => {
+    const acShow = vi.fn()
+    const { handleComposerInputChange, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    mobileCmdInput.value = 'curl'
+    handleComposerInputChange(mobileCmdInput)
+
+    expect(cmdInput.value).toBe('curl')
+    expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
 
     restoreViewport()
   })
@@ -851,6 +1004,27 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
     expect(runBtn.hidden).toBe(true)
+
+    restoreViewport()
+  })
+
+  it('submits the visible mobile composer through the shared submit helper', async () => {
+    const submitVisibleComposerCommand = vi.fn(() => true)
+    const runCommand = vi.fn()
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      submitVisibleComposerCommand,
+      runCommand,
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
+
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    mobileCmdInput.value = 'curl darklab.sh'
+    mobileRunBtn.click()
+
+    expect(submitVisibleComposerCommand).toHaveBeenCalledWith({ dismissKeyboard: true, focusAfterSubmit: false })
+    expect(runCommand).not.toHaveBeenCalled()
 
     restoreViewport()
   })
@@ -1051,28 +1225,33 @@ describe('app helpers', () => {
   })
 
   it('supports the mobile edit bar actions', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { getVisibleComposerInput } = await loadAppFns()
     const press = (selector) => {
       document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }
 
+    const visibleInput = getVisibleComposerInput()
+    const cmdInput = document.getElementById('cmd')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
     cmdInput.value = 'ping -c 4 example.com'
+    mobileCmdInput.value = 'ping -c 4 example.com'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
 
     press('[data-edit-action="left"]')
-    expect(cmdInput.selectionStart).toBe(cmdInput.value.length - 1)
+    expect(visibleInput.selectionStart).toBe(visibleInput.value.length - 1)
 
     press('[data-edit-action="home"]')
-    expect(cmdInput.selectionStart).toBe(0)
+    expect(visibleInput.selectionStart).toBe(0)
 
     press('[data-edit-action="right"]')
-    expect(cmdInput.selectionStart).toBe(1)
+    expect(visibleInput.selectionStart).toBe(1)
 
     press('[data-edit-action="end"]')
-    expect(cmdInput.selectionStart).toBe(cmdInput.value.length)
+    expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
     press('[data-edit-action="delete-word"]')
-    expect(cmdInput.value).toBe('ping -c 4 ')
+    expect(visibleInput.value).toBe('ping -c 4 ')
   })
 
   it('uses Ctrl+C to open kill confirm when active tab is running', async () => {
@@ -1418,20 +1597,21 @@ describe('app helpers', () => {
 
   it('supports Enter and Escape in the kill confirmation modal', async () => {
     const doKill = vi.fn()
-    const { cmdInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
+    const { getVisibleComposerInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
+    const visibleInput = getVisibleComposerInput()
 
     showKillOverlay()
     expect(isKillOverlayOpen()).toBe(true)
     confirmPendingKill()
     expect(doKill).toHaveBeenCalledWith('tab-1')
     expect(isKillOverlayOpen()).toBe(false)
-    expect(cmdInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).toHaveBeenCalled()
 
-    cmdInput.focus.mockClear()
+    visibleInput.focus.mockClear()
     showKillOverlay()
     closeKillOverlay()
     expect(isKillOverlayOpen()).toBe(false)
-    expect(cmdInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).toHaveBeenCalled()
   })
 
   it('wires search controls and Escape dismissal correctly', async () => {
@@ -1451,15 +1631,34 @@ describe('app helpers', () => {
 
     searchBar.style.display = 'flex'
     searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 10))
     expect(searchBar.style.display).toBe('none')
     expect(clearSearch).toHaveBeenCalled()
-    expect(cmdInput.focus).toHaveBeenCalled()
 
     searchBar.style.display = 'none'
     document.getElementById('search-toggle-btn').click()
     document.getElementById('search-toggle-btn').click()
     expect(clearSearch).toHaveBeenCalledTimes(3)
     expect(searchBar.style.display).toBe('none')
+  })
+
+  it('refocuses the visible mobile composer after closing search with Escape', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const searchBar = document.getElementById('search-bar')
+    const searchInput = document.getElementById('search-input')
+    const visibleInput = getVisibleComposerInput()
+
+    document.getElementById('search-toggle-btn').click()
+    expect(searchBar.style.display).toBe('flex')
+
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    expect(searchBar.style.display).toBe('none')
+    expect(visibleInput.focus).toHaveBeenCalled()
+
+    restoreViewport()
   })
 
   it('opens and closes the FAQ overlay through the wired controls', async () => {
@@ -1478,21 +1677,38 @@ describe('app helpers', () => {
   })
 
   it('opens and closes the options overlay through the wired controls', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { getVisibleComposerInput } = await loadAppFns()
     const overlay = document.getElementById('options-overlay')
+    const visibleInput = getVisibleComposerInput()
 
     document.getElementById('options-btn').click()
     expect(overlay.classList.contains('open')).toBe(true)
 
     document.querySelector('.options-close').click()
     expect(overlay.classList.contains('open')).toBe(false)
-    expect(cmdInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).toHaveBeenCalled()
 
     document.querySelector('#mobile-menu [data-action="options"]').click()
     expect(overlay.classList.contains('open')).toBe(true)
 
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(overlay.classList.contains('open')).toBe(false)
+  })
+
+  it('blurs the visible mobile composer when opening options', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const overlay = document.getElementById('options-overlay')
+    const visibleInput = getVisibleComposerInput()
+    document.body.classList.add('mobile-terminal-mode')
+
+    document.getElementById('options-btn').click()
+
+    expect(overlay.classList.contains('open')).toBe(true)
+    expect(visibleInput.blur).toHaveBeenCalled()
+
+    restoreViewport()
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
@@ -1562,5 +1778,57 @@ describe('app helpers', () => {
     expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Click any command')
     expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
     expect(document.querySelectorAll('.allowed-chip')).toHaveLength(2)
+  })
+
+  it('loads FAQ command chips into the visible mobile composer and refocuses it', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            app_name: 'shell.darklab.sh',
+            version: '9.9',
+            default_theme: 'dark',
+            motd: '',
+            command_timeout_seconds: 120,
+            max_output_lines: 5000,
+            permalink_retention_days: 365,
+          }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: ['curl'],
+            groups: [{ name: 'Network', commands: ['curl'] }],
+          }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            items: [
+              { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const faqBtn = document.getElementById('faq-btn')
+    const chip = document.querySelector('.allowed-chip')
+
+    faqBtn.click()
+    expect(mobileCmdInput.blur).toHaveBeenCalled()
+
+    chip.click()
+
+    expect(mobileCmdInput.value).toBe('curl ')
+    expect(mobileCmdInput.focus).toHaveBeenCalled()
   })
 })

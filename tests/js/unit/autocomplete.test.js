@@ -4,6 +4,7 @@ function loadAutocompleteFns() {
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac')
   const mobileComposerHost = document.getElementById('mobile-composer-host')
+  const mobileCmdInput = document.getElementById('mobile-cmd')
 
   return fromDomScripts([
     'app/static/js/utils.js',
@@ -13,6 +14,8 @@ function loadAutocompleteFns() {
     cmdInput,
     acDropdown,
     mobileComposerHost,
+    mobileCmdInput,
+    getComposerValue: () => cmdInput.value,
     acSuggestions: [],
     acFiltered: [],
     acIndex: -1,
@@ -31,7 +34,9 @@ describe('autocomplete helpers', () => {
       <input id="cmd" />
       <div id="ac"></div>
       <div id="mobile-composer-host"></div>
+      <input id="mobile-cmd" />
     `
+    document.body.className = ''
   })
 
   it('hides the dropdown when there are no suggestions', () => {
@@ -53,6 +58,32 @@ describe('autocomplete helpers', () => {
     expect(item).not.toBeNull()
     expect(item.innerHTML).toContain('<span class="ac-match">pi</span>')
     expect(document.getElementById('ac').style.display).toBe('block')
+  })
+
+  it('renders suggestions from the shared composer value accessor when present', () => {
+    document.getElementById('cmd').value = ''
+    const { acShow } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'pi',
+      acSuggestions: [],
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      acShow,
+    }`)
+
+    acShow(['ping google.com'])
+
+    const item = document.querySelector('.ac-item')
+    expect(item.innerHTML).toContain('<span class="ac-match">pi</span>')
   })
 
   it('applies the active class to the indexed suggestion', () => {
@@ -77,6 +108,24 @@ describe('autocomplete helpers', () => {
     expect(input.value).toBe('nmap -sV')
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(focusSpy).toHaveBeenCalledTimes(1)
+  })
+
+  it('acAccept keeps focus on the visible mobile composer when mobile mode is active', () => {
+    const { acAccept } = loadAutocompleteFns()
+    const desktopInput = document.getElementById('cmd')
+    const mobileInput = document.getElementById('mobile-cmd')
+    const mobileFocusSpy = vi.spyOn(mobileInput, 'focus')
+    const desktopFocusSpy = vi.spyOn(desktopInput, 'focus')
+    document.body.classList.add('mobile-terminal-mode')
+    document.getElementById('ac').style.display = 'block'
+
+    acAccept('nmap -sV')
+
+    expect(mobileInput.value).toBe('nmap -sV')
+    expect(desktopInput.value).toBe('nmap -sV')
+    expect(document.getElementById('ac').style.display).toBe('none')
+    expect(mobileFocusSpy).toHaveBeenCalledTimes(1)
+    expect(desktopFocusSpy).not.toHaveBeenCalled()
   })
 
   it('mousedown on a suggestion accepts it without blurring the input', () => {

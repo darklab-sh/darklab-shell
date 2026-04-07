@@ -144,14 +144,7 @@ function _clearDesktopInput() {
 }
 
 function focusComposerInputAfterRun() {
-  const visibleInput = (typeof getVisibleMobileComposerInput === 'function')
-    ? getVisibleMobileComposerInput()
-    : null;
-  if (visibleInput && visibleInput !== cmdInput && typeof visibleInput.focus === 'function') {
-    visibleInput.focus();
-    return;
-  }
-  cmdInput.focus();
+  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
 }
 
 function interruptPromptLine(tabId = activeTabId) {
@@ -159,7 +152,7 @@ function interruptPromptLine(tabId = activeTabId) {
   if (t && t.st === 'running') return false;
   appendPromptNewline(tabId);
   _clearDesktopInput();
-  cmdInput.focus();
+  focusComposerInputAfterRun();
   if (tabId === activeTabId) setStatus('idle');
   return true;
 }
@@ -415,14 +408,28 @@ function submitCommand(rawCmd) {
   return true;
 }
 
-function runCommand() {
-  if (runBtn && runBtn.disabled) return;
-  const result = submitCommand(cmdInput.value);
+function submitComposerCommand(rawCmd, { dismissKeyboard = false, focusAfterSubmit = true } = {}) {
+  const result = submitCommand(rawCmd);
   if (result === true) {
     _clearDesktopInput();
-    focusComposerInputAfterRun();
-    if (typeof dismissMobileKeyboardAfterSubmit === 'function') dismissMobileKeyboardAfterSubmit();
+    if (focusAfterSubmit) focusComposerInputAfterRun();
+    if (dismissKeyboard && typeof dismissMobileKeyboardAfterSubmit === 'function') {
+      dismissMobileKeyboardAfterSubmit();
+    }
   } else if (result === 'settle') {
     focusComposerInputAfterRun();
   }
+  return result;
+}
+
+function submitVisibleComposerCommand({ rawCmd = null, dismissKeyboard = false, focusAfterSubmit = true } = {}) {
+  const value = typeof rawCmd === 'string'
+    ? rawCmd
+    : ((typeof getComposerValue === 'function') ? getComposerValue() : '');
+  return submitComposerCommand(value, { dismissKeyboard, focusAfterSubmit });
+}
+
+function runCommand() {
+  if (typeof isRunButtonDisabled === 'function' && isRunButtonDisabled()) return;
+  submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
 }

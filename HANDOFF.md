@@ -1,7 +1,7 @@
 # Phase 0 Handoff — Dedicated Mobile UI Plan
 
 Current branch: `v1.3`
-All 206 unit tests passing (`npm run test:unit`).
+All 226 unit tests passing (`npm run test:unit`).
 No uncommitted regressions — all changes are behavior-preserving.
 
 ---
@@ -25,7 +25,7 @@ The 25 inline `tabs.find(t => t.id === …)` call sites across runner.js, tabs.j
 
 ### 2. Removed redundant `typeof fn === 'function'` guards
 
-All the defensive `typeof fn === 'function' &&` guards were removed from app.js, runner.js, tabs.js, and welcome.js. Scripts load synchronously in a defined order; these guards were dead code. The only remaining `typeof` guards are for functions defined in later-loading scripts (e.g. `getVisibleMobileComposerInput`, `dismissMobileKeyboardAfterSubmit`, `_maybeMountDeferredPrompt`, `syncOutputPrefixes` — all defined in app.js which loads after runner.js/output.js).
+All the defensive `typeof fn === 'function' &&` guards were removed from app.js, runner.js, tabs.js, and welcome.js. Scripts load synchronously in a defined order; these guards were dead code. The only remaining `typeof` guards are for functions defined in later-loading scripts (e.g. `getVisibleComposerInput`, `dismissMobileKeyboardAfterSubmit`, `_maybeMountDeferredPrompt`, `syncOutputPrefixes` — all defined in app.js which loads after runner.js/output.js).
 
 ### 3. `submitCommand(rawCmd)` — DOM-free command entry point
 
@@ -78,7 +78,7 @@ Two explicit interfaces now sit on top of the shared state layer:
 
 - `state.js` source is read once at module load (`STATE_SRC` constant) and prepended to every eval'd script in `fromScript`, `fromDomScript`, and `fromDomScripts`.
 - `fromDomScripts` accepts an optional 4th `initCode` string that runs after state.js but before the script files, with injected globals in scope. Test loaders that inject `tabs` and `activeTabId` as parameters call `setTabs(tabs); setActiveTabId(activeTabId);` in initCode so `getTab()` / `getActiveTab()` find the right objects.
-- 206 unit tests across 11 files, all passing.
+- 226 unit tests across 11 files, all passing.
 
 ---
 
@@ -86,7 +86,7 @@ Two explicit interfaces now sit on top of the shared state layer:
 
 The shared state layer, composer/overlay helpers, DOM binding cache, module boundary comments, and tab-node helpers are all in place. The browser modules now rely on those shared helpers instead of ad hoc prompt or overlay state.
 
-The remaining implementation work now starts in Phase 2 with the dedicated visible mobile composer.
+The remaining implementation work now starts in Phase 3 with the mobile transcript and output model. Phase 2 is complete.
 
 ---
 
@@ -94,7 +94,7 @@ The remaining implementation work now starts in Phase 2 with the dedicated visib
 
 The template now includes a real `mobile-shell` root plus dedicated `mobile-shell-chrome`, `mobile-shell-transcript`, `mobile-shell-composer`, and `mobile-shell-overlays` mounts, and the mobile composer dock plus mobile menu are nested inside the shell as first-class mobile-owned UI instead of as separate runtime-moved siblings. The browser can therefore activate a structured mobile shell path instead of relying only on the desktop terminal wrapper. The current mobile behavior is still preserved, and the layout logic now resolves the shell, composer, and overlay refs through one combined mobile UI helper, binds and sets up the mobile composer interactions through helper functions, caches the shared top-level controls in `dom.js`, centralises tab-node lookups behind small tab helpers, and lets the shared state layer trust those cached bindings directly, while still moving the shell sections through grouped helpers in both directions and using a grouped visibility helper for the composer/prompt swap so the boundary is easier to extend.
 
-Phase 1 is complete. The remaining mobile work now starts in Phase 2 with the dedicated visible composer, followed by the transcript, autocomplete, and session/navigation polish in later phases.
+Phase 1 is complete. Phase 2 is complete as well. The remaining mobile work now starts in Phase 3 with the transcript and output model, followed by autocomplete, session/navigation, and overlay polish in later phases.
 
 ---
 
@@ -121,13 +121,12 @@ In the test harness (`new Function(...params, body)`), injected parameters **sha
 ### Mobile submit path (current state)
 ```
 user taps Run  →  _mobileSubmit() in app.js
-                  → sets mobileCmdInput.value = ''
-                  → calls runCommand()    ← still going through desktop wrapper
-                  → runCommand reads cmdInput.value (kept in sync with mobile input)
-                  → calls submitCommand(cmdInput.value)
+                  → reads the visible composer through getComposerValue()
+                  → calls submitComposerCommand(val, { dismissKeyboard: true, focusAfterSubmit: false })
+                  → submitCommand(val)
 ```
 
-`_mobileSubmit` deliberately routes through `runCommand()` so that `_clearDesktopInput()` runs (clearing the hidden desktop input that keyboard shortcuts and autocomplete use). This coupling is acceptable for now and will be replaced in Phase 2 when the mobile composer gets its own independent input path that calls `submitCommand` directly.
+`_mobileSubmit` now routes through the shared visible-submit helper directly. The visible mobile composer is the source of truth for the command text, `focusVisibleComposerInput()` / `blurVisibleComposerInput()` keep visible-input focus and blur on one path, `handleComposerInputChange()` lives in the shared state layer for both desktop and mobile input updates, and the shared composer-value accessor keeps the mobile and desktop inputs aligned while the transition continues. Phase 2 is complete; Phase 3 begins with the transcript and output model, then autocomplete, session/navigation, and overlay polish.
 
 ### Test harness pattern for new test files
 
@@ -154,7 +153,7 @@ The `initCode` string (4th arg) runs after state.js, before your script, with in
 
 ### Running tests
 ```bash
-npm run test:unit        # vitest run (all 206 unit tests)
+npm run test:unit        # vitest run (all 226 unit tests)
 npm run test:unit:watch  # vitest watch mode
 ```
 
