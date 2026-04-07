@@ -44,6 +44,9 @@ function loadRunnerFns({
   createTab = () => 'tab-2',
   addToHistory = () => {},
   appendLine = () => {},
+  getComposerValue: getComposerValueOverride = null,
+  getVisibleComposerInput: getVisibleComposerInputOverride = null,
+  welcomeActive = false,
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
@@ -64,16 +67,35 @@ function loadRunnerFns({
     <button id="run-btn"></button>
     <span id="status"></span>
     <span id="run-timer"></span>
+    <div id="mobile-shell" aria-hidden="true">
+      <div id="mobile-shell-composer">
+        <div id="mobile-composer-host">
+          <div id="mobile-composer-row">
+            <input id="mobile-cmd" />
+            <button id="mobile-run-btn"></button>
+          </div>
+        </div>
+      </div>
+    </div>
     <div id="history-panel"></div>
-    <button class="tab-kill-btn" data-tab="tab-1" style="display:inline-block"></button>
-    <div class="tab" data-id="tab-1"><span class="tab-status idle"></span></div>
+    <div id="tabs-bar">
+      <div class="tab" data-id="tab-1"><span class="tab-status idle"></span></div>
+    </div>
+    <div id="tab-panels">
+      <div class="tab-panel" data-id="tab-1">
+        <button class="tab-kill-btn" data-tab="tab-1" style="display:inline-block"></button>
+      </div>
+    </div>
   `
   const cmdInput = document.getElementById('cmd')
   const runBtn = document.getElementById('run-btn')
   const status = document.getElementById('status')
   const runTimer = document.getElementById('run-timer')
   const historyPanel = document.getElementById('history-panel')
+  const tabsBar = document.getElementById('tabs-bar')
+  const tabPanels = document.getElementById('tab-panels')
   cmdInput.value = cmdValue
+  Object.defineProperty(cmdInput, 'focus', { configurable: true, value: vi.fn() })
   cmdInput.blur = vi.fn()
 
   const setTabLabel = vi.fn()
@@ -99,8 +121,13 @@ function loadRunnerFns({
     status,
     runTimer,
     historyPanel,
+    tabsBar,
+    tabPanels,
+    mobileCmdInput: document.getElementById('mobile-cmd'),
+    mobileRunBtn: document.getElementById('mobile-run-btn'),
+    syncRunButtonDisabled: undefined,
     APP_CONFIG: appConfig,
-    _welcomeActive: false,
+    _welcomeActive: welcomeActive,
     _welcomeDone: false,
     searchBar: document.createElement('div'),
     addToHistory,
@@ -112,9 +139,12 @@ function loadRunnerFns({
     clearTab,
     cancelWelcome,
     welcomeOwnsTab,
+    requestWelcomeSettle: () => {},
     refreshHistoryPanel: () => {},
     showToast,
     dismissMobileKeyboardAfterSubmit,
+    ...(getComposerValueOverride ? { getComposerValue: getComposerValueOverride } : {}),
+    ...(getVisibleComposerInputOverride ? { getVisibleComposerInput: getVisibleComposerInputOverride } : {}),
     describeFetchError: (err, context = 'server') => {
       const message = err && err.message ? err.message : 'unknown network error'
       if (message === 'Failed to fetch' || message === 'network down') {
@@ -129,9 +159,13 @@ function loadRunnerFns({
   }, `{
     setStatus,
     doKill,
+    submitCommand,
+    submitComposerCommand,
+    submitVisibleComposerCommand,
+    interruptPromptLine,
     runCommand,
     _getPendingKillTabId: () => pendingKillTabId,
-  }`)
+  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
   return {
     ...fns,
@@ -143,6 +177,7 @@ function loadRunnerFns({
     clearTab,
     cancelWelcome,
     showToast,
+    interruptPromptLine: fns.interruptPromptLine,
   }
 }
 
@@ -478,5 +513,130 @@ describe('runner helpers', () => {
 
     expect(showToast).toHaveBeenCalledWith('Failed to send kill request; command may still be running')
     expect(appendLine).toHaveBeenCalledWith('[kill request failed] Unable to reach the server. Check that it is running and try again.', 'notice', 'tab-1')
+  })
+})
+
+describe('submitCommand return contract', () => {
+  it('returns true on empty input (blank Enter)', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+    })
+    expect(submitCommand('   ')).toBe(true)
+  })
+
+  it("returns 'settle' on empty input during active welcome", () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      welcomeActive: true,
+      welcomeOwnsTab: () => true,
+    })
+    expect(submitCommand('')).toBe('settle')
+  })
+
+  it('returns false when shell operators are rejected', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+    })
+    expect(submitCommand('ping x | cat /etc/passwd')).toBe(false)
+  })
+
+  it('returns false when /tmp path is denied', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+    })
+    expect(submitCommand('cat /tmp/secret')).toBe(false)
+  })
+
+  it('returns true when a valid command is submitted', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+    })
+    expect(submitCommand('ping darklab.sh')).toBe(true)
+  })
+
+  it('submitComposerCommand clears the input and dismisses the keyboard after submit', () => {
+    const dismissMobileKeyboardAfterSubmit = vi.fn()
+    const { submitComposerCommand, cmdInput } = loadRunnerFns({
+      cmdValue: 'ping darklab.sh',
+      apiFetch: vi.fn(() => Promise.resolve()),
+      dismissMobileKeyboardAfterSubmit,
+    })
+
+    submitComposerCommand('ping darklab.sh', { dismissKeyboard: true })
+
+    expect(cmdInput.value).toBe('')
+    expect(cmdInput.focus).toHaveBeenCalled()
+    expect(dismissMobileKeyboardAfterSubmit).toHaveBeenCalled()
+  })
+
+  it('submitComposerCommand can skip refocusing after a mobile submit', () => {
+    const dismissMobileKeyboardAfterSubmit = vi.fn()
+    const { submitComposerCommand, cmdInput } = loadRunnerFns({
+      cmdValue: 'ping darklab.sh',
+      apiFetch: vi.fn(() => Promise.resolve()),
+      dismissMobileKeyboardAfterSubmit,
+    })
+
+    submitComposerCommand('ping darklab.sh', { dismissKeyboard: true, focusAfterSubmit: false })
+
+    expect(cmdInput.value).toBe('')
+    expect(cmdInput.focus).not.toHaveBeenCalled()
+    expect(dismissMobileKeyboardAfterSubmit).toHaveBeenCalled()
+  })
+
+  it('submitVisibleComposerCommand reads the visible composer value and submits it', () => {
+    const apiFetch = vi.fn(() => Promise.resolve())
+    const { submitVisibleComposerCommand } = loadRunnerFns({
+      apiFetch,
+      getComposerValue: () => 'curl darklab.sh',
+    })
+
+    submitVisibleComposerCommand({ dismissKeyboard: true, focusAfterSubmit: false })
+
+    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'curl darklab.sh' }),
+    }))
+  })
+
+  it('submitVisibleComposerCommand can submit an explicit raw command', () => {
+    const apiFetch = vi.fn(() => Promise.resolve())
+    const { submitVisibleComposerCommand } = loadRunnerFns({
+      apiFetch,
+      getComposerValue: () => 'ignored',
+    })
+
+    submitVisibleComposerCommand({ rawCmd: 'curl explicit.sh', dismissKeyboard: true, focusAfterSubmit: false })
+
+    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'curl explicit.sh' }),
+    }))
+  })
+
+  it('interruptPromptLine refocuses the visible mobile composer when present', () => {
+    const visibleInput = { focus: vi.fn() }
+    const { interruptPromptLine, cmdInput } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      getVisibleComposerInput: () => visibleInput,
+    })
+
+    expect(interruptPromptLine('tab-1')).toBe(true)
+    expect(visibleInput.focus).toHaveBeenCalled()
+    expect(cmdInput.focus).not.toHaveBeenCalled()
+  })
+
+  it('returns false when the tab limit is reached', () => {
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'running', runId: null, killed: false, pendingKill: false }],
+      apiFetch: vi.fn(() => Promise.resolve()),
+      createTab: () => null, // signals tab limit reached
+    })
+    expect(submitCommand('ping darklab.sh')).toBe(false)
   })
 })

@@ -1,4 +1,4 @@
-// ── SSE stall detection ──
+// ── Shared command execution + desktop input wrapper ──
 // If no chunk arrives from the SSE stream for 45 seconds (> 2× the 20s server heartbeat),
 // the connection has silently died. Surface a notice and reset the UI so the user isn't
 // left with a perpetually-spinning tab. The command may still be running server-side;
@@ -9,7 +9,7 @@ const _stalledTimeouts = new Map();
 function _resetStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
   _stalledTimeouts.set(tabId, setTimeout(() => {
-    const t = tabs.find(t => t.id === tabId);
+    const t = getTab(tabId);
     if (!t || t.killed) return;  // already handled
     appendLine('[connection stalled — command may still be running on the server]', 'notice', tabId);
     appendLine('[check the history panel for the result once it completes]', 'notice', tabId);
@@ -32,8 +32,6 @@ function setStatus(s) {
 }
 
 // ── Run timer ──
-let timerInterval = null;
-let timerStart = null;
 
 // Format a duration in seconds as a compact human-readable string.
 // Examples: 32.6 → "32.6s", 125.0 → "2m 5.0s", 3812.3 → "1h 3m 32.3s"
@@ -47,7 +45,7 @@ function _formatElapsed(totalSecs) {
 
 function startTimer() {
   timerStart = Date.now();
-  runTimer.style.display = 'inline';
+  showRunTimer();
   timerInterval = setInterval(() => {
     runTimer.textContent = _formatElapsed((Date.now() - timerStart) / 1000);
   }, 100);
@@ -56,8 +54,7 @@ function startTimer() {
 function stopTimer() {
   clearInterval(timerInterval);
   timerInterval = null;
-  runTimer.style.display = 'none';
-  runTimer.textContent = '';
+  hideRunTimer();
 }
 
 function elapsedSeconds() {
@@ -66,20 +63,24 @@ function elapsedSeconds() {
 
 // ── Kill button ──
 function getTabKillBtn(tabId) {
-  return document.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`);
+  return tabPanels ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
 }
 
-function showTabKillBtn(tabId) {
+function _showTabKillBtnFallback(tabId) {
   const btn = getTabKillBtn(tabId);
-  if (btn) btn.style.display = 'inline-block';
+  setDisplayState(btn, true, 'inline-block');
 }
 
-function hideTabKillBtn(tabId) {
+function _hideTabKillBtnFallback(tabId) {
   const btn = getTabKillBtn(tabId);
-  if (btn) btn.style.display = 'none';
+  setDisplayState(btn, false, 'inline-block');
 }
 
 function _setRunButtonDisabled(disabled) {
+  if (typeof syncRunButtonDisabled === 'function') {
+    syncRunButtonDisabled();
+    return;
+  }
   if (typeof setRunButtonDisabled === 'function') {
     setRunButtonDisabled(disabled);
     return;
@@ -88,13 +89,11 @@ function _setRunButtonDisabled(disabled) {
 }
 
 function _describeRunnerFetchError(err, context = 'server') {
-  if (typeof describeFetchError === 'function') return describeFetchError(err, context);
-  const message = err && err.message ? err.message : 'unknown network error';
-  return `Request to the ${context} failed: ${message}`;
+  return describeFetchError(err, context);
 }
 
 function _logRunnerError(context, err) {
-  if (typeof logClientError === 'function') logClientError(context, err);
+  logClientError(context, err);
 }
 
 function _handleKillRequestFailure(err, tabId) {
@@ -144,38 +143,33 @@ function appendPromptNewline(tabId) {
   appendLine('', 'prompt-echo', tabId);
 }
 
+function _clearDesktopInput() {
+  setComposerValue('', 0, 0);
+}
+
 function focusComposerInputAfterRun() {
-  const visibleInput = (typeof getVisibleMobileComposerInput === 'function')
-    ? getVisibleMobileComposerInput()
-    : null;
-  if (visibleInput && visibleInput !== cmdInput && typeof visibleInput.focus === 'function') {
-    visibleInput.focus();
-    return;
-  }
-  cmdInput.focus();
+  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
 }
 
 function interruptPromptLine(tabId = activeTabId) {
-  const t = tabs.find(tab => tab.id === tabId);
+  const t = getTab(tabId);
   if (t && t.st === 'running') return false;
   appendPromptNewline(tabId);
-  cmdInput.value = '';
-  cmdInput.dispatchEvent(new Event('input'));
-  cmdInput.focus();
+  _clearDesktopInput();
+  focusComposerInputAfterRun();
   if (tabId === activeTabId) setStatus('idle');
   return true;
 }
 
 // ── Kill confirmation modal ──
-let pendingKillTabId = null;
-
 function confirmKill(tabId) {
   pendingKillTabId = tabId;
-  killOverlay.style.display = 'flex';
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  showKillOverlay();
 }
 
 function doKill(tabId) {
-  const t = tabs.find(t => t.id === tabId);
+  const t = getTab(tabId);
   if (!t || t.st !== 'running') return;
   const secs = elapsedSeconds();
   if (t.runId) {
@@ -203,25 +197,24 @@ function doKill(tabId) {
 }
 
 // ── Run command ──
-function runCommand() {
-  if (runBtn && runBtn.disabled) return;
-  const raw = cmdInput.value;
-  const cmd = raw.trim();
+// submitCommand(rawCmd) is the shared entry point for executing a command
+// string. It does not read from or write to any DOM input — the caller
+// supplies the value and owns input cleanup afterward.
+//
+// Return values (callers use these to decide what to do with their input):
+//   'settle'  — empty input during welcome; caller should focus without clearing
+//   true      — command submitted; caller should clear input and focus
+//   false     — rejected or blocked; caller should leave input as-is
+function submitCommand(rawCmd) {
+  const cmd = (rawCmd || '').trim();
   if (!cmd) {
-    if (
-      typeof _welcomeActive !== 'undefined' && _welcomeActive
-      && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)
-    ) {
-      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle(activeTabId);
-      focusComposerInputAfterRun();
-      return;
+    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+      requestWelcomeSettle(activeTabId);
+      return 'settle';
     }
     appendPromptNewline(activeTabId);
-    cmdInput.value = '';
-    cmdInput.dispatchEvent(new Event('input'));
-    focusComposerInputAfterRun();
     setStatus('idle');
-    return;
+    return true;
   }
 
   // If the active tab is currently running a command, open a new tab automatically
@@ -235,10 +228,10 @@ function runCommand() {
     clearTab(activeTabId);
   }
 
-  const activeTab = tabs.find(t => t.id === activeTabId);
+  const activeTab = getActiveTab();
   if (activeTab && activeTab.st === 'running') {
     const newId = createTab('tab ' + (tabs.length + 1));
-    if (!newId) return; // tab limit reached — createTab already showed a toast
+    if (!newId) return false; // tab limit reached — createTab already showed a toast
     // createTab calls activateTab internally, so activeTabId now points to the new tab
   }
 
@@ -248,27 +241,24 @@ function runCommand() {
     appendCommandEcho(cmd);
     appendLine('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied');
     setStatus('fail');
-    return;
+    return false;
   }
 
   if (/(?<![\w:\/])\/data\b/.test(cmd) || /(?<![\w:\/])\/tmp\b/.test(cmd)) {
     appendCommandEcho(cmd);
     appendLine('[denied] Access to /data and /tmp is not permitted.', 'denied');
     setStatus('fail');
-    return;
+    return false;
   }
 
   addToHistory(cmd);
-  if (!activeTab || !activeTab.renamed) setTabLabel(activeTabId, cmd);
-  const _cmdTab = tabs.find(t => t.id === activeTabId);
-  if (_cmdTab) _cmdTab.command = cmd;
+  // Re-lookup the active tab after the potential createTab() call above, which
+  // may have changed activeTabId to point at the newly created tab.
+  const _runTab = getActiveTab();
+  if (!_runTab || !_runTab.renamed) setTabLabel(activeTabId, cmd);
+  if (_runTab) _runTab.command = cmd;
   appendCommandEcho(cmd);
-  cmdInput.value = '';
-  cmdInput.dispatchEvent(new Event('input'));
-  focusComposerInputAfterRun();
-  if (typeof dismissMobileKeyboardAfterSubmit === 'function') dismissMobileKeyboardAfterSubmit();
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
-  const _runTab = tabs.find(t => t.id === activeTabId);
   if (_runTab) {
     _runTab.runStart = Date.now();
     _runTab.currentRunStartIndex = _runTab.rawLines.length;
@@ -338,7 +328,7 @@ function runCommand() {
             try {
               const msg = JSON.parse(part.slice(6));
               if (msg.type === 'started') {
-                const t = tabs.find(t => t.id === tabId);
+                const t = getTab(tabId);
                 if (t) {
                   t.runId = msg.run_id;
                   t.historyRunId = msg.run_id;
@@ -359,7 +349,7 @@ function runCommand() {
                 appendLine(msg.text, 'notice', tabId);
               } else if (msg.type === 'clear') {
                 clearTab(tabId);
-                const t = tabs.find(t => t.id === tabId);
+                const t = getTab(tabId);
                 if (t) t.syntheticClear = true;
               } else if (msg.type === 'output') {
                 msg.text.split('\n').forEach((line, i, arr) => {
@@ -367,7 +357,7 @@ function runCommand() {
                 });
               } else if (msg.type === 'exit') {
                 _clearStalledTimeout(tabId);
-                const t = tabs.find(t => t.id === tabId);
+                const t = getTab(tabId);
                 if (t) {
                   t.exitCode = msg.code;
                   t.runId = null;
@@ -381,7 +371,11 @@ function runCommand() {
                   t.killed = false;
                   stopTimer();
                   _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-                  if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+                  if (t.closing && typeof finalizeClosingTab === 'function') {
+                    finalizeClosingTab(tabId);
+                    if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  }
+                  if (isHistoryPanelOpen()) refreshHistoryPanel();
                   return;
                 }
                 const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
@@ -400,7 +394,12 @@ function runCommand() {
                 }
                 if (t) t.syntheticClear = false;
                 _setRunButtonDisabled(false); hideTabKillBtn(tabId);
-                if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+                if (t && t.closing && typeof finalizeClosingTab === 'function') {
+                  finalizeClosingTab(tabId);
+                  if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  return;
+                }
+                if (isHistoryPanelOpen()) refreshHistoryPanel();
                 if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
               } else if (msg.type === 'error') {
                 _clearStalledTimeout(tabId);
@@ -420,4 +419,31 @@ function runCommand() {
     _clearStalledTimeout(tabId);
     _handleRunTransportFailure(err, tabId);
   });
+  return true;
+}
+
+function submitComposerCommand(rawCmd, { dismissKeyboard = false, focusAfterSubmit = true } = {}) {
+  const result = submitCommand(rawCmd);
+  if (result === true) {
+    _clearDesktopInput();
+    if (focusAfterSubmit) focusComposerInputAfterRun();
+    if (dismissKeyboard && typeof dismissMobileKeyboardAfterSubmit === 'function') {
+      dismissMobileKeyboardAfterSubmit();
+    }
+  } else if (result === 'settle') {
+    focusComposerInputAfterRun();
+  }
+  return result;
+}
+
+function submitVisibleComposerCommand({ rawCmd = null, dismissKeyboard = false, focusAfterSubmit = true } = {}) {
+  const value = typeof rawCmd === 'string'
+    ? rawCmd
+    : ((typeof getComposerValue === 'function') ? getComposerValue() : '');
+  return submitComposerCommand(value, { dismissKeyboard, focusAfterSubmit });
+}
+
+function runCommand() {
+  if (typeof isRunButtonDisabled === 'function' && isRunButtonDisabled()) return;
+  submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
 }

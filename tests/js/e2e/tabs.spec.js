@@ -4,6 +4,7 @@ import { runCommand } from './helpers.js'
 // Use allowed commands that complete quickly.
 const CMD   = 'curl http://localhost:5001/health'
 const CMD_B = 'curl http://localhost:5001/config'
+const LONG_CMD = 'ping -c 1000 127.0.0.1'
 
 test.describe('max tabs', () => {
   test.beforeEach(async ({ page }) => {
@@ -100,6 +101,22 @@ test.describe('tab command recall', () => {
 
     // Input stays neutral across tab switches
     await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('running a command in one tab does not block another tab from running', async ({ page }) => {
+    await page.locator('#cmd').fill(LONG_CMD)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await page.locator('#cmd').fill(CMD_B)
+    await page.keyboard.press('Enter')
+
+    await expect(page.locator('.tab-panel.active .output .line.exit-ok')).toBeVisible({ timeout: 15_000 })
+    await page.locator('.tab').first().click()
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
   })
 
   test('a freshly created tab starts with an empty input', async ({ page }) => {

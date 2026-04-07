@@ -227,7 +227,7 @@ test.describe('welcome animation', () => {
     test('switches to the mobile welcome path with the mobile banner', async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 })
       await page.reload()
-      await page.locator('#cmd').waitFor()
+      await page.locator('#mobile-cmd').waitFor()
 
       await expect(page.locator('.welcome-ascii-art')).toContainText('mobile console')
       await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })

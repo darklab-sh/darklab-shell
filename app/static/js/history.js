@@ -1,4 +1,4 @@
-// ── Starred commands ──
+// ── Shared history/permalink logic ──
 // Stored in localStorage as a JSON array of command strings.
 // Stars float starred items to the top of both the chips row and history panel.
 
@@ -17,10 +17,6 @@ function _toggleStar(cmd) {
 
 
 // ── Command history chips ──
-let cmdHistory = [];
-let _cmdHistoryNavIndex = -1;
-let _cmdHistoryNavDraft = '';
-let _suspendCmdHistoryNavReset = false;
 
 function resetCmdHistoryNav() {
   _cmdHistoryNavIndex = -1;
@@ -39,9 +35,8 @@ function navigateCmdHistory(delta) {
     } else {
       return true;
     }
-    cmdInput.value = cmdHistory[_cmdHistoryNavIndex];
     _suspendCmdHistoryNavReset = true;
-    cmdInput.dispatchEvent(new Event('input'));
+    setComposerValue(cmdHistory[_cmdHistoryNavIndex]);
     return true;
   }
 
@@ -49,14 +44,12 @@ function navigateCmdHistory(delta) {
     if (_cmdHistoryNavIndex === -1) return false;
     if (_cmdHistoryNavIndex > 0) {
       _cmdHistoryNavIndex--;
-      cmdInput.value = cmdHistory[_cmdHistoryNavIndex];
       _suspendCmdHistoryNavReset = true;
-      cmdInput.dispatchEvent(new Event('input'));
+      setComposerValue(cmdHistory[_cmdHistoryNavIndex]);
       return true;
     }
-    cmdInput.value = _cmdHistoryNavDraft;
     _suspendCmdHistoryNavReset = true;
-    cmdInput.dispatchEvent(new Event('input'));
+    setComposerValue(_cmdHistoryNavDraft);
     resetCmdHistoryNav();
     return true;
   }
@@ -87,8 +80,8 @@ function hydrateCmdHistory(runs) {
 
 function renderHistory() {
   while (histRow.children.length > 1) histRow.removeChild(histRow.lastChild);
-  if (!cmdHistory.length) { histRow.style.display = 'none'; return; }
-  histRow.style.display = 'flex';
+  if (!cmdHistory.length) { hideHistoryRow(); return; }
+  showHistoryRow();
 
   const starred = _getStarred();
   // Starred commands first, then remaining in recency order
@@ -122,26 +115,8 @@ function renderHistory() {
     chip.appendChild(starEl);
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
-      const targetInput = (typeof getVisibleMobileComposerInput === 'function')
-        ? getVisibleMobileComposerInput()
-        : cmdInput;
-      if (targetInput) {
-        targetInput.value = cmd;
-        if (typeof targetInput.setSelectionRange === 'function') {
-          const end = cmd.length;
-          targetInput.setSelectionRange(end, end);
-        }
-        targetInput.dispatchEvent(new Event('input'));
-        if (typeof targetInput.focus === 'function') targetInput.focus();
-      }
-      if (cmdInput && targetInput !== cmdInput) {
-        cmdInput.value = cmd;
-        if (typeof cmdInput.setSelectionRange === 'function') {
-          const end = cmd.length;
-          cmdInput.setSelectionRange(end, end);
-        }
-        cmdInput.dispatchEvent(new Event('input'));
-      }
+      setComposerValue(cmd, cmd.length, cmd.length);
+      if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
       resetCmdHistoryNav();
     });
     histRow.appendChild(chip);
@@ -154,7 +129,7 @@ function renderHistory() {
     overflowChip.title = 'Open history panel';
     overflowChip.addEventListener('click', () => {
       if (!historyPanel) return;
-      historyPanel.classList.add('open');
+      showHistoryPanel();
       if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
     });
     histRow.appendChild(overflowChip);
@@ -167,19 +142,18 @@ let pendingHistAction = null;
 
 function confirmHistAction(type, id, command) {
   pendingHistAction = { type, id, command };
-  const msg      = document.getElementById('hist-del-msg');
-  const nonfav   = document.getElementById('hist-del-nonfav');
-  const confirm  = document.getElementById('hist-del-confirm');
+  const msg      = histDelMsg;
+  const confirm  = histDelConfirmBtn;
   if (type === 'clear') {
     msg.innerHTML = 'Clear run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
-    nonfav.style.display  = 'inline-block';
+    showHistoryDeleteNonfav();
     confirm.textContent   = 'Delete all';
   } else {
     msg.innerHTML = 'Remove this run from history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
-    nonfav.style.display  = 'none';
+    hideHistoryDeleteNonfav();
     confirm.textContent   = 'Delete';
   }
-  histDelOverlay.style.display = 'flex';
+  showHistoryDeleteOverlay();
 }
 
 function executeHistAction(type) {
@@ -224,8 +198,8 @@ function executeHistAction(type) {
 
 function _setHistoryLoadState(loading) {
   if (!historyLoadOverlay) return;
-  historyLoadOverlay.classList.toggle('open', !!loading);
-  historyLoadOverlay.setAttribute('aria-hidden', loading ? 'false' : 'true');
+  if (loading) showHistoryLoadOverlay();
+  else hideHistoryLoadOverlay();
 }
 
 function refreshHistoryPanel() {
@@ -275,7 +249,7 @@ function refreshHistoryPanel() {
         const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
         if (existing && !canUpgradeExisting) {
           activateTab(existing.id);
-          historyPanel.classList.remove('open');
+          hideHistoryPanel();
           return;
         }
 
@@ -291,7 +265,7 @@ function refreshHistoryPanel() {
             const previewNotice = fullRun.preview_notice || null;
             const newId = canUpgradeExisting ? existing.id : createTab(fullRun.command);
             if (canUpgradeExisting) clearTab(newId);
-            const t = tabs.find(t => t.id === newId);
+            const t = getTab(newId);
             if (t) {
               t.command = fullRun.command;
               t.previewTruncated = !!previewNotice;
@@ -305,7 +279,7 @@ function refreshHistoryPanel() {
               appendLine(previewNotice, 'notice', newId);
             }
             appendLine(`[history — exit ${fullRun.exit_code}]`, fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail', newId);
-            historyPanel.classList.remove('open');
+            hideHistoryPanel();
           })
           .catch(() => {
             entry.querySelector('.history-entry-cmd').textContent = run.command;
@@ -329,6 +303,8 @@ function refreshHistoryPanel() {
         copyTextToClipboard(run.command)
           .then(() => showToast('Command copied to clipboard'))
           .catch(() => showToast('Failed to copy command', 'error'));
+        const btn = entry.querySelector('[data-action="copy"]');
+        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
@@ -336,9 +312,13 @@ function refreshHistoryPanel() {
         copyTextToClipboard(url)
           .then(() => showToast('Link copied to clipboard'))
           .catch(() => showToast('Failed to copy link', 'error'));
+        const btn = entry.querySelector('[data-action="permalink"]');
+        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
         confirmHistAction('delete', run.id, run.command);
+        const btn = entry.querySelector('[data-action="delete"]');
+        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });
 
       historyList.appendChild(entry);

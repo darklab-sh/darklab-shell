@@ -152,6 +152,30 @@ test.describe('permalink / share', () => {
       .toContainEqual(expect.stringContaining('+'))
   })
 
+  test('permalink page honors line-number and timestamp cookies on load', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    const [shareResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
+      page.locator('[data-action="permalink"]').click(),
+    ])
+    const data = await shareResp.json()
+
+    await page.context().addCookies([
+      { name: 'pref_line_numbers', value: 'on', url: 'http://localhost:5001' },
+      { name: 'pref_timestamps', value: 'elapsed', url: 'http://localhost:5001' },
+    ])
+
+    await page.goto(data.url)
+
+    await expect(page.locator('#toggle-ln')).toHaveText('line numbers: on')
+    await expect(page.locator('#toggle-ts')).toHaveText('timestamps: elapsed')
+    await expect(page.locator('.perm-prefix').first()).toContainText('1')
+    await expect
+      .poll(async () => page.locator('.perm-prefix').allTextContents())
+      .toContainEqual(expect.stringContaining('+'))
+  })
+
   test('permalink exports use timestamped filenames for txt and html downloads', async ({ page }) => {
     await runCommand(page, CMD)
 

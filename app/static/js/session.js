@@ -1,4 +1,4 @@
-// ── Anonymous session ID ──
+// ── Shared utility module ──
 // Generated once per browser, persisted in localStorage.
 // Sent as X-Session-ID on every API request so run history is scoped per user.
 let SESSION_ID = localStorage.getItem('session_id');

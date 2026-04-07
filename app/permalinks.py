@@ -265,8 +265,16 @@ pointer-events:none;">Copied to clipboard</div>
   const out = document.getElementById('output');
   const plainClasses = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
   const tsModes = ['off', 'elapsed', 'clock'];
-  let lnMode = 'off';
-  let tsMode = 'off';
+  function getCookie(name) {{
+    const prefix = `${{name}}=`;
+    const match = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix));
+    return match ? decodeURIComponent(match.slice(prefix.length)) : '';
+  }}
+  const prefLineNumbers = getCookie('pref_line_numbers');
+  const prefTimestamps = getCookie('pref_timestamps');
+  let lnMode = prefLineNumbers === 'on' ? 'on' : 'off';
+  let tsMode = tsModes.includes(prefTimestamps) ? prefTimestamps : 'off';
+  if (!hasTimestampMetadata) tsMode = 'off';
 
   function renderPromptEcho(text) {{
     const raw = String(text || '');

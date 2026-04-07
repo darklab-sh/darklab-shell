@@ -13,6 +13,8 @@ async function loadAppFns({
   welcomeActive = false,
   welcomeOwnsTab: welcomeOwnsTabOverride = () => false,
   runCommand: runCommandOverride = vi.fn(),
+  submitComposerCommand: submitComposerCommandOverride = vi.fn(),
+  submitVisibleComposerCommand: submitVisibleComposerCommandOverride = vi.fn(),
   createTab: createTabOverride = vi.fn(() => 'tab-1'),
   closeTab: closeTabOverride = vi.fn(),
   activateTab: activateTabOverride = vi.fn(),
@@ -22,6 +24,7 @@ async function loadAppFns({
   cancelWelcome: cancelWelcomeOverride = vi.fn(),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
+  acSuggestions: acSuggestionsOverride = [],
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
   acHide: acHideOverride = () => {},
@@ -50,7 +53,37 @@ async function loadAppFns({
     <div id="version-label"></div>
     <div id="motd"></div>
     <div id="motd-wrap"></div>
-    <div id="mobile-shell" aria-hidden="true"></div>
+    <div id="mobile-shell" aria-hidden="true">
+      <div id="mobile-shell-chrome"></div>
+      <div id="mobile-shell-transcript"></div>
+      <div id="mobile-shell-composer">
+        <div id="mobile-composer-host">
+          <div id="mobile-edit-bar">
+            <button data-edit-action="home"></button>
+            <button data-edit-action="left"></button>
+            <button data-edit-action="right"></button>
+            <button data-edit-action="end"></button>
+            <button data-edit-action="delete-word"></button>
+          </div>
+          <div id="mobile-composer-row">
+            <span class="mobile-prompt-label">$</span>
+            <input id="mobile-cmd" />
+            <button id="mobile-run-btn"></button>
+          </div>
+        </div>
+      </div>
+      <div id="mobile-shell-overlays">
+        <div id="mobile-menu">
+          <button data-action="ln"></button>
+          <button data-action="ts"></button>
+          <button data-action="search"></button>
+          <button data-action="history"></button>
+          <button data-action="options"></button>
+          <button data-action="theme"></button>
+          <button data-action="faq"></button>
+        </div>
+      </div>
+    </div>
     <div class="terminal-wrap">
       <div id="history-row" class="history-row" style="display:none">
         <span class="history-label">Recent:</span>
@@ -89,29 +122,8 @@ async function loadAppFns({
         </div>
       </div>
       <div id="tab-panels"></div>
-    <div id="mobile-composer-host">
-        <div id="mobile-edit-bar">
-          <button data-edit-action="home"></button>
-          <button data-edit-action="left"></button>
-          <button data-edit-action="right"></button>
-          <button data-edit-action="end"></button>
-          <button data-edit-action="delete-word"></button>
-        </div>
-        <div id="mobile-composer-row">
-          <button id="mobile-run-btn"></button>
-        </div>
-      </div>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
-      <div id="mobile-menu">
-        <button data-action="ln"></button>
-        <button data-action="ts"></button>
-        <button data-action="search"></button>
-        <button data-action="history"></button>
-        <button data-action="options"></button>
-        <button data-action="theme"></button>
-        <button data-action="faq"></button>
-      </div>
       <div id="faq-overlay"></div>
       <button class="faq-close"></button>
       <div class="faq-body"></div>
@@ -131,6 +143,7 @@ async function loadAppFns({
       </div>
       <div id="history-panel"></div>
       <div id="history-list"></div>
+      <div id="permalink-toast"></div>
       <div id="kill-overlay"></div>
       <div id="hist-del-overlay"></div>
       <div class="prompt-wrap"></div>
@@ -172,12 +185,84 @@ async function loadAppFns({
   const logClientError = vi.fn()
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac-dropdown')
+  const domBindings = {
+    hamburgerBtn: document.getElementById('hamburger-btn'),
+    faqBtn: document.getElementById('faq-btn'),
+    faqCloseBtn: document.querySelector('.faq-close'),
+    optionsBtn: document.getElementById('options-btn'),
+    optionsCloseBtn: document.querySelector('.options-close'),
+    newTabBtn: document.getElementById('new-tab-btn'),
+    searchToggleBtn: document.getElementById('search-toggle-btn'),
+    histBtn: document.getElementById('hist-btn'),
+    historyCloseBtn: document.getElementById('history-close'),
+    histClearAllBtn: document.getElementById('hist-clear-all-btn'),
+    histDelCancelBtn: document.getElementById('hist-del-cancel'),
+    histDelNonfavBtn: document.getElementById('hist-del-nonfav'),
+    histDelConfirmBtn: document.getElementById('hist-del-confirm'),
+    killCancelBtn: document.getElementById('kill-cancel'),
+    killConfirmBtn: document.getElementById('kill-confirm'),
+    searchPrevBtn: document.getElementById('search-prev'),
+    searchNextBtn: document.getElementById('search-next'),
+    optionsTsSelect: document.getElementById('options-ts-select'),
+    optionsLnToggle: document.getElementById('options-ln-toggle'),
+    tsBtn: document.getElementById('ts-btn'),
+    lnBtn: document.getElementById('ln-btn'),
+    themeBtn: document.getElementById('theme-btn'),
+    headerTitle: document.querySelector('header h1'),
+    themePrefInputs: document.querySelectorAll('input[name="theme-pref"]'),
+    faqBody: document.querySelector('.faq-body'),
+    faqLimitsText: document.getElementById('faq-limits-text'),
+    faqAllowedText: document.getElementById('faq-allowed-text'),
+    versionLabel: document.getElementById('version-label'),
+    motd: document.getElementById('motd'),
+    motdWrap: document.getElementById('motd-wrap'),
+    status: document.getElementById('status'),
+    histRow: document.getElementById('history-row'),
+    tabsBar: document.getElementById('tabs-bar'),
+    tabPanels: document.getElementById('tab-panels'),
+    mobileShell: document.getElementById('mobile-shell'),
+    mobileShellChrome: document.getElementById('mobile-shell-chrome'),
+    mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
+    mobileShellComposer: document.getElementById('mobile-shell-composer'),
+    mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
+    mobileComposerHost: document.getElementById('mobile-composer-host'),
+    mobileComposerRow: document.getElementById('mobile-composer-row'),
+    mobileEditBar: document.getElementById('mobile-edit-bar'),
+    mobileCmdInput: document.getElementById('mobile-cmd'),
+    mobileRunBtn: document.getElementById('mobile-run-btn'),
+    mobileMenu: document.getElementById('mobile-menu'),
+    searchBar: document.getElementById('search-bar'),
+    searchInput: document.getElementById('search-input'),
+    searchCount: document.getElementById('search-count'),
+    historyPanel: document.getElementById('history-panel'),
+    historyList: document.getElementById('history-list'),
+    historyLoadOverlay: document.getElementById('history-load-overlay'),
+    acDropdown,
+    killOverlay: document.getElementById('kill-overlay'),
+    histDelOverlay: document.getElementById('hist-del-overlay'),
+    faqOverlay: document.getElementById('faq-overlay'),
+    optionsOverlay: document.getElementById('options-overlay'),
+    permalinkToast: document.getElementById('permalink-toast'),
+    runTimer: document.getElementById('run-timer'),
+    searchCaseBtn: document.getElementById('search-case-btn'),
+    searchRegexBtn: document.getElementById('search-regex-btn'),
+    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+    shellPromptLine: document.getElementById('shell-prompt-line'),
+    shellPromptText: document.getElementById('shell-prompt-text'),
+    shellPromptCaret: document.getElementById('shell-prompt-caret'),
+    shellInputRow: document.getElementById('shell-input-row'),
+    runBtn: document.getElementById('run-btn'),
+  }
   cmdInput.focus = vi.fn()
   cmdInput.blur = vi.fn()
   const shellPromptWrapEl = document.getElementById('shell-prompt-wrap')
   shellPromptWrapEl.scrollIntoView = vi.fn()
   const mobileComposerHostEl = document.getElementById('mobile-composer-host')
   mobileComposerHostEl.scrollIntoView = vi.fn()
+  const mobileCmdInput = document.getElementById('mobile-cmd')
+  cmdInput.focus = vi.fn()
+  mobileCmdInput.focus = vi.fn()
+  mobileCmdInput.blur = vi.fn()
 
   const originalMatchMedia = window.matchMedia
   const originalVisualViewport = window.visualViewport
@@ -203,6 +288,11 @@ async function loadAppFns({
       Object.defineProperty(window.navigator, 'maxTouchPoints', {
         configurable: true,
         value: 5,
+      })
+    } else {
+      Object.defineProperty(window.navigator, 'maxTouchPoints', {
+        configurable: true,
+        value: 0,
       })
     }
     Object.defineProperty(window, 'visualViewport', {
@@ -235,6 +325,7 @@ async function loadAppFns({
     apiFetch,
     APP_CONFIG: {},
     AnsiUp: FakeAnsiUp,
+    ...domBindings,
     getOutput: () => document.getElementById('history-list'),
     renderMotd: (text) => text,
     updateNewTabBtn: () => {},
@@ -263,13 +354,17 @@ async function loadAppFns({
     pendingHistAction: null,
     pendingKillTabId,
     acHide: acHideOverride,
-    acSuggestions: [],
+    acSuggestions: acSuggestionsOverride,
     acFiltered: acFilteredOverride,
     acIndex: acIndexOverride,
     acShow: acShowOverride,
     acAccept: () => {},
     resetCmdHistoryNav: () => {},
     navigateCmdHistory: () => false,
+    setupTabScrollControls: () => {},
+    hydrateCmdHistory: () => {},
+    mountShellPrompt: () => {},
+    unmountShellPrompt: () => {},
     logClientError,
     tabs: tabsOverride,
     activeTabId,
@@ -291,13 +386,23 @@ async function loadAppFns({
     histRow: document.getElementById('history-row'),
     tabPanels: document.getElementById('tab-panels'),
     mobileShell: document.getElementById('mobile-shell'),
+    mobileShellChrome: document.getElementById('mobile-shell-chrome'),
+    mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
+    mobileShellComposer: document.getElementById('mobile-shell-composer'),
+    mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
     mobileComposerHost: document.getElementById('mobile-composer-host'),
     mobileComposerRow: document.getElementById('mobile-composer-row'),
     mobileEditBar: document.getElementById('mobile-edit-bar'),
+    mobileMenu: document.getElementById('mobile-menu'),
+    faqOverlay: document.getElementById('faq-overlay'),
+    optionsOverlay: document.getElementById('options-overlay'),
+    permalinkToast: document.getElementById('permalink-toast'),
     mobileComposerHostEl,
     acDropdown,
     requestWelcomeSettle: requestWelcomeSettleOverride,
     runCommand: runCommandOverride,
+    submitComposerCommand: submitComposerCommandOverride,
+    submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
     doKill: doKillOverride,
     Event,
     setTimeout: (fn) => {
@@ -307,17 +412,29 @@ async function loadAppFns({
   }, `{
     _setTsMode,
     _setLnMode,
+    handleComposerInputChange,
+    focusVisibleComposerInput,
+    blurVisibleComposerInput,
+    blurVisibleComposerInputIfMobile,
+    refocusTerminalInput,
+    getVisibleComposerInput,
+    getComposerValue,
     setRunButtonDisabled,
     confirmHistAction,
     executeHistAction,
     doKill,
+    showKillOverlay,
+    hideKillOverlay,
+    isKillOverlayOpen,
+    confirmPendingKill,
+    closeKillOverlay,
     _getAcIndex: () => acIndex,
-  }`)
+  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
   await Promise.resolve()
   await Promise.resolve()
 
-    return {
+  return {
     ...fns,
     storage,
     apiFetch,
@@ -336,10 +453,17 @@ async function loadAppFns({
     cancelWelcome: cancelWelcomeOverride,
     interruptPromptLine: interruptPromptLineOverride,
     runCommand: runCommandOverride,
+    submitComposerCommand: submitComposerCommandOverride,
+    submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
     logClientError,
     acDropdown,
     acHide: acHideOverride,
     shellPromptWrap: shellPromptWrapEl,
+    showKillOverlay: fns.showKillOverlay,
+    hideKillOverlay: fns.hideKillOverlay,
+    isKillOverlayOpen: fns.isKillOverlayOpen,
+    confirmPendingKill: fns.confirmPendingKill,
+    closeKillOverlay: fns.closeKillOverlay,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
       else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
@@ -347,10 +471,8 @@ async function loadAppFns({
       else Object.defineProperty(window, 'visualViewport', { configurable: true, value: originalVisualViewport })
       if (originalScrollTo === undefined) delete window.scrollTo
       else window.scrollTo = originalScrollTo
-      if (mobileTouch) {
-        if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
-        else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
-      }
+      if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
+      else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
     },
   }
 }
@@ -607,6 +729,18 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
+  it('does not manually duplicate printable desktop keydown input', async () => {
+    const { cmdInput } = await loadAppFns()
+
+    cmdInput.value = 'ab'
+    cmdInput.setSelectionRange(2, 2)
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+
+    expect(cmdInput.value).toBe('ab')
+    expect(cmdInput.selectionStart).toBe(2)
+    expect(cmdInput.selectionEnd).toBe(2)
+  })
+
   it('updates the visible cursor when the selection changes without typing', async () => {
     const { cmdInput } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
@@ -625,31 +759,49 @@ describe('app helpers', () => {
   })
 
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
-    const { cmdInput, shellPromptWrap, restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 500, offsetTop: 0 },
+    const { shellPromptWrap, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
     })
+    const header = document.querySelector('header')
+    const status = document.getElementById('status')
     const runBtn = document.getElementById('run-btn')
     const terminalWrap = document.querySelector('.terminal-wrap')
     const mobileShell = document.getElementById('mobile-shell')
+    const mobileShellChrome = document.getElementById('mobile-shell-chrome')
+    const mobileShellTranscript = document.getElementById('mobile-shell-transcript')
+    const mobileShellComposer = document.getElementById('mobile-shell-composer')
+    const mobileShellOverlays = document.getElementById('mobile-shell-overlays')
     const mobileComposerHost = document.getElementById('mobile-composer-host')
     const mobileComposerRow = document.getElementById('mobile-composer-row')
     const shellInputRow = document.getElementById('shell-input-row')
-    const promptPrefix = shellInputRow
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
     const histRow = document.getElementById('history-row')
     const terminalBar = document.querySelector('.terminal-bar')
     const searchBar = document.getElementById('search-bar')
     const tabPanels = document.getElementById('tab-panels')
+    const historyPanel = document.getElementById('history-panel')
+    const faqOverlay = document.getElementById('faq-overlay')
+    const optionsOverlay = document.getElementById('options-overlay')
 
-    cmdInput.dispatchEvent(new Event('focus'))
-    cmdInput.value = 'curl'
-    cmdInput.dispatchEvent(new Event('input'))
+    document.body.classList.add('mobile-terminal-mode')
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    window.visualViewport.height = 500
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    mobileCmdInput.value = 'curl'
+    mobileCmdInput.dispatchEvent(new Event('input'))
+    window.dispatchEvent(new Event('resize'))
+    await new Promise(resolve => setTimeout(resolve, 10))
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
     expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe('268px')
     expect(terminalWrap.hidden).toBe(true)
     expect(mobileShell.hidden).toBe(false)
-    expect(runBtn.hidden).toBe(false)
+    expect(runBtn.hidden).toBe(true)
     expect(mobileComposerHost.getAttribute('aria-hidden')).toBe('false')
     expect(shellPromptWrap.getAttribute('aria-hidden')).toBe('true')
     expect(mobileComposerRow.hidden).toBe(false)
@@ -658,11 +810,177 @@ describe('app helpers', () => {
     expect(mobileShell.contains(searchBar)).toBe(true)
     expect(mobileShell.contains(tabPanels)).toBe(true)
     expect(mobileShell.contains(mobileComposerHost)).toBe(true)
-    expect(mobileComposerRow.contains(shellInputRow)).toBe(true)
-    expect(mobileComposerRow.contains(runBtn)).toBe(true)
-    expect(shellInputRow.getAttribute('aria-hidden')).toBe(null)
-    expect(promptPrefix.getAttribute('data-mobile-label')).toBe('$')
+    expect(mobileShell.contains(mobileShellChrome)).toBe(true)
+    expect(mobileShell.contains(mobileShellTranscript)).toBe(true)
+    expect(mobileShell.contains(mobileShellComposer)).toBe(true)
+    expect(mobileShell.contains(mobileShellOverlays)).toBe(true)
+    expect(header.contains(status)).toBe(true)
+    expect(header.contains(document.getElementById('run-timer'))).toBe(true)
+    expect(mobileShellChrome.contains(histRow)).toBe(true)
+    expect(mobileShellChrome.contains(terminalBar)).toBe(true)
+    expect(mobileShellChrome.contains(searchBar)).toBe(true)
+    expect(mobileShellTranscript.contains(tabPanels)).toBe(true)
+    expect(mobileShellComposer.contains(mobileComposerHost)).toBe(true)
+    expect(mobileShellOverlays.contains(historyPanel)).toBe(true)
+    expect(mobileShellOverlays.contains(faqOverlay)).toBe(true)
+    expect(mobileShellOverlays.contains(optionsOverlay)).toBe(true)
+    expect(mobileComposerRow.contains(mobileCmdInput)).toBe(true)
+    expect(mobileComposerRow.contains(mobileRunBtn)).toBe(true)
+    expect(mobileComposerRow.contains(shellInputRow)).toBe(false)
+    expect(runBtn.hidden).toBe(true)
+    expect(shellInputRow.hidden).toBe(true)
+    expect(shellInputRow.getAttribute('aria-hidden')).toBe('true')
+    expect(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent).toBe('$')
     expect(shellPromptWrap.scrollIntoView).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('does not programmatically focus the mobile composer', async () => {
+    const { refocusTerminalInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const cmdInput = document.getElementById('cmd')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(refocusTerminalInput()).toBeUndefined()
+
+    expect(mobileCmdInput.focus).not.toHaveBeenCalled()
+    expect(cmdInput.focus).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('focuses the mobile composer with preventScroll when the user taps the input', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const visibleInput = getVisibleComposerInput()
+    document.body.classList.add('mobile-terminal-mode')
+
+    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+    Object.assign(ev, { pointerType: 'touch' })
+    visibleInput.dispatchEvent(ev)
+
+    expect(visibleInput.focus).toHaveBeenCalledWith({ preventScroll: true })
+
+    restoreViewport()
+  })
+
+  it('prefers the mobile composer as the visible input while mobile mode is active', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(getVisibleComposerInput()).toBe(mobileCmdInput)
+    expect(getVisibleComposerInput()).not.toBe(cmdInput)
+
+    restoreViewport()
+  })
+
+  it('does not focus the mobile composer through the shared focus helper', async () => {
+    const { focusVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(focusVisibleComposerInput({ preventScroll: true })).toBe(false)
+    expect(mobileCmdInput.focus).not.toHaveBeenCalled()
+    expect(cmdInput.focus).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('focuses the desktop composer through the shared visible helper', async () => {
+    const { focusVisibleComposerInput } = await loadAppFns()
+    const cmdInput = document.getElementById('cmd')
+
+    expect(focusVisibleComposerInput({ preventScroll: true })).toBe(true)
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('blurs the visible mobile composer through the shared blur helper', async () => {
+    const { blurVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(blurVisibleComposerInput()).toBe(true)
+    expect(mobileCmdInput.blur).toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('blurs the mobile composer through the shared mobile blur helper', async () => {
+    const { blurVisibleComposerInputIfMobile, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    expect(blurVisibleComposerInputIfMobile()).toBe(true)
+    expect(mobileCmdInput.blur).toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('reads the visible mobile composer value through the shared accessor', async () => {
+    const { getComposerValue, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    mobileCmdInput.value = 'curl darklab.sh'
+
+    expect(getComposerValue()).toBe('curl darklab.sh')
+
+    restoreViewport()
+  })
+
+  it('syncs mobile composer input through the shared input handler', async () => {
+    const acShow = vi.fn()
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    mobileCmdInput.value = 'curl'
+    mobileCmdInput.dispatchEvent(new Event('input', { bubbles: true }))
+
+    expect(cmdInput.value).toBe('curl')
+    expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
+
+    restoreViewport()
+  })
+
+  it('exposes the shared composer input handler for visible mobile input changes', async () => {
+    const acShow = vi.fn()
+    const { handleComposerInputChange, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      acShow,
+      acSuggestions: ['curl http://localhost:5001/health'],
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const cmdInput = document.getElementById('cmd')
+    document.body.classList.add('mobile-terminal-mode')
+
+    mobileCmdInput.value = 'curl'
+    handleComposerInputChange(mobileCmdInput)
+
+    expect(cmdInput.value).toBe('curl')
+    expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
 
     restoreViewport()
   })
@@ -690,13 +1008,19 @@ describe('app helpers', () => {
   })
 
   it('keeps the mobile run button visible after the keyboard closes', async () => {
-    const { cmdInput, restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 500, offsetTop: 0 },
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
     })
     const runBtn = document.getElementById('run-btn')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
 
-    cmdInput.dispatchEvent(new Event('focus'))
-    expect(runBtn.hidden).toBe(false)
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    window.visualViewport.height = 500
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    expect(runBtn.hidden).toBe(true)
 
     Object.defineProperty(window, 'visualViewport', {
       configurable: true,
@@ -707,11 +1031,36 @@ describe('app helpers', () => {
         removeEventListener: vi.fn(),
       },
     })
-    cmdInput.dispatchEvent(new Event('blur'))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => document.body,
+    })
+    mobileCmdInput.dispatchEvent(new Event('blur'))
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
-    expect(runBtn.hidden).toBe(false)
+    expect(runBtn.hidden).toBe(true)
+
+    restoreViewport()
+  })
+
+  it('submits the visible mobile composer through the shared submit helper', async () => {
+    const submitVisibleComposerCommand = vi.fn(() => true)
+    const runCommand = vi.fn()
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+      submitVisibleComposerCommand,
+      runCommand,
+    })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
+
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    mobileCmdInput.value = 'curl darklab.sh'
+    mobileRunBtn.click()
+
+    expect(submitVisibleComposerCommand).toHaveBeenCalledWith({ dismissKeyboard: true, focusAfterSubmit: false })
+    expect(runCommand).not.toHaveBeenCalled()
 
     restoreViewport()
   })
@@ -731,22 +1080,25 @@ describe('app helpers', () => {
   })
 
   it('closes transient ui while the mobile keyboard is open', async () => {
-    const acHide = vi.fn()
-    const { cmdInput, restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 500, offsetTop: 0 },
-      acHide,
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
     })
+    const mobileCmdInput = document.getElementById('mobile-cmd')
 
     document.getElementById('mobile-menu').classList.add('open')
     document.getElementById('history-panel').classList.add('open')
 
-    cmdInput.dispatchEvent(new Event('focus'))
-    cmdInput.value = 'curl'
-    cmdInput.dispatchEvent(new Event('input'))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    window.visualViewport.height = 500
+    mobileCmdInput.dispatchEvent(new Event('focus'))
+    mobileCmdInput.value = 'curl'
+    mobileCmdInput.dispatchEvent(new Event('input'))
 
     expect(document.getElementById('mobile-menu').classList.contains('open')).toBe(false)
     expect(document.getElementById('history-panel').classList.contains('open')).toBe(false)
-    expect(acHide).toHaveBeenCalled()
 
     restoreViewport()
   })
@@ -912,28 +1264,33 @@ describe('app helpers', () => {
   })
 
   it('supports the mobile edit bar actions', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { getVisibleComposerInput } = await loadAppFns()
     const press = (selector) => {
       document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }
 
+    const visibleInput = getVisibleComposerInput()
+    const cmdInput = document.getElementById('cmd')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
     cmdInput.value = 'ping -c 4 example.com'
+    mobileCmdInput.value = 'ping -c 4 example.com'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
 
     press('[data-edit-action="left"]')
-    expect(cmdInput.selectionStart).toBe(cmdInput.value.length - 1)
+    expect(visibleInput.selectionStart).toBe(visibleInput.value.length - 1)
 
     press('[data-edit-action="home"]')
-    expect(cmdInput.selectionStart).toBe(0)
+    expect(visibleInput.selectionStart).toBe(0)
 
     press('[data-edit-action="right"]')
-    expect(cmdInput.selectionStart).toBe(1)
+    expect(visibleInput.selectionStart).toBe(1)
 
     press('[data-edit-action="end"]')
-    expect(cmdInput.selectionStart).toBe(cmdInput.value.length)
+    expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
     press('[data-edit-action="delete-word"]')
-    expect(cmdInput.value).toBe('ping -c 4 ')
+    expect(visibleInput.value).toBe('ping -c 4 ')
   })
 
   it('uses Ctrl+C to open kill confirm when active tab is running', async () => {
@@ -1143,19 +1500,20 @@ describe('app helpers', () => {
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Ctrl+L to clear the active tab', async () => {
+  it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {
     const clearTab = vi.fn()
     const cancelWelcome = vi.fn()
     const { cmdInput } = await loadAppFns({
       clearTab,
       cancelWelcome,
-      tabs: [{ id: 'tab-1', st: 'idle' }],
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      activeTabId: 'tab-1',
     })
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
 
     expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
-    expect(clearTab).toHaveBeenCalledWith('tab-1')
+    expect(clearTab).toHaveBeenCalledWith('tab-1', { preserveRunState: true })
   })
 
   it('does not apply Alt-based tab shortcuts while typing in non-terminal inputs', async () => {
@@ -1277,22 +1635,28 @@ describe('app helpers', () => {
     expect(killOverlay2.style.display).toBe('none')
   })
 
-  it('supports Enter and Escape in the kill confirmation modal', async () => {
+  it('does not refocus the mobile composer when closing the kill confirmation modal', async () => {
     const doKill = vi.fn()
-    const { cmdInput } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
-    const killOverlay = document.getElementById('kill-overlay')
+    const { getVisibleComposerInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({
+      doKill,
+      pendingKillTabId: 'tab-1',
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const visibleInput = getVisibleComposerInput()
+    visibleInput.focus.mockClear()
 
-    killOverlay.style.display = 'flex'
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true }))
+    showKillOverlay()
+    expect(isKillOverlayOpen()).toBe(true)
+    confirmPendingKill()
     expect(doKill).toHaveBeenCalledWith('tab-1')
-    expect(killOverlay.style.display).toBe('none')
-    expect(cmdInput.focus).toHaveBeenCalled()
+    expect(isKillOverlayOpen()).toBe(false)
+    expect(visibleInput.focus).not.toHaveBeenCalled()
 
-    cmdInput.focus.mockClear()
-    killOverlay.style.display = 'flex'
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    expect(killOverlay.style.display).toBe('none')
-    expect(cmdInput.focus).toHaveBeenCalled()
+    visibleInput.focus.mockClear()
+    showKillOverlay()
+    closeKillOverlay()
+    expect(isKillOverlayOpen()).toBe(false)
+    expect(visibleInput.focus).not.toHaveBeenCalled()
   })
 
   it('wires search controls and Escape dismissal correctly', async () => {
@@ -1312,15 +1676,34 @@ describe('app helpers', () => {
 
     searchBar.style.display = 'flex'
     searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 10))
     expect(searchBar.style.display).toBe('none')
     expect(clearSearch).toHaveBeenCalled()
-    expect(cmdInput.focus).toHaveBeenCalled()
 
     searchBar.style.display = 'none'
     document.getElementById('search-toggle-btn').click()
     document.getElementById('search-toggle-btn').click()
     expect(clearSearch).toHaveBeenCalledTimes(3)
     expect(searchBar.style.display).toBe('none')
+  })
+
+  it('refocuses the visible mobile composer after closing search with Escape', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const searchBar = document.getElementById('search-bar')
+    const searchInput = document.getElementById('search-input')
+    const visibleInput = getVisibleComposerInput()
+
+    document.getElementById('search-toggle-btn').click()
+    expect(searchBar.style.display).toBe('flex')
+
+    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+
+    expect(searchBar.style.display).toBe('none')
+    expect(visibleInput.focus).not.toHaveBeenCalled()
+
+    restoreViewport()
   })
 
   it('opens and closes the FAQ overlay through the wired controls', async () => {
@@ -1338,22 +1721,42 @@ describe('app helpers', () => {
     expect(faqOverlay.classList.contains('open')).toBe(false)
   })
 
-  it('opens and closes the options overlay through the wired controls', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('does not refocus the mobile composer when closing options', async () => {
+    const { getVisibleComposerInput } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
     const overlay = document.getElementById('options-overlay')
+    const visibleInput = getVisibleComposerInput()
+    visibleInput.focus.mockClear()
 
     document.getElementById('options-btn').click()
     expect(overlay.classList.contains('open')).toBe(true)
 
     document.querySelector('.options-close').click()
     expect(overlay.classList.contains('open')).toBe(false)
-    expect(cmdInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).not.toHaveBeenCalled()
 
     document.querySelector('#mobile-menu [data-action="options"]').click()
     expect(overlay.classList.contains('open')).toBe(true)
 
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(overlay.classList.contains('open')).toBe(false)
+  })
+
+  it('blurs the visible mobile composer when opening options', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const overlay = document.getElementById('options-overlay')
+    const visibleInput = getVisibleComposerInput()
+    document.body.classList.add('mobile-terminal-mode')
+
+    document.getElementById('options-btn').click()
+
+    expect(overlay.classList.contains('open')).toBe(true)
+    expect(visibleInput.blur).toHaveBeenCalled()
+
+    restoreViewport()
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
@@ -1423,5 +1826,57 @@ describe('app helpers', () => {
     expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Click any command')
     expect(document.getElementById('faq-limits-text')?.innerHTML).toContain('Command timeout')
     expect(document.querySelectorAll('.allowed-chip')).toHaveLength(2)
+  })
+
+  it('loads FAQ command chips into the visible mobile composer and refocuses it', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            app_name: 'shell.darklab.sh',
+            version: '9.9',
+            default_theme: 'dark',
+            motd: '',
+            command_timeout_seconds: 120,
+            max_output_lines: 5000,
+            permalink_retention_days: 365,
+          }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: ['curl'],
+            groups: [{ name: 'Network', commands: ['curl'] }],
+          }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            items: [
+              { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const faqBtn = document.getElementById('faq-btn')
+    const chip = document.querySelector('.allowed-chip')
+
+    faqBtn.click()
+    expect(mobileCmdInput.blur).toHaveBeenCalled()
+
+    chip.click()
+
+    expect(mobileCmdInput.value).toBe('curl ')
+    expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
 })

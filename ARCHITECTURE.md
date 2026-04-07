@@ -1,6 +1,6 @@
 # Architecture & Decision Log
 
-This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of shell.darklab.sh. It is intended as a handoff document for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
+This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of shell.darklab.sh. It is intended as a durable decision log for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
 
 ---
 
@@ -11,6 +11,8 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 ## Table of Contents
 - [Project Overview](#project-overview)
 - [Key Architectural Decisions](#key-architectural-decisions)
+- [Shared Frontend State Layer](#shared-frontend-state-layer)
+- [Dedicated Mobile Shell](#dedicated-mobile-shell)
 - [Project Tests](#project-tests)
 - [Testing Strategy](#testing-strategy)
 
@@ -201,6 +203,25 @@ External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 for ANSI-to-HTML 
 
 **JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
+### Shared Frontend State Layer
+
+The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object.
+
+That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, which lets `getTab()` and `getActiveTab()` resolve the right objects without rewriting the production call sites.
+
+### Dedicated Mobile Shell
+
+The mobile UI uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The mobile composer dock and mobile menu are first-class mobile-owned UI, not runtime-moved siblings of the desktop terminal.
+
+That structure makes the mobile layout easier to reason about:
+
+- `#tab-panels` is reparented into the mobile transcript mount at runtime so output rendering stays shared while the mobile surface gets its own container.
+- `#mobile-composer-host` stays fixed in the mobile composer mount and uses a dynamic spacing variable for keyboard height.
+- Mobile input focus is user-driven; the code avoids forcing focus back into the composer after tab switches or closes on mobile because that was causing browser scroll jumps.
+- Overlays are mounted into a separate mobile overlay area so the shell can manage menu, history, FAQ, and options surfaces independently of the desktop wrapper.
+
+This keeps the mobile surface structured without needing a separate frontend bundle or framework split.
+
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
 
 ### Shell Prompt Model
@@ -362,9 +383,9 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 Current totals on this branch:
 
 - `pytest`: 453
-- `vitest`: 199
-- `playwright`: 107
-- total: 759
+- `vitest`: 229
+- `playwright`: 121
+- total: 803
 
 ### Testing Architecture
 
@@ -377,7 +398,9 @@ Current totals on this branch:
 
 - The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage.
 
-- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage.
+- The jsdom harness mirrors production load order by prepending `app/static/js/state.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
+
+- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, and close-running-tab / clear-preserve behavior.
 
 - Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does.
 

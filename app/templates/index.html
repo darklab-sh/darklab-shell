@@ -24,14 +24,41 @@
   <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
 </header>
 
-<div id="mobile-menu">
-  <button data-action="search">⌕ search</button>
-  <button data-action="history">⧖ history</button>
-  <button data-action="options">≡ options</button>
-  <button data-action="ln">line numbers: off</button>
-  <button data-action="ts">timestamps: off</button>
-  <button data-action="theme">◑ theme</button>
-  <button data-action="faq">? FAQ</button>
+<div id="mobile-shell" aria-hidden="true">
+  <div id="mobile-shell-chrome"></div>
+  <div id="mobile-shell-transcript"></div>
+  <div id="mobile-shell-composer">
+    <div id="mobile-composer-host" aria-hidden="true">
+      <div id="mobile-composer">
+        <div id="mobile-edit-bar" aria-label="Mobile edit controls">
+          <button type="button" data-mobile-edit="home" aria-label="Move to start">Home</button>
+          <button type="button" data-mobile-edit="left" aria-label="Move left">←</button>
+          <button type="button" data-mobile-edit="right" aria-label="Move right">→</button>
+          <button type="button" data-mobile-edit="end" aria-label="Move to end">End</button>
+          <button type="button" data-mobile-edit="delete-word" aria-label="Delete word">Del Word</button>
+        </div>
+        <div id="mobile-composer-row">
+          <span class="mobile-prompt-label">$</span>
+          <input id="mobile-cmd" type="search"
+                 autocomplete="off" autocapitalize="none" autocorrect="off"
+                 spellcheck="false" inputmode="text" enterkeyhint="go"
+                 placeholder="Type a command" aria-label="Command">
+          <button id="mobile-run-btn" type="button">Run</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="mobile-shell-overlays">
+    <div id="mobile-menu">
+      <button data-action="search">⌕ search</button>
+      <button data-action="history">⧖ history</button>
+      <button data-action="options">≡ options</button>
+      <button data-action="ln">line numbers: off</button>
+      <button data-action="ts">timestamps: off</button>
+      <button data-action="theme">◑ theme</button>
+      <button data-action="faq">? FAQ</button>
+    </div>
+  </div>
 </div>
 
 <div style="display:none;padding:6px 0" id="motd-wrap">
@@ -75,23 +102,6 @@
   </div>
   <div id="tab-panels">
     <!-- panels injected here -->
-  </div>
-  <div id="mobile-composer">
-    <div id="mobile-edit-bar" aria-label="Mobile edit controls">
-      <button type="button" data-mobile-edit="home" aria-label="Move to start">Home</button>
-      <button type="button" data-mobile-edit="left" aria-label="Move left">←</button>
-      <button type="button" data-mobile-edit="right" aria-label="Move right">→</button>
-      <button type="button" data-mobile-edit="end" aria-label="Move to end">End</button>
-      <button type="button" data-mobile-edit="delete-word" aria-label="Delete word">Del Word</button>
-    </div>
-    <div id="mobile-composer-row">
-      <span class="mobile-prompt-label">$</span>
-      <input id="mobile-cmd" type="search"
-             autocomplete="off" autocapitalize="none" autocorrect="off"
-             spellcheck="false" inputmode="text" enterkeyhint="go"
-             placeholder="Type a command" aria-label="Command">
-      <button id="mobile-run-btn" type="button">Run</button>
-    </div>
   </div>
   <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
     <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
@@ -342,6 +352,7 @@
 </div>
 
 <script src="/static/js/session.js"></script>
+<script src="/static/js/state.js"></script>
 <script src="/static/js/utils.js"></script>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/dom.js"></script>

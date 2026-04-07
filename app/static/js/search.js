@@ -1,8 +1,4 @@
-// ── Output search ──
-let searchMatches = [];
-let searchMatchIdx = -1;
-let searchCaseSensitive = false;
-let searchRegexMode = false;
+// ── Shared search logic ──
 
 function runSearch() {
   clearHighlights();

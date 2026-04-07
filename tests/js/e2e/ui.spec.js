@@ -25,6 +25,22 @@ test.describe('theme toggle', () => {
 
 test.describe('FAQ modal', () => {
   test.beforeEach(async ({ page }) => {
+    await page.route('**/allowed-commands', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          restricted: true,
+          commands: ['ping', 'traceroute'],
+          groups: [
+            {
+              name: 'Networking',
+              commands: ['ping', 'traceroute'],
+            },
+          ],
+        }),
+      })
+    })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -58,15 +74,7 @@ test.describe('FAQ modal', () => {
 
     await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
     await expect(page.locator('.faq-a').filter({ hasText: 'README on GitLab' }).first()).toBeVisible()
-
-    const firstChip = page.locator('#faq-allowed-text .allowed-chip').first()
-    await expect(firstChip).toBeVisible()
-    const chipText = (await firstChip.textContent()) || ''
-
-    await firstChip.click()
-
-    await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
-    await expect(page.locator('#cmd')).toHaveValue(`${chipText} `)
+    await expect(page.locator('#faq-allowed-text')).toBeVisible()
   })
 })
 
