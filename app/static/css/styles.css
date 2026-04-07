@@ -448,9 +448,6 @@ body.mobile-terminal-mode {
   gap: 0;
 }
 
-body.mobile-terminal-mode.mobile-keyboard-open {
-}
-
 .terminal-bar {
   display: flex;
   align-items: center;
