@@ -66,4 +66,22 @@ test.describe('timestamp toggle', () => {
     await expect(prefixedLine).toHaveAttribute('data-prefix', /^\d+(\s+\+\d+\.\ds)?$/)
     await expect(page.locator('#shell-prompt-wrap')).toHaveAttribute('data-prefix', /^\d+$/)
   })
+
+  test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({ page }) => {
+    await page.locator('#cmd').fill('man curl')
+    await page.locator('#cmd').press('Enter')
+    await expect(page.locator('#status')).toHaveText('EXIT 0')
+
+    const output = page.locator('.tab-panel.active .output')
+    await output.evaluate(el => { el.scrollTop = el.scrollHeight })
+
+    const isAtBottom = async () => output.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
+    await expect.poll(isAtBottom).toBeTruthy()
+
+    await page.locator('#ts-btn').click()
+    await expect.poll(isAtBottom).toBeTruthy()
+
+    await page.locator('#ln-btn').click()
+    await expect.poll(isAtBottom).toBeTruthy()
+  })
 })

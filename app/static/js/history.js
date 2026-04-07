@@ -267,25 +267,36 @@ function refreshHistoryPanel() {
       entry.addEventListener('click', e => {
         if (e.target.closest('.history-action-btn')) return;
 
-        // If a tab already has this command, switch to it instead of duplicating
-    const existing = tabs.find(t => t.command === run.command);
-    if (existing) {
-      activateTab(existing.id);
-      historyPanel.classList.remove('open');
-      return;
+        // If a tab already has this command and already has the full output,
+        // switch to it instead of duplicating. If the tab is still showing a
+        // truncated preview and the full artifact exists, upgrade that tab in
+        // place so the restored view stays consistent.
+        const existing = tabs.find(t => t.command === run.command);
+        const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
+        if (existing && !canUpgradeExisting) {
+          activateTab(existing.id);
+          historyPanel.classList.remove('open');
+          return;
         }
 
         const cmdEl = entry.querySelector('.history-entry-cmd');
         cmdEl.textContent = 'loading…';
         _setHistoryLoadState(true);
-        apiFetch(`/history/${run.id}?json&preview=1`)
+        const restoreUrl = run.full_output_available
+          ? `/history/${run.id}?json`
+          : `/history/${run.id}?json&preview=1`
+        apiFetch(restoreUrl)
           .then(r => r.json())
           .then(fullRun => {
             const previewNotice = fullRun.preview_notice || null;
-            const newId = createTab(fullRun.command);
+            const newId = canUpgradeExisting ? existing.id : createTab(fullRun.command);
+            if (canUpgradeExisting) clearTab(newId);
             const t = tabs.find(t => t.id === newId);
             if (t) {
               t.command = fullRun.command;
+              t.previewTruncated = !!previewNotice;
+              t.fullOutputAvailable = !!fullRun.full_output_available;
+              t.fullOutputLoaded = !!fullRun.full_output_available && !previewNotice;
             }
             appendLine(`$ ${fullRun.command}`, '', newId);
             appendLine('', '', newId);
@@ -315,16 +326,16 @@ function refreshHistoryPanel() {
       });
 
       entry.querySelector('[data-action="copy"]').addEventListener('click', () => {
-        navigator.clipboard.writeText(run.command)
+        copyTextToClipboard(run.command)
           .then(() => showToast('Command copied to clipboard'))
-          .catch(() => showToast('Failed to copy command'));
+          .catch(() => showToast('Failed to copy command', 'error'));
       });
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
         const url = `${location.origin}/history/${run.id}`;
-        navigator.clipboard.writeText(url)
+        copyTextToClipboard(url)
           .then(() => showToast('Link copied to clipboard'))
-          .catch(() => showToast('Failed to copy link'));
+          .catch(() => showToast('Failed to copy link', 'error'));
       });
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
         confirmHistAction('delete', run.id, run.command);

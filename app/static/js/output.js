@@ -13,6 +13,10 @@ let tsMode = 'off';
 // Body class 'ln-on' enables shared prefix rendering for output rows.
 let lnMode = 'off';
 
+const _OUTPUT_SYNC_BURST_LIMIT = 60;
+const _OUTPUT_BATCH_SIZE = 80;
+const _pendingOutputBatches = new Map();
+
 function _outputPromptPrefix() {
   const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix');
   const text = promptPrefix ? String(promptPrefix.textContent || '').trim() : '';
@@ -31,6 +35,166 @@ function _formatOutputPrefix(index, tsText, includeTimestamp) {
 function _isWelcomeLine(line) {
   if (!line || !line.classList) return false;
   return [...line.classList].some(cls => cls.startsWith('welcome-') || cls.startsWith('wlc-'));
+}
+
+function _getPendingOutputBatch(tabId) {
+  let state = _pendingOutputBatches.get(tabId);
+  if (!state) {
+    state = {
+      items: [],
+      scheduled: false,
+      burstCount: 0,
+    };
+    _pendingOutputBatches.set(tabId, state);
+  }
+  return state;
+}
+
+function _cancelPendingOutputBatch(tabId) {
+  const state = _pendingOutputBatches.get(tabId);
+  if (!state) return;
+  if (state.handle != null) {
+    clearTimeout(state.handle);
+  }
+  _pendingOutputBatches.delete(tabId);
+}
+
+function _schedulePendingOutputFlush(tabId) {
+  const state = _getPendingOutputBatch(tabId);
+  if (state.scheduled) return;
+  state.scheduled = true;
+  state.handle = setTimeout(() => _flushPendingOutputBatch(tabId), 16);
+}
+
+function _buildOutputLine(text, cls, tabId, now, runStart) {
+  const span = document.createElement('span');
+  span.className = 'line' + (cls ? ' ' + cls : '');
+  const content = document.createElement('span');
+  content.className = 'line-content';
+
+  const tsC = new Date(now).toTimeString().slice(0, 8);
+  span.dataset.tsC = tsC;
+  if (runStart) {
+    span.dataset.tsE = '+' + ((now - runStart) / 1000).toFixed(1) + 's';
+  }
+
+  let rawTextForStorage = text;
+  if (cls === 'prompt-echo') {
+    const prefix = _outputPromptPrefix();
+    const prefixEl = document.createElement('span');
+    prefixEl.className = 'prompt-prefix';
+    prefixEl.textContent = prefix;
+    content.appendChild(prefixEl);
+    if (text) content.appendChild(document.createTextNode(' ' + text));
+    rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
+  } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
+    content.textContent = text;
+  } else {
+    content.innerHTML = ansi_up.ansi_to_html(text);
+  }
+  span.appendChild(content);
+
+  return {
+    span,
+    rawLine: { text: rawTextForStorage, cls: cls || '', tsC, tsE: span.dataset.tsE || '' },
+  };
+}
+
+function _appendOutputSpan(out, span) {
+  const prompt = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && shellPromptWrap.parentElement === out)
+    ? shellPromptWrap
+    : null;
+  if (prompt) out.insertBefore(span, prompt);
+  else out.appendChild(span);
+}
+
+function _stickOutputToBottom(out, tab) {
+  if (!out) return;
+  if (tab) {
+    tab._outputFollowToken = (tab._outputFollowToken || 0) + 1;
+    tab.suppressOutputScrollTracking = true;
+  }
+  out.scrollTop = out.scrollHeight;
+  if (tab) {
+    const token = tab._outputFollowToken;
+    setTimeout(() => {
+      if (!tabs.find(t => t.id === tab.id) || tab._outputFollowToken !== token) return;
+      out.scrollTop = out.scrollHeight;
+      tab.suppressOutputScrollTracking = false;
+    }, 16);
+  }
+}
+
+function _syncTabRawLines(tab, rawLine) {
+  if (!tab || !rawLine) return;
+  tab.rawLines.push(rawLine);
+  const max = APP_CONFIG.max_output_lines;
+  if (max > 0 && tab.rawLines.length > max) tab.rawLines.splice(0, tab.rawLines.length - max);
+}
+
+function _flushPendingOutputBatch(tabId) {
+  const state = _pendingOutputBatches.get(tabId);
+  if (!state) return;
+  state.scheduled = false;
+  state.handle = null;
+
+  const out = getOutput(tabId);
+  const tab = tabs.find(t => t.id === tabId);
+  if (!out || !tab) {
+    _cancelPendingOutputBatch(tabId);
+    return;
+  }
+
+  const shouldStickToBottom = tab.followOutput !== false;
+  const fragment = document.createDocumentFragment();
+  const batch = state.items.splice(0, _OUTPUT_BATCH_SIZE);
+  batch.forEach(entry => {
+    fragment.appendChild(entry.span);
+    _syncTabRawLines(tab, entry.rawLine);
+  });
+  _appendOutputSpan(out, fragment);
+
+  const max = APP_CONFIG.max_output_lines;
+  if (max > 0) {
+    const lines = out.querySelectorAll('.line');
+    if (lines.length > max) {
+      for (let i = 0; i < lines.length - max; i++) lines[i].remove();
+    }
+  }
+
+  syncOutputPrefixes(out);
+  if (shouldStickToBottom) {
+    setTimeout(() => _stickOutputToBottom(out, tab), 0);
+  }
+
+  if (state.items.length > 0) {
+    _schedulePendingOutputFlush(tabId);
+    return;
+  }
+
+  state.burstCount = 0;
+  _maybeMountDeferredPrompt(tabId);
+}
+
+function _refreshFollowingOutputsAfterLayout() {
+  if (!Array.isArray(tabs)) return;
+  tabs.forEach(tab => {
+    if (!tab || tab.followOutput === false) return;
+    const out = getOutput(tab.id);
+    if (!out) return;
+    setTimeout(() => _stickOutputToBottom(out, tab), 16);
+  });
+}
+
+function _maybeMountDeferredPrompt(tabId) {
+  const tab = tabs.find(t => t.id === tabId);
+  if (!tab || !tab.deferPromptMount || tab.st === 'running') return;
+  const state = _pendingOutputBatches.get(tabId);
+  if (state && (state.scheduled || state.items.length > 0)) return;
+  tab.deferPromptMount = false;
+  if (tabId === activeTabId && typeof mountShellPrompt === 'function') {
+    mountShellPrompt(tabId, true);
+  }
 }
 
 function syncOutputPrefixes(scope = document) {
@@ -90,6 +254,9 @@ function _setLnMode(mode) {
   const mobileLn = document.querySelector('#mobile-menu [data-action="ln"]');
   if (mobileLn) mobileLn.textContent = label;
   syncOutputPrefixes();
+  try {
+    _refreshFollowingOutputsAfterLayout();
+  } catch (_) {}
 }
 
 function _setTsMode(mode) {
@@ -98,6 +265,9 @@ function _setTsMode(mode) {
   if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
   if (mode === 'clock') document.body.classList.add('ts-clock');
   syncOutputPrefixes();
+  try {
+    _refreshFollowingOutputsAfterLayout();
+  } catch (_) {}
 }
 
 _setLnMode('off');
@@ -115,38 +285,19 @@ function appendLine(text, cls, tabId) {
   const tab = tabs.find(t => t.id === id);
   const now = Date.now();
   const runStart = tab?.runStart || 0;
+  const state = _getPendingOutputBatch(id);
+  const shouldBatch = state.scheduled || state.items.length > 0 || state.burstCount >= _OUTPUT_SYNC_BURST_LIMIT;
+  const { span, rawLine } = _buildOutputLine(text, cls, id, now, runStart);
 
-  const span = document.createElement('span');
-  span.className = 'line' + (cls ? ' ' + cls : '');
-
-  // Set timestamp data attributes; CSS ::before reads these — no DOM children needed.
-  const tsC = new Date(now).toTimeString().slice(0, 8);
-  span.dataset.tsC = tsC;
-  if (runStart) {
-    span.dataset.tsE = '+' + ((now - runStart) / 1000).toFixed(1) + 's';
+  if (shouldBatch) {
+    state.items.push({ span, rawLine });
+    _schedulePendingOutputFlush(id);
+    return;
   }
 
-  let rawTextForStorage = text;
+  state.burstCount += 1;
 
-  if (cls === 'prompt-echo') {
-    const prefix = _outputPromptPrefix();
-    const prefixEl = document.createElement('span');
-    prefixEl.className = 'prompt-prefix';
-    prefixEl.textContent = prefix;
-    span.appendChild(prefixEl);
-    if (text) span.appendChild(document.createTextNode(' ' + text));
-    rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
-  } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
-    // Plain-text classes: render as text to avoid XSS via ANSI passthrough
-    span.textContent = text;
-  } else {
-    span.innerHTML = ansi_up.ansi_to_html(text);
-  }
-  const prompt = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && shellPromptWrap.parentElement === out)
-    ? shellPromptWrap
-    : null;
-  if (prompt) out.insertBefore(span, prompt);
-  else out.appendChild(span);
+  _appendOutputSpan(out, span);
 
   // Enforce max output lines — drop oldest lines from the top
   const max = APP_CONFIG.max_output_lines;
@@ -157,12 +308,10 @@ function appendLine(text, cls, tabId) {
     }
   }
 
-  out.scrollTop = out.scrollHeight;
-
   syncOutputPrefixes(out);
-
-  if (tab) {
-    tab.rawLines.push({ text: rawTextForStorage, cls: cls || '', tsC, tsE: span.dataset.tsE || '' });
-    if (max > 0 && tab.rawLines.length > max) tab.rawLines.splice(0, tab.rawLines.length - max);
+  if (tab?.followOutput !== false) {
+    setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
+
+  _syncTabRawLines(tab, rawLine);
 }

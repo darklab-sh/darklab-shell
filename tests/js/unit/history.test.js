@@ -325,18 +325,18 @@ describe('history panel actions', () => {
       apiFetch,
       clipboard,
       windowOpen,
+      appendLine,
+      showToast,
     }
   }
 
-  it('refreshHistoryPanel copy actions show failure toasts when clipboard writes reject', async () => {
+  it('refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject', async () => {
     const clipboard = {
-      writeText: vi.fn(() => ({
-        then: () => ({
-          catch: (handler) => handler(new Error('clipboard denied')),
-        }),
-      })),
+      writeText: vi.fn(() => Promise.reject(new Error('clipboard denied'))),
     }
-    const { refreshHistoryPanel, showToast } = loadHistoryPanel({ clipboardImpl: clipboard })
+    const originalExecCommand = document.execCommand
+    document.execCommand = vi.fn(() => true)
+    const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard })
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -347,7 +347,8 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise(resolve => setImmediate(resolve))
 
-    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to copy command')
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(document.getElementById('permalink-toast').textContent).toBe('Command copied to clipboard')
 
     entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clipboard.writeText).toHaveBeenCalledTimes(2)
@@ -355,7 +356,9 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise(resolve => setImmediate(resolve))
 
-    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to copy link')
+    expect(document.execCommand).toHaveBeenCalledTimes(2)
+    expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
+    document.execCommand = originalExecCommand
   })
 
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {
@@ -444,7 +447,7 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, appendLine } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -457,6 +460,51 @@ describe('history panel actions', () => {
     await new Promise(resolve => setImmediate(resolve))
 
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
+  })
+
+  it('restores the full history payload when full output is available', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            runs: [
+              {
+                id: 'run-1',
+                command: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+                full_output_available: true,
+              },
+            ],
+          }),
+        })
+      }
+      if (url === '/history/run-1?json') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            command: 'ping darklab.sh',
+            output: ['ok line 1', 'ok line 2'],
+            exit_code: 0,
+            full_output_available: true,
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel, appendLine } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
+    expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
+    expect(appendLine).toHaveBeenCalledWith('$ ping darklab.sh', '', 'tab-2')
+    expect(appendLine).toHaveBeenCalledWith('ok line 1', '', 'tab-2')
+    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('preview truncated'), 'notice', 'tab-2')
   })
 
   it('clears the history loading overlay and shows a failure toast when a restore fetch fails', async () => {

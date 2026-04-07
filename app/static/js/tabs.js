@@ -241,7 +241,11 @@ function mountShellPrompt(tabId, force = false) {
     return;
   }
   const tabState = tabs.find(t => t.id === tabId);
-  // Never show a prompt while a command is running in this tab.
+  if (!force && tabState && tabState.deferPromptMount) {
+    unmountShellPrompt();
+    return;
+  }
+  // Keep the prompt hidden while the tab is running a command.
   if (tabState && tabState.st === 'running') {
     unmountShellPrompt();
     return;
@@ -330,6 +334,15 @@ function createTab(label) {
         <button class="term-action-btn" data-action="clear"     data-tab="${id}">clear</button>
       </div>
     </div>`;
+  const outputEl = panel.querySelector('.output');
+  if (outputEl) {
+    outputEl.addEventListener('scroll', () => {
+      const t = tabs.find(tab => tab.id === id);
+      if (!t || t.suppressOutputScrollTracking) return;
+      const nearBottom = outputEl.scrollTop + outputEl.clientHeight >= outputEl.scrollHeight - 8;
+      t.followOutput = nearBottom;
+    }, { passive: true });
+  }
   panel.querySelector('.terminal-body')?.addEventListener('click', e => {
     if (id !== activeTabId) return;
     if (e.target.closest('.term-action-btn')) return;
@@ -349,7 +362,27 @@ function createTab(label) {
   });
   tabPanels.appendChild(panel);
 
-  tabs.push({ id, label, command: '', runId: null, runStart: null, exitCode: null, rawLines: [], killed: false, pendingKill: false, st: 'idle', renamed: false });
+  tabs.push({
+    id,
+    label,
+    command: '',
+    runId: null,
+    historyRunId: null,
+    runStart: null,
+    currentRunStartIndex: null,
+    exitCode: null,
+    rawLines: [],
+    previewTruncated: false,
+    fullOutputAvailable: false,
+    fullOutputLoaded: false,
+    followOutput: true,
+    suppressOutputScrollTracking: false,
+    deferPromptMount: false,
+    killed: false,
+    pendingKill: false,
+    st: 'idle',
+    renamed: false,
+  });
   activateTab(id);
   updateNewTabBtn();
   updateTabScrollButtons();
@@ -390,6 +423,13 @@ function closeTab(id) {
     return;
   }
   const idx = tabs.findIndex(t => t.id === id);
+  if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
+  const closingTab = tabs[idx];
+  if (closingTab) {
+    closingTab._outputFollowToken = (closingTab._outputFollowToken || 0) + 1;
+    closingTab.suppressOutputScrollTracking = false;
+    closingTab.deferPromptMount = false;
+  }
   tabs.splice(idx, 1);
   document.querySelector(`.tab[data-id="${id}"]`).remove();
   document.querySelector(`.tab-panel[data-id="${id}"]`).remove();
@@ -423,10 +463,25 @@ function getOutput(id) {
 }
 
 function clearTab(id) {
+  if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
   const out = getOutput(id);
   if (out) out.innerHTML = '';
   const t = tabs.find(t => t.id === id);
-  if (t) { t.rawLines = []; t.runStart = null; }
+  if (t) {
+    t._outputFollowToken = (t._outputFollowToken || 0) + 1;
+    t.suppressOutputScrollTracking = false;
+    t.deferPromptMount = false;
+    t.rawLines = [];
+    t.runStart = null;
+    t.currentRunStartIndex = null;
+    t.previewTruncated = false;
+    t.fullOutputAvailable = false;
+    t.fullOutputLoaded = false;
+    t.historyRunId = null;
+    t.followOutput = true;
+    t.suppressOutputScrollTracking = false;
+    t.deferPromptMount = false;
+  }
   if (id === activeTabId) mountShellPrompt(id);
   setTabStatus(id, 'idle');
   if (id === activeTabId) { setStatus('idle'); clearSearch(); }
@@ -452,9 +507,9 @@ function copyTab(id) {
     return;
   }
   const text = lines.map(l => l.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '')).join('\n');
-  navigator.clipboard.writeText(text)
+  copyTextToClipboard(text)
     .then(() => showToast('Copied to clipboard'))
-    .catch(() => showToast('Failed to copy'));
+    .catch(() => showToast('Failed to copy', 'error'));
 }
 
 // ── Plain text save ──
@@ -601,20 +656,65 @@ function startTabRename(id, labelEl) {
   });
 }
 
-function permalinkTab(id) {
+function _cloneShareLine(line) {
+  if (typeof line === 'string') {
+    return { text: line, cls: '', tsC: '', tsE: '' };
+  }
+  if (line && typeof line.text === 'string') {
+    return {
+      text: line.text,
+      cls: String(line.cls || ''),
+      tsC: String(line.tsC || ''),
+      tsE: String(line.tsE || ''),
+    };
+  }
+  return null;
+}
+
+function _shareLinesWithoutTruncationNotices(lines) {
+  return (Array.isArray(lines) ? lines : [])
+    .map(_cloneShareLine)
+    .filter(line => line && !/^\[(?:preview|tab output) truncated/i.test(String(line.text || '')));
+}
+
+function _extractLatestFullRunShareContent(tab, fullRun) {
+  const rawLines = Array.isArray(tab.rawLines) ? tab.rawLines : [];
+  const runStartIndex = typeof tab.currentRunStartIndex === 'number' && tab.currentRunStartIndex >= 0
+    ? tab.currentRunStartIndex
+    : rawLines.length;
+  const exitIndex = (() => {
+    for (let i = rawLines.length - 1; i >= 0; i -= 1) {
+      const cls = String(rawLines[i] && rawLines[i].cls || '');
+      if (cls === 'exit-ok' || cls === 'exit-fail') return i;
+    }
+    return rawLines.length;
+  })();
+  const fullOutput = Array.isArray(fullRun && fullRun.output_entries)
+    ? fullRun.output_entries
+    : _shareLinesWithoutTruncationNotices(fullRun && fullRun.output);
+
+  return [
+    ..._shareLinesWithoutTruncationNotices(rawLines.slice(0, runStartIndex)),
+    ..._shareLinesWithoutTruncationNotices(fullOutput),
+    ..._shareLinesWithoutTruncationNotices(rawLines.slice(exitIndex)),
+  ];
+}
+
+async function permalinkTab(id) {
   const t = tabs.find(t => t.id === id);
   if (!t || !t.rawLines.length) {
     showToast('No output to share yet');
     return;
   }
-  const truncated = APP_CONFIG.max_output_lines > 0
-    && t.rawLines.length >= APP_CONFIG.max_output_lines;
-  const shareContent = t.rawLines.slice();
-  if (truncated) {
-    shareContent.push({
-      text: `[tab output truncated to ${APP_CONFIG.max_output_lines} lines; use the run history permalink for the full output]`,
-      cls: 'notice',
-    });
+  let shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
+  if (t.fullOutputAvailable && !t.fullOutputLoaded && t.historyRunId) {
+    try {
+      const res = await apiFetch(`/history/${t.historyRunId}?json`);
+      const fullRun = await res.json();
+      shareContent = _extractLatestFullRunShareContent(t, fullRun);
+    } catch {
+      shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
+    }
   }
   apiFetch('/share', {
     method: 'POST',
@@ -622,8 +722,11 @@ function permalinkTab(id) {
     body: JSON.stringify({ label: t.label, content: shareContent })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
-    navigator.clipboard.writeText(url)
+    copyTextToClipboard(url)
       .then(() => showToast('Link copied to clipboard'))
-      .catch(() => showToast('Failed to copy link'));
-  }).catch(() => showToast('Failed to create permalink'));
+      .catch(() => showToast('Failed to copy link', 'error'));
+  }).catch(() => showToast('Failed to create permalink', 'error'))
+    .finally(() => {
+      if (cmdInput && typeof cmdInput.focus === 'function') cmdInput.focus();
+    });
 }

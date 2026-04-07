@@ -24,10 +24,17 @@ test.describe('output actions', () => {
     await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
   })
 
-  test('copy button shows a failure toast when clipboard writeText rejects', async ({ page }) => {
+  test('copy button falls back when clipboard writeText rejects', async ({ page }) => {
     await page.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.reject(new Error('clipboard denied')) },
+        configurable: true,
+      })
+      Object.defineProperty(document, 'execCommand', {
+        value: (cmd) => {
+          window.__copyFallbackUsed = cmd === 'copy'
+          return true
+        },
         configurable: true,
       })
     })
@@ -35,7 +42,8 @@ test.describe('output actions', () => {
     await page.locator('[data-action="copy"]').click()
 
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
-    await expect(page.locator('#permalink-toast')).toContainText('Failed to copy')
+    await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
+    await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
   // ── Clear ─────────────────────────────────────────────────────────────────

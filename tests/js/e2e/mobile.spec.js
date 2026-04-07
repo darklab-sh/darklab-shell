@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test'
 
 const MOBILE = { width: 375, height: 812 }
+const LONG_CMD = 'ping -c 4 8.8.8.8'
 
 // Enable touch so useMobileTerminalViewportMode() returns true on the narrow
 // viewport, which triggers the compact welcome and other mobile JS paths.
@@ -105,6 +106,42 @@ test.describe('mobile menu', () => {
 
     await expect(page.locator('#cmd')).toHaveValue(commandText || '')
     await expect(page.locator('#mobile-composer')).toBeVisible()
+  })
+
+  test('mobile run button disables while a command is running', async ({ page }) => {
+    await page.locator('#mobile-cmd').fill(LONG_CMD)
+    await page.locator('#mobile-run-btn').click()
+
+    await expect(page.locator('#mobile-run-btn')).toBeDisabled()
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+
+    await expect(page.locator('.status-pill').filter({ hasNotText: 'RUNNING' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('#mobile-run-btn')).toBeEnabled()
+  })
+
+  test('mobile permalink copies via the fallback path when clipboard writeText is unavailable', async ({ page }) => {
+    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=share')
+
+    await page.evaluate(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: {
+          writeText: () => Promise.reject(new Error('clipboard denied')),
+        },
+        configurable: true,
+      })
+      Object.defineProperty(document, 'execCommand', {
+        value: (cmd) => {
+          window.__copyFallbackUsed = cmd === 'copy'
+          return true
+        },
+        configurable: true,
+      })
+    })
+
+    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+    await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
   test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {

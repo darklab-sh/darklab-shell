@@ -503,12 +503,13 @@ body.light .terminal-bar { background: #e0e0e0; }
   flex: 1;
   padding: 16px;
   overflow-y: auto;
+  overflow-anchor: none;
   line-height: var(--terminal-line-height);
   font-size: var(--terminal-font-size);
   white-space: pre-wrap;
   word-break: normal;
   overflow-wrap: anywhere;
-  scroll-behavior: smooth;
+  scroll-behavior: auto;
   min-height: 0;
   overscroll-behavior: contain;
   -webkit-overflow-scrolling: touch;
@@ -540,16 +541,40 @@ body.ts-clock .output .line::before,
 body.ts-elapsed .output .shell-prompt-wrap::before,
 body.ts-clock .output .shell-prompt-wrap::before {
   content: attr(data-prefix);
-  display: inline-block;
+  position: absolute;
+  left: 0;
+  top: 0;
   width: var(--output-prefix-width, 0ch);
   padding-right: 0.5ch;
-  margin-right: 0.5ch;
   text-align: left;
   color: var(--muted);
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
   user-select: none;
   white-space: pre;
+  pointer-events: none;
+}
+
+.output .line-content,
+.output .shell-prompt-line {
+  display: block;
+  white-space: pre-wrap;
+  word-break: normal;
+  overflow-wrap: normal;
+}
+
+.output .shell-prompt-line {
+  display: flex;
+}
+
+body.ln-on .output .line-content,
+body.ts-elapsed .output .line-content,
+body.ts-clock .output .line-content,
+body.ln-on .output .shell-prompt-line,
+body.ts-elapsed .output .shell-prompt-line,
+body.ts-clock .output .shell-prompt-line {
+  transform: translateX(calc(var(--output-prefix-width, 0ch) + 0.5ch));
+  transform-origin: left top;
 }
 
 .output .line[class*="welcome-"]::before,
@@ -1109,6 +1134,16 @@ mark.search-hl.current { background: rgba(255,184,0,0.7); }
   opacity: 0;
   visibility: hidden;
 }
+#permalink-toast.toast-success {
+  background: #1a1a1a;
+  border-color: var(--green-dim);
+  color: var(--green);
+}
+#permalink-toast.toast-error {
+  background: #1f1212;
+  border-color: rgba(255, 60, 60, 0.45);
+  color: var(--red);
+}
 #permalink-toast.show {
   transform: translateX(-50%) translateY(0);
   opacity: 1;
@@ -1629,32 +1664,9 @@ body.light #mobile-menu { background: #fff; }
   background: var(--green-dim);
 }
 
-  #mobile-edit-bar {
-    display: none;
-    gap: 5px;
-    overflow-x: auto;
-    scrollbar-width: none;
-    padding-bottom: 2px;
-  }
-
-#mobile-edit-bar::-webkit-scrollbar { display: none; }
-
-  #mobile-edit-bar button {
-    background: transparent;
-    border: 1px solid var(--border-bright);
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 11px;
-    padding: 3px 8px;
-    border-radius: 3px;
-    cursor: pointer;
-    flex-shrink: 0;
-    white-space: nowrap;
-  }
-
-#mobile-edit-bar button:active {
-  border-color: var(--green-dim);
-  color: var(--green);
+#mobile-run-btn:disabled {
+  opacity: 0.3;
+  cursor: not-allowed;
 }
 
 /* ── Mobile ── */
@@ -1746,27 +1758,6 @@ body.light #mobile-menu { background: #fff; }
     white-space: nowrap;
     align-self: center;
   }
-  #mobile-edit-bar {
-    display: none;
-    grid-template-columns: repeat(5, minmax(0, 1fr));
-    gap: 6px;
-    padding: 6px 0 0;
-  }
-  #mobile-edit-bar button {
-    min-width: 0;
-    background: transparent;
-    border: 1px solid var(--border-bright);
-    border-radius: 3px;
-    color: var(--muted);
-    font-family: var(--font-mono);
-    font-size: 10px;
-    line-height: 1.2;
-    padding: 6px 4px;
-  }
-  #mobile-edit-bar button:active {
-    border-color: var(--green-dim);
-    color: var(--green);
-  }
   body.light.mobile-terminal-mode #mobile-composer-host {
     background: linear-gradient(180deg, rgba(255,255,255,0.94), rgba(255,255,255,0.99));
   }
@@ -1841,8 +1832,6 @@ body.light #mobile-menu { background: #fff; }
     position: relative;
     left: auto;
     top: auto;
-    width: auto;
-    height: auto;
     width: auto;
     min-width: 0;
     flex: 1 1 auto;
@@ -1924,11 +1913,6 @@ body.light #mobile-menu { background: #fff; }
     display: none;
   }
 
-  /* Edit bar appears when the mobile keyboard is open. */
-  body.mobile-keyboard-open #mobile-edit-bar {
-    display: flex;
-  }
-
   #mobile-cmd {
     font-size: 16px;
   }
@@ -1941,15 +1925,31 @@ body.light #mobile-menu { background: #fff; }
     scrollbar-width: none;
   }
 
+  body.mobile-keyboard-open #mobile-edit-bar {
+    display: flex;
+  }
+
   #mobile-edit-bar button {
     flex: 1 1 0;
     min-width: 0;
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    color: var(--muted);
+    font-family: var(--font-mono);
     font-size: 12px;
     padding: 4px 2px;
+    border-radius: 3px;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  #mobile-edit-bar button:hover {
+    border-color: var(--green-dim);
+    color: var(--text);
   }
 
   #mobile-edit-bar button[data-mobile-edit="left"],
@@ -1988,5 +1988,8 @@ body.light #mobile-menu { background: #fff; }
   body.light #mobile-run-btn {
     color: var(--green-dim);
     border-color: var(--green-dim);
+  }
+  body.light #mobile-run-btn:disabled {
+    opacity: 0.35;
   }
 }

@@ -16,10 +16,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 445
-- `vitest`: 186
-- `playwright`: 102
-- total: 733
+- `pytest`: 449
+- `vitest`: 198
+- `playwright`: 106
+- total: 753
 
 ## Running The Suites
 
@@ -64,15 +64,15 @@ Files and focus:
 
 - `config.test.js` - frontend fallback config coverage for keys mirrored from `/config`
 - `utils.test.js` - escaping and MOTD rendering
-- `runner.test.js` - elapsed formatting, kill flow, friendly network/server error handling, rate-limit handling, fake-command SSE handling including web-shell `clear`, prompt blank-line behavior, and stall recovery
+- `runner.test.js` - elapsed formatting, kill flow, friendly network/server error handling, rate-limit handling, fake-command SSE handling including web-shell `clear`, prompt blank-line behavior, run-button disable/enable guarding, and stall recovery
 - `history.test.js` - starred state helpers, startup hydration for blank-input command recall, clipboard fallback handling, history action failures, and the restore-loading overlay for history-to-tab preview fetches
 - `session.test.js` - session ID persistence and `apiFetch()` header injection
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, and no-output toast behavior
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, and featured-sample interaction behavior
-- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
+- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics, mobile Run-button sync, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
 - `search.test.js` - search helper boundaries and no-op behavior
-- `output.test.js` - output rendering, shared timestamp/line-number prefix support, welcome-prefix exclusion, and no-output edge cases
+- `output.test.js` - output rendering, batched live flushing, shared timestamp/line-number prefix support, welcome-prefix exclusion, and no-output edge cases
 
 Notes:
 
@@ -89,7 +89,7 @@ Spec files:
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
 - `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, and killed-state UI
-- `mobile.spec.js` - mobile startup composer visibility, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling
+- `mobile.spec.js` - mobile startup composer visibility, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, and Run-button disable/reenable coverage while a command is active
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery

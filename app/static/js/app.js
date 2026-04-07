@@ -239,8 +239,6 @@ function ensureMobilePromptVisible() {
 function syncMobileViewportState() {
   if (typeof document === 'undefined') return;
   const mobileMode = useMobileTerminalViewportMode();
-  // Only activate the dedicated mobile shell layout if #mobile-shell exists in the DOM.
-  // Without it, mobile falls back to the standard responsive layout.
   const hasMobileShell = typeof mobileShell !== 'undefined' && !!mobileShell;
   const activeMobileMode = mobileMode && hasMobileShell;
   const keyboardOffset = getMobileKeyboardOffset();
@@ -255,13 +253,11 @@ function syncMobileViewportState() {
   document.body.classList.toggle('mobile-chrome-ios', activeMobileMode && isChromeIOS());
   document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
-  if (hasMobileShell) syncMobileComposerLayout(activeMobileMode);
+  syncMobileComposerLayout(activeMobileMode);
   if (activeMobileMode && keyboardOpen) {
     mobileMenu?.classList.remove('open');
     if (historyPanel?.classList.contains('open')) historyPanel.classList.remove('open');
-    // Only call acHide() on the keyboard-open transition, not on every subsequent
-    // keystroke. Calling it unconditionally here would hide the dropdown immediately
-    // after every input event, making autocomplete impossible.
+    // Hide autocomplete only when the mobile keyboard becomes active.
     if (!wasMobileKeyboardOpen && typeof acHide === 'function') acHide();
   }
   syncMobilePromptReserve();
@@ -479,18 +475,6 @@ function getCmdSelection(value = cmdInput.value || '') {
   return { start, end };
 }
 
-function getComposerInputForMobileEdit() {
-  if (
-    typeof mobileCmdInput !== 'undefined'
-    && mobileCmdInput
-    && typeof mobileCmdInput.getClientRects === 'function'
-    && mobileCmdInput.getClientRects().length > 0
-  ) {
-    return mobileCmdInput;
-  }
-  return cmdInput;
-}
-
 function getVisibleMobileComposerInput() {
   if (
     typeof mobileCmdInput !== 'undefined'
@@ -558,7 +542,7 @@ function deleteCmdWordLeft() {
 }
 
 function performMobileEditAction(action) {
-  const input = getComposerInputForMobileEdit();
+  const input = getVisibleMobileComposerInput();
   if (!input) return;
   if (document.activeElement !== input && typeof input.focus === 'function') {
     try {
@@ -673,6 +657,11 @@ function _setTsMode(mode) {
   const mobileTs = document.querySelector('#mobile-menu [data-action="ts"]');
   if (mobileTs) mobileTs.textContent = label;
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
+  if (typeof _refreshFollowingOutputsAfterLayout === 'function') {
+    try {
+      _refreshFollowingOutputsAfterLayout();
+    } catch (_) {}
+  }
 }
 
 document.getElementById('ts-btn').addEventListener('click', () => {
@@ -1034,13 +1023,12 @@ killOverlay.addEventListener('click', e => {
 // - welcome settle: printable typing, Enter, Escape
 // - Escape: close FAQ/options and search UI
 //
-// Planned primary app-safe rollout:
+// App-safe key bindings stay narrow:
 // - Alt+T / Alt+W for new/close tab
 // - Alt+ArrowLeft / Alt+ArrowRight for tab cycling
 // - Alt+P for permalink, Alt+Shift+C for copy
 // - Enter / Escape for kill-confirm accept / cancel
-// Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain optional
-// fallbacks because interception is environment-dependent.
+// Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
 document.addEventListener('keydown', e => {
   if (isKillOverlayOpen()) {
     if (e.key === 'Enter') {
@@ -1424,9 +1412,15 @@ syncShellPrompt();
 const mobileCmdInput = document.getElementById('mobile-cmd');
 const mobileRunBtn_  = document.getElementById('mobile-run-btn');
 
+function setRunButtonDisabled(disabled) {
+  if (runBtn) runBtn.disabled = !!disabled;
+  if (typeof mobileRunBtn_ !== 'undefined' && mobileRunBtn_) mobileRunBtn_.disabled = !!disabled;
+}
+
 if (mobileCmdInput && mobileRunBtn_ && typeof runCommand === 'function') {
   // Submit handler — sync value to cmdInput then run
   function _mobileSubmit() {
+    if (runBtn && runBtn.disabled) return;
     const val = mobileCmdInput.value;
     if (!val.trim() && typeof _welcomeActive !== 'undefined' && _welcomeActive
         && typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(activeTabId)) {
@@ -1492,7 +1486,7 @@ if (mobileCmdInput && mobileRunBtn_ && typeof runCommand === 'function') {
   }
 }
 
-// Keyboard detection for mobile composer (works when mobile-shell feature is not active)
+// Keyboard detection for the mobile composer.
 function _syncMobileComposerKeyboard() {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();

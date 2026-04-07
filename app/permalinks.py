@@ -240,10 +240,23 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
   </div>
 </header>
 <div id="output"></div>
-<div id="copy-toast" style="position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
+<div id="copy-toast" style="display:none;position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(60px);
 background:#1a1a1a;border:1px solid #1a7a08;color:#39ff14;font-family:'JetBrains Mono',monospace;
 font-size:12px;padding:10px 18px;border-radius:4px;z-index:300;
-transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
+transition:transform 0.3s ease;
+pointer-events:none;">Copied to clipboard</div>
+<style>
+  #copy-toast.show {{
+    transform: translateX(-50%) translateY(0);
+  }}
+  @media (max-width: 768px) {{
+    #copy-toast {{
+      bottom: calc(112px + env(safe-area-inset-bottom)) !important;
+      max-width: calc(100vw - 24px);
+      text-align: center;
+    }}
+  }}
+</style>
 <script>
   const lines = {lines_json};
   const hasTimestampMetadata = {json.dumps(has_timestamp_metadata)};
@@ -335,13 +348,51 @@ transition:transform 0.3s ease;pointer-events:none;">Copied to clipboard</div>
 
   function _showToast() {{
     const t = document.getElementById('copy-toast');
-    t.style.transform = 'translateX(-50%) translateY(0)';
-    setTimeout(() => {{ t.style.transform = 'translateX(-50%) translateY(60px)'; }}, 2500);
+    t.style.display = 'block';
+    t.offsetHeight;
+    t.classList.add('show');
+    setTimeout(() => {{
+      t.classList.remove('show');
+      t.style.display = 'none';
+    }}, 2500);
+  }}
+
+  function _copyTextFallback(text) {{
+    return new Promise((resolve, reject) => {{
+      const textarea = document.createElement('textarea');
+      textarea.value = String(text);
+      textarea.setAttribute('readonly', '');
+      textarea.style.position = 'fixed';
+      textarea.style.top = '-9999px';
+      textarea.style.left = '-9999px';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.focus();
+      textarea.select();
+      textarea.setSelectionRange(0, textarea.value.length);
+      let copied = false;
+      try {{
+        copied = typeof document.execCommand === 'function' && document.execCommand('copy');
+      }} catch (_) {{
+        copied = false;
+      }}
+      textarea.remove();
+      if (copied) resolve(true);
+      else reject(new Error('Copy command failed'));
+    }});
+  }}
+
+  function _copyTextToClipboard(text) {{
+    const value = String(text || '');
+    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {{
+      return navigator.clipboard.writeText(value).catch(() => _copyTextFallback(value));
+    }}
+    return _copyTextFallback(value);
   }}
 
   function copyTxt() {{
     const text = lines.map((entry, index) => displayText(entry, index)).join('\\n');
-    navigator.clipboard.writeText(text).then(_showToast);
+    _copyTextToClipboard(text).then(_showToast);
   }}
 
   function exportTimestamp() {{

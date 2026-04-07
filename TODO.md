@@ -43,6 +43,8 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - version source cleanup: backend version is canonical, frontend header fallback is generic, and `/config` populates the visible version label
 - dedicated mobile composer dock: the mobile shell now uses a visible composer row/host with a touch-focused input, visible Run action, and mobile-only mounting path while the desktop shell remains intact
 - mobile helper-row polish: the compact edit helpers stay hidden until the keyboard is open, sync with the visible mobile input, and avoid letting autocomplete cover the helper row
+- batched live-output rendering: fast bursts flush in small chunks so the browser can repaint, and the terminal follows the bottom only while the user has not scrolled away
+- shared Run-button guard: desktop and mobile Run controls disable together while a command is active so duplicate submits are blocked consistently
 
 #### Remaining
 - continue refining inline selection visibility for advanced keyboard flows

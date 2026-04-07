@@ -219,6 +219,7 @@ On mobile, the prompt surface is split into a dedicated visible composer:
 - `#mobile-cmd` is the visible source-of-truth input on touch-sized viewports
 - the helper row with `Home`, `←`, `→`, `End`, and `Del Word` appears only while the mobile keyboard is open
 - command chips, autocomplete acceptance, and the Run/Enter paths all sync back to the visible mobile input so the desktop mirror stays in step
+- the desktop and mobile Run buttons stay disabled together while any command in the active tab is running, preventing duplicate submits from either surface
 - mobile keyboard-open state is driven by the visible mobile input when it exists, with a viewport-offset fallback for the legacy/mobile-shell test harness path
 
 This keeps browser editing semantics and accessibility predictable without relying on `contenteditable`.
@@ -236,6 +237,10 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 - `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
 
 Tab switching is intentionally input-neutral: activating a different tab clears the hidden input and resets history-navigation cursor state instead of restoring prior tab text into the prompt.
+
+### Live Output Rendering
+
+Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
 
 ### Output Prefixes: Line Numbers And Timestamps
 
@@ -353,10 +358,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 445
-- `vitest`: 186
-- `playwright`: 102
-- total: 733
+- `pytest`: 449
+- `vitest`: 198
+- `playwright`: 106
+- total: 753
 
 ### Python tests
 
@@ -392,8 +397,8 @@ The browser JS files share a single global scope (by design — no ES modules, n
 - `autocomplete.test.js` — terminal-style suggestion list placement (above/below), highlighting, acceptance, and dismissal
 - `tabs.test.js` — tab limits, rename, drag-reorder state sync, rename/overflow scroll-button behavior, prompt mounting rules, no-output toasts, export guards, and last-tab reset
 - `welcome.test.js` — welcome animation cancellation, badge behavior, and current DOM/state transitions
-- `app.test.js` — startup theme, timestamp-mode bootstrap behavior, and config/history boot wiring
-- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers, including timestamp/line-number mode styling
+- `app.test.js` — startup theme, timestamp-mode bootstrap behavior, mobile Run-button sync, and config/history boot wiring
+- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers, including batched live output rendering and timestamp/line-number mode styling
 
 Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
 
@@ -405,7 +410,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 - `commands.spec.js` — command execution, denial, and exit-status rendering
 - `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
 - `kill.spec.js` — kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation, and killed-state UI
-- `mobile.spec.js` — mobile startup composer visibility, hamburger/menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, and long-command caret scrolling
+- `mobile.spec.js` — mobile startup composer visibility, hamburger/menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, mobile Run-button disable/reenable behavior, and long-command caret scrolling
 - `output.spec.js` — copy/clear/export actions, no-output toasts, and download fidelity
 - `rate-limit.spec.js` — per-session rate limiting
 - `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
@@ -427,7 +432,7 @@ Playwright tests exercise the full UI against a real Flask server. `playwright.c
 
 ### Testing Strategy
 - The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. The file-by-file breakdown and maintenance notes live in [tests/README.md](tests/README.md).
-- Vitest explicitly exercises `session.js`, `autocomplete.js`, and the new `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
+- Vitest explicitly exercises `session.js`, `autocomplete.js`, and the `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
 - Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, macOS-style Option shortcut handling, kill-modal keyboard confirmation, tab rename persistence, and both snapshot/run permalink JSON/HTML exports plus permalink line-number/timestamp toggles and export filename/content assertions.
 
 Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.

@@ -41,6 +41,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Tab-bar resize edge case** — tab overflow controls now recalculate correctly when tab width changes (for example after rename)
 - **Welcome output prefix bleed** — line numbers and timestamps no longer distort the decorative welcome animation or shift its status rows
 - **Mobile helper-row overlap** — the compact `Home` / `←` / `→` / `End` / `Del Word` row now stays hidden until the mobile keyboard is actually open, and helper taps no longer reopen autocomplete over the row
+- **Batched live output** — large output bursts now flush in small chunks so the browser can repaint during fast commands, and the live terminal only stays pinned to the bottom while the user has not scrolled away
+- **Shared Run guard** — desktop and mobile Run buttons now disable together while a command is active, preventing duplicate submits from either input path
 
 
 ## [1.2] — 2026-04-05

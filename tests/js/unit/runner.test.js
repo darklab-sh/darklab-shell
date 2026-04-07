@@ -49,6 +49,16 @@ function loadRunnerFns({
   showToast: showToastOverride = null,
   dismissMobileKeyboardAfterSubmit = () => {},
 } = {}) {
+  const normalizedTabs = tabs.map(tab => ({
+    rawLines: [],
+    previewTruncated: false,
+    fullOutputAvailable: false,
+    fullOutputLoaded: false,
+    historyRunId: null,
+    currentRunStartIndex: null,
+    ...tab,
+  }))
+
   document.body.innerHTML = `
     <input id="cmd" />
     <button id="run-btn"></button>
@@ -82,7 +92,7 @@ function loadRunnerFns({
   ], {
     document,
     Map,
-    tabs,
+    tabs: normalizedTabs,
     activeTabId,
     cmdInput,
     runBtn,
@@ -125,7 +135,7 @@ function loadRunnerFns({
 
   return {
     ...fns,
-    tabs,
+    tabs: normalizedTabs,
     cmdInput,
     runBtn,
     status,
@@ -446,10 +456,11 @@ describe('runner helpers', () => {
     await Promise.resolve()
 
     expect(appendLine).toHaveBeenCalledWith(
-      '[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. Use the permalink button below or in the history panel for complete results]',
+      '[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. To view the full output, use either permalink button now; after another command, use this command\'s history permalink]',
       'notice',
       'tab-1',
     )
+    expect(loaded.tabs[0].historyRunId).toBe('run-man')
   })
 
   it('doKill shows a notice when the kill request fails', async () => {

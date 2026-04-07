@@ -11,6 +11,7 @@ function loadTabsFns({
   maxTabs = 3,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
+  clipboardWrite = () => Promise.resolve(),
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -28,7 +29,7 @@ function loadTabsFns({
     clipboard: {
       writeText: (text) => {
         clipboardWrites.push(text)
-        return Promise.resolve()
+        return clipboardWrite(text)
       },
     },
   }
@@ -78,6 +79,74 @@ function loadTabsFns({
   }`)
 
   return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap }
+}
+
+function loadTabsAndOutputFns({
+  maxTabs = 3,
+  apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
+  clipboardWrite = () => Promise.resolve(),
+} = {}) {
+  const cmdInput = document.getElementById('cmd')
+  cmdInput.focus = vi.fn()
+  const tabsBar = document.getElementById('tabs-bar')
+  const tabPanels = document.getElementById('tab-panels')
+  const mobileComposerHost = document.getElementById('mobile-composer-host')
+  const mobileComposerRow = document.getElementById('mobile-composer-row')
+  const historyPanel = document.getElementById('history-panel')
+  const shellPromptWrap = document.createElement('div')
+  shellPromptWrap.className = 'shell-prompt-wrap'
+
+  const navigator = {
+    clipboard: {
+      writeText: text => clipboardWrite(text),
+    },
+  }
+
+  const fns = fromDomScripts([
+    'app/static/js/utils.js',
+    'app/static/js/output.js',
+    'app/static/js/tabs.js',
+  ], {
+    document,
+    AnsiUp: class {
+      constructor() {
+        this.use_classes = false
+      }
+
+      ansi_to_html(s) {
+        return '<em>' + s + '</em>'
+      }
+    },
+    cmdInput,
+    tabsBar,
+    tabPanels,
+    historyPanel,
+    mobileComposerHost,
+    mobileComposerRow,
+    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: 100, app_name: 'shell.darklab.sh' },
+    setStatus: () => {},
+    clearSearch: () => {},
+    confirmKill: () => {},
+    cancelWelcome: () => {},
+    apiFetch,
+    location: { origin: 'https://example.test' },
+    navigator,
+    URL: {
+      createObjectURL: () => 'blob:mock',
+      revokeObjectURL: () => {},
+    },
+    Blob,
+    shellPromptWrap,
+    getOutput: id => document.getElementById(`output-${id}`),
+  }, `{
+    createTab,
+    mountShellPrompt,
+    _getTabs: () => tabs,
+    _stickOutputToBottom,
+    _maybeMountDeferredPrompt,
+  }`)
+
+  return { ...fns, shellPromptWrap }
 }
 
 describe('tabs helpers', () => {
@@ -181,6 +250,66 @@ describe('tabs helpers', () => {
     expect(mobileComposerRow.contains(shellInputRow)).toBe(false)
   })
 
+  it('tracks whether the output should keep following the live tail', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+
+    let scrollTop = 0
+    Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: value => { scrollTop = value },
+    })
+
+    output.dispatchEvent(new Event('scroll'))
+    expect(tab.followOutput).toBe(false)
+
+    scrollTop = 200
+    output.dispatchEvent(new Event('scroll'))
+    expect(tab.followOutput).toBe(true)
+  })
+
+  it('keeps follow-output enabled when the terminal scrolls itself to the bottom', () => {
+    const { createTab, _getTabs, _stickOutputToBottom } = loadTabsAndOutputFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+
+    let scrollTop = 0
+    Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: value => {
+        scrollTop = value
+        output.dispatchEvent(new Event('scroll'))
+      },
+    })
+
+    _stickOutputToBottom(output, tab)
+
+    expect(tab.suppressOutputScrollTracking).toBe(true)
+    expect(tab.followOutput).toBe(true)
+  })
+
+  it('defers remounting the prompt until the output queue is drained', () => {
+    const { createTab, mountShellPrompt, _maybeMountDeferredPrompt, _getTabs, shellPromptWrap } = loadTabsAndOutputFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    tab.deferPromptMount = true
+
+    mountShellPrompt(id)
+    expect(shellPromptWrap.parentElement).not.toBe(document.getElementById(`output-${id}`))
+
+    _maybeMountDeferredPrompt(id)
+    expect(tab.deferPromptMount).toBe(false)
+  })
+
   it('mountShellPrompt stays hidden during the desktop welcome boot', () => {
     const { createTab, mountShellPrompt, shellPromptWrap } = loadTabsFns({ welcomeBootPending: true })
     const id = createTab('tab 1')
@@ -221,6 +350,75 @@ describe('tabs helpers', () => {
     await new Promise(resolve => setImmediate(resolve))
 
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to create permalink')
+  })
+
+  it('permalinkTab falls back to execCommand when clipboard writeText rejects', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }))
+    document.execCommand = vi.fn(() => true)
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      clipboardWrite: () => Promise.reject(new Error('clipboard denied')),
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
+    expect(document.getElementById('permalink-toast').classList.contains('toast-error')).toBe(false)
+  })
+
+  it('permalinkTab does not append a truncation warning for a tab with full output already loaded', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history/run-1?json') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            output_entries: [
+              { text: 'full line 1', cls: '', tsC: '', tsE: '' },
+              { text: 'full line 2', cls: '', tsC: '', tsE: '' },
+            ],
+            output: ['full line 1', 'full line 2'],
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) })
+    })
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({ apiFetch })
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const cmdInput = document.getElementById('cmd')
+    tab.historyRunId = 'run-1'
+    tab.fullOutputAvailable = true
+    tab.previewTruncated = true
+    tab.currentRunStartIndex = 2
+    tab.rawLines.push({ text: '$ tab 1', cls: 'prompt-echo', tsC: '', tsE: '' })
+    tab.rawLines.push({ text: '', cls: 'prompt-echo', tsC: '', tsE: '' })
+    tab.rawLines.push({ text: 'preview line 1', cls: '', tsC: '', tsE: '' })
+    tab.rawLines.push({ text: '[preview truncated — only the last 2000 lines are shown here, but the full output had 6386 lines. Use the run history permalink for the full output]', cls: 'notice', tsC: '', tsE: '' })
+    tab.rawLines.push({ text: '[process exited with code 0 in 0.2s]', cls: 'exit-ok', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
+    const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
+    expect(shareCall).toBeTruthy()
+    const payload = JSON.parse(shareCall[1].body)
+    expect(payload.content).toHaveLength(5)
+    expect(payload.content.map(entry => entry.text)).toEqual([
+      '$ tab 1',
+      '',
+      'full line 1',
+      'full line 2',
+      '[process exited with code 0 in 0.2s]',
+    ])
+    expect(payload.content.some(entry => String(entry.text || '').includes('tab output truncated'))).toBe(false)
+    expect(payload.content.some(entry => String(entry.text || '').includes('preview truncated'))).toBe(false)
+    expect(cmdInput.focus).toHaveBeenCalled()
   })
 
   it('copyTab shows a toast when there is no exportable output', () => {

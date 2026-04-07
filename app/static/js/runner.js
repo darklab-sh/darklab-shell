@@ -15,7 +15,7 @@ function _resetStalledTimeout(tabId) {
     appendLine('[check the history panel for the result once it completes]', 'notice', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
-    stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+    stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
   }, 45000));
 }
 
@@ -79,6 +79,14 @@ function hideTabKillBtn(tabId) {
   if (btn) btn.style.display = 'none';
 }
 
+function _setRunButtonDisabled(disabled) {
+  if (typeof setRunButtonDisabled === 'function') {
+    setRunButtonDisabled(disabled);
+    return;
+  }
+  if (runBtn) runBtn.disabled = !!disabled;
+}
+
 function _describeRunnerFetchError(err, context = 'server') {
   if (typeof describeFetchError === 'function') return describeFetchError(err, context);
   const message = err && err.message ? err.message : 'unknown network error';
@@ -100,7 +108,7 @@ function _handleRunTransportFailure(err, tabId) {
   appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
   if (tabId === activeTabId) setStatus('fail');
   setTabStatus(tabId, 'fail');
-  stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+  stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
 }
 
 async function _readRunErrorMessage(res) {
@@ -123,7 +131,7 @@ function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
   const shown = APP_CONFIG.max_output_lines || outputLineCount || 0;
   const total = outputLineCount || shown;
   if (fullOutputAvailable) {
-    return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Use the permalink button below or in the history panel for complete results]`;
+    return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]`;
   }
   return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Full output persistence is disabled or unavailable]`;
 }
@@ -190,12 +198,13 @@ function doKill(tabId) {
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
     setStatus('killed');
-    runBtn.disabled = false;
+    _setRunButtonDisabled(false);
   }
 }
 
 // ── Run command ──
 function runCommand() {
+  if (runBtn && runBtn.disabled) return;
   const raw = cmdInput.value;
   const cmd = raw.trim();
   if (!cmd) {
@@ -260,10 +269,19 @@ function runCommand() {
   if (typeof dismissMobileKeyboardAfterSubmit === 'function') dismissMobileKeyboardAfterSubmit();
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
   const _runTab = tabs.find(t => t.id === activeTabId);
-  if (_runTab) _runTab.runStart = Date.now();
+  if (_runTab) {
+    _runTab.runStart = Date.now();
+    _runTab.currentRunStartIndex = _runTab.rawLines.length;
+    _runTab.previewTruncated = false;
+    _runTab.fullOutputAvailable = false;
+    _runTab.fullOutputLoaded = false;
+    _runTab.historyRunId = null;
+    _runTab.followOutput = true;
+    _runTab.deferPromptMount = false;
+  }
   setStatus('running');
   setTabStatus(activeTabId, 'running');
-  runBtn.disabled = true;
+  _setRunButtonDisabled(true);
   showTabKillBtn(activeTabId);
   startTimer();
 
@@ -278,13 +296,13 @@ function runCommand() {
       return res.json().then(data => {
         appendLine('[denied] ' + (data.error || 'Command not allowed.'), 'denied', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
-        stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+        stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });
     }
     if (res.status === 429) {
       appendLine('[rate limited] Too many requests. Please wait a moment.', 'denied', tabId);
       setStatus('fail'); setTabStatus(tabId, 'fail');
-      stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       return;
     }
     if (!res.ok) {
@@ -292,13 +310,13 @@ function runCommand() {
         const suffix = message ? ` ${message}` : '';
         appendLine(`[server error] The server could not start the command.${suffix}`, 'exit-fail', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
-        stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+        stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });
     }
     if (!res.body || typeof res.body.getReader !== 'function') {
       appendLine('[server error] The server returned an invalid streaming response.', 'exit-fail', tabId);
       setStatus('fail'); setTabStatus(tabId, 'fail');
-      stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       return;
     }
 
@@ -310,7 +328,7 @@ function runCommand() {
 
     function read() {
       reader.read().then(({ done, value }) => {
-        if (done) { _clearStalledTimeout(tabId); stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
+        if (done) { _clearStalledTimeout(tabId); stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId); return; }
         _resetStalledTimeout(tabId);
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
@@ -323,6 +341,7 @@ function runCommand() {
                 const t = tabs.find(t => t.id === tabId);
                 if (t) {
                   t.runId = msg.run_id;
+                  t.historyRunId = msg.run_id;
                   if (t.pendingKill) {
                     // Kill was requested before runId was available — send it now
                     t.pendingKill = false;
@@ -349,12 +368,19 @@ function runCommand() {
               } else if (msg.type === 'exit') {
                 _clearStalledTimeout(tabId);
                 const t = tabs.find(t => t.id === tabId);
-                if (t) { t.exitCode = msg.code; t.runId = null; }
+                if (t) {
+                  t.exitCode = msg.code;
+                  t.runId = null;
+                  t.deferPromptMount = true;
+                  t.previewTruncated = !!msg.preview_truncated;
+                  t.fullOutputAvailable = !!msg.full_output_available;
+                  t.fullOutputLoaded = !msg.preview_truncated;
+                }
                 // If already killed by user, ignore the subsequent -15 exit code
                 if (t && t.killed) {
                   t.killed = false;
                   stopTimer();
-                  runBtn.disabled = false; hideTabKillBtn(tabId);
+                  _setRunButtonDisabled(false); hideTabKillBtn(tabId);
                   if (historyPanel.classList.contains('open')) refreshHistoryPanel();
                   return;
                 }
@@ -373,14 +399,15 @@ function runCommand() {
                   setTabStatus(tabId, 'fail');
                 }
                 if (t) t.syntheticClear = false;
-                runBtn.disabled = false; hideTabKillBtn(tabId);
+                _setRunButtonDisabled(false); hideTabKillBtn(tabId);
                 if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+                if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
               } else if (msg.type === 'error') {
                 _clearStalledTimeout(tabId);
                 appendLine('[error] ' + msg.text, 'exit-fail', tabId);
                 if (tabId === activeTabId) setStatus('fail');
                 setTabStatus(tabId, 'fail');
-                stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+                stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
               }
             } catch(e) {}
           }

@@ -1,6 +1,6 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadOutputFns() {
+function loadOutputFns({ appConfig = {} } = {}) {
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -18,7 +18,7 @@ function loadOutputFns() {
     AnsiUp: FakeAnsiUp,
     activeTabId: 'tab-1',
     tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
-    APP_CONFIG: { max_output_lines: 2 },
+    APP_CONFIG: { max_output_lines: 2, ...appConfig },
     getOutput: () => document.getElementById('out'),
     shellPromptWrap: document.getElementById('shell-prompt-wrap'),
   }, `{
@@ -61,6 +61,17 @@ describe('appendLine', () => {
 
     const line = document.querySelector('.line')
     expect(line.innerHTML).toContain('<em>hello</em>')
+  })
+
+  it('wraps output content in a line-content container so prefix mode does not reshape the line flow', () => {
+    const { appendLine } = loadOutputFns()
+
+    appendLine('hello', '', 'tab-1')
+
+    const line = document.querySelector('.line')
+    expect(line.querySelector('.line-content')).not.toBeNull()
+    expect(line.firstElementChild?.classList.contains('line-content')).toBe(true)
+    expect(line.querySelector('.line-content').innerHTML).toContain('<em>hello</em>')
   })
 
   it('trims old lines and keeps rawLines in sync', () => {
@@ -152,5 +163,22 @@ describe('appendLine', () => {
 
     expect(document.querySelector('.line')).toBeNull()
     expect(_getTabs()[0].rawLines).toHaveLength(0)
+  })
+
+  it('batches large bursts of output and finishes rendering on the next tick', async () => {
+    const { appendLine } = loadOutputFns({ appConfig: { max_output_lines: 100 } })
+
+    for (let i = 1; i <= 65; i++) {
+      appendLine(`line ${i}`, '', 'tab-1')
+    }
+
+    expect(document.querySelectorAll('.line')).toHaveLength(60)
+
+    await new Promise(resolve => setTimeout(resolve, 25))
+
+    const lines = document.querySelectorAll('.line')
+    expect(lines).toHaveLength(65)
+    expect(lines[0].textContent).toContain('line 1')
+    expect(lines[64].textContent).toContain('line 65')
   })
 })

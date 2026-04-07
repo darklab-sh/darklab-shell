@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import { runCommand, openHistoryWithEntries } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const MOBILE = { width: 375, height: 812 }
 
 test.describe('permalink / share', () => {
   test.beforeEach(async ({ page }) => {
@@ -62,7 +63,7 @@ test.describe('permalink / share', () => {
     await expect(page.locator('#permalink-toast')).toContainText('No output')
   })
 
-  test('permalink button shows a failure toast when clipboard writeText rejects', async ({ page }) => {
+  test('permalink button falls back to execCommand when clipboard writeText rejects', async ({ page }) => {
     await runCommand(page, CMD)
 
     await page.evaluate(() => {
@@ -70,11 +71,19 @@ test.describe('permalink / share', () => {
         value: { writeText: () => Promise.reject(new Error('clipboard denied')) },
         configurable: true,
       })
+      Object.defineProperty(document, 'execCommand', {
+        value: (cmd) => {
+          window.__copyFallbackUsed = cmd === 'copy'
+          return true
+        },
+        configurable: true,
+      })
     })
 
     await page.locator('[data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
-    await expect(page.locator('#permalink-toast')).toContainText('Failed to copy link')
+    await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+    await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
   test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({ page }) => {
@@ -206,5 +215,25 @@ test.describe('permalink / share', () => {
     expect(html).toContain('curl http://localhost:5001/health')
     expect(html).toContain('perm-prefix')
     expect(html).toContain('+')
+  })
+
+  test('mobile permalink page toast hides after copy', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    const [shareResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
+      page.locator('[data-action="permalink"]').click(),
+    ])
+    const data = await shareResp.json()
+
+    await page.setViewportSize(MOBILE)
+    await page.goto(data.url)
+
+    await page.locator('button:has-text("copy")').click()
+
+    const toast = page.locator('#copy-toast')
+    await expect(toast).toHaveText('Copied to clipboard')
+    await expect(toast).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(toast).toBeHidden({ timeout: 5_000 })
   })
 })

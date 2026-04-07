@@ -89,7 +89,7 @@ async function loadAppFns({
         </div>
       </div>
       <div id="tab-panels"></div>
-      <div id="mobile-composer-host">
+    <div id="mobile-composer-host">
         <div id="mobile-edit-bar">
           <button data-edit-action="home"></button>
           <button data-edit-action="left"></button>
@@ -97,7 +97,9 @@ async function loadAppFns({
           <button data-edit-action="end"></button>
           <button data-edit-action="delete-word"></button>
         </div>
-        <div id="mobile-composer-row"></div>
+        <div id="mobile-composer-row">
+          <button id="mobile-run-btn"></button>
+        </div>
       </div>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
@@ -305,6 +307,7 @@ async function loadAppFns({
   }, `{
     _setTsMode,
     _setLnMode,
+    setRunButtonDisabled,
     confirmHistAction,
     executeHistAction,
     doKill,
@@ -694,6 +697,20 @@ describe('app helpers', () => {
     expect(runBtn.hidden).toBe(false)
 
     restoreViewport()
+  })
+
+  it('keeps the desktop and mobile run buttons in sync when disabled', async () => {
+    const { setRunButtonDisabled } = await loadAppFns()
+    const runBtn = document.getElementById('run-btn')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
+
+    setRunButtonDisabled(true)
+    expect(runBtn.disabled).toBe(true)
+    expect(mobileRunBtn.disabled).toBe(true)
+
+    setRunButtonDisabled(false)
+    expect(runBtn.disabled).toBe(false)
+    expect(mobileRunBtn.disabled).toBe(false)
   })
 
   it('closes transient ui while the mobile keyboard is open', async () => {
