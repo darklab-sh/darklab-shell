@@ -66,12 +66,26 @@ WORKDIR /app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Download the latest ansi_up at build time, overwriting the bundled fallback.
-# The || true ensures a build failure here doesn't abort the image build —
-# the committed copy in the repo is used by docker-compose via the bind mount.
-RUN mkdir -p /app/static/js/vendor && \
+# Download the latest ansi_up at build time into a path outside /app so the
+# docker-compose bind mount cannot shadow it.
+RUN mkdir -p /usr/local/share/shell-assets/js/vendor && \
     curl -sSL https://cdn.jsdelivr.net/npm/ansi_up/ansi_up.js \
-         -o /app/static/js/vendor/ansi_up.js || true
+         -o /usr/local/share/shell-assets/js/vendor/ansi_up.js || true
+
+# Download the current upstream font binaries at build time so the image keeps
+# using locally hosted fonts without relying on Google Fonts requests at runtime.
+RUN set -eux; \
+    mkdir -p /usr/local/share/shell-assets/fonts; \
+    curl -fsSL "https://raw.githubusercontent.com/google/fonts/main/ofl/jetbrainsmono/JetBrainsMono%5Bwght%5D.ttf" \
+      -o /tmp/JetBrainsMono-wght.ttf; \
+    install -m 0644 /tmp/JetBrainsMono-wght.ttf /usr/local/share/shell-assets/fonts/JetBrainsMono-300.ttf; \
+    install -m 0644 /tmp/JetBrainsMono-wght.ttf /usr/local/share/shell-assets/fonts/JetBrainsMono-400.ttf; \
+    install -m 0644 /tmp/JetBrainsMono-wght.ttf /usr/local/share/shell-assets/fonts/JetBrainsMono-700.ttf; \
+    curl -fsSL "https://raw.githubusercontent.com/google/fonts/main/ofl/syne/Syne%5Bwght%5D.ttf" \
+      -o /tmp/Syne-wght.ttf; \
+    install -m 0644 /tmp/Syne-wght.ttf /usr/local/share/shell-assets/fonts/Syne-700.ttf; \
+    install -m 0644 /tmp/Syne-wght.ttf /usr/local/share/shell-assets/fonts/Syne-800.ttf; \
+    rm -f /tmp/JetBrainsMono-wght.ttf /tmp/Syne-wght.ttf
 
 # Create two unprivileged users:
 #   appuser — owns /data and runs Gunicorn (can write SQLite database)

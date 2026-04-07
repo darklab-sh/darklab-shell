@@ -1,12 +1,70 @@
 import { test, expect } from '@playwright/test'
+import { makeTestIp } from './helpers.js'
 
 // A long-running command that is in the allowlist and won't exit on its own.
 const LONG_CMD = 'ping -c 1000 127.0.0.1'
+const TEST_IP = makeTestIp(63)
 
 test.describe('kill running command', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
+    await page.addInitScript(() => {
+      const originalFetch = window.fetch.bind(window)
+      const encoder = new TextEncoder()
+      let longRunController = null
+
+      const finishLongRun = () => {
+        if (!longRunController) return
+        longRunController.enqueue(encoder.encode(
+          'data: {"type":"exit","code":143,"elapsed":0.0}\n\n',
+        ))
+        longRunController.close()
+        longRunController = null
+      }
+
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url
+        const rawBody = typeof init?.body === 'string' ? init.body : ''
+
+        if (url.endsWith('/run') && init?.method === 'POST' && rawBody.includes('ping -c 1000 127.0.0.1')) {
+          const body = new ReadableStream({
+            start(controller) {
+              longRunController = controller
+              controller.enqueue(encoder.encode(
+                'data: {"type":"started","run_id":"kill-spec-long-run"}\n\n',
+              ))
+              controller.enqueue(encoder.encode(
+                'data: {"type":"output","text":"long run started\\n"}\n\n',
+              ))
+              // Leave the stream open so the command stays in RUNNING state.
+            },
+          })
+
+          return new Response(body, {
+            status: 200,
+            headers: { 'Content-Type': 'text/event-stream' },
+          })
+        }
+
+        if (url.endsWith('/kill') && init?.method === 'POST' && rawBody.includes('kill-spec-long-run')) {
+          finishLongRun()
+          return new Response('{}', {
+            status: 200,
+            headers: { 'Content-Type': 'application/json' },
+          })
+        }
+
+        return originalFetch(input, init)
+      }
+    })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await page.evaluate(() => {
+      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
+    })
+    await page.waitForFunction(() => {
+      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
+    })
   })
 
   test('kill button stops a running command and status becomes KILLED', async ({ page }) => {
@@ -98,6 +156,11 @@ test.describe('kill running command', () => {
 
     await expect(page.locator('#kill-overlay')).toBeHidden()
     await expect(page.locator('.status-pill')).toHaveText('RUNNING')
+
+    // Clean up the still-running command so the next test starts from a blank session.
+    await page.locator('#cmd').press('Control+c')
+    await page.locator('#kill-confirm').click()
+    await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
   })
 
   test('Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation', async ({ page }) => {

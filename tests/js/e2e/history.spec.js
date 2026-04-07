@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory } from './helpers.js'
+import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory, makeTestIp } from './helpers.js'
 
 // Use allowed commands that complete quickly and exit 0.
 // curl against the local test server is ideal — always available and fast.
@@ -8,7 +8,7 @@ const CMD_B = 'curl http://localhost:5001/config'
 
 test.describe('history drawer', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': '203.0.113.62' })
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(62) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     // Clear any localStorage state left over from a previous test run
@@ -84,10 +84,35 @@ test.describe('history drawer', () => {
     // Open the history panel to access the clear-all button (it lives inside the panel)
     await openHistory(page)
     await page.locator('#hist-clear-all-btn').click()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#hist-del-overlay')).toBeHidden()
+    await page.locator('#hist-clear-all-btn').click()
     await page.locator('#hist-del-confirm').click()
 
     // All chips should be gone
     await expect(page.locator('.hist-chip')).toHaveCount(0)
+  })
+
+  test('clicking outside the drawer closes the history panel', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    await openHistory(page)
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+
+    await page.locator('.terminal-wrap').click({ position: { x: 12, y: 12 } })
+
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+  })
+
+  test('pressing Escape closes the history panel', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    await openHistory(page)
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+
+    await page.keyboard.press('Escape')
+
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   })
 
   test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
@@ -110,5 +135,4 @@ test.describe('history drawer', () => {
     await expect(page.locator('.history-entry')).toHaveCount(1)
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
   })
-
 })

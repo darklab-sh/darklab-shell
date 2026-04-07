@@ -16,7 +16,6 @@ help
 history
 hostname
 id
-keys
 last
 limits
 ls
@@ -32,6 +31,7 @@ ps
 ps aux
 ps -ef
 retention
+shortcuts
 status
 uname -a
 uptime
@@ -57,7 +57,6 @@ man host
 man hostname
 man hping3
 man id
-man keys
 man last
 man limits
 man ls
@@ -71,6 +70,7 @@ man ping
 man ps
 man pwd
 man retention
+man shortcuts
 man status
 man tcptraceroute
 man testssl

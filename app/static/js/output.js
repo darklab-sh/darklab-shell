@@ -1,6 +1,25 @@
 // ── Shared output logic ──
-const ansi_up = new AnsiUp();
-ansi_up.use_classes = false;
+function createAnsiUpRenderer() {
+  if (typeof AnsiUp === 'function') {
+    try {
+      const instance = new AnsiUp();
+      if (instance && typeof instance.ansi_to_html === 'function') {
+        instance.use_classes = false;
+        return instance;
+      }
+    } catch (err) {
+      // Fall through to the plain-text renderer below.
+    }
+  }
+  return {
+    use_classes: false,
+    ansi_to_html(text) {
+      return escapeHtml(String(text ?? ''));
+    },
+  };
+}
+
+const ansi_up = createAnsiUpRenderer();
 
 // ── Timestamp mode ──
 // Cycles: 'off' → 'elapsed' → 'clock' → 'off'

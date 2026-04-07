@@ -25,7 +25,9 @@ import database
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
-    load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
+    load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
+    load_mobile_welcome_hints, load_autocomplete,
+    load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
@@ -581,6 +583,22 @@ class TestRunOutputCapture:
         try:
             with mock.patch("commands.APP_HINTS_FILE", path):
                 assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
+        finally:
+            os.unlink(path)
+
+
+class TestMobileWelcomeHintLoading:
+    def test_missing_mobile_hints_file_returns_empty_list(self):
+        with mock.patch("commands.APP_HINTS_MOBILE_FILE", "/nonexistent/app_hints_mobile.txt"):
+            assert load_mobile_welcome_hints() == []
+
+    def test_mobile_hints_loader_ignores_blank_lines_and_comments(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# comment\n\nTap the prompt.\n  \n# another\nUse the mobile menu.\n")
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
+                assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
         finally:
             os.unlink(path)
 

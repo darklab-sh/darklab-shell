@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 453
-- `vitest`: 229
-- `playwright`: 121
-- total: 803
+- `pytest`: 465
+- `vitest`: 231
+- `playwright`: 126
+- total: 822
 
 ## Running The Suites
 
@@ -48,7 +48,7 @@ npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 Pytest lives in `tests/py/` and is organized by backend concern:
 
 - `test_validation.py` - command validation, shell operator blocking, path blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
-- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, canonical run permalink behavior when full-output artifacts exist, permalink line-number/timestamp toggle behavior, and the backward-compatible `/history/<run_id>/full` alias
+- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, canonical run permalink behavior when full-output artifacts exist, permalink line-number/timestamp toggle behavior, the vendor asset routes for fonts and `ansi_up` including build-time/fallback serving and unknown-path rejection, and the backward-compatible `/history/<run_id>/full` alias
 - `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
 - `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
 - `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` builtin+custom merge behavior, `load_ascii_art()`, `load_ascii_mobile_art()`, FAQ schema handling, and module-level utility coverage
@@ -92,9 +92,9 @@ Spec files:
 
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
-- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, killed-state UI, and closing the only running tab while a command is active
+- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, killed-state UI, and closing the only running tab while a command is active; it uses a browser-side fetch mock for the long-running SSE and a per-run `X-Forwarded-For` bucket so the modal flow stays deterministic across repeated suite runs
 - `mobile.spec.js` - mobile startup composer visibility, keyboard open/close transitions, transcript tap dismissal, mobile input tap no-scroll focus, new-tab/close-tab scroll behavior, status-pill placement in the mobile header, mobile tab-row overflow/scrolling, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, action-button focus cleanup, clear/kill preservation while a command is active, Run-button disable/reenable coverage while a command is active, and close-button focus cleanup after single-tab reset
-- `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
+- `output.spec.js` - copy, clear, save txt/html, clipboard failure handling, and exported HTML assertions for local vendor font paths
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
@@ -105,7 +105,7 @@ Spec files:
 - `ui.spec.js` - theme toggle plus backend-driven FAQ modal rendering, close behavior, allowlist-chip interaction, and options-modal preference persistence
 - `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, prompt-key settle behavior, welcome-tab isolation, preferred-command stability, and the mobile welcome banner regression
 - `failure-paths.spec.js` - `/run` denial/rate limit/offline handling, share failure, and history delete/clear failure toasts
-- `boot-resilience.spec.js` - startup fetch fallbacks and core smoke checks
+- `boot-resilience.spec.js` - startup fetch fallbacks, core smoke checks, and the no-external-font-request regression
 
 Notes:
 
@@ -122,7 +122,8 @@ Notes:
 - Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
 - When a branch depends on a browser API or network error, make the failure deterministic in the harness instead of relying on the environment.
 - For browser tests that interact with history, remember that the server is eventually consistent around run persistence. Retry or re-open the drawer when needed.
-- For tests that need isolated rate-limit buckets, use a dedicated RFC 5737 test-net address in `X-Forwarded-For`.
+- For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a per-run RFC 5737 test-net address in `X-Forwarded-For`.
+- For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
 
 ## Related Docs

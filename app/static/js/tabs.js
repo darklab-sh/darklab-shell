@@ -659,8 +659,8 @@ function saveTab(id) {
 }
 
 // ── HTML snapshot export ──
-// Generates a self-contained HTML file with terminal styling, ANSI colors
-// rendered as inline spans, and clock timestamps shown alongside each line.
+// Generates a themed HTML file with terminal styling, ANSI colors rendered
+// as inline spans, and clock timestamps shown alongside each line.
 function exportTabHtml(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) { showToast('No output to export'); return; }
@@ -685,7 +685,18 @@ function exportTabHtml(id) {
 <meta charset="UTF-8">
 <title>${escapeHtml(t.label)} \u2014 ${escapeHtml(appName)}</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/vendor/fonts/JetBrainsMono-400.ttf') format('truetype');
+    font-weight: 400;
+    font-style: normal;
+  }
+  @font-face {
+    font-family: 'JetBrains Mono';
+    src: url('/vendor/fonts/JetBrainsMono-700.ttf') format('truetype');
+    font-weight: 700;
+    font-style: normal;
+  }
   body {
     background: #0d0d0d; color: #e0e0e0;
     font-family: 'JetBrains Mono', monospace; font-size: 13px;

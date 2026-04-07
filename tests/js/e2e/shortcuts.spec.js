@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(70)
 
 async function dispatchMacOptionKey(page, selector, init) {
   await page.locator(selector).evaluate((el, eventInit) => {
@@ -11,6 +12,7 @@ async function dispatchMacOptionKey(page, selector, init) {
 
 test.describe('keyboard shortcuts', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },

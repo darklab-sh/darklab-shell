@@ -63,6 +63,27 @@ describe('appendLine', () => {
     expect(line.innerHTML).toContain('<em>hello</em>')
   })
 
+  it('falls back to plain-text rendering when AnsiUp is unavailable', () => {
+    const { appendLine } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/output.js',
+    ], {
+      document,
+      activeTabId: 'tab-1',
+      tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
+      APP_CONFIG: { max_output_lines: 2 },
+      getOutput: () => document.getElementById('out'),
+      shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+    }, `{
+      appendLine,
+    }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
+
+    appendLine('plain <b>text</b>', '', 'tab-1')
+
+    const line = document.querySelector('.line')
+    expect(line.innerHTML).toContain('plain &lt;b&gt;text&lt;/b&gt;')
+  })
+
   it('wraps output content in a line-content container so prefix mode does not reshape the line flow', () => {
     const { appendLine } = loadOutputFns()
 

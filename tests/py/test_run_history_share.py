@@ -282,11 +282,11 @@ class TestRunStreaming:
         assert "help       Show web shell helpers available in this app.\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
         assert "hostname   Show the instance hostname/app name.\\n" in body
-        assert "keys       Show current keyboard shortcuts and fallback notes.\\n" in body
         assert "limits     Show configured runtime and retention limits.\\n" in body
         assert "man <cmd>  Show the real man page for an allowed command.\\n" in body
         assert "last       Show recent completed runs with timestamps and exit codes.\\n" in body
         assert "retention  Show retention and full-output persistence settings.\\n" in body
+        assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert "status     Summarize the current session and instance settings.\\n" in body
         assert "tty        Show the web terminal device path.\\n" in body
         assert "type <cmd> Describe whether a command is a helper command, real command, or missing.\\n" in body
@@ -297,10 +297,10 @@ class TestRunStreaming:
         assert "who        Show the current web shell user/session.\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_keys_lists_current_and_planned_shortcuts(self):
+    def test_fake_shortcuts_lists_current_shortcuts(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "keys"})
+        resp = client.post("/run", json={"command": "shortcuts"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -308,7 +308,6 @@ class TestRunStreaming:
         assert "Alt+T" in body
         assert "Option+Shift+C" in body
         assert "Ctrl+U" in body
-        assert "Fallback notes:\\n" in body
         assert "browser Command shortcuts remain environment-dependent" in body
         assert '"type": "exit"' in body
 
@@ -462,7 +461,33 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "sudo: 'ping darklab.sh' is not happening today.\\n" in body
+        assert (
+            "sudo: 'ping darklab.sh' is not happening today.\\n" in body
+            or "sudo: 'ping darklab.sh' is still not a privilege escalation strategy.\\n" in body
+            or "sudo: 'ping darklab.sh' has been denied by the browser court.\\n" in body
+            or "sudo: 'ping darklab.sh' will remain a non-event.\\n" in body
+            or "sudo: nice try with 'ping darklab.sh', but no.\\n" in body
+            or "sudo: 'ping darklab.sh' is still just a wish with shell syntax.\\n" in body
+            or "sudo: the answer to 'ping darklab.sh' is firmly no.\\n" in body
+            or "sudo: 'ping darklab.sh' will remain below the line.\\n" in body
+            or "sudo: 'ping darklab.sh' was rejected before it could become a plan.\\n" in body
+        )
+
+    def test_fake_sudo_without_arguments_uses_the_snark_pool(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "sudo"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert (
+            "sudo: confidence noted. Privilege escalation is still not happening.\\n" in body
+            or "sudo: that's a local habit, not a capability.\\n" in body
+            or "sudo: request denied by the web shell's sense of self-preservation.\\n" in body
+            or "sudo: the operator badge is decorative here.\\n" in body
+            or "sudo: this browser tab does not recognize your authority.\\n" in body
+            or "sudo: close, but still no root access.\\n" in body
+        )
 
     def test_fake_reboot_reports_web_shell_restriction(self):
         client = get_client()
@@ -471,8 +496,14 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "reboot: bold choice.\\n" in body
-        assert "If this web shell could reboot the host, we would both have bigger problems.\\n" in body
+        assert (
+            "reboot: bold choice.\\n" in body
+            or "reboot: not with this browser tab.\\n" in body
+            or "reboot: the server is not taking user suggestions for downtime.\\n" in body
+            or "reboot: let's not turn a diagnostic console into a blackout.\\n" in body
+            or "reboot: all I can offer is a dramatic sigh.\\n" in body
+            or "reboot: have you tried turning your expectations off and on again?\\n" in body
+        )
 
     def test_fake_rm_root_refuses_exact_root_delete_pattern(self):
         client = get_client()
@@ -481,8 +512,14 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "rm: nice try.\\n" in body
-        assert "Even this web shell has standards.\\n" in body
+        assert (
+            "rm: nice try.\\n" in body
+            or "rm: the web shell prefers not to become a cautionary tale.\\n" in body
+            or "rm: not even for dramatic effect.\\n" in body
+            or "rm: that's a hard no from the entire stack.\\n" in body
+            or "rm: the filesystem would like to keep existing, thanks.\\n" in body
+            or "rm: asking for `/` is a little too committed.\\n" in body
+        )
 
     def test_fake_date_hostname_and_uptime_render_shell_style_information(self):
         client = get_client()
@@ -577,15 +614,15 @@ class TestRunStreaming:
         assert "Web shell helpers:\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
 
-    def test_fake_man_for_keys_topic_returns_web_shell_help(self):
+    def test_fake_man_for_shortcuts_topic_returns_web_shell_help(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "man keys"})
+        resp = client.post("/run", json={"command": "man shortcuts"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert "Web shell helpers:\\n" in body
-        assert "keys       Show current keyboard shortcuts and fallback notes.\\n" in body
+        assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_history_lists_recent_session_commands(self):

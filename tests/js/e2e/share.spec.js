@@ -1,12 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries } from './helpers.js'
+import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const MOBILE = { width: 375, height: 812 }
 
 test.describe('permalink / share', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': '203.0.113.61' })
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(61) })
     // Mock clipboard so writeText() resolves in headless Chromium without
     // requiring the clipboard-write permission grant.
     await page.addInitScript(() => {
@@ -53,6 +53,35 @@ test.describe('permalink / share', () => {
 
     // The permalink page should display the command that was run
     await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
+  })
+
+  test('permalink page honors the light theme cookie for the live view and export', async ({ page }) => {
+    await runCommand(page, CMD)
+
+    const [shareResp] = await Promise.all([
+      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
+      page.locator('[data-action="permalink"]').click(),
+    ])
+    const data = await shareResp.json()
+
+    await page.context().addCookies([
+      { name: 'pref_theme', value: 'light', url: 'http://localhost:5001' },
+    ])
+    await page.goto(data.url)
+
+    await expect(page.locator('body')).toHaveClass(/light/)
+    await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
+
+    const [htmlDownload] = await Promise.all([
+      page.waitForEvent('download'),
+      page.locator('button:has-text("save .html")').click(),
+    ])
+    const htmlStream = await htmlDownload.createReadStream()
+    const htmlChunks = []
+    for await (const chunk of htmlStream) htmlChunks.push(chunk)
+    const html = Buffer.concat(htmlChunks).toString('utf8')
+    expect(html).toContain('body class="light"')
+    expect(html).toContain('--bg: #e7e6e1')
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {

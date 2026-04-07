@@ -21,6 +21,7 @@ WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
+APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 
 BUILTIN_FAQ = [
     {
@@ -114,8 +115,9 @@ BUILTIN_FAQ = [
             "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
             "view the raw data.<br>"
             "<strong>copy</strong> — copies the full plain-text output to your clipboard.<br>"
-            "<strong>save .html</strong> — downloads a self-contained HTML file with ANSI colors "
-            "preserved, suitable for archiving or sending to someone without a browser link.<br>"
+            "<strong>save .html</strong> — downloads a themed HTML file with ANSI colors "
+            "preserved. It uses app-hosted vendor fonts when opened alongside this shell and "
+            "falls back to browser monospace fonts offline.<br>"
             "<strong>save .txt</strong> — downloads a plain-text version of the output.<br><br>"
             "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
         ),
@@ -155,7 +157,7 @@ BUILTIN_FAQ = [
     {
         "question": "Are there keyboard shortcuts?",
         "answer": (
-            "Yes. Run keys in the web shell for the current shortcut list, including tab, output, "
+            "Yes. Run shortcuts in the web shell for the current shortcut list, including tab, output, "
             "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
         ),
         "answer_html": (
@@ -182,8 +184,8 @@ BUILTIN_FAQ = [
             "dismisses.<br><br>On macOS, the app-safe tab/action shortcuts use the "
             "<strong>Option</strong> key. The <strong>Ctrl+...</strong> bindings are intentional "
             "shell-style controls, not replacements for browser <strong>Command</strong> "
-            "shortcuts.<br><br>You can also run <code>keys</code> in the terminal for the current "
-            "shortcut reference and any remaining browser-native fallback notes."
+            "shortcuts.<br><br>You can also run <code>shortcuts</code> in the terminal for the "
+            "current shortcut reference."
         ),
     },
     {
@@ -336,6 +338,19 @@ def load_welcome_hints():
         return []
     hints = []
     with open(APP_HINTS_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                hints.append(line)
+    return hints
+
+
+def load_mobile_welcome_hints():
+    """Read app_hints_mobile.txt and return a list of mobile-specific hints."""
+    if not os.path.exists(APP_HINTS_MOBILE_FILE):
+        return []
+    hints = []
+    with open(APP_HINTS_MOBILE_FILE) as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):

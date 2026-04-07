@@ -12,10 +12,7 @@
 
 ### Follow-ups
 
-- Keep the hint rotation running until interrupted, on both the main welcome and the mobile welcome.
-- Rename the synthetic `keys` command to something clearer and more obvious.
-- Add a few more snarky easter-egg comments for `sudo`, `rm -fr /`, and `reboot`.
-- Add subtle section headers above the recommended commands and hints on the main welcome, and carry the same treatment through to mobile hints.
+- None at the moment.
 
 ---
 
@@ -38,3 +35,10 @@
 
 - ~~The backend `/config` response is the canonical version source, the initial header label is generic, and the frontend updates the visible version label only after config loads.~~
 - ~~Result: `app/config.py` defines the backend version, `/config` exposes it to the frontend, and the UI falls back to a generic `real-time` label until config loads.~~
+
+### Welcome / Helper Follow-ups
+
+- ~~Keep the hint rotation running until interrupted, on both the main welcome and the mobile welcome.~~
+- ~~Create separate app hints for mobile that are mobile specific.~~
+- ~~Add a few more snarky easter-egg comments for `sudo`, `rm -fr /`, and `reboot`.~~
+- ~~Add subtle section headers above the recommended commands and hints on the main welcome, and carry the same treatment through to mobile hints.~~

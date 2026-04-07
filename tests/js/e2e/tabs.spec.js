@@ -1,13 +1,15 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 // Use allowed commands that complete quickly.
 const CMD   = 'curl http://localhost:5001/health'
 const CMD_B = 'curl http://localhost:5001/config'
 const LONG_CMD = 'ping -c 1000 127.0.0.1'
+const TEST_IP = makeTestIp(66)
 
 test.describe('max tabs', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -27,6 +29,7 @@ test.describe('max tabs', () => {
 
 test.describe('tab renaming', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -76,6 +79,7 @@ test.describe('tab renaming', () => {
 
 test.describe('tab command recall', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     // Wait for the app to be fully initialised
     await page.locator('#cmd').waitFor()
@@ -104,6 +108,39 @@ test.describe('tab command recall', () => {
   })
 
   test('running a command in one tab does not block another tab from running', async ({ page }) => {
+    await page.route('**/run', async route => {
+      const body = route.request().postData() || '{}'
+      const payload = JSON.parse(body)
+      const command = payload.command || ''
+
+      if (command === LONG_CMD) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: [
+            'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
+            'data: {"type":"output","text":"long run started\\n"}\n\n',
+          ].join(''),
+        })
+        return
+      }
+
+      if (command === CMD_B) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: [
+            'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
+            'data: {"type":"output","text":"second tab output\\n"}\n\n',
+            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+          ].join(''),
+        })
+        return
+      }
+
+      await route.continue()
+    })
+
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
@@ -130,7 +167,7 @@ test.describe('tab command recall', () => {
     const beforeCount = await page.locator('.tab-panel.active .output .line.prompt-echo').count()
 
     await page.evaluate(() => {
-      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle('tab-1')
+      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
     })
     await page.waitForFunction(() => {
       return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
@@ -146,6 +183,7 @@ test.describe('tab command recall', () => {
 
 test.describe('tab closing', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -166,6 +204,7 @@ test.describe('tab closing', () => {
 
 test.describe('tab strip interactions', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })

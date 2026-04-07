@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(65)
 
 test.describe('output actions', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -97,11 +99,16 @@ test.describe('output actions', () => {
     const html = Buffer.concat(chunks).toString('utf8')
 
     expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain('/vendor/fonts/JetBrainsMono-400.ttf')
+    expect(html).toContain('/vendor/fonts/JetBrainsMono-700.ttf')
+    expect(html).not.toContain('fonts.googleapis.com')
+    expect(html).not.toContain('fonts.gstatic.com')
   })
 })
 
 test.describe('output actions with no exportable output', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },

@@ -19,13 +19,13 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
 - **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered from shared per-line prefix metadata so existing output updates instantly without rebuilding the line DOM
 - **Line numbers per output line** — toggle visible sequence numbers on each output line using the **line numbers** button in the terminal bar. Uses the same shared prefix metadata as timestamps so numbering stays aligned when timestamp mode changes
-- **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, fresh run permalinks do the same when full output was captured with structured line metadata, and both permalink page types honor the browser’s saved line-number and timestamp preferences on load
+- **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, fresh run permalinks do the same when full output was captured with structured line metadata, and both permalink page types honor the browser’s saved line-number and timestamp preferences on load. They also inherit the current session theme so the share page matches the main shell
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
-- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and skips the sampled commands from `welcome.yaml`
+- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and `app_hints_mobile.txt` and skips the sampled commands from `welcome.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
 - **Mobile composer dock** — on touch-sized screens the app uses a visible mobile composer with a Run button, a compact helper row that appears only while the keyboard is open, and shared syncing for command chips and autocomplete
 - **Terminal-like command flow** — while a command is running, the prompt is hidden and the Run action is disabled; completed commands are echoed inline above their output; pressing **Enter** on a blank line inserts a fresh prompt line; **Ctrl+C** opens kill confirmation when running, or drops to a new prompt line when idle
-- **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `keys` shows current keyboard shortcuts plus any remaining browser-native fallback notes, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
+- **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `shortcuts` shows current keyboard shortcuts, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
 - **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` render as a terminal-style list aligned to the command start (not a textbox dropdown), with smart above/below placement to avoid pushing the prompt when space is tight. Use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
@@ -34,13 +34,13 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
 - **Full-output permalinks for long runs** — when full-output persistence is enabled, run permalinks automatically serve the complete saved output of that run, while loading a run back into a terminal tab still uses the capped preview so the UI stays fast
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
-- **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, fetches and shares that full saved output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI color) buttons
+- **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, fetches and shares that full saved output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (themed HTML export with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
-- **HTML export** — download a tab's output as a self-contained HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar
+- **HTML export** — download a tab's output as a themed HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar. It uses app-hosted vendor fonts when opened alongside the app and falls back to browser monospace fonts offline
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
-- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
+- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
@@ -112,6 +112,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
     │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
     │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
+    │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
     │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
     ├── templates/
@@ -120,6 +121,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     └── static/
         ├── css/
         │   └── styles.css      # All application styles
+        ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
         └── js/
             ├── session.js      # Session UUID + apiFetch wrapper (loads first)
             ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
@@ -135,7 +137,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
             ├── app.js          # Initialization and event wiring (loads last)
             └── vendor/
                 └── ansi_up.js  # ANSI-to-HTML library — committed as a fallback for local/docker-compose
-                                #   runs; overwritten with the latest version at Docker image build time
+                                #   runs; Docker image builds fetch the latest copy into /usr/local/share/shell-assets
 ```
 
 ---
@@ -159,6 +161,7 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 | `conf/ascii.txt` | On next page load — fetched once by the browser on load |
 | `conf/ascii_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/app_hints.txt` | On next page load — fetched once by the browser on load |
+| `conf/app_hints_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
 | `conf/auto_complete.txt` | On next page load — fetched once by the browser |
 | `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
@@ -329,7 +332,7 @@ Log level and format are configured in `config.yaml` and take effect after `dock
 **`gelf`** — newline-delimited GELF 1.1 JSON. `short_message` is the bare event name; all context is in `_`-prefixed additional fields for direct Graylog indexing:
 
 ```json
-{"version":"1.1","host":"shell.darklab.sh","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"shell.darklab.sh","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
+{"version":"1.1","host":"shell.darklab.sh","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"shell.darklab.sh","_app_version":"1.3","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
 ```
 
 ### GELF back-end integration
@@ -460,9 +463,9 @@ When the page first loads, the terminal can render a staged welcome sequence:
 - curated sampled commands and their sample output from `app/conf/welcome.yaml`
 - rotating footer hints loaded from `app/conf/app_hints.txt`
 
-On touch-sized screens the welcome flow uses `app/conf/ascii_mobile.txt` instead of the wide desktop banner and keeps the same status and hint timing while skipping the sampled command blocks.
+On touch-sized screens the welcome flow uses `app/conf/ascii_mobile.txt` and `app/conf/app_hints_mobile.txt` instead of the wide desktop banner and desktop hint file, while keeping the same status and hint timing and skipping the sampled command blocks.
 
-If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt` or `app_hints.txt` are absent, those parts are skipped as well.
+If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt`, `app_hints.txt`, `ascii_mobile.txt`, or `app_hints_mobile.txt` are absent, those parts are skipped as well.
 
 **Format:**
 
@@ -493,7 +496,7 @@ Notes:
 - App hints rotate only briefly; they are not an endless carousel
 - If the user runs a command before the welcome sequence completes, it stops immediately and clears the partial output in that same tab only
 
-The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, `conf/ascii_mobile.txt`, or `conf/app_hints.txt` and reload the page to see changes without restarting the server.
+The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, `conf/ascii_mobile.txt`, `conf/app_hints.txt`, or `conf/app_hints_mobile.txt` and reload the page to see changes without restarting the server.
 
 ---
 
@@ -573,10 +576,10 @@ Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally tr
 
 Longer-term plan:
 
-- keep the `keys` helper command aligned with shipped behavior and any remaining browser-native fallback notes
+- keep the `shortcuts` helper command aligned with shipped behavior
 - add a user options surface so shortcuts and terminal display preferences can be documented and configured together
 
-The same shortcut reference is also available in-terminal via `keys`.
+The same shortcut reference is also available in-terminal via `shortcuts`.
 
 ---
 
@@ -659,7 +662,7 @@ On mobile, the search, history, theme, and FAQ buttons are accessible via the **
 
 There are two types of permalink:
 
-**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. It also honors the browser’s saved line-number and timestamp preferences on load. This is the recommended way to share results.
+**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (themed HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. It also honors the browser’s saved line-number and timestamp preferences on load. This is the recommended way to share results.
 
 **Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite. It also honors the browser’s saved line-number and timestamp preferences on load.
 
@@ -846,7 +849,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **453 pytest + 229 Vitest + 121 Playwright = 803 tests**.
+Current totals in this branch: **465 pytest + 231 Vitest + 126 Playwright = 822 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

@@ -22,4 +22,19 @@ test.describe('boot resilience', () => {
     await page.locator('#faq-btn').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
   })
+
+  test('the shell does not request external font assets on load', async ({ page }) => {
+    const externalFonts = []
+    page.on('request', request => {
+      const url = request.url()
+      if (url.includes('fonts.googleapis.com') || url.includes('fonts.gstatic.com')) {
+        externalFonts.push(url)
+      }
+    })
+
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+
+    expect(externalFonts).toEqual([])
+  })
 })

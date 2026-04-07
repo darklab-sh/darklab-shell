@@ -6,9 +6,11 @@ function loadWelcomeFns({
   asciiArt = 'ASCII ART',
   mobileAsciiArt = 'MOBILE ASCII ART',
   hintItems = [],
+  mobileHintItems = null,
   failAscii = false,
   failMobileAscii = false,
   failHints = false,
+  failMobileHints = false,
   config = {},
   appendLine = () => {},
   setTimeoutImpl = null,
@@ -32,6 +34,10 @@ function loadWelcomeFns({
     if (url === '/welcome/hints') {
       if (failHints) return Promise.reject(new Error('hints down'))
       return Promise.resolve({ json: () => Promise.resolve({ items: hintItems }) })
+    }
+    if (url === '/welcome/hints-mobile') {
+      if (failMobileHints) return Promise.reject(new Error('mobile hints down'))
+      return Promise.resolve({ json: () => Promise.resolve({ items: mobileHintItems ?? hintItems }) })
     }
     throw new Error(`Unexpected url: ${url}`)
   })
@@ -361,18 +367,19 @@ describe('welcome helpers', () => {
   it('uses the mobile welcome path with the mobile banner and no sample commands', async () => {
     const { runWelcome, out, apiFetch, mountShellPrompt } = loadWelcomeFns({
       mobile: true,
-      hintItems: ['Use the history panel to reopen saved runs.'],
+      mobileHintItems: ['Tap the prompt to open the mobile keyboard quickly.'],
     })
 
     await runWelcome()
 
     expect(apiFetch).toHaveBeenCalledWith('/welcome/ascii-mobile')
-    expect(apiFetch).toHaveBeenCalledWith('/welcome/hints')
+    expect(apiFetch).toHaveBeenCalledWith('/welcome/hints-mobile')
     expect(apiFetch).not.toHaveBeenCalledWith('/welcome')
     expect(out.querySelector('.welcome-ascii-art')?.textContent).toContain('MOBILE ASCII ART')
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
     expect(out.querySelectorAll('.welcome-command')).toHaveLength(0)
-    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Use the history panel')
+    expect(out.querySelector('.welcome-section-header')?.textContent).toContain('Helpful hints')
+    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Tap the prompt')
     expect(mountShellPrompt).toHaveBeenCalledWith('tab-1', true)
   })
 })

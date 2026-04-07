@@ -5,7 +5,7 @@ Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
-from flask import Flask, Response, request, jsonify, send_file, render_template
+from flask import Flask, Response, request, jsonify, send_file, render_template, abort
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import shutil
@@ -18,6 +18,7 @@ import signal
 import uuid
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Logging must be configured before other local imports — process.py
 # connects to Redis at module import time and emits log calls then.
@@ -33,6 +34,7 @@ from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
     load_all_faq, load_autocomplete, load_welcome,
     load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
+    load_mobile_welcome_hints,
     is_command_allowed, rewrite_command,
     runtime_missing_command_message, runtime_missing_command_name,
 )
@@ -45,6 +47,18 @@ SUDO_BIN = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN = shutil.which("kill") or "/bin/kill"
 
 app = Flask(__name__, template_folder="templates")
+
+_ANSI_UP_PATH = Path("/usr/local/share/shell-assets/js/vendor/ansi_up.js")
+_ANSI_UP_FALLBACK = Path(__file__).resolve().parent / "static" / "js" / "vendor" / "ansi_up.js"
+_FONT_DIR = Path("/usr/local/share/shell-assets/fonts")
+_FONT_FALLBACK_DIR = Path(__file__).resolve().parent / "static" / "fonts"
+_VENDOR_FONT_FILES = frozenset({
+    "JetBrainsMono-300.ttf",
+    "JetBrainsMono-400.ttf",
+    "JetBrainsMono-700.ttf",
+    "Syne-700.ttf",
+    "Syne-800.ttf",
+})
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
@@ -98,6 +112,25 @@ def _log_response(response):
             extra["size"] = response.content_length
         log.debug("RESPONSE", extra=extra)
     return response
+
+
+@app.route("/vendor/ansi_up.js")
+def vendor_ansi_up_js():
+    """Serve ansi_up from the build-time vendor path, with a repo fallback."""
+    if _ANSI_UP_PATH.exists():
+        return send_file(_ANSI_UP_PATH, mimetype="application/javascript")
+    return send_file(_ANSI_UP_FALLBACK, mimetype="application/javascript")
+
+
+@app.route("/vendor/fonts/<path:filename>")
+def vendor_fonts(filename):
+    """Serve vendored font files from the build-time path, with a repo fallback."""
+    if filename not in _VENDOR_FONT_FILES:
+        abort(404)
+    font_path = _FONT_DIR / filename
+    if font_path.exists():
+        return send_file(font_path)
+    return send_file(_FONT_FALLBACK_DIR / filename)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -353,6 +386,12 @@ def get_welcome_ascii_mobile():
 def get_welcome_hints():
     """Return rotating footer hints for the welcome animation."""
     return jsonify({"items": load_welcome_hints()})
+
+
+@app.route("/welcome/hints-mobile")
+def get_mobile_welcome_hints():
+    """Return rotating footer hints for the mobile welcome animation."""
+    return jsonify({"items": load_mobile_welcome_hints()})
 
 
 @app.route("/history")

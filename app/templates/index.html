@@ -5,10 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>shell.darklab.sh</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
-<script src="/static/js/vendor/ansi_up.js"></script>
+<script src="/vendor/ansi_up.js"></script>
 </head>
 <body>
 
@@ -152,7 +151,7 @@
 
 <!-- History delete confirmation modal -->
 <div id="hist-del-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
-  <div style="background:#111;border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
+  <div id="hist-del-modal" style="background:#111;border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
     <div id="hist-del-msg" style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button id="hist-del-cancel" class="term-action-btn">Cancel</button>
@@ -218,7 +217,7 @@
           There are several options from the action bar below each tab's output:<br><br>
           <strong>permalink</strong> — saves the current tab output and generates a shareable URL. If a full saved artifact exists, the link uses that full output; otherwise it uses the current tab snapshot. The page lets the recipient copy, download, or view the raw data.<br>
           <strong>copy</strong> — copies the full plain-text output to your clipboard.<br>
-          <strong>save .html</strong> — downloads a self-contained HTML file with ANSI colors preserved, suitable for archiving or sending to someone without a browser link.<br>
+          <strong>save .html</strong> — downloads a themed HTML file with ANSI colors preserved. It uses app-hosted vendor fonts when opened alongside this shell and falls back to browser monospace fonts offline.<br>
           <strong>save .txt</strong> — downloads a plain-text version of the output.<br><br>
           Single-run permalinks are also available from the <strong>⧖ history</strong> panel.
         </div>
@@ -264,7 +263,7 @@
           <strong>Welcome screen:</strong> printable typing, <strong>Enter</strong>, and <strong>Escape</strong> all settle the welcome animation immediately.<br>
           <strong>Autocomplete:</strong> <strong>↑↓</strong> navigate, <strong>Tab</strong> accepts, <strong>Enter</strong> accepts or runs, and <strong>Escape</strong> dismisses.<br><br>
           On macOS, the app-safe tab/action shortcuts use the <strong>Option</strong> key. The <strong>Ctrl+...</strong> bindings are intentional shell-style controls, not replacements for browser <strong>Command</strong> shortcuts.<br><br>
-          You can also run <code>keys</code> in the terminal for the current shortcut reference and any remaining browser-native fallback notes.
+          You can also run <code>shortcuts</code> in the terminal for the current shortcut reference.
         </div>
       </div>
 

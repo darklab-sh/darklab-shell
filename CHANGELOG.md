@@ -14,7 +14,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - `Alt/Option+T`, `Alt/Option+W`, `Alt/Option+ArrowLeft/Right`, and `Alt/Option+1...9` manage tab creation, closing, and navigation
   - `Alt/Option+P`, `Alt/Option+Shift+C`, and `Ctrl+L` trigger permalink, copy, and clear actions for the active tab
   - `Ctrl+U`, `Ctrl+K`, and `Alt/Option+B` / `Alt/Option+F` add readline-style prompt editing on top of the existing `Ctrl+W` support
-- **Keyboard shortcut discovery** — new `keys` web-shell helper prints the current shortcut set plus any remaining browser-native fallback notes, and is exposed through `help`, `man keys`, autocomplete, the README, and the FAQ modal
+- **Keyboard shortcut discovery** — new `shortcuts` web-shell helper prints the current shortcut set and is exposed through `help`, autocomplete, the README, and the FAQ modal
+- **Shortcut helper cleanup** — the old `keys` helper alias and fallback-notes wording were removed so `shortcuts` is the only supported name in help, autocomplete, docs, and in-terminal output
+- **Bundled local fonts** — JetBrains Mono and Syne are now served through local vendor routes backed by build-time font downloads, with repo fallbacks for local dev, so the shell and permalink pages no longer make external font requests on load
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
 - **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
@@ -30,16 +32,23 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Full-output permalink behavior** — tab permalink snapshots now fetch the full persisted run output when it exists, so the main-page permalink button can share the complete result instead of the preview-only tab state
 - **Live-output rendering** — fast bursts now flush in small batches so the browser can repaint during large commands, and the live terminal follows the bottom only while the user remains at the tail
 - **Welcome interruption and settle behavior** — welcome fast-forward now consistently responds to keyboard actions used in the inline-prompt flow and preserves correct prompt mounting after settle
+- **Welcome asset split** — desktop and mobile welcome flows now use separate hint files, with mobile keeping its own `app_hints_mobile.txt`
 - **Tab activation model** — switching tabs now keeps the prompt input neutral (no automatic command repopulation), preventing cross-tab draft leakage
 - **Prompt rendering model** — submitted commands are preserved as styled prompt lines in output and running tabs hide the live prompt until completion, matching shell transcript flow more closely
 - **Autocomplete presentation** — dropdown framing was removed in favor of a terminal-style suggestion list that can flip above the prompt when space is tight
 - **Autocomplete matching and navigation** — suggestions now match from the beginning of commands only, keep the active row in view, and use visual Up/Down navigation even when the list is rendered above the prompt
 - **Output actions UX** — `copy` and `save txt` now report a friendly no-output toast when the tab only contains welcome/decorative lines
 - **Run-output persistence format** — fresh run previews and full-output artifacts now preserve structured `{text, cls, tsC, tsE}` entries instead of flattening everything to plain text, allowing canonical run permalinks to keep prompt echo and timestamp metadata while remaining backward-compatible with older plain-text artifacts
+- **Theme parity and light-mode polish** — light-mode colors were softened across the main shell and permalink pages, and share/permalink views now follow the current session theme so saved output matches the live UI
+- **History and modal UX** — the history drawer now closes on outside click and Escape, and the clear-all / kill confirmation flows honor Escape consistently
+- **HTML export wording and behavior notes** — docs and UI copy now describe `save .html` as a themed HTML export that uses app-hosted vendor fonts when available and falls back to browser monospace fonts offline, matching the current implementation
 
 ### Fixed
 - **Prompt alignment** — when line numbers or timestamps are enabled, the new prompt stays aligned under the output gutter instead of leaving the prompt prefix pinned flush left
 - **Tab isolation and close-running-tab kill** — running one tab no longer blocks the others, and closing a running tab now kills that tab before switching away
+- **Kill-spec rate-limit stability** — the kill modal e2e coverage now isolates its limiter bucket per run and stubs the long-running SSE locally so repeated full-suite runs do not hang on a shared `/run` bucket
+- **Vendor font route hardening** — `/vendor/fonts/...` now only serves the known vendored font files instead of accepting arbitrary joined paths, and route coverage now includes unknown/traversal rejection
+- **Release metadata alignment** — the Node package metadata now reports `1.3.0`, matching the app version used elsewhere in the release
 - **Mobile tab close focus** — closing the only mobile tab no longer leaves the reset `X` visually focused, and tab close controls no longer stay highlighted after use
 - **Mobile tab row overflow** — mobile tabs now scroll horizontally with hidden scrollbars, tab labels resist text selection during drag, and tab chrome reads as separate bordered tabs instead of a plain text strip
 - **Mobile header layout** — the mobile app name, status pill, timer, and hamburger control now use the available header space more evenly instead of looking undersized
@@ -123,7 +132,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
   - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
   - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
-  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
+  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html with local vendor font assertions), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
   - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
   - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
@@ -176,7 +185,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - history-to-tab restores now show an in-drawer loading overlay while large previews are fetched and rendered
 - **Welcome content files** — `app_hints.txt` adds app-specific onboarding hints, and `welcome.yaml` examples were cleaned up to use real installed wordlists and safer sample commands
 - **Welcome styling** — the ASCII banner remains plain terminal content instead of a nested framed widget; the rendered art is larger, uses a solid green treatment, and no longer dims when later welcome blocks appear
-- **Documentation** — README, architecture notes, test guide, and changelog now describe the current welcome system, config keys, extra content files, boot-time history hydration, and updated route/test coverage
+- **Documentation** — README, architecture notes, test guide, and changelog now describe the current welcome system, config keys, extra content files, boot-time history hydration, vendor asset routes, and updated route/test coverage
 - **Welcome route naming** — grouped the newer welcome-content routes under `/welcome/*` for consistency with the existing `/welcome` command-sample endpoint
 - `styles.css` — muted text color brightened for readability: dark theme `#606060` → `#7a7a7a`, light theme `#888` → `#666`
 - `.gitignore` — added `.vscode/` to excluded paths

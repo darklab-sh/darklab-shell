@@ -177,6 +177,73 @@ class TestConfigRoute:
         assert data["command_timeout_seconds"] == 0
 
 
+# ── /vendor assets ───────────────────────────────────────────────────────────
+
+class TestVendorAssets:
+    def test_ansi_up_prefers_build_time_asset(self, tmp_path, monkeypatch):
+        client = get_client()
+        build_asset = tmp_path / "build" / "ansi_up.js"
+        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
+        build_asset.parent.mkdir(parents=True)
+        fallback_asset.parent.mkdir(parents=True)
+        build_asset.write_text("build ansi_up")
+        fallback_asset.write_text("fallback ansi_up")
+
+        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", build_asset)
+        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+
+        resp = client.get("/vendor/ansi_up.js")
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True) == "build ansi_up"
+
+    def test_ansi_up_falls_back_to_repo_copy_when_build_asset_missing(self, tmp_path, monkeypatch):
+        client = get_client()
+        missing_build_asset = tmp_path / "missing" / "ansi_up.js"
+        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
+        fallback_asset.parent.mkdir(parents=True)
+        fallback_asset.write_text("fallback ansi_up")
+
+        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", missing_build_asset)
+        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+
+        resp = client.get("/vendor/ansi_up.js")
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True) == "fallback ansi_up"
+
+    def test_font_route_prefers_build_time_asset_and_falls_back(self, tmp_path, monkeypatch):
+        client = get_client()
+        build_dir = tmp_path / "build-fonts"
+        fallback_dir = tmp_path / "fallback-fonts"
+        build_dir.mkdir()
+        fallback_dir.mkdir()
+
+        build_font = build_dir / "JetBrainsMono-400.ttf"
+        fallback_font = fallback_dir / "JetBrainsMono-400.ttf"
+        build_font.write_bytes(b"build font bytes")
+        fallback_font.write_bytes(b"fallback font bytes")
+
+        monkeypatch.setattr(shell_app, "_FONT_DIR", build_dir)
+        monkeypatch.setattr(shell_app, "_FONT_FALLBACK_DIR", fallback_dir)
+
+        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
+        assert resp.status_code == 200
+        assert resp.data == b"build font bytes"
+
+        monkeypatch.setattr(shell_app, "_FONT_DIR", tmp_path / "missing-fonts")
+        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
+        assert resp.status_code == 200
+        assert resp.data == b"fallback font bytes"
+
+    def test_font_route_rejects_unknown_or_traversal_paths(self):
+        client = get_client()
+
+        resp = client.get("/vendor/fonts/UnknownFont.ttf")
+        assert resp.status_code == 404
+
+        resp = client.get("/vendor/fonts/../../app.py")
+        assert resp.status_code == 404
+
+
 # ── /allowed-commands ─────────────────────────────────────────────────────────
 
 class TestAllowedCommandsRoute:
@@ -275,6 +342,19 @@ class TestWelcomeHintsRoute:
     def test_items_key_present(self):
         client = get_client()
         data = json.loads(client.get("/welcome/hints").data)
+        assert "items" in data
+        assert isinstance(data["items"], list)
+
+
+class TestMobileWelcomeHintsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/hints-mobile")
+        assert resp.status_code == 200
+
+    def test_items_key_present(self):
+        client = get_client()
+        data = json.loads(client.get("/welcome/hints-mobile").data)
         assert "items" in data
         assert isinstance(data["items"], list)
 
@@ -548,6 +628,20 @@ class TestShareRoute:
         resp = client.get(f"/share/{share_id}")
         assert resp.status_code == 200
         assert b"<html" in resp.data.lower()
+
+    def test_get_share_html_honors_light_theme_cookie(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "light theme test", "content": ["line"]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        client.set_cookie("pref_theme", "light")
+        resp = client.get(f"/share/{share_id}")
+        body = resp.get_data(as_text=True)
+        assert 'class="light"' in body
+        assert "body.light" in body
 
     def test_get_share_html_contains_label(self):
         client = get_client()

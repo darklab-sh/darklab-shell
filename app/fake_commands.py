@@ -54,8 +54,40 @@ _CURRENT_SHORTCUTS = [
     ("Ctrl+E", "move to the end of the line"),
     ("Option+B/F or Alt+B/F", "move backward / forward by word"),
 ]
-_PLANNED_SHORTCUTS = [
-    ("Browser-native fallbacks", "evaluate Ctrl/Cmd+T, Ctrl/Cmd+W, and Ctrl+Tab where reliable"),
+_SNARKY_SUDO_RESPONSES = [
+    "sudo: confidence noted. Privilege escalation is still not happening.",
+    "sudo: that's a local habit, not a capability.",
+    "sudo: request denied by the web shell's sense of self-preservation.",
+    "sudo: the operator badge is decorative here.",
+    "sudo: this browser tab does not recognize your authority.",
+    "sudo: close, but still no root access.",
+]
+_SNARKY_SUDO_TARGET_RESPONSES = [
+    "sudo: '{target}' is not happening today.",
+    "sudo: '{target}' is still not a privilege escalation strategy.",
+    "sudo: '{target}' has been denied by the browser court.",
+    "sudo: '{target}' will remain a non-event.",
+    "sudo: nice try with '{target}', but no.",
+    "sudo: '{target}' is still just a wish with shell syntax.",
+    "sudo: the answer to '{target}' is firmly no.",
+    "sudo: '{target}' will remain below the line.",
+    "sudo: '{target}' was rejected before it could become a plan.",
+]
+_SNARKY_REBOOT_RESPONSES = [
+    "reboot: bold choice.",
+    "reboot: not with this browser tab.",
+    "reboot: the server is not taking user suggestions for downtime.",
+    "reboot: let's not turn a diagnostic console into a blackout.",
+    "reboot: all I can offer is a dramatic sigh.",
+    "reboot: have you tried turning your expectations off and on again?",
+]
+_SNARKY_RM_ROOT_RESPONSES = [
+    "rm: nice try.",
+    "rm: the web shell prefers not to become a cautionary tale.",
+    "rm: not even for dramatic effect.",
+    "rm: that's a hard no from the entire stack.",
+    "rm: the filesystem would like to keep existing, thanks.",
+    "rm: asking for `/` is a little too committed.",
 ]
 _SPECIAL_FAKE_COMMANDS = {
     "rm -fr /": "rm_root",
@@ -63,9 +95,9 @@ _SPECIAL_FAKE_COMMANDS = {
 }
 _FAKE_COMMANDS = {
     "banner", "clear", "date", "env", "help", "history", "hostname",
-    "id", "keys", "last", "limits", "ls", "man", "ps", "pwd", "retention",
-    "status", "sudo", "type", "uname", "uptime", "which", "who", "whoami",
-    "groups", "tty", "version", "faq",
+    "id", "last", "limits", "ls", "man", "ps", "pwd", "retention",
+    "shortcuts", "status", "sudo", "type", "uname", "uptime", "which",
+    "who", "whoami", "groups", "tty", "version", "faq",
     "fortune", "reboot",
 }
 _BACKSPACE_RE = re.compile(r".\x08")
@@ -81,7 +113,6 @@ _FAKE_COMMAND_HELP = [
     ("history", "Show recent commands from this session."),
     ("hostname", "Show the instance hostname/app name."),
     ("id", "Show a web shell app identity."),
-    ("keys", "Show current keyboard shortcuts and fallback notes."),
     ("last", "Show recent completed runs with timestamps and exit codes."),
     ("limits", "Show configured runtime and retention limits."),
     ("ls", "List the current allowed command catalog."),
@@ -89,6 +120,7 @@ _FAKE_COMMAND_HELP = [
     ("ps", "Show the current ps helper plus recent session commands."),
     ("pwd", "Show the web shell workspace path."),
     ("retention", "Show retention and full-output persistence settings."),
+    ("shortcuts", "Show current keyboard shortcuts."),
     ("status", "Summarize the current session and instance settings."),
     ("tty", "Show the web terminal device path."),
     ("type <cmd>", "Describe whether a command is a helper command, real command, or missing."),
@@ -140,8 +172,8 @@ def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, 
         return _run_fake_hostname(), 0
     if root == "id":
         return _run_fake_id(), 0
-    if root == "keys":
-        return _run_fake_keys(), 0
+    if root == "shortcuts":
+        return _run_fake_shortcuts(), 0
     if root == "last":
         return _run_fake_last(session_id), 0
     if root == "limits":
@@ -259,15 +291,10 @@ def _run_fake_help() -> list[dict[str, str]]:
     return _text_lines(lines)
 
 
-def _run_fake_keys() -> list[dict[str, str]]:
+def _run_fake_shortcuts() -> list[dict[str, str]]:
     lines = ["Current shortcuts:"]
     for name, description in _CURRENT_SHORTCUTS:
         lines.append(f"  {name:<26} {description}")
-    if _PLANNED_SHORTCUTS:
-        lines.append("")
-        lines.append("Fallback notes:")
-        for name, description in _PLANNED_SHORTCUTS:
-            lines.append(f"  {name:<26} {description}")
     lines.append("")
     lines.append("Note: on macOS, use Option for app-safe tab shortcuts; browser Command shortcuts remain environment-dependent.")
     return _text_lines(lines)
@@ -581,17 +608,11 @@ def _run_fake_pwd() -> list[dict[str, str]]:
 
 
 def _run_fake_reboot() -> list[dict[str, str]]:
-    return _text_lines([
-        "reboot: bold choice.",
-        "If this web shell could reboot the host, we would both have bigger problems.",
-    ])
+    return [{"type": "output", "text": random.choice(_SNARKY_REBOOT_RESPONSES)}]
 
 
 def _run_fake_rm_root() -> list[dict[str, str]]:
-    return _text_lines([
-        "rm: nice try.",
-        "Even this web shell has standards.",
-    ])
+    return [{"type": "output", "text": random.choice(_SNARKY_RM_ROOT_RESPONSES)}]
 
 
 def _run_fake_status(session_id: str) -> list[dict[str, str]]:
@@ -612,8 +633,10 @@ def _run_fake_tty() -> list[dict[str, str]]:
 def _run_fake_sudo(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) == 1:
-        return [{"type": "output", "text": "sudo: confidence noted. Privilege escalation is still not happening."}]
-    return [{"type": "output", "text": f"sudo: '{' '.join(parts[1:])}' is not happening today."}]
+        return [{"type": "output", "text": random.choice(_SNARKY_SUDO_RESPONSES)}]
+    target = " ".join(parts[1:])
+    template = random.choice(_SNARKY_SUDO_TARGET_RESPONSES)
+    return [{"type": "output", "text": template.format(target=target)}]
 
 
 def _run_fake_type(command: str) -> list[dict[str, str]]:

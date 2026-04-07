@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(64)
 
 test.describe('command execution', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -32,4 +34,3 @@ test.describe('command execution', () => {
   })
 
 })
-

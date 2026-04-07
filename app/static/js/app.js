@@ -1172,12 +1172,52 @@ document.addEventListener('keydown', e => {
       return;
     }
   }
+  if (isHistoryDeleteOverlayOpen()) {
+    if (e.key === 'Escape') {
+      hideHistoryDeleteOverlay();
+      pendingHistAction = null;
+      e.preventDefault();
+      return;
+    }
+  }
+  if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+    const isCtrlC = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C');
+    const isSpace = e.key === ' ' || e.code === 'Space';
+    const isPrintable = !e.metaKey && !e.ctrlKey && !e.altKey && !isEditableTarget(e.target) && e.key.length === 1;
+    if (isCtrlC) {
+      _welcomePromptAfterSettle = true;
+      requestWelcomeSettle(activeTabId);
+      refocusTerminalInput();
+      e.preventDefault();
+      return;
+    }
+    if (e.key === 'Escape' || e.key === 'Enter' || isSpace) {
+      requestWelcomeSettle(activeTabId);
+      refocusTerminalInput();
+      e.preventDefault();
+      return;
+    }
+    if (isPrintable) {
+      requestWelcomeSettle(activeTabId);
+      refocusTerminalInput();
+      setComposerValue((cmdInput.value || '') + e.key);
+      e.preventDefault();
+      return;
+    }
+  }
   if (handleTabShortcut(e)) return;
   if (handleActionShortcut(e)) return;
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     if (e.target === cmdInput) return;
     const editable = isEditableTarget(e.target);
     if (editable) return;
+    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+      _welcomePromptAfterSettle = true;
+      requestWelcomeSettle(activeTabId);
+      refocusTerminalInput();
+      e.preventDefault();
+      return;
+    }
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
@@ -1201,6 +1241,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
+    if (cmdInput && cmdInput.value.trim()) return;
     requestWelcomeSettle(activeTabId);
     refocusTerminalInput();
     e.preventDefault();
@@ -1217,6 +1258,7 @@ document.addEventListener('keydown', e => {
     closeOptions();
     hideSearchBar();
     clearSearch();
+    if (isHistoryPanelOpen()) hideHistoryPanel();
   }
 });
 
@@ -1224,6 +1266,12 @@ document.addEventListener('keydown', e => {
 document.addEventListener('click', e => {
   if (_uiOverlayRefs.mobileMenu && !_uiOverlayRefs.mobileMenu.contains(e.target) && e.target !== _uiOverlayRefs.hamburgerBtn) {
     hideMobileMenu();
+  }
+  if (historyPanel && isHistoryPanelOpen() && e.target !== histBtn && !historyPanel.contains(e.target)) {
+    if (e.target.closest?.('.hist-chip-overflow') || e.target.closest?.('[data-action="history"]')) {
+      return;
+    }
+    hideHistoryPanel();
   }
   if (!(e.target && e.target.closest &&
         (e.target.closest('.prompt-wrap') || e.target.closest('.ac-dropdown') || e.target.closest('#mobile-composer')))) acHide();
@@ -1287,6 +1335,12 @@ cmdInput.addEventListener('input', () => {
 cmdInput.addEventListener('keydown', e => {
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     e.preventDefault();
+    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+      _welcomePromptAfterSettle = true;
+      requestWelcomeSettle(activeTabId);
+      refocusTerminalInput();
+      return;
+    }
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
@@ -1376,14 +1430,24 @@ cmdInput.addEventListener('keydown', e => {
   }
 
   if (e.key === 'Enter') {
-    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+    if (_welcomeActive && welcomeOwnsTab(activeTabId) && !cmdInput.value.trim()) {
       e.preventDefault();
       requestWelcomeSettle(activeTabId);
       refocusTerminalInput();
       return;
     }
-    if (acIndex >= 0 && acFiltered[acIndex]) { e.preventDefault(); acAccept(acFiltered[acIndex]); }
-    else { acHide(); runCommand(); }
+    if (acIndex >= 0 && acFiltered[acIndex]) {
+      e.preventDefault();
+      acAccept(acFiltered[acIndex]);
+    } else {
+      e.preventDefault();
+      acHide();
+      if (typeof submitComposerCommand === 'function') {
+        submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
+      } else {
+        runCommand();
+      }
+    }
     return;
   }
   if (e.key === 'Tab') {

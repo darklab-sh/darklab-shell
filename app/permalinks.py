@@ -2,12 +2,57 @@
 Permalink page rendering — styled HTML pages for run history and tab snapshots.
 """
 
+import base64
 import json
+from pathlib import Path
 from datetime import datetime, timedelta, timezone
 
-from flask import Response
+from flask import Response, has_request_context, request
 
 from config import CFG
+
+_FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
+_FONT_FILES = [
+    ("JetBrains Mono", 300, "JetBrainsMono-300.ttf"),
+    ("JetBrains Mono", 400, "JetBrainsMono-400.ttf"),
+    ("JetBrains Mono", 700, "JetBrainsMono-700.ttf"),
+    ("Syne", 700, "Syne-700.ttf"),
+    ("Syne", 800, "Syne-800.ttf"),
+]
+
+
+def _font_face_css(*, embed: bool = False) -> str:
+    rules = []
+    for family, weight, filename in _FONT_FILES:
+        font_path = _FONT_DIR / filename
+        if embed:
+            try:
+                data = base64.b64encode(font_path.read_bytes()).decode("ascii")
+                src = f"url(data:font/ttf;base64,{data}) format('truetype')"
+            except OSError:
+                continue
+        else:
+            src = f"url('/vendor/fonts/{filename}') format('truetype')"
+        rules.append(
+            "@font-face {"
+            f" font-family: '{family}';"
+            " font-style: normal;"
+            f" font-weight: {weight};"
+            " font-display: swap;"
+            f" src: {src};"
+            " }"
+        )
+    return "\n".join(rules)
+
+
+def _current_theme() -> str:
+    """Return the current session theme if available, otherwise default to dark."""
+    if not has_request_context():
+        return "dark"
+    try:
+        return "light" if request.cookies.get("pref_theme") == "light" else "dark"
+    except Exception:
+        return "dark"
 
 
 def _format_retention(days: int) -> str:
@@ -41,6 +86,7 @@ def _permalink_error_page(noun: str) -> Response:
     """Render a themed 404 page for a missing permalink (snapshot or run)."""
     retention = CFG.get("permalink_retention_days", 0)
     retention_str = _format_retention(retention)
+    theme_class = "light" if _current_theme() == "light" else ""
     if retention == 0:
         detail = (
             f"The {noun} ID is invalid, the {noun} was never saved, "
@@ -59,33 +105,45 @@ def _permalink_error_page(noun: str) -> Response:
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{app_name} — {noun} not found</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/fonts.css">
 <style>
   :root {{
-    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e;
+    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e; --border-bright: #2e2e2e;
     --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
     --amber: #ffb800; --muted: #606060; --text: #e0e0e0;
     --font: 'JetBrains Mono', monospace;
   }}
+  body.light {{
+    --bg: #e7e6e1; --surface: #f2f0eb; --border: #b8b7b0; --border-bright: #a9a79f;
+    --green: #2a5d18; --green-dim: #355f24; --green-glow: rgba(42,93,24,0.08);
+    --amber: #b37000; --muted: #45453f; --text: #101010;
+  }}
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ background: var(--bg); color: var(--text); font-family: var(--font);
           font-size: 13px; display: flex; flex-direction: column; min-height: 100vh; }}
-  header {{ display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+  header {{ display: flex; align-items: baseline; gap: 14px; padding: 16px 20px;
             border-bottom: 1px solid var(--border); background: #111; flex-wrap: wrap; }}
-  header h1 {{ font-size: 14px; font-weight: 300; letter-spacing: 3px; color: var(--green);
+  body.light header {{ background: #d9d7d1; }}
+  header h1 {{ font-size: 20px; font-weight: 300; letter-spacing: 4px; color: var(--green);
                text-shadow: 0 0 16px var(--green-glow); }}
-  .actions {{ margin-left: auto; display: flex; gap: 8px; }}
+  .actions {{ margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }}
   .btn {{ background: transparent; border: 1px solid var(--border); color: var(--muted);
-          font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
+          font-family: var(--font); font-size: 11px; padding: 4px 10px; border-radius: 3px;
           cursor: pointer; text-decoration: none; transition: border-color .2s, color .2s; }}
   .btn:hover {{ border-color: var(--green-dim); color: var(--green); }}
-  #output {{ flex: 1; padding: 20px; line-height: 1.65; }}
+  body.light .btn {{ background: #e4e2dc; border-color: var(--border-bright); color: var(--muted); }}
+  body.light .btn:hover {{ border-color: var(--green-dim); color: var(--text); }}
+  .btn:focus:not(:focus-visible),
+  .btn:focus-visible {{
+    outline: none;
+    box-shadow: none;
+  }}
+  #output {{ flex: 1; padding: 16px 20px 20px; line-height: 1.65; }}
   .error-heading {{ color: var(--amber); font-weight: 700; margin-bottom: 12px; }}
   .error-detail {{ color: var(--muted); }}
 </style>
 </head>
-<body>
+<body{f' class="{theme_class}"' if theme_class else ''}>
 <header>
   <h1>{app_name}</h1>
   <div class="actions">
@@ -131,10 +189,11 @@ def _expiry_note(created: str) -> str:
 
 
 def _permalink_page(title, label, created, content_lines, json_url, extra_actions=None) -> Response:
-    """Render a self-contained HTML page for a permalink.
+    """Render a themed HTML page for a permalink.
     content_lines can be a list of strings (single-run history) or
     a list of {text, cls} objects (tab snapshots with class info)."""
     app_name   = CFG.get("app_name", "shell.darklab.sh")
+    theme_class = "light" if _current_theme() == "light" else ""
     is_structured_snapshot = any(
         entry and isinstance(entry, dict)
         for entry in content_lines
@@ -183,32 +242,44 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>{app_name} — {title}</title>
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&display=swap" rel="stylesheet">
-<script src="/static/js/vendor/ansi_up.js"></script>
+<link rel="stylesheet" href="/static/css/fonts.css">
+<script src="/vendor/ansi_up.js"></script>
 <style>
   :root {{
-    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e;
+    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e; --border-bright: #2e2e2e;
     --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
     --amber: #ffb800; --red: #ff3c3c; --muted: #606060; --text: #e0e0e0;
     --font: 'JetBrains Mono', monospace;
   }}
+  body.light {{
+    --bg: #e7e6e1; --surface: #f2f0eb; --border: #b8b7b0; --border-bright: #a9a79f;
+    --green: #2a5d18; --green-dim: #355f24; --green-glow: rgba(42,93,24,0.08);
+    --amber: #b37000; --red: #cc2200; --muted: #45453f; --text: #101010;
+  }}
   *, *::before, *::after {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{ background: var(--bg); color: var(--text); font-family: var(--font);
           font-size: 13px; display: flex; flex-direction: column; min-height: 100vh; }}
-  header {{ display: flex; align-items: center; gap: 16px; padding: 14px 20px;
+  header {{ display: flex; align-items: baseline; gap: 14px; padding: 16px 20px;
             border-bottom: 1px solid var(--border); background: #111; flex-wrap: wrap; }}
-  header h1 {{ font-size: 14px; font-weight: 300; letter-spacing: 3px; color: var(--green);
+  body.light header {{ background: #d9d7d1; }}
+  header h1 {{ font-size: 20px; font-weight: 300; letter-spacing: 4px; color: var(--green);
                text-shadow: 0 0 16px var(--green-glow); }}
-  .meta {{ font-size: 11px; color: var(--muted); }}
+  .meta {{ font-size: 10px; color: var(--muted); letter-spacing: 1.5px; text-transform: uppercase; }}
   .meta.expiry {{ color: var(--amber); }}
   .actions {{ margin-left: auto; display: flex; gap: 8px; flex-wrap: wrap; }}
   .btn {{ background: transparent; border: 1px solid var(--border); color: var(--muted);
-          font-family: var(--font); font-size: 11px; padding: 4px 12px; border-radius: 3px;
+          font-family: var(--font); font-size: 11px; padding: 4px 10px; border-radius: 3px;
           cursor: pointer; text-decoration: none; transition: border-color .2s, color .2s; }}
   .btn:hover {{ border-color: var(--green-dim); color: var(--green); }}
+  body.light .btn {{ background: #e4e2dc; border-color: var(--border-bright); color: var(--muted); }}
+  body.light .btn:hover {{ border-color: var(--green-dim); color: var(--text); }}
+  .btn:focus:not(:focus-visible),
+  .btn:focus-visible {{
+    outline: none;
+    box-shadow: none;
+  }}
   .btn:disabled {{ opacity: 0.35; cursor: not-allowed; }}
-  #output {{ flex: 1; padding: 20px; line-height: 1.65; white-space: pre-wrap;
+  #output {{ flex: 1; padding: 16px 20px 20px; line-height: 1.65; white-space: pre-wrap;
              word-break: break-all; overflow-y: auto; }}
   .line {{ display: block; }}
   .line.exit-ok   {{ color: var(--green); font-weight: 700; margin-top: 8px; }}
@@ -219,11 +290,12 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
                   color: #6a6a6a; font-size: 11px; text-align: right; user-select: none;
                   font-variant-numeric: tabular-nums; }}
   .perm-content {{ display: inline; }}
+  body.light .prompt-prefix {{ color: #335d83; }}
   .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
   a {{ color: var(--green); }}
 </style>
 </head>
-<body>
+<body{f' class="{theme_class}"' if theme_class else ''}>
 <header>
   <h1>{app_name}</h1>
   <div class="meta">{created_fmt}</div>
@@ -248,6 +320,12 @@ pointer-events:none;">Copied to clipboard</div>
 <style>
   #copy-toast.show {{
     transform: translateX(-50%) translateY(0);
+  }}
+  body.light #copy-toast {{
+    background: #e4e2dc;
+    border-color: var(--border-bright);
+    color: var(--text);
+    box-shadow: 0 12px 28px rgba(0,0,0,0.18);
   }}
   @media (max-width: 768px) {{
     #copy-toast {{
@@ -430,6 +508,8 @@ pointer-events:none;">Copied to clipboard</div>
     const appName = {json.dumps(app_name)};
     const label   = {label_json};
     const created = {json.dumps(created_fmt)};
+    const themeClass = document.body.classList.contains('light') ? 'light' : '';
+    const fontFacesCss = {json.dumps(_font_face_css(embed=True))};
 
     const prefixWidth = Math.max(0, ...lines.map((entry, index) => formatPrefix(index + 1, entry).length));
     const linesHtml = lines.map((entry, index) => {{
@@ -453,34 +533,51 @@ pointer-events:none;">Copied to clipboard</div>
 <meta charset="UTF-8">
 <title>${{escHtml(label)}} \u2014 ${{escHtml(appName)}}</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  ${{fontFacesCss}}
+  :root {{
+    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e; --border-bright: #2e2e2e;
+    --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
+    --amber: #ffb800; --red: #ff3c3c; --muted: #606060; --text: #e0e0e0;
+  }}
+  body.light {{
+    --bg: #e7e6e1; --surface: #f2f0eb; --border: #b8b7b0; --border-bright: #a9a79f;
+    --green: #2a5d18; --green-dim: #355f24; --green-glow: rgba(42,93,24,0.08);
+    --amber: #b37000; --red: #cc2200; --muted: #45453f; --text: #101010;
+  }}
   body {{
-    background: #0d0d0d; color: #e0e0e0;
+    background: var(--bg); color: var(--text);
     font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    padding: 28px 32px; margin: 0; line-height: 1.65;
+    padding: 24px 28px; margin: 0; line-height: 1.65;
   }}
   .header {{
     margin-bottom: 20px; padding-bottom: 14px;
-    border-bottom: 1px solid #1f1f1f;
+    border-bottom: 1px solid var(--border);
   }}
-  .app-name {{ color: #39ff14; font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }}
-  .meta {{ color: #606060; font-size: 11px; }}
+  body.light {{
+    color: var(--text);
+  }}
+  body.light .header {{
+    border-bottom-color: var(--border-bright);
+  }}
+  .app-name {{ color: var(--green); font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }}
+  .meta {{ color: var(--muted); font-size: 11px; }}
   .output {{ white-space: pre-wrap; word-break: break-all; }}
   .line {{ display: block; }}
-  .line.exit-ok   {{ color: #39ff14; font-weight: 700; margin-top: 8px; }}
-  .line.exit-fail {{ color: #ff3c3c; font-weight: 700; margin-top: 8px; }}
-  .line.denied    {{ color: #ffb800; font-weight: 700; }}
+  .line.exit-ok   {{ color: var(--green); font-weight: 700; margin-top: 8px; }}
+  .line.exit-fail {{ color: var(--red); font-weight: 700; margin-top: 8px; }}
+  .line.denied    {{ color: var(--amber); font-weight: 700; }}
   .line.notice    {{ color: #6ab0f5; font-style: italic; }}
   .perm-prefix {{
     display: inline-block; margin-right: 14px;
-    color: #505050; font-size: 10px; user-select: none;
+    color: var(--muted); font-size: 10px; user-select: none;
     text-align: right; font-variant-numeric: tabular-nums;
   }}
   .perm-content {{ display: inline; }}
+  body.light .prompt-prefix {{ color: #335d83; }}
   .prompt-prefix {{ color: #6ab0f5; font-weight: 700; margin-right: 8px; }}
 </style>
 </head>
-<body>
+<body class="${{themeClass}}">
 <div class="header">
   <div class="app-name">${{escHtml(appName)}}</div>
   <div class="meta">${{escHtml(label)}} &nbsp;&middot;&nbsp; ${{escHtml(created)}}</div>

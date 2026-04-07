@@ -1,8 +1,8 @@
 // ── Desktop UI module ──
 // Fetches welcome content from /welcome, /welcome/ascii, and /welcome/hints
-// for desktop, and from /welcome/ascii-mobile plus /welcome/hints for the
-// mobile variant. Renders the intro into the initial tab with status lines,
-// typed commands, inline comment hints, and a closing hint row.
+// for desktop, and from /welcome/ascii-mobile plus /welcome/hints-mobile for
+// the mobile variant. Renders the intro into the initial tab with status
+// lines, typed commands, inline comment hints, and a closing hint row.
 // Calling cancelWelcome() (e.g. when the user runs a command) stops the
 // animation immediately; runner.js also calls clearTab to wipe partial output.
 
@@ -63,6 +63,7 @@ function _resetWelcomePlan() {
   _welcomePlan = null;
   _welcomeNextBlockIndex = 0;
   _welcomeSettleRequested = false;
+  _welcomePromptAfterSettle = false;
 }
 
 function _setWelcomeBannerSettled(settled) {
@@ -185,7 +186,6 @@ async function _runWelcomeAnimation(tabId, {
   const POST_CMD_MS = APP_CONFIG.welcome_post_cmd_ms ?? 700;
   const FIRST_PROMPT_IDLE_MS = Math.max(0, Number(APP_CONFIG.welcome_first_prompt_idle_ms ?? 2100) || 0);
   const HINT_INTERVAL_MS = Math.max(0, Number(APP_CONFIG.welcome_hint_interval_ms ?? 4200) || 0);
-  const HINT_ROTATIONS = Math.max(0, Number(APP_CONFIG.welcome_hint_rotations ?? 2) || 0);
 
   await _runWelcomeStatusSequence(effectiveStatusLabels, STATUS_MS, STATUS_STAGGER_MS);
   if (!_welcomeActive) return false;
@@ -201,6 +201,9 @@ async function _runWelcomeAnimation(tabId, {
     return true;
   }
 
+  if (introBlocks.length) {
+    _appendWelcomeSectionHeader(tabId, 'Recommended commands', 'recommended-commands');
+  }
   for (const [blockIndex, block] of introBlocks.entries()) {
     if (!_welcomeActive) break;
     if (_welcomeSettleRequested) {
@@ -233,7 +236,8 @@ async function _runWelcomeAnimation(tabId, {
   if (_welcomeActive) {
     _welcomeDone = true;
     if (hints.length) {
-      void _runWelcomeHintFeed(tabId, hints, HINT_INTERVAL_MS, HINT_ROTATIONS);
+      _appendWelcomeSectionHeader(tabId, 'Helpful hints', 'helpful-hints');
+      void _runWelcomeHintFeed(tabId, hints, HINT_INTERVAL_MS);
     } else {
       _appendWelcomeOutput(tabId, 'Enter runs the command · Up/Down navigates autocomplete · History keeps previous runs', 'welcome-hint');
       _welcomeActive = false;
@@ -472,6 +476,22 @@ function _appendWelcomeOutput(tabId, text, cls = 'welcome-output') {
   out.scrollTop = out.scrollHeight;
 }
 
+function _appendWelcomeSectionHeader(tabId, text, sectionId = '', cls = 'welcome-section-header') {
+  const out = getOutput(tabId);
+  if (!out) return null;
+  if (sectionId) {
+    const existing = out.querySelector(`[data-welcome-section="${sectionId}"]`);
+    if (existing) return existing;
+  }
+  const line = document.createElement('span');
+  line.className = `line ${cls}`;
+  if (sectionId) line.dataset.welcomeSection = sectionId;
+  line.textContent = `# ${String(text).trim()}`;
+  out.appendChild(line);
+  out.scrollTop = out.scrollHeight;
+  return line;
+}
+
 function _pickRandomHint(hints, used) {
   if (!hints.length) return '';
   const pool = hints.filter(hint => !used.has(hint));
@@ -532,6 +552,7 @@ function _sampleWelcomeBlocks(blocks, count = 5) {
 
 function _shouldRotateWelcomeHints(tabId) {
   return _welcomeActive
+    && !_welcomeSettleRequested
     && welcomeOwnsTab(tabId)
     && activeTabId === tabId
     && (!cmdInput || !cmdInput.value.trim());
@@ -566,8 +587,13 @@ async function _showWelcomeHint(tabId, text, initial = false) {
   return _welcomeHintNode;
 }
 
-async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
+async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
   if (!_welcomeActive || !_welcomeDone || !Array.isArray(hints) || !hints.length) return;
+
+  if (_welcomeSettleRequested) {
+    settleWelcome(tabId);
+    return;
+  }
 
   const used = new Set();
   let current = _pickRandomHint(hints, used);
@@ -580,16 +606,24 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs, maxRotations = 2) {
     if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   }
 
-  let rotations = 0;
-  while (_shouldRotateWelcomeHints(tabId) && rotations < maxRotations) {
+  if (!(Number(intervalMs) > 0)) {
+    _welcomeActive = false;
+    if (tabId === activeTabId) mountShellPrompt(tabId);
+    return;
+  }
+
+  while (_shouldRotateWelcomeHints(tabId)) {
     await _sleep(intervalMs);
+    if (_welcomeSettleRequested) {
+      settleWelcome(tabId);
+      return;
+    }
     if (!_shouldRotateWelcomeHints(tabId)) break;
 
     current = _pickRandomHint(hints, used);
     if (!current) return;
     used.add(current);
     await _showWelcomeHint(tabId, current, false);
-    rotations++;
   }
 
   _welcomeActive = false;
@@ -656,6 +690,9 @@ function settleWelcome(tabId = activeTabId) {
   _setWelcomeBannerSettled(true);
 
   const blocks = (_welcomePlan && Array.isArray(_welcomePlan.blocks)) ? _welcomePlan.blocks : [];
+  if (blocks.length) {
+    _appendWelcomeSectionHeader(tabId, 'Recommended commands', 'recommended-commands');
+  }
   for (let i = _welcomeNextBlockIndex; i < blocks.length; i++) {
     const line = _appendWelcomeCommand(tabId, blocks[i].cmd, blocks[i].out || null);
     if (i === 0) {
@@ -665,10 +702,17 @@ function settleWelcome(tabId = activeTabId) {
   _welcomeNextBlockIndex = blocks.length;
 
   _welcomeDone = true;
+  if (_welcomePlan && Array.isArray(_welcomePlan.hints) && _welcomePlan.hints.length) {
+    _appendWelcomeSectionHeader(tabId, 'Helpful hints', 'helpful-hints');
+  }
   _ensureWelcomeFinalHint(tabId, _welcomePlan && _welcomePlan.hints);
   _welcomeActive = false;
   _welcomeBootPending = false;
   if (tabId === activeTabId) mountShellPrompt(tabId);
+  if (_welcomePromptAfterSettle) {
+    _welcomePromptAfterSettle = false;
+    appendPromptNewline(tabId);
+  }
   out.scrollTop = out.scrollHeight;
   return true;
 }
@@ -688,8 +732,8 @@ async function runWelcome() {
         logClientError('failed to load /welcome/ascii-mobile', err);
         return '';
       }),
-      apiFetch('/welcome/hints').then(r => r.json()).catch(err => {
-        logClientError('failed to load /welcome/hints', err);
+      apiFetch('/welcome/hints-mobile').then(r => r.json()).catch(err => {
+        logClientError('failed to load /welcome/hints-mobile', err);
         return null;
       }),
     ]);

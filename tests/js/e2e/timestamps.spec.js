@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(67)
 
 test.describe('timestamp toggle', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
@@ -68,8 +70,22 @@ test.describe('timestamp toggle', () => {
   })
 
   test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({ page }) => {
-    await page.locator('#cmd').fill('man curl')
-    await page.locator('#cmd').press('Enter')
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.wlc-command-text')?.textContent || ''
+      return text.length >= 5
+    })
+    await page.evaluate(() => {
+      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
+    })
+    await page.waitForFunction(() => {
+      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
+    })
+
+    await page.evaluate(() => {
+      if (typeof submitComposerCommand === 'function') {
+        submitComposerCommand('man curl', { dismissKeyboard: true })
+      }
+    })
     await expect(page.locator('#status')).toHaveText('EXIT 0')
 
     const output = page.locator('.tab-panel.active .output')
