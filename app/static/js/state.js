@@ -38,6 +38,13 @@
   const state = global.APP_STATE || (global.APP_STATE = {});
   Object.assign(state, defaults);
   const getMobileMenuEl = () => mobileMenu || null;
+  const isMobileTerminalViewportActive = () => !!(
+    typeof useMobileTerminalViewportMode === 'function'
+    && useMobileTerminalViewportMode()
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+  );
 
   const bindings = [
     'tabs',
@@ -129,6 +136,7 @@
     return true;
   };
   global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
+    if (isMobileTerminalViewportActive()) return false;
     const target = (typeof getVisibleComposerInput === 'function')
       ? getVisibleComposerInput()
       : global.getVisibleComposerInput();

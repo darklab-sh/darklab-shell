@@ -762,6 +762,8 @@ describe('app helpers', () => {
     const { shellPromptWrap, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
     })
+    const header = document.querySelector('header')
+    const status = document.getElementById('status')
     const runBtn = document.getElementById('run-btn')
     const terminalWrap = document.querySelector('.terminal-wrap')
     const mobileShell = document.getElementById('mobile-shell')
@@ -812,6 +814,8 @@ describe('app helpers', () => {
     expect(mobileShell.contains(mobileShellTranscript)).toBe(true)
     expect(mobileShell.contains(mobileShellComposer)).toBe(true)
     expect(mobileShell.contains(mobileShellOverlays)).toBe(true)
+    expect(header.contains(status)).toBe(true)
+    expect(header.contains(document.getElementById('run-timer'))).toBe(true)
     expect(mobileShellChrome.contains(histRow)).toBe(true)
     expect(mobileShellChrome.contains(terminalBar)).toBe(true)
     expect(mobileShellChrome.contains(searchBar)).toBe(true)
@@ -832,7 +836,7 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
-  it('refocuses the visible mobile composer instead of the hidden desktop input', async () => {
+  it('does not programmatically focus the mobile composer', async () => {
     const { refocusTerminalInput, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
@@ -840,10 +844,26 @@ describe('app helpers', () => {
     const mobileCmdInput = document.getElementById('mobile-cmd')
     document.body.classList.add('mobile-terminal-mode')
 
-    refocusTerminalInput()
+    expect(refocusTerminalInput()).toBeUndefined()
 
-    expect(mobileCmdInput.focus).toHaveBeenCalled()
+    expect(mobileCmdInput.focus).not.toHaveBeenCalled()
     expect(cmdInput.focus).not.toHaveBeenCalled()
+
+    restoreViewport()
+  })
+
+  it('focuses the mobile composer with preventScroll when the user taps the input', async () => {
+    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const visibleInput = getVisibleComposerInput()
+    document.body.classList.add('mobile-terminal-mode')
+
+    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+    Object.assign(ev, { pointerType: 'touch' })
+    visibleInput.dispatchEvent(ev)
+
+    expect(visibleInput.focus).toHaveBeenCalledWith({ preventScroll: true })
 
     restoreViewport()
   })
@@ -862,7 +882,7 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
-  it('focuses the visible mobile composer through the shared focus helper', async () => {
+  it('does not focus the mobile composer through the shared focus helper', async () => {
     const { focusVisibleComposerInput, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
@@ -870,8 +890,8 @@ describe('app helpers', () => {
     const cmdInput = document.getElementById('cmd')
     document.body.classList.add('mobile-terminal-mode')
 
-    expect(focusVisibleComposerInput({ preventScroll: true })).toBe(true)
-    expect(mobileCmdInput.focus).toHaveBeenCalled()
+    expect(focusVisibleComposerInput({ preventScroll: true })).toBe(false)
+    expect(mobileCmdInput.focus).not.toHaveBeenCalled()
     expect(cmdInput.focus).not.toHaveBeenCalled()
 
     restoreViewport()
@@ -1480,19 +1500,20 @@ describe('app helpers', () => {
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
 
-  it('supports Ctrl+L to clear the active tab', async () => {
+  it('supports Ctrl+L to clear the active tab without dropping a running command', async () => {
     const clearTab = vi.fn()
     const cancelWelcome = vi.fn()
     const { cmdInput } = await loadAppFns({
       clearTab,
       cancelWelcome,
-      tabs: [{ id: 'tab-1', st: 'idle' }],
+      tabs: [{ id: 'tab-1', st: 'running' }],
+      activeTabId: 'tab-1',
     })
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
 
     expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
-    expect(clearTab).toHaveBeenCalledWith('tab-1')
+    expect(clearTab).toHaveBeenCalledWith('tab-1', { preserveRunState: true })
   })
 
   it('does not apply Alt-based tab shortcuts while typing in non-terminal inputs', async () => {
@@ -1614,23 +1635,28 @@ describe('app helpers', () => {
     expect(killOverlay2.style.display).toBe('none')
   })
 
-  it('supports Enter and Escape in the kill confirmation modal', async () => {
+  it('does not refocus the mobile composer when closing the kill confirmation modal', async () => {
     const doKill = vi.fn()
-    const { getVisibleComposerInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
+    const { getVisibleComposerInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({
+      doKill,
+      pendingKillTabId: 'tab-1',
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
     const visibleInput = getVisibleComposerInput()
+    visibleInput.focus.mockClear()
 
     showKillOverlay()
     expect(isKillOverlayOpen()).toBe(true)
     confirmPendingKill()
     expect(doKill).toHaveBeenCalledWith('tab-1')
     expect(isKillOverlayOpen()).toBe(false)
-    expect(visibleInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).not.toHaveBeenCalled()
 
     visibleInput.focus.mockClear()
     showKillOverlay()
     closeKillOverlay()
     expect(isKillOverlayOpen()).toBe(false)
-    expect(visibleInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).not.toHaveBeenCalled()
   })
 
   it('wires search controls and Escape dismissal correctly', async () => {
@@ -1675,7 +1701,7 @@ describe('app helpers', () => {
     searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
 
     expect(searchBar.style.display).toBe('none')
-    expect(visibleInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).not.toHaveBeenCalled()
 
     restoreViewport()
   })
@@ -1695,17 +1721,20 @@ describe('app helpers', () => {
     expect(faqOverlay.classList.contains('open')).toBe(false)
   })
 
-  it('opens and closes the options overlay through the wired controls', async () => {
-    const { getVisibleComposerInput } = await loadAppFns()
+  it('does not refocus the mobile composer when closing options', async () => {
+    const { getVisibleComposerInput } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
     const overlay = document.getElementById('options-overlay')
     const visibleInput = getVisibleComposerInput()
+    visibleInput.focus.mockClear()
 
     document.getElementById('options-btn').click()
     expect(overlay.classList.contains('open')).toBe(true)
 
     document.querySelector('.options-close').click()
     expect(overlay.classList.contains('open')).toBe(false)
-    expect(visibleInput.focus).toHaveBeenCalled()
+    expect(visibleInput.focus).not.toHaveBeenCalled()
 
     document.querySelector('#mobile-menu [data-action="options"]').click()
     expect(overlay.classList.contains('open')).toBe(true)
@@ -1848,6 +1877,6 @@ describe('app helpers', () => {
     chip.click()
 
     expect(mobileCmdInput.value).toBe('curl ')
-    expect(mobileCmdInput.focus).toHaveBeenCalled()
+    expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
 })

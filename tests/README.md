@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals on this branch:
 
 - `pytest`: 453
-- `vitest`: 228
-- `playwright`: 114
-- total: 795
+- `vitest`: 229
+- `playwright`: 121
+- total: 803
 
 ## Running The Suites
 
@@ -93,7 +93,7 @@ Spec files:
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
 - `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, killed-state UI, and closing the only running tab while a command is active
-- `mobile.spec.js` - mobile startup composer visibility, keyboard open/close transitions, transcript tap dismissal, new-tab/close-tab scroll behavior, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, and Run-button disable/reenable coverage while a command is active
+- `mobile.spec.js` - mobile startup composer visibility, keyboard open/close transitions, transcript tap dismissal, mobile input tap no-scroll focus, new-tab/close-tab scroll behavior, status-pill placement in the mobile header, mobile tab-row overflow/scrolling, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, action-button focus cleanup, clear/kill preservation while a command is active, Run-button disable/reenable coverage while a command is active, and close-button focus cleanup after single-tab reset
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery

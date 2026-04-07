@@ -25,6 +25,11 @@ function _getTabOutputEl(id) {
   return _getTabPanelEl(id)?.querySelector('.output') || null;
 }
 
+function _blurActiveElement() {
+  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
+  if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
+}
+
 function _clearTabDropIndicators() {
   if (!tabsBar) return;
   tabsBar.querySelectorAll('.tab-drop-before, .tab-drop-after').forEach(node => {
@@ -61,11 +66,14 @@ function updateTabScrollButtons() {
   rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
 }
 
-function ensureActiveTabVisible(tabId) {
-  if (typeof document !== 'undefined'
+function shouldScrollActiveTabIntoView() {
+  return !(typeof document !== 'undefined'
     && document.body
     && document.body.classList
-    && document.body.classList.contains('mobile-terminal-mode')) return;
+    && document.body.classList.contains('mobile-terminal-mode'));
+}
+
+function ensureActiveTabVisible(tabId) {
   const tabEl = _getTabEl(tabId);
   if (!tabEl || typeof tabEl.scrollIntoView !== 'function') return;
   tabEl.scrollIntoView({ block: 'nearest', inline: 'nearest', behavior: 'smooth' });
@@ -172,7 +180,7 @@ function _onTouchDragEnd(e) {
   if (!moved) return;
   syncTabOrderFromDom();
   updateTabScrollButtons();
-  ensureActiveTabVisible(activeTabId);
+  if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
   _tabDragSuppressClickUntil = Date.now() + 220;
   if (state.id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
 }
@@ -231,7 +239,7 @@ function bindTabDragReorder(tab, id) {
     e.preventDefault();
     syncTabOrderFromDom();
     updateTabScrollButtons();
-    ensureActiveTabVisible(activeTabId);
+    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
   });
 
   tab.addEventListener('dragend', () => {
@@ -239,7 +247,7 @@ function bindTabDragReorder(tab, id) {
     if (_dragMoved) {
       syncTabOrderFromDom();
       updateTabScrollButtons();
-      ensureActiveTabVisible(activeTabId);
+      if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
       _tabDragSuppressClickUntil = Date.now() + 160;
       if (id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
     }
@@ -315,10 +323,14 @@ function createTab(label) {
   const tab = document.createElement('div');
   tab.className = 'tab';
   tab.dataset.id = id;
-  tab.innerHTML = `<span class="tab-status idle"></span><span class="tab-label">${escapeHtml(label)}</span><span class="tab-close">✕</span>`;
+  tab.innerHTML = `<span class="tab-status idle"></span><span class="tab-label">${escapeHtml(label)}</span><button class="tab-close" type="button" aria-label="Close tab">✕</button>`;
   tab.addEventListener('click', e => {
     if (Date.now() < _tabDragSuppressClickUntil) return;
-    if (e.target.classList.contains('tab-close')) { closeTab(id); return; }
+    if (e.target.classList.contains('tab-close')) {
+      closeTab(id);
+      _blurActiveElement();
+      return;
+    }
     activateTab(id);
   });
 
@@ -370,12 +382,22 @@ function createTab(label) {
   panel.querySelectorAll('[data-action]').forEach(btn => {
     btn.addEventListener('click', () => {
       const action = btn.dataset.action;
+      if (typeof useMobileTerminalViewportMode === 'function'
+        && useMobileTerminalViewportMode()
+        && typeof blurVisibleComposerInputIfMobile === 'function') {
+        blurVisibleComposerInputIfMobile();
+      }
       if (action === 'kill')      confirmKill(id);
-      if (action === 'clear')     { cancelWelcome(id); clearTab(id); }
+      if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
       if (action === 'copy')      copyTab(id);
       if (action === 'save')      saveTab(id);
       if (action === 'html')      exportTabHtml(id);
       if (action === 'permalink') permalinkTab(id);
+      if (typeof btn.blur === 'function') {
+        setTimeout(() => {
+          if (typeof btn.blur === 'function') btn.blur();
+        }, 0);
+      }
     });
   });
   tabPanels.appendChild(panel);
@@ -408,14 +430,14 @@ function createTab(label) {
   return id;
 }
 
-function activateTab(id) {
+function activateTab(id, { focusComposer = true } = {}) {
   setActiveTabId(id);
   tabsBar?.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
   tabPanels?.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.id === id));
   mountShellPrompt(id);
   const t = getTab(id);
   setStatus(t ? (t.st || 'idle') : 'idle');
-  ensureActiveTabVisible(id);
+  if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
   if (typeof setComposerValue === 'function') {
@@ -425,7 +447,7 @@ function activateTab(id) {
     cmdInput.dispatchEvent(new Event('input'));
   }
   resetCmdHistoryNav();
-  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
 }
 
@@ -444,7 +466,7 @@ function closeTab(id) {
     if (typeof doKill === 'function') doKill(id);
     if (activeTabId === id && tabs.length > 1) {
       const nextId = _getNeighborTabIdAfterClose(idx, id);
-      if (nextId) activateTab(nextId);
+      if (nextId) activateTab(nextId, { focusComposer: false });
     }
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
     updateNewTabBtn();
@@ -461,6 +483,12 @@ function closeTab(id) {
     t.exitCode = null;
     t.killed = false;
     t.pendingKill = false;
+    if (typeof useMobileTerminalViewportMode === 'function'
+      && useMobileTerminalViewportMode()
+      && typeof blurVisibleComposerInputIfMobile === 'function') {
+      setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
+    }
+    _blurActiveElement();
     return;
   }
   tabs.splice(idx, 1);
@@ -468,7 +496,7 @@ function closeTab(id) {
   _getTabPanelEl(id)?.remove();
   if (activeTabId === id) {
     const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
-    if (nextId) activateTab(nextId);
+    if (nextId) activateTab(nextId, { focusComposer: false });
     if (typeof document !== 'undefined'
       && document.body
       && document.body.classList
@@ -511,30 +539,44 @@ function getOutput(id) {
   return _getTabOutputEl(id);
 }
 
-function clearTab(id) {
+function clearTab(id, { preserveRunState = false } = {}) {
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
   const out = getOutput(id);
   if (out) out.innerHTML = '';
   const t = getTab(id);
+  const wasRunning = !!(t && t.st === 'running');
   if (t) {
     t._outputFollowToken = (t._outputFollowToken || 0) + 1;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
     t.rawLines = [];
-    t.runStart = null;
-    t.currentRunStartIndex = null;
-    t.previewTruncated = false;
-    t.fullOutputAvailable = false;
-    t.fullOutputLoaded = false;
-    t.historyRunId = null;
     t.followOutput = true;
     t.suppressOutputScrollTracking = false;
     t.deferPromptMount = false;
     t.closing = false;
+    if (!preserveRunState || !wasRunning) {
+      t.runStart = null;
+      t.currentRunStartIndex = null;
+      t.previewTruncated = false;
+      t.fullOutputAvailable = false;
+      t.fullOutputLoaded = false;
+      t.historyRunId = null;
+    }
   }
-  if (id === activeTabId) mountShellPrompt(id);
-  setTabStatus(id, 'idle');
-  if (id === activeTabId) { setStatus('idle'); clearSearch(); }
+  if (id === activeTabId && (!preserveRunState || !wasRunning)) {
+    mountShellPrompt(id);
+  }
+  if (!preserveRunState || !wasRunning) {
+    setTabStatus(id, 'idle');
+    if (id === activeTabId) { setStatus('idle'); clearSearch(); }
+  }
+  if (typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+    && typeof blurVisibleComposerInputIfMobile === 'function') {
+    setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
+  }
 }
 
 function finalizeClosingTab(id) {
@@ -547,6 +589,13 @@ function finalizeClosingTab(id) {
     tab.closing = false;
     clearTab(id);
     setTabLabel(id, 'tab 1');
+    if (typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-terminal-mode')
+      && typeof blurVisibleComposerInputIfMobile === 'function') {
+      setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
+    }
     return true;
   }
 
@@ -555,7 +604,7 @@ function finalizeClosingTab(id) {
   _getTabPanelEl(id)?.remove();
   if (activeTabId === id && tabs.length) {
     const nextId = _getNeighborTabIdAfterClose(Math.min(idx, tabs.length), id);
-    if (nextId) activateTab(nextId);
+    if (nextId) activateTab(nextId, { focusComposer: false });
   }
   updateNewTabBtn();
   updateTabScrollButtons();
@@ -707,7 +756,7 @@ function startTabRename(id, labelEl) {
     setTabLabel(id, next);
     if (t) t.renamed = true;
     updateTabScrollButtons();
-    ensureActiveTabVisible(id);
+    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
   }
   function cancel() {
     if (done) return;
@@ -715,7 +764,7 @@ function startTabRename(id, labelEl) {
     if (labelEl.contains(input)) labelEl.removeChild(input);
     setTabLabel(id, original);
     updateTabScrollButtons();
-    ensureActiveTabVisible(id);
+    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
   }
 
   input.addEventListener('keydown', e => {
@@ -728,7 +777,7 @@ function startTabRename(id, labelEl) {
   input.addEventListener('input', () => {
     // Renaming can change tab width before commit, which affects scroll affordances.
     updateTabScrollButtons();
-    ensureActiveTabVisible(id);
+    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
   });
 }
 

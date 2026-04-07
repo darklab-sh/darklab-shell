@@ -79,6 +79,7 @@ function loadTabsFns({
     startTabRename,
     mountShellPrompt,
     closeTab,
+    clearTab,
     setTabStatus,
     setTabLabel,
     copyTab,
@@ -225,11 +226,14 @@ describe('tabs helpers', () => {
     const { createTab, closeTab, _getTabs } = loadTabsFns()
     const id = createTab('first label')
     const tab = _getTabs()[0]
+    const closeBtn = document.querySelector('.tab-close')
+    closeBtn.blur = vi.fn()
     tab.runId = 'run-1'
     tab.runStart = 123
     tab.exitCode = 9
     tab.killed = true
     tab.pendingKill = true
+    const activeElementSpy = vi.spyOn(document, 'activeElement', 'get').mockReturnValue(closeBtn)
 
     closeTab(id)
 
@@ -240,6 +244,29 @@ describe('tabs helpers', () => {
     expect(_getTabs()[0].killed).toBe(false)
     expect(_getTabs()[0].pendingKill).toBe(false)
     expect(document.querySelector('.tab-label').textContent).toBe('tab 1')
+    expect(closeBtn.blur).toHaveBeenCalled()
+    activeElementSpy.mockRestore()
+  })
+
+  it('clearTab preserves a running tab state when asked to keep the run active', () => {
+    const { createTab, clearTab, _getTabs, shellPromptWrap } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    output.innerHTML = '<div>before</div>'
+    tab.st = 'running'
+    tab.runId = 'run-1'
+    tab.historyRunId = 'history-1'
+    tab.followOutput = false
+
+    clearTab(id, { preserveRunState: true })
+
+    expect(output.innerHTML).toBe('')
+    expect(tab.st).toBe('running')
+    expect(tab.runId).toBe('run-1')
+    expect(tab.historyRunId).toBe('history-1')
+    expect(tab.followOutput).toBe(true)
+    expect(document.querySelector(`.tab-panel[data-id="${id}"]`).contains(shellPromptWrap)).toBe(false)
   })
 
   it('closing a running tab kills it and activates a neighboring tab', () => {
@@ -248,6 +275,7 @@ describe('tabs helpers', () => {
     const secondId = createTab('tab 2')
 
     activateTab(secondId)
+    document.getElementById('cmd').focus.mockClear()
     const runningTab = _getTabs().find(tab => tab.id === secondId)
     runningTab.st = 'running'
     runningTab.runId = 'run-2'
@@ -258,7 +286,7 @@ describe('tabs helpers', () => {
     expect(_getTabs().map(tab => tab.id)).toEqual([firstId, secondId])
     expect(_getTabs().find(tab => tab.id === secondId).closing).toBe(true)
     expect(document.querySelector('.tab.active').dataset.id).toBe(firstId)
-    expect(document.getElementById('cmd').focus).toHaveBeenCalled()
+    expect(document.getElementById('cmd').focus).not.toHaveBeenCalled()
   })
 
   it('closing the only running tab kills it and keeps the tab shell ready', () => {

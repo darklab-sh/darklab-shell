@@ -49,11 +49,13 @@ function syncShellPrompt() {
 
 function refocusTerminalInput() {
   setTimeout(() => {
+    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return;
     if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
   }, 0);
 }
 
 function focusCommandInputFromGesture() {
+  if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return;
   if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
 }
 
@@ -79,6 +81,9 @@ const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay
 const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
+const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
+const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
+const _headerHomeParent = typeof headerTitle !== 'undefined' && headerTitle ? headerTitle.closest('header') : (typeof document !== 'undefined' ? document.querySelector('header') : null);
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -244,6 +249,14 @@ function syncMobileShellLayout(mobileMode) {
   syncMobileShellChromeLayout(useMobile, mobileShellChromeMount);
   syncMobileShellTranscriptLayout(useMobile, mobileShellTranscriptMount, mobileShellChromeMount);
   syncMobileShellOverlayLayout(useMobile, mobileShellOverlaysMount);
+  if (status && _headerHomeParent) {
+    if (useMobile) _moveComposerNode(status, _headerHomeParent, hamburgerBtn || null);
+    else _moveComposerNode(status, _statusHomeParent);
+  }
+  if (runTimer && _headerHomeParent) {
+    if (useMobile) _moveComposerNode(runTimer, _headerHomeParent, hamburgerBtn || null);
+    else _moveComposerNode(runTimer, _runTimerHomeParent);
+  }
   if (!useMobile && _shellInputRowHomeParent) _moveComposerNode(shellInputRow, _shellInputRowHomeParent);
 }
 
@@ -437,7 +450,8 @@ function copyActiveShortcutTab() {
 function clearActiveShortcutTab() {
   if (!activeTabId) return;
   cancelWelcome(activeTabId);
-  clearTab(activeTabId);
+  const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
 }
 
 function closeKillOverlay() {
@@ -647,6 +661,34 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
 
 function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   if (!mobileInput || !mobileRunBtn) return;
+  mobileInput.addEventListener('pointerdown', e => {
+    if (!useMobileTerminalViewportMode()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof focusComposerInput === 'function') {
+      focusComposerInput(mobileInput, { preventScroll: true });
+    } else if (typeof mobileInput.focus === 'function') {
+      try {
+        mobileInput.focus({ preventScroll: true });
+      } catch (_) {
+        mobileInput.focus();
+      }
+    }
+  });
+  mobileInput.addEventListener('touchstart', e => {
+    if (!useMobileTerminalViewportMode()) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (typeof focusComposerInput === 'function') {
+      focusComposerInput(mobileInput, { preventScroll: true });
+    } else if (typeof mobileInput.focus === 'function') {
+      try {
+        mobileInput.focus({ preventScroll: true });
+      } catch (_) {
+        mobileInput.focus();
+      }
+    }
+  }, { passive: false });
   // Submit handler — read the visible composer input and submit through the
   // shared command engine.
   function _mobileSubmit() {
@@ -1413,14 +1455,11 @@ function setupMobileComposer() {
       const interactiveTarget = e && e.target && e.target.closest
         && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
       if (interactiveTarget) return;
-      if (e && typeof e.preventDefault === 'function') e.preventDefault();
-      if (e && typeof e.stopPropagation === 'function') e.stopPropagation();
       if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
         blurVisibleComposerInputIfMobile();
       }
     };
-    mobileShellTranscript.addEventListener('pointerdown', closeKeyboardFromTranscript);
-    mobileShellTranscript.addEventListener('touchstart', closeKeyboardFromTranscript, { passive: false });
+    mobileShellTranscript.addEventListener('click', closeKeyboardFromTranscript);
   }
 }
 

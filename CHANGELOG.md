@@ -40,6 +40,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Fixed
 - **Prompt alignment** — when line numbers or timestamps are enabled, the new prompt stays aligned under the output gutter instead of leaving the prompt prefix pinned flush left
 - **Tab isolation and close-running-tab kill** — running one tab no longer blocks the others, and closing a running tab now kills that tab before switching away
+- **Mobile tab close focus** — closing the only mobile tab no longer leaves the reset `X` visually focused, and tab close controls no longer stay highlighted after use
+- **Mobile tab row overflow** — mobile tabs now scroll horizontally with hidden scrollbars, tab labels resist text selection during drag, and tab chrome reads as separate bordered tabs instead of a plain text strip
+- **Mobile header layout** — the mobile app name, status pill, timer, and hamburger control now use the available header space more evenly instead of looking undersized
+- **Mobile action-button focus cleanup** — `permalink`, `copy`, `clear`, and history action buttons now drop focus after tap/click so they don’t remain visually brighter than the rest
+- **Mobile input focus control** — tab switches, close/reset, and other app-driven flows no longer force focus back into the composer on mobile; only an explicit user tap on the input does
+- **Mobile clear / close-tab run preservation** — clearing a running tab and closing a running tab now preserve the command lifecycle correctly so the kill path stays available and output does not leak into a replacement tab
 - **Permalink preference defaults** — permalink pages now honor saved line-number and timestamp cookies on load
 - **macOS keyboard shortcuts** — app-safe `Option` shortcuts now match physical key codes instead of the produced symbol, preventing `Option+T`, `Option+W`, `Option+Shift+C`, and `Option+B/F` from inserting special characters into the prompt
 - **Mobile permalink copy flow** — the `/share/...` permalink page now hides its copy toast correctly on mobile and falls back to `execCommand('copy')` when the Clipboard API is unavailable

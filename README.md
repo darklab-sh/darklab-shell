@@ -846,7 +846,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **453 pytest + 228 Vitest + 114 Playwright = 795 tests**.
+Current totals in this branch: **453 pytest + 229 Vitest + 121 Playwright = 803 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

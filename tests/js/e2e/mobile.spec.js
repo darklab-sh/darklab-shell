@@ -3,9 +3,9 @@ import { test, expect } from '@playwright/test'
 const MOBILE = { width: 375, height: 812 }
 const LONG_CMD = 'ping -c 4 8.8.8.8'
 
-// Enable touch so useMobileTerminalViewportMode() returns true on the narrow
-// viewport, which triggers the mobile welcome and other mobile JS paths.
-test.use({ hasTouch: true })
+// Use a full mobile-like emulation so the mobile shell code sees the same
+// viewport and touch signals as real mobile browsers.
+test.use({ hasTouch: true, isMobile: true })
 
 async function runCommandMobile(page, cmd) {
   await page.locator('#mobile-cmd').fill(cmd)
@@ -32,7 +32,9 @@ test.describe('mobile menu', () => {
   test.beforeEach(async ({ page }) => {
     await page.setViewportSize(MOBILE)
     await page.goto('/')
-    await page.locator('#mobile-composer').waitFor({ state: 'visible' })
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')))
+    await expect.poll(async () => page.evaluate(() => document.body.classList.contains('mobile-terminal-mode'))).toBe(true)
+    await page.locator('#mobile-cmd').waitFor({ state: 'attached' })
   })
 
   test('mobile startup uses the mobile welcome and keeps the composer visible', async ({ page }) => {
@@ -47,6 +49,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#mobile-composer')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript')).toBeVisible()
     await expect(page.locator('#mobile-shell-transcript .tab-panels, #mobile-shell-transcript #tab-panels')).toHaveCount(1)
+    await expect(page.locator('header .status-pill')).toBeVisible()
     // Composer must stay within the viewport
     const composerBox = await page.locator('#mobile-composer').boundingBox()
     expect(composerBox).not.toBeNull()
@@ -56,6 +59,40 @@ test.describe('mobile menu', () => {
   test('mobile edit bar appears when the mobile command input is focused', async ({ page }) => {
     await openMobileKeyboard(page)
     await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+  })
+
+  test('tapping the mobile command input opens the keyboard without jumping the page', async ({ page }) => {
+    const startScrollY = await page.evaluate(() => window.scrollY)
+    await page.locator('#mobile-cmd').tap()
+    await page.evaluate(() => {
+      const vv = window.visualViewport
+      if (!vv) return
+      try {
+        Object.defineProperty(vv, 'height', {
+          configurable: true,
+          value: 500,
+        })
+      } catch (_) {}
+      window.dispatchEvent(new Event('resize'))
+    })
+
+    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(startScrollY + 12)
+  })
+
+  test('mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused', async ({ page }) => {
+    await page.locator('#mobile-cmd').fill('nmap')
+
+    const dropdown = page.locator('#ac-dropdown')
+    await expect(dropdown).toBeVisible()
+    await expect(dropdown).toContainText('nmap -h')
+
+    await dropdown.locator('.ac-item', { hasText: 'nmap -h' }).tap()
+
+    await expect(page.locator('#mobile-cmd')).toHaveValue('nmap -h')
+    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect(dropdown).toBeHidden()
   })
 
   test('clicking the mobile transcript closes the keyboard and helper row', async ({ page }) => {
@@ -70,17 +107,26 @@ test.describe('mobile menu', () => {
     await openMobileKeyboard(page)
     await expect(page.locator('#mobile-edit-bar')).toBeVisible()
 
+    const startScrollY = await page.evaluate(() => window.scrollY)
     await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=actions')
+    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+    await expect(page.locator('.tab-panel.active [data-action="permalink"]')).not.toBeFocused()
+    await page.locator('.tab-panel.active [data-action="copy"]').click()
+    await expect(page.locator('.tab-panel.active [data-action="copy"]')).not.toBeFocused()
     await page.locator('.tab-panel.active [data-action="clear"]').click()
 
     await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
+    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('.tab-panel.active [data-action="clear"]')).not.toBeFocused()
+    await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(startScrollY + 12)
   })
 
-  test('creating a new mobile tab keeps focus on the visible composer', async ({ page }) => {
+  test('creating a new mobile tab does not force composer focus', async ({ page }) => {
     const startScrollY = await page.evaluate(() => window.scrollY)
     await page.locator('#new-tab-btn').click()
 
-    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect(page.locator('#mobile-cmd')).not.toBeFocused()
+    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
     await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(startScrollY + 12)
   })
 
@@ -91,8 +137,43 @@ test.describe('mobile menu', () => {
     await page.locator('#mobile-run-btn').click()
     await page.locator('.tab').nth(1).locator('.tab-close').click()
 
-    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect(page.locator('#mobile-cmd')).not.toBeFocused()
+    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
     await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(12)
+  })
+
+  test('closing a mobile tab does not leave the close button focused', async ({ page }) => {
+    await page.locator('#new-tab-btn').click()
+    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=tab-close-focus')
+
+    const closeBtn = page.locator('.tab').nth(1).locator('.tab-close')
+    await closeBtn.click()
+
+    await expect(page.locator('.tab')).toHaveCount(1)
+    await expect.poll(async () => page.evaluate(() => document.activeElement?.classList?.contains('tab-close') || false)).toBe(false)
+  })
+
+  test('closing the only mobile tab does not leave the reset close button focused', async ({ page }) => {
+    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=single-close-focus')
+
+    const closeBtn = page.locator('.tab').first().locator('.tab-close')
+    await closeBtn.click()
+
+    await expect(page.locator('.tab')).toHaveCount(1)
+    await expect.poll(async () => page.evaluate(() => document.activeElement?.classList?.contains('tab-close') || false)).toBe(false)
+  })
+
+  test('mobile tabs bar can overflow and scroll horizontally', async ({ page }) => {
+    for (let i = 0; i < 6; i++) {
+      await page.locator('#new-tab-btn').click()
+      await runCommandMobile(page, `curl http://localhost:5001/health?mobile=overflow-${i}-${'x'.repeat(22)}`)
+    }
+
+    const tabsBar = page.locator('.terminal-bar .tabs-bar')
+    const metrics = await tabsBar.evaluate(el => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth }))
+    expect(metrics.scrollWidth).toBeGreaterThan(metrics.clientWidth)
+    await tabsBar.evaluate(el => { el.scrollLeft = el.scrollWidth; })
+    await expect.poll(async () => tabsBar.evaluate(el => el.scrollLeft)).toBeGreaterThan(0)
   })
 
   test('hamburger button is visible and desktop header buttons are hidden at mobile width', async ({ page }) => {
@@ -103,6 +184,22 @@ test.describe('mobile menu', () => {
   test('clicking the hamburger opens the mobile menu', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
+  })
+
+  test('mobile menu FAQ and options open overlays in the mobile shell', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="faq"]').click()
+    await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
+
+    await page.locator('#faq-overlay .faq-close').click()
+    await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="options"]').click()
+    await expect(page.locator('#options-overlay')).toHaveClass(/open/)
+
+    await page.locator('#options-overlay .options-close').click()
+    await expect(page.locator('#options-overlay')).not.toHaveClass(/open/)
   })
 
   test('mobile menu contains history and theme action buttons', async ({ page }) => {
@@ -163,6 +260,28 @@ test.describe('mobile menu', () => {
 
     await expect(page.locator('#cmd')).toHaveValue(commandText || '')
     await expect(page.locator('#mobile-composer')).toBeVisible()
+  })
+
+  test('mobile history restore works from a newly created session via the mobile menu', async ({ page }) => {
+    const commands = [
+      'curl http://localhost:5001/health?mobile=history-1',
+      'curl http://localhost:5001/health?mobile=history-2',
+    ]
+
+    for (const command of commands) {
+      await runCommandMobile(page, command)
+    }
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="history"]').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+
+    await page.locator('.history-entry').first().click()
+    await expect(page.locator('.tab-panel.active .output')).toContainText('mobile=history-2')
+    await expect(page.locator('#cmd')).toHaveValue('')
   })
 
   test('mobile run button disables while a command is running', async ({ page }) => {

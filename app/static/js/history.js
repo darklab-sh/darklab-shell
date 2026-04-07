@@ -303,6 +303,8 @@ function refreshHistoryPanel() {
         copyTextToClipboard(run.command)
           .then(() => showToast('Command copied to clipboard'))
           .catch(() => showToast('Failed to copy command', 'error'));
+        const btn = entry.querySelector('[data-action="copy"]');
+        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
@@ -310,9 +312,13 @@ function refreshHistoryPanel() {
         copyTextToClipboard(url)
           .then(() => showToast('Link copied to clipboard'))
           .catch(() => showToast('Failed to copy link', 'error'));
+        const btn = entry.querySelector('[data-action="permalink"]');
+        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
         confirmHistAction('delete', run.id, run.command);
+        const btn = entry.querySelector('[data-action="delete"]');
+        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
       });
 
       historyList.appendChild(entry);
