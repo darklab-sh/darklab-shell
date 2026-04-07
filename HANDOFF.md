@@ -1,7 +1,7 @@
 # Handoff — Dedicated Mobile UI Plan
 
 Current branch: `v1.3`
-All 227 unit tests passing (`npm run test:unit`).
+All 228 unit tests passing (`npm run test:unit`).
 No uncommitted regressions — all changes are behavior-preserving.
 
 ---
@@ -78,7 +78,7 @@ Two explicit interfaces now sit on top of the shared state layer:
 
 - `state.js` source is read once at module load (`STATE_SRC` constant) and prepended to every eval'd script in `fromScript`, `fromDomScript`, and `fromDomScripts`.
 - `fromDomScripts` accepts an optional 4th `initCode` string that runs after state.js but before the script files, with injected globals in scope. Test loaders that inject `tabs` and `activeTabId` as parameters call `setTabs(tabs); setActiveTabId(activeTabId);` in initCode so `getTab()` / `getActiveTab()` find the right objects.
-- 227 unit tests across 11 files, all passing.
+- 228 unit tests across 11 files, all passing.
 
 ---
 
@@ -125,7 +125,7 @@ All six phases now substantially implemented. Summary of key changes:
 
 **Phase 8 (preferences):** FAQ and options modals become bottom sheets in mobile-terminal-mode (`border-radius: 14px 14px 0 0; width: 100%; max-height: 88svh`); options choice rows and select enlarged for touch.
 
-**All 227 unit tests passing throughout.**
+**All 228 unit tests passing throughout.**
 
 ## Phase 9 Complete — Browser Hardening
 
@@ -190,7 +190,7 @@ The `initCode` string (4th arg) runs after state.js, before your script, with in
 
 ### Running tests
 ```bash
-npm run test:unit        # vitest run (all 227 unit tests)
+npm run test:unit        # vitest run (all 228 unit tests)
 npm run test:unit:watch  # vitest watch mode
 ```
 

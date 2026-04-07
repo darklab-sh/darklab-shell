@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals on this branch:
 
 - `pytest`: 453
-- `vitest`: 199
+- `vitest`: 228
 - `playwright`: 114
-- total: 766
+- total: 795
 
 ## Running The Suites
 
@@ -74,7 +74,7 @@ Files and focus:
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, and no-output toast behavior
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, featured-sample interaction behavior, and mobile banner loading
-- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics, mobile Run-button sync, autocomplete keyboard ordering, and prompt-refocus behavior for display toggles
+- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, and the shared mobile focus/blur helpers
 - `search.test.js` - search helper boundaries and no-op behavior
 - `output.test.js` - output rendering, batched live flushing, shared timestamp/line-number prefix support, welcome-prefix exclusion, and no-output edge cases
 
@@ -92,15 +92,15 @@ Spec files:
 
 - `commands.spec.js` - command execution, denial, and status rendering
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
-- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, and killed-state UI
-- `mobile.spec.js` - mobile startup composer visibility, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, and Run-button disable/reenable coverage while a command is active
+- `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, killed-state UI, and closing the only running tab while a command is active
+- `mobile.spec.js` - mobile startup composer visibility, keyboard open/close transitions, transcript tap dismissal, new-tab/close-tab scroll behavior, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, and Run-button disable/reenable coverage while a command is active
 - `output.spec.js` - copy, clear, save txt/html, and clipboard failure handling
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
 - `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings including tab actions, permalink/copy, clear, and prompt word-motion behavior
-- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, permalink line-number/timestamp toggles, preference-cookie defaults on load, permalink export filename/content assertions, and clipboard failure handling
-- `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, and closing behavior
+- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, permalink line-number/timestamp toggles, preference-cookie defaults on load, permalink page cookie defaults, mobile permalink toast hide behavior, permalink export filename/content assertions, and clipboard failure handling
+- `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, running-tab isolation, and closing behavior including kill/reset paths
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
 - `ui.spec.js` - theme toggle plus backend-driven FAQ modal rendering, close behavior, allowlist-chip interaction, and options-modal preference persistence
 - `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, prompt-key settle behavior, welcome-tab isolation, preferred-command stability, and the mobile welcome banner regression

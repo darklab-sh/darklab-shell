@@ -129,7 +129,7 @@ Keep the new terminal-native prompt flow stable across desktop/mobile and remove
 - ~~module boundary annotation across browser scripts~~
 - ~~shared action path cleanup across tabs.js, welcome.js, and app.js~~
 - ~~unit test harness updated: `state.js` prepended to all eval'd scripts; `fromDomScripts` accepts an `initCode` string so test loaders can call `setTabs(tabs); setActiveTabId(activeTabId)` to seed shared state; `STATE_SRC` cached at module level~~
-- ~~227 unit tests passing (11 test files, no regressions)~~
+- ~~228 unit tests passing (11 test files, no regressions)~~
 
 **Phase 0 Complete**
 
