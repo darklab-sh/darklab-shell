@@ -170,56 +170,61 @@ Phase 2 is complete. The dedicated visible mobile composer, shared visible-input
 
 ##### Phase 3: Mobile Transcript And Output Model
 
-1. Replace the mobile mirrored prompt with a dedicated transcript renderer optimized for readability and touch scrolling:
-   - likely a single-line `input` initially
-   - preserve existing output semantics:
-   - prompt echo lines
-   - stdout/stderr styling
-   - exit lines
-   - timestamps/line numbers when enabled
-2. Decide mobile defaults for timestamps and line numbers:
-   - likely off by default
-   - still configurable in options
-3. Ensure transcript and composer are fully independent:
-   - transcript scrolls
-   - composer stays fixed
-   - keyboard does not obscure transcript or composer
-4. Re-test long-output and long-command cases in both Safari and Chrome.
+**Current state (Phase 3 start):**
+- `#mobile-shell-transcript` receives `#tab-panels` via DOM reparenting at runtime; output routing (`appendLine`, `getOutput`) is already shared
+- `#mobile-composer-host` becomes `position: fixed` only when `body.mobile-keyboard-open` is set; at rest it is `position: relative` inside the flex column
+- `padding-bottom: 100px` on `.output` when keyboard is open is a hardcoded magic number (also `74px` for Chrome iOS at rest)
+- Keyboard detection uses `visualViewport` resize events; blur-without-dismiss edge cases are known but not yet addressed
+
+**Work items:**
+
+~~1. Make the composer always fixed at the bottom of the mobile shell:~~
+   - ~~`#mobile-composer-host` is now `position: fixed` at all times in mobile mode; keyboard-open only adjusts `bottom`/`left`/`right`/`border-radius`~~
+   - ~~`body.mobile-terminal-mode .output` uses `padding-bottom: var(--mobile-composer-height, 80px)` so content is never hidden behind the fixed composer~~
+~~2. Replace hardcoded `padding-bottom: 100px` / `74px` magic numbers with dynamic spacing:~~
+   - ~~`syncMobileComposerHeight()` measures `#mobile-composer-host.offsetHeight` and writes to `--mobile-composer-height` on `documentElement`; called from `syncMobileViewportState` and `syncMobileComposerKeyboard` (on visualViewport resize/scroll and input focus/blur)~~
+   - ~~hardcoded `100px` and Chrome iOS `74px` rules removed~~
+~~3. Address keyboard detection edge cases:~~
+   - ~~`isMobileKeyboardOpen` now checks viewport offset first (`offset > 40`) before falling back to focus-based detection — handles blur-without-dismiss (keyboard stays geometrically open after focus leaves the input)~~
+~~4. Confirm mobile defaults for timestamps and line numbers — both default to `'off'` via `getPreference('pref_timestamps') || 'off'` at app.js:998-999; no code change needed~~
+5. Re-test independent transcript scroll on long-output and long-command cases in Safari and Chrome after the fixed-composer change (manual verification)
 
 ##### Phase 4: Mobile Autocomplete
 
-1. Replace the current terminal-style dropdown logic on mobile with a dedicated autocomplete sheet.
-2. Mobile autocomplete behavior should be touch-first:
-   - anchored to composer
-   - easy tap targets
-   - stable vertical placement
-   - no dependency on desktop up/down menu inversion rules
-3. Keep filtering logic shared with desktop, but mobile rendering and interaction should be separate.
-4. Define behavior for:
-   - tap suggestion
-   - keyboard enter
-   - escape/close
-   - empty input
-   - scrolling long suggestion lists
-5. Add strict regression coverage for first-open placement in Safari and Chrome.
+**Completed**
+
+- ~~Replace the current terminal-style dropdown logic on mobile with a dedicated autocomplete sheet.~~
+- ~~Mobile autocomplete behavior is now touch-first:~~
+  - ~~anchored to composer (already done via reparenting into `#mobile-composer-row`)~~
+  - ~~easy tap targets: `.ac-mobile .ac-item` now uses `padding: 10px 14px`, `font-size: 14px`, `min-height: 44px`, `display: flex; align-items: center`; `::before` prefix glyph hidden on mobile~~
+  - ~~stable vertical placement: always above the fixed composer (`bottom: calc(100% + 4px)`, `ac-up`); height caps at `min(targetHeight, available)` where available = space above composer~~
+  - ~~no dependency on desktop up/down inversion rules: mobile takes the always-above path~~
+- ~~`touchstart` handler added alongside `mousedown` in `acShow` for immediate tap acceptance without 300ms delay; `{ passive: false }` + `e.preventDefault()` prevents focus-loss before accept~~
+- ~~Row height estimate updated from 22px to 44px; max item count for height calculation capped at 8; `maxHeight` uses full available space (no 200px hardcap) so the sheet can grow to fill the space above the composer~~
+- ~~Filtering logic stays shared with desktop~~
+- ~~Tap suggestion, keyboard enter, escape/close, empty input behaviors all already handled by existing shared paths~~
+
+**Remaining:**
+
+- Add regression coverage for first-open placement in Safari and Chrome (manual verification)
 
 ##### Phase 5: Mobile Session And History Navigation
 
-1. Replace the squeezed desktop tab bar with a mobile-specific session switcher.
-2. Candidate approach:
-   - horizontal session chips plus overflow button
-   - or a session drawer / bottom sheet
-3. Mobile switching should support:
-   - create session
-   - switch session
-   - rename session
-   - close session
-   - reorder later only if still valuable on touch
-4. Keep recent-command rail separate from session switching.
-5. History drawer should be designed for touch:
-   - large row hit targets
-   - clear restore feedback
-   - easy permalink/copy/delete actions
+**Completed**
+
+- ~~Replace the squeezed desktop tab bar with a mobile-friendly session bar:~~
+  - ~~`.dot` elements (macOS decorative dots) hidden in `mobile-terminal-mode`~~
+  - ~~Tab scroll arrow buttons hidden in `mobile-terminal-mode` (replaced by native touch scroll)~~
+  - ~~`.tab` touch targets enlarged: `min-height: 44px; padding: 0 14px; font-size: 13px; gap: 8px`~~
+  - ~~`#new-tab-btn` enlarged: `min-height: 44px; padding: 0 16px; font-size: 16px`~~
+  - ~~`.tab .tab-close` hit area enlarged: `20×20px`~~
+  - ~~Status pill font adjusted for compact mobile header~~
+- ~~Create/switch/rename/close session all work through the existing shared tab logic — no new JS needed~~
+
+**Remaining:**
+
+- Reorder on touch: not yet addressed (deferred, depends on Phase 9 testing)
+- History drawer touch refinement: large row targets / permalink/copy/delete on touch is pending Phase 7 (overlay polish)
 
 ##### Phase 6: Mobile Welcome Flow
 
@@ -234,23 +239,39 @@ Phase 2 is complete. The dedicated visible mobile composer, shared visible-input
 
 ##### Phase 7: Mobile Overlay And Action System
 
-1. Convert mobile menu, FAQ, options, history, kill confirm, and future actions into a consistent touch overlay system.
-2. Prefer bottom sheets or full-height drawers over desktop modal patterns on mobile.
-3. Define one mobile overlay manager so only one major overlay is open at a time.
-4. Make input focus behavior deterministic:
-   - opening overlay blurs mobile composer
-   - closing overlay restores focus only when appropriate
-5. Ensure search is also reconsidered for mobile rather than inherited from desktop layout.
+**Completed**
+
+- ~~Mobile menu converted to bottom sheet in `mobile-terminal-mode`:~~
+  - ~~`position: fixed; bottom: 0; left: 0; right: 0` with `border-radius: 14px 14px 0 0`~~
+  - ~~Safe-area inset bottom padding (`env(safe-area-inset-bottom, 0)`)~~
+  - ~~Bottom sheet drag handle via `#mobile-menu::before` pseudo-element~~
+  - ~~Button rows enlarged to `min-height: 52px; padding: 16px 20px; font-size: 15px`~~
+- ~~`_closeMajorOverlays()` helper added to app.js — closes history panel, FAQ, and options overlays; called before opening any major overlay (FAQ, options, history)~~
+- ~~History panel open now calls `blurVisibleComposerInputIfMobile()` and `_closeMajorOverlays()`; close restores focus via `refocusTerminalInput()`~~
+- ~~Kill confirmation open (`confirmKill` in runner.js) now calls `blurVisibleComposerInputIfMobile()` before showing the modal~~
+- ~~Search bar mobile overrides: `font-size: 16px`, input `min-height: 40px`, nav and toggle buttons `min-height: 40px` with larger padding~~
+
+**Remaining:**
+
+- History drawer touch refinement: larger action button hit areas, swipe-to-close (Phase 9 candidate)
+- History delete modal and kill modal close currently call `refocusTerminalInput()` — on mobile this may or may not be desired; revisit during Phase 9 testing
 
 ##### Phase 8: Mobile Preference And Display Policy
 
-1. Decide which preferences are global versus device-specific.
-2. Recommended:
-   - theme can stay shared
-   - timestamps/line numbers may need mobile-specific defaults
-   - mobile-only preferences may be needed later for compact mode and transcript density
-3. Add a mobile-first options surface rather than reusing desktop options layout unchanged.
-4. Ensure cookies/preferences do not force awkward desktop choices onto mobile and vice versa.
+**Completed**
+
+- ~~Theme stays shared (existing behavior)~~
+- ~~Timestamps and line numbers both default to `'off'` already — confirmed in Phase 3~~
+- ~~FAQ and options overlays now render as bottom sheets in `mobile-terminal-mode`:~~
+  - ~~`align-items: flex-end` on overlay backgrounds~~
+  - ~~`width: 100%; border-radius: 14px 14px 0 0; max-height: 88svh`~~
+  - ~~Drag handle via `::before` pseudo-element~~
+  - ~~Safe-area bottom padding (`env(safe-area-inset-bottom, 0)`)~~
+  - ~~Options choice rows enlarged to `min-height: 44px`; select enlarged to `min-height: 44px; font-size: 15px`~~
+
+**Remaining:**
+
+- Mobile-only preferences (compact mode, transcript density) deferred until Phase 9 testing reveals concrete needs
 
 ##### Phase 9: Browser Hardening
 

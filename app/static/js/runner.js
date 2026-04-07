@@ -160,6 +160,7 @@ function interruptPromptLine(tabId = activeTabId) {
 // ── Kill confirmation modal ──
 function confirmKill(tabId) {
   pendingKillTabId = tabId;
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showKillOverlay();
 }
 

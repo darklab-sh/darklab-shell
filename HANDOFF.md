@@ -98,6 +98,52 @@ Phase 1 is complete. Phase 2 is complete as well. The remaining mobile work now 
 
 ---
 
+## Phase 3 In Progress
+
+Phase 3 addresses the mobile transcript and output model. Work completed so far:
+
+**Always-fixed composer (`app/static/css/styles.css`):**
+- `#mobile-composer-host` is now `position: fixed; bottom: 0; left: 0; right: 0;` in all `body.mobile-terminal-mode` states, not only when keyboard is open
+- On keyboard open (`body.mobile-terminal-mode.mobile-keyboard-open`), the rule only adjusts `bottom`, `left`, `right`, `border`, and `border-radius` — no longer needs to set `position: fixed` (already inherited)
+- `body.mobile-terminal-mode .output { padding-bottom: var(--mobile-composer-height, 80px) }` replaces the old `body.mobile-keyboard-open .output { padding-bottom: 100px }` magic number and now applies at all times in mobile mode
+- Chrome iOS `74px` `padding-bottom` on `#tab-panels` removed (`.output` padding covers this)
+
+**Dynamic composer height (`app/static/js/app.js`):**
+- `syncMobileComposerHeight()` — measures `mobileComposerHost.offsetHeight` and writes to `document.documentElement` CSS var `--mobile-composer-height`
+- Called from `syncMobileViewportState()` (every layout sync) and from `syncMobileComposerKeyboard()` (on visualViewport resize/scroll and input focus/blur)
+
+**Keyboard detection reliability (`app/static/js/app.js`):**
+- `isMobileKeyboardOpen(offset)` now checks `offset > 40` first before checking `document.activeElement`
+- This handles blur-without-dismiss: when user taps away but keyboard is still geometrically open, `visualViewport` hasn't reduced yet but the active-element check would have incorrectly returned false
+
+**Phase 3 complete.** Timestamps and line numbers confirmed off-by-default at `app.js:998-999`. Transcript scroll testing is manual (Safari/Chrome device test).
+
+---
+
+## Phases 4–8 Complete
+
+All six phases now substantially implemented. Summary of key changes:
+
+**Phase 4 (autocomplete):** `.ac-mobile .ac-item` touch targets enlarged to 44px min-height with `flex` layout; `touchstart` handler added with `{ passive: false }` for immediate tap acceptance; row height estimate updated from 22px to 44px; `maxHeight` calculation uses `min(targetHeight, available)` without a hardcap.
+
+**Phase 5 (session bar):** `.dot` and tab scroll arrows hidden in mobile-terminal-mode; `.tab` min-height 44px, font-size 13px; `#new-tab-btn` min-height 44px; `.tab .tab-close` hit area 20×20px.
+
+**Phase 6 (welcome flow):** Already complete before this session.
+
+**Phase 7 (overlays):** `#mobile-menu` converted to a fixed bottom sheet with drag handle `::before`, `env(safe-area-inset-bottom)` padding, 52px button rows; `_closeMajorOverlays()` helper enforces one-overlay-at-a-time; history panel open blurs composer; kill overlay open (`confirmKill` in runner.js) blurs composer; mobile search bar input enlarged to 16px/40px.
+
+**Phase 8 (preferences):** FAQ and options modals become bottom sheets in mobile-terminal-mode (`border-radius: 14px 14px 0 0; width: 100%; max-height: 88svh`); options choice rows and select enlarged for touch.
+
+**All 226 unit tests passing throughout.**
+
+**Remaining work (Phase 9 — browser hardening):**
+- Manual testing in iOS Safari and iOS Chrome
+- Keyboard open/close, focus-on-tap, autocomplete tap, session create/switch/close
+- Long command editing and transcript scroll with compositor always fixed
+- After testing: targeted fixes for any regressions found
+
+---
+
 ## Key Architecture Facts for Continuing Work
 
 ### Script load order (index.html)
@@ -126,7 +172,7 @@ user taps Run  →  _mobileSubmit() in app.js
                   → submitCommand(val)
 ```
 
-`_mobileSubmit` now routes through the shared visible-submit helper directly. The visible mobile composer is the source of truth for the command text, `focusVisibleComposerInput()` / `blurVisibleComposerInput()` keep visible-input focus and blur on one path, `handleComposerInputChange()` lives in the shared state layer for both desktop and mobile input updates, and the shared composer-value accessor keeps the mobile and desktop inputs aligned while the transition continues. Phase 2 is complete; Phase 3 begins with the transcript and output model, then autocomplete, session/navigation, and overlay polish.
+`_mobileSubmit` now routes through the shared visible-submit helper directly. The visible mobile composer is the source of truth for the command text, `focusVisibleComposerInput()` / `blurVisibleComposerInput()` keep visible-input focus and blur on one path, `handleComposerInputChange()` lives in the shared state layer for both desktop and mobile input updates, and the shared composer-value accessor keeps the mobile and desktop inputs aligned while the transition continues. Phase 2 is complete. Phase 3 is in progress — the always-fixed composer, dynamic height variable, and keyboard detection reliability improvements are done.
 
 ### Test harness pattern for new test files
 

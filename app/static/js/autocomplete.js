@@ -14,11 +14,11 @@ function _positionAutocomplete(itemsCount) {
     const rect = anchor && typeof anchor.getBoundingClientRect === 'function'
       ? anchor.getBoundingClientRect()
       : { top: 0 };
-    const rowH = 22;
-    const desired = Math.min(10, Math.max(1, itemsCount)) * rowH + 10;
-    const targetHeight = Math.max(88, Math.min(260, desired));
+    const rowH = 44;
+    const desired = Math.min(8, Math.max(1, itemsCount)) * rowH + 10;
+    const targetHeight = Math.max(88, Math.min(360, desired));
     const available = Math.max(0, rect.top - 12);
-    const maxHeight = Math.max(0, Math.min(200, available));
+    const maxHeight = Math.max(0, Math.min(targetHeight, available));
     acDropdown.style.position = 'absolute';
     acDropdown.style.left = '0';
     acDropdown.style.right = '0';
@@ -123,6 +123,7 @@ function acShow(items) {
       div.textContent = s;
     }
     div.addEventListener('mousedown', e => { e.preventDefault(); acAccept(s); });
+    div.addEventListener('touchstart', e => { e.preventDefault(); acAccept(s); }, { passive: false });
     acDropdown.appendChild(div);
   });
   showAcDropdown();

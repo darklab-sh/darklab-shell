@@ -261,6 +261,22 @@ header .version {
   position: absolute;
   z-index: 45;
   max-width: none;
+  border-radius: 6px 6px 0 0;
+  padding: 4px 0;
+}
+
+.ac-dropdown.ac-mobile .ac-item {
+  padding: 10px 14px;
+  font-size: 14px;
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
+}
+
+.ac-dropdown.ac-mobile .ac-item::before {
+  display: none;
 }
 
 .ac-dropdown.ac-up {
@@ -409,7 +425,10 @@ body.light.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 
 body.mobile-terminal-mode #mobile-composer-host {
   display: block;
-  position: relative;
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
   z-index: 40;
   background: linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98));
   border-top: 1px solid var(--border);
@@ -417,11 +436,9 @@ body.mobile-terminal-mode #mobile-composer-host {
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open #mobile-composer-host {
-  display: block;
-  position: fixed;
+  bottom: calc(var(--mobile-keyboard-offset) + 8px);
   left: 12px;
   right: 12px;
-  bottom: calc(var(--mobile-keyboard-offset) + 8px);
   border: 1px solid var(--border);
   border-radius: 4px;
 }
@@ -1335,9 +1352,43 @@ body.light #mobile-menu { background: #fff; }
   text-align: left;
   cursor: pointer;
   transition: background 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 #mobile-menu button:last-child { border-bottom: none; }
 #mobile-menu button:hover { background: var(--green-glow); color: var(--green); }
+
+body.mobile-terminal-mode #mobile-menu {
+  position: fixed;
+  top: auto;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  border-radius: 14px 14px 0 0;
+  border-left: none;
+  border-right: none;
+  border-bottom: none;
+  min-width: 0;
+  box-shadow: 0 -4px 32px rgba(0,0,0,0.55);
+  padding-bottom: env(safe-area-inset-bottom, 0);
+  z-index: 310;
+}
+body.mobile-terminal-mode #mobile-menu button {
+  font-size: 15px;
+  padding: 16px 20px;
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+}
+body.mobile-terminal-mode #mobile-menu::before {
+  content: '';
+  display: block;
+  width: 40px;
+  height: 4px;
+  background: var(--border-bright);
+  border-radius: 2px;
+  margin: 10px auto 6px;
+  flex-shrink: 0;
+}
 
 /* ── Welcome typeout cursor ── */
 .welcome-banner {
@@ -1724,9 +1775,7 @@ body.light #mobile-menu { background: #fff; }
   body.mobile-terminal-mode #mobile-shell-transcript #tab-panels {
     flex: 1 1 auto;
     min-height: 0;
-  }
-  body.mobile-terminal-mode.mobile-chrome-ios:not(.mobile-keyboard-open) #mobile-shell-transcript #tab-panels {
-    padding-bottom: 74px;
+    padding-bottom: var(--mobile-composer-height, 80px);
   }
   body.mobile-terminal-mode.mobile-keyboard-open {
     overflow: hidden;
@@ -1734,12 +1783,14 @@ body.light #mobile-menu { background: #fff; }
   }
   body.mobile-terminal-mode #mobile-composer-host {
     display: block;
-    position: relative;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
     z-index: 40;
     background: linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98));
     border-top: 1px solid var(--border);
-    padding: 10px 0 10px;
-    min-height: 0;
+    padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
   }
   body.mobile-terminal-mode #mobile-edit-bar,
   body.mobile-terminal-mode #mobile-composer-row {
@@ -1770,17 +1821,110 @@ body.light #mobile-menu { background: #fff; }
     display: flex;
   }
   body.mobile-terminal-mode.mobile-keyboard-open #mobile-composer-host {
-    display: block;
-    position: fixed;
+    bottom: calc(var(--mobile-keyboard-offset) + 8px);
     left: 12px;
     right: 12px;
-    bottom: calc(var(--mobile-keyboard-offset) + 8px);
     border: 1px solid var(--border);
     border-radius: 4px;
     padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
   }
   body.mobile-terminal-mode #mobile-shell #history-row {
     background: var(--surface);
+  }
+
+  /* Mobile session bar: hide desktop-only chrome and enlarge touch targets */
+  body.mobile-terminal-mode .terminal-bar {
+    padding: 6px 10px;
+    gap: 0;
+  }
+  body.mobile-terminal-mode .terminal-bar .dot,
+  body.mobile-terminal-mode .terminal-bar .tabs-scroll-btn {
+    display: none;
+  }
+  body.mobile-terminal-mode .terminal-bar .tabs-bar {
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+  body.mobile-terminal-mode .terminal-bar .tab {
+    min-height: 44px;
+    padding: 0 14px;
+    font-size: 13px;
+    gap: 8px;
+  }
+  body.mobile-terminal-mode .terminal-bar #new-tab-btn {
+    min-height: 44px;
+    padding: 0 16px;
+    font-size: 16px;
+  }
+  body.mobile-terminal-mode .terminal-bar .tab .tab-close {
+    width: 20px;
+    height: 20px;
+    font-size: 14px;
+    line-height: 20px;
+  }
+  body.mobile-terminal-mode .terminal-bar .status-pill {
+    font-size: 9px;
+    padding: 2px 6px;
+  }
+
+  /* Mobile overlays: bottom sheet layout for FAQ and options */
+  body.mobile-terminal-mode #faq-overlay,
+  body.mobile-terminal-mode #options-overlay {
+    align-items: flex-end;
+    justify-content: stretch;
+  }
+  body.mobile-terminal-mode #faq-modal,
+  body.mobile-terminal-mode #options-modal {
+    width: 100%;
+    max-width: 100%;
+    border-radius: 14px 14px 0 0;
+    border-left: none;
+    border-right: none;
+    border-bottom: none;
+    max-height: 88svh;
+    padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  body.mobile-terminal-mode #faq-modal::before,
+  body.mobile-terminal-mode #options-modal::before {
+    content: '';
+    display: block;
+    width: 40px;
+    height: 4px;
+    background: var(--border-bright);
+    border-radius: 2px;
+    margin: 10px auto 0;
+    flex-shrink: 0;
+  }
+  body.mobile-terminal-mode .options-choice {
+    min-height: 44px;
+    padding: 8px 0;
+  }
+  body.mobile-terminal-mode .options-select {
+    min-height: 44px;
+    font-size: 15px;
+    padding: 8px 10px;
+  }
+
+  /* Mobile search bar: larger touch targets and font */
+  body.mobile-terminal-mode .search-bar {
+    padding: 8px 12px;
+    gap: 10px;
+    flex-wrap: nowrap;
+  }
+  body.mobile-terminal-mode .search-bar input {
+    font-size: 16px;
+    padding: 8px 10px;
+    min-height: 40px;
+  }
+  body.mobile-terminal-mode .search-nav button {
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 16px;
+  }
+  body.mobile-terminal-mode .search-toggles button {
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 13px;
   }
 
   /* Make terminal-wrap fill remaining viewport on mobile */
@@ -1843,9 +1987,9 @@ body.light #mobile-menu { background: #fff; }
     padding-bottom: 2px;
   }
 
-  /* Reserve space at bottom of output when keyboard+composer are fixed */
-  body.mobile-keyboard-open .output {
-    padding-bottom: 100px;
+  /* Light breathing room at bottom of scrollable output on mobile */
+  body.mobile-terminal-mode .output {
+    padding-bottom: 16px;
   }
 
   /* Light theme adjustments */

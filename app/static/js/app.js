@@ -282,18 +282,23 @@ function getMobileKeyboardOffset() {
 
 function isMobileKeyboardOpen(offset = null) {
   if (!useMobileTerminalViewportMode()) return false;
+  // Viewport shrinkage is the most reliable signal and handles blur-without-dismiss
+  // edge cases (keyboard still geometrically open after focus leaves the input).
+  if (typeof offset === 'number' && offset > 40) return true;
   const mobileInputEl = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
   const mobileInputVisible = !!(
     mobileInputEl
     && typeof mobileInputEl.getClientRects === 'function'
     && mobileInputEl.getClientRects().length > 0
   );
+  // Fall back to focus-based detection when viewport hasn't shrunk
+  // (e.g., hardware keyboards or viewports that don't resize on focus).
   if (mobileInputVisible) {
     return typeof document !== 'undefined'
       && document.activeElement
       && document.activeElement === mobileInputEl;
   }
-  return typeof offset === 'number' ? offset > 40 : false;
+  return false;
 }
 
 function syncMobileViewportState() {
@@ -311,6 +316,7 @@ function syncMobileViewportState() {
   else document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
+  if (activeMobileMode) syncMobileComposerHeight();
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -379,7 +385,14 @@ function applyLineNumberPreference(mode, persist = true) {
   syncOptionsControls();
 }
 
+function _closeMajorOverlays() {
+  if (isHistoryPanelOpen()) hideHistoryPanel();
+  if (isFaqOverlayOpen()) hideFaqOverlay();
+  if (isOptionsOverlayOpen()) hideOptionsOverlay();
+}
+
 function openOptions() {
+  _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   syncOptionsControls();
   showOptionsOverlay();
@@ -617,10 +630,19 @@ function performMobileEditAction(action) {
   if (typeof focusAnyComposerInput === 'function') setTimeout(() => focusAnyComposerInput({ preventScroll: true }), 0);
 }
 
+function syncMobileComposerHeight() {
+  if (typeof document === 'undefined') return;
+  const host = (typeof mobileComposerHost !== 'undefined' && mobileComposerHost) || null;
+  if (!host) return;
+  const h = host.offsetHeight;
+  if (h > 0) document.documentElement.style.setProperty('--mobile-composer-height', `${h}px`);
+}
+
 function syncMobileComposerKeyboard() {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();
   if (typeof syncMobileComposerKeyboardState === 'function') syncMobileComposerKeyboardState(offset);
+  syncMobileComposerHeight();
 }
 
 function bindMobileComposerKeyboardListeners(mobileInput) {
@@ -909,8 +931,12 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn =
       }
     }
     if (action === 'history') {
+      _closeMajorOverlays();
       const isOpen = togglePanelOverlay(historyPanel);
-      if (isOpen) refreshHistoryPanel();
+      if (isOpen) {
+        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+        refreshHistoryPanel();
+      }
     }
     if (action === 'ts') {
       applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
@@ -931,6 +957,7 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn =
 
 // ── FAQ ──
 function openFaq() {
+  _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   showFaqOverlay();
 }
@@ -1044,8 +1071,14 @@ searchRegexBtn.addEventListener('click', () => {
 
 // ── Run history panel ──
 histBtn.addEventListener('click', () => {
+  _closeMajorOverlays();
   const isOpen = togglePanelOverlay(historyPanel);
-  if (isOpen) refreshHistoryPanel();
+  if (isOpen) {
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+    refreshHistoryPanel();
+  } else {
+    refocusTerminalInput();
+  }
 });
 historyCloseBtn.addEventListener('click', () => {
   hideHistoryPanel();
