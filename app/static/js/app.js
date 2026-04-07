@@ -835,25 +835,44 @@ function formatFaqLimits(cfg) {
 }
 
 function renderFaqLimits(cfg) {
-  const limitsEl = faqLimitsText;
+  const limitsEl = document.getElementById('faq-limits-text') || faqLimitsText;
   if (!limitsEl || !cfg) return;
   limitsEl.innerHTML = formatFaqLimits(cfg);
 }
 
+function activateFaqCommandChip(cmd) {
+  if (!cmd) return;
+  setComposerValue(cmd + ' ');
+  closeFaq();
+}
+
+function wireFaqCommandChips(root = faqBody) {
+  if (!root) return;
+  root.querySelectorAll('.faq-chip[data-faq-command]').forEach(chip => {
+    if (chip.dataset.faqWired === '1') return;
+    chip.dataset.faqWired = '1';
+    chip.addEventListener('click', () => {
+      activateFaqCommandChip(chip.dataset.faqCommand || '');
+    });
+    chip.addEventListener('keydown', e => {
+      if (e.key !== 'Enter' && e.key !== ' ') return;
+      e.preventDefault();
+      activateFaqCommandChip(chip.dataset.faqCommand || '');
+    });
+  });
+}
+
 function makeAllowedCommandChip(cmd) {
   const chip = document.createElement('span');
-  chip.className = 'allowed-chip';
+  chip.className = 'allowed-chip faq-chip';
   chip.textContent = cmd;
   chip.title = 'Click to load into prompt';
-  chip.addEventListener('click', () => {
-    setComposerValue(cmd + ' ');
-    closeFaq();
-  });
+  chip.dataset.faqCommand = cmd;
   return chip;
 }
 
 function renderAllowedCommandsFaq(data) {
-  const el = faqAllowedText;
+  const el = document.getElementById('faq-allowed-text') || faqAllowedText;
   if (!el || !data) return;
   if (!data.restricted) {
     el.textContent = 'No restrictions are configured — all commands are permitted.';
@@ -877,6 +896,7 @@ function renderAllowedCommandsFaq(data) {
       groupEl.appendChild(list);
       el.appendChild(groupEl);
     });
+    wireFaqCommandChips(el);
     return;
   }
 
@@ -884,6 +904,7 @@ function renderAllowedCommandsFaq(data) {
   list.className = 'allowed-list';
   data.commands.forEach(cmd => list.appendChild(makeAllowedCommandChip(cmd)));
   el.appendChild(list);
+  wireFaqCommandChips(el);
 }
 
 function renderFaqItems(items) {
@@ -918,6 +939,7 @@ function renderFaqItems(items) {
 
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);
+  wireFaqCommandChips(faqBody);
 }
 
 // ── Load config from server ──

@@ -1879,4 +1879,56 @@ describe('app helpers', () => {
     expect(mobileCmdInput.value).toBe('curl ')
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()
   })
+
+  it('loads custom FAQ chips into the prompt with the same command-chip behavior', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            app_name: 'shell.darklab.sh',
+            version: '9.9',
+            default_theme: 'dark',
+            motd: '',
+            command_timeout_seconds: 120,
+            max_output_lines: 5000,
+            permalink_retention_days: 365,
+          }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            restricted: true,
+            commands: ['curl'],
+            groups: [{ name: 'Network', commands: ['curl'] }],
+          }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            items: [
+              {
+                question: 'Styled custom FAQ?',
+                answer: 'Use [[cmd:ping -c 1 127.0.0.1|ping chip]] and **bold**.',
+                answer_html: 'Use <span class="allowed-chip faq-chip" data-faq-command="ping -c 1 127.0.0.1" role="button" tabindex="0">ping chip</span> and <strong>bold</strong>.',
+              },
+            ],
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
+    await new Promise(resolve => setImmediate(resolve))
+
+    const chip = document.querySelector('.faq-item .faq-chip[data-faq-command="ping -c 1 127.0.0.1"]')
+    expect(chip).not.toBeNull()
+
+    chip.click()
+
+    expect(document.getElementById('mobile-cmd').value).toBe('ping -c 1 127.0.0.1 ')
+    expect(document.getElementById('faq-overlay').classList.contains('open')).toBe(false)
+  })
 })

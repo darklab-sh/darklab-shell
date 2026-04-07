@@ -66,11 +66,10 @@ WORKDIR /app
 COPY app/requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Download the latest ansi_up at build time into a path outside /app so the
-# docker-compose bind mount cannot shadow it.
-RUN mkdir -p /usr/local/share/shell-assets/js/vendor && \
-    curl -sSL https://cdn.jsdelivr.net/npm/ansi_up/ansi_up.js \
-         -o /usr/local/share/shell-assets/js/vendor/ansi_up.js || true
+# Copy the checked-in browser-global ansi_up build to a path outside /app so
+# the docker-compose bind mount cannot shadow it.
+RUN mkdir -p /usr/local/share/shell-assets/js/vendor
+COPY app/static/js/vendor/ansi_up.js /usr/local/share/shell-assets/js/vendor/ansi_up.js
 
 # Download the current upstream font binaries at build time so the image keeps
 # using locally hosted fonts without relying on Google Fonts requests at runtime.

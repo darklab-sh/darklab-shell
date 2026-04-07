@@ -12,7 +12,14 @@
 
 ### Follow-ups
 
-- None at the moment.
+- **Permalink page template refactor**
+  - Move the `/share/<id>` and `/history/<run_id>` HTML chrome out of `app/permalinks.py` and into a Jinja template.
+  - Reuse the shared `static/css/styles.css` rules where possible instead of maintaining a large block of inlined CSS inside `permalinks.py`.
+  - Keep permalink pages server-rendered and self-contained at request time; do not turn them into client-fetched shells.
+  - Preserve the current theme behavior, line-number/timestamp toggles, copy/save actions, and JSON/raw-data links.
+  - Keep the downloadable/exported HTML path fully rendered so saved share pages remain portable and do not depend on the live app after download.
+  - Update route tests and permalink/export tests to confirm the refactor keeps the same visible behavior.
+  - Refresh the docs and release notes to describe the template split and any shared style changes.
 
 ---
 

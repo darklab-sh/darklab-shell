@@ -175,6 +175,34 @@ class TestLoadFaq:
         assert result[0]["question"] == "What is this?"
         assert result[0]["answer"] == "A web shell."
 
+    def test_markdown_style_markup_renders_to_answer_html(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Styled entry?
+              answer: |
+                Use **bold**, *italic*, __underline__, `code`, and [[cmd:ping -c 1 127.0.0.1|ping chip]].
+
+                - first item
+                - second item
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq()
+        finally:
+            os.unlink(path)
+        assert len(result) == 1
+        html = result[0]["answer_html"]
+        assert "<strong>bold</strong>" in html
+        assert "<em>italic</em>" in html
+        assert "<u>underline</u>" in html
+        assert "<code>code</code>" in html
+        assert 'data-faq-command="ping -c 1 127.0.0.1"' in html
+        assert '<ul>' in html and '<li>first item</li>' in html
+
     def test_entries_missing_answer_filtered_out(self):
         yaml_content = "- question: No answer here.\n- question: Has both.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

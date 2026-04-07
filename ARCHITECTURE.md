@@ -36,7 +36,7 @@ fake_commands.py — Synthetic shell helpers for /run
 
 `commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. `app.py` imports by name from each module (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
 
-`fake_commands.py` sits alongside that path and provides a small web-shell helper layer for shell-like commands that should be useful in the UI without spawning a real process. `/run` checks that layer before allowlist validation and process launch. Today it handles `banner`, `clear`, `date`, `env`, `faq`, `fortune`, `groups`, `help`, `history`, `hostname`, `id`, `last`, `limits`, `ls`, `man`, `ps`, `pwd`, `reboot`, `retention`, `status`, `sudo`, `tty`, `type`, `uname -a`, `uptime`, `version`, `which`, `who`, and `whoami`, plus exact-match guardrail easter eggs for `rm -fr /` and `rm -rf /`. Most of the commands are intentionally synthetic in implementation but presented as web-shell helpers: they surface app-specific state like the allowlist, runtime limits, configured FAQ entries, and session history, return stable environment strings, or trigger UI-native behavior like clearing the current tab. `faq` now merges the built-in FAQ set with custom `faq.yaml` entries so the terminal view matches the operator-extended help surface more closely. `ps` is intentionally half-synthetic: it shows the current `ps` invocation with a fake PID, then recent completed session commands with separate exit/start/end columns but no PID so they read as completed work, not active processes. `man <topic>` is the other exception: for allowlisted real commands it renders the real system man page, while `man <fake-command>` reuses the helper descriptions instead of rejecting the topic. Runtime command availability is now checked in the shared command layer, so fake commands and normal allowlisted `/run` commands both return the same clean instance-level message when a required binary is missing.
+`fake_commands.py` sits alongside that path and provides a small web-shell helper layer for shell-like commands that should be useful in the UI without spawning a real process. `/run` checks that layer before allowlist validation and process launch. Today it handles `banner`, `clear`, `date`, `env`, `faq`, `fortune`, `groups`, `help`, `history`, `hostname`, `id`, `last`, `limits`, `ls`, `man`, `ps`, `pwd`, `reboot`, `retention`, `status`, `sudo`, `tty`, `type`, `uname -a`, `uptime`, `version`, `which`, `who`, and `whoami`, plus exact-match guardrail easter eggs for `rm -fr /` and `rm -rf /`. Most of the commands are intentionally synthetic in implementation but presented as web-shell helpers: they surface app-specific state like the allowlist, runtime limits, configured FAQ entries, and session history, return stable environment strings, or trigger UI-native behavior like clearing the current tab. `faq` now merges the built-in FAQ set first and appends any `faq.yaml` entries after it, and custom entries can use the same lightweight markup supported by the modal renderer: bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt. `ps` is intentionally half-synthetic: it shows the current `ps` invocation with a fake PID, then recent completed session commands with separate exit/start/end columns but no PID so they read as completed work, not active processes. `man <topic>` is the other exception: for allowlisted real commands it renders the real system man page, while `man <fake-command>` reuses the helper descriptions instead of rejecting the topic. Runtime command availability is now checked in the shared command layer, so fake commands and normal allowlisted `/run` commands both return the same clean instance-level message when a required binary is missing.
 
 `logging_setup.py` depends only on `config.py` and the standard library. It must be imported and `configure_logging(CFG)` called before any other local import in `app.py` — `process.py` attempts a Redis connection at module-import time and emits log records then, so the logger must already be configured with the correct formatter and level when those calls fire.
 
@@ -199,7 +199,7 @@ These happen in `rewrite_command()` silently (no user-visible notice unless spec
 
 Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: each module file defines functions and state only; `app.js` loads last and performs all initialization and event wiring. No bundler, no transpilation.
 
-External dependencies: local vendor routes backed by build-time downloads for fonts and `ansi_up` for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the file is committed to the repo at `static/js/vendor/ansi_up.js` as a reliable fallback for local dev and docker-compose runs. The Dockerfile fetches the latest version at image build time into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
+External dependencies: local vendor routes backed by build-time font downloads and a copied-in `ansi_up` browser build for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the checked-in browser-global file at `static/js/vendor/ansi_up.js` serves as the fallback for local dev and docker-compose runs. The Dockerfile copies that same file into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
 
 **JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
@@ -306,7 +306,7 @@ Welcome settle behavior is intentionally keyboard-friendly: printable typing, `E
 
 The route shape is intentional. Frontend-facing config content is exposed through narrow, typed endpoints rather than a generic “serve files from `conf/`” handler:
 
-- `/faq` for the canonical FAQ dataset (built-in entries plus `faq.yaml`)
+- `/faq` for the canonical FAQ dataset (built-ins first, then `faq.yaml` entries)
 - `/autocomplete` for `auto_complete.txt`
 - `/welcome` for sampled command metadata from `welcome.yaml`
 - `/welcome/ascii` for plain-text banner art from `ascii.txt`
@@ -364,7 +364,7 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 **ansi_up and permalink colors.** ansi_up converts ANSI escape codes to HTML spans, consuming the original codes. If you try to re-render from `element.innerText`, all color information is lost. The `rawLines` array stores the original text before ansi_up processes it, enabling the permalink page to run ansi_up fresh and reproduce the exact same colors.
 
-**`vendor/` routes must exist for local dev.** `ansi_up.js` is served through `/vendor/ansi_up.js`, with the build-time copy living outside `/app` and the repo file as a fallback. If you run the app locally without Docker and the fallback file doesn't exist, the script tag 404s, `AnsiUp` is undefined, and `appendLine()` crashes before the fetch to `/run` fires. The symptom is: tab label updates (it runs before `appendLine`) but no command output and nothing in the server logs — the fetch never happens. Fix: keep `app/static/js/vendor/ansi_up.js` in place or copy a fresh build into `/usr/local/share/shell-assets/js/vendor/ansi_up.js` in Docker.
+**`vendor/` routes must exist for local dev.** `ansi_up.js` is served through `/vendor/ansi_up.js`, with the copied-in asset living outside `/app` and the repo file as a fallback. If you run the app locally without Docker and the fallback file doesn't exist, the script tag 404s, `AnsiUp` is undefined, and `appendLine()` crashes before the fetch to `/run` fires. The symptom is: tab label updates (it runs before `appendLine`) but no command output and nothing in the server logs — the fetch never happens. Fix: keep `app/static/js/vendor/ansi_up.js` in place or copy it into `/usr/local/share/shell-assets/js/vendor/ansi_up.js` in Docker.
 
 **SSE via fetch vs EventSource.** `EventSource` doesn't support custom request headers. Since we need `X-Session-ID` on every request, we use `fetch()` with a `ReadableStream` reader instead. This requires manually parsing the SSE format (`data: ...\n\n`) from the raw byte stream.
 
@@ -382,10 +382,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 465
-- `vitest`: 231
+- `pytest`: 466
+- `vitest`: 232
 - `playwright`: 126
-- total: 822
+- total: 824
 
 ### Testing Architecture
 

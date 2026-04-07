@@ -17,8 +17,10 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Keyboard shortcut discovery** — new `shortcuts` web-shell helper prints the current shortcut set and is exposed through `help`, autocomplete, the README, and the FAQ modal
 - **Shortcut helper cleanup** — the old `keys` helper alias and fallback-notes wording were removed so `shortcuts` is the only supported name in help, autocomplete, docs, and in-terminal output
 - **Bundled local fonts** — JetBrains Mono and Syne are now served through local vendor routes backed by build-time font downloads, with repo fallbacks for local dev, so the shell and permalink pages no longer make external font requests on load
+- **Bundled local ansi_up** — the browser-facing `ansi_up` asset is now copied from the checked-in repo build into the image at build time, with the repo copy still serving as the local/docker-compose fallback
 - **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
 - **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
+- **FAQ markup syntax** — custom `faq.yaml` entries can now use lightweight markup for bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt
 - **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
 - **Display toggles for output prefixes** — line numbers can now be toggled independently from timestamps, with mobile-menu access and shared prefix alignment across output, prompt, and exit rows
 - **User options modal** — a new options modal lets users set theme, timestamp mode, and line-number display from one place, with cookie-backed persistence across sessions while keeping the existing quick-toggle buttons in sync
@@ -242,7 +244,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Redis process tracking** — active PIDs stored in Redis (or in-process dict) so any Gunicorn worker can kill a process started by a different worker
 - **Security model** — two non-root users: `appuser` runs the Flask/Gunicorn process; `scanner` runs all user commands; filesystem mounted read-only except `/tmp`; `sudo kill` used for cross-user SIGTERM
 - **Gunicorn WSGI** — production server with configurable timeout (3600 s); heartbeat SSE comments prevent nginx/browser idle disconnects
-- **Custom FAQ** — operator-supplied `faq.yaml` entries appended to the built-in FAQ; clickable command chips load commands directly into the input bar
+- **Custom FAQ** — operator-supplied `faq.yaml` entries append after the built-in FAQ; lightweight markup and clickable command chips load commands directly into the input bar
 - **Custom autocomplete** — `auto_complete.txt` drives the command input dropdown
 - **MOTD** — optional message-of-the-day rendered in the header area
 - **Theme toggle** — dark (default) / light theme; preference persisted in localStorage; operator can set `default_theme: light`

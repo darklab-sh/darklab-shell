@@ -136,8 +136,9 @@ A web-based shell for running network diagnostics and vulnerability scans agains
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
             ├── app.js          # Initialization and event wiring (loads last)
             └── vendor/
-                └── ansi_up.js  # ANSI-to-HTML library — committed as a fallback for local/docker-compose
-                                #   runs; Docker image builds fetch the latest copy into /usr/local/share/shell-assets
+                └── ansi_up.js  # ANSI-to-HTML library — committed browser-global build copied into
+                                #   /usr/local/share/shell-assets for the image; repo copy remains the
+                                #   fallback for local/docker-compose runs
 ```
 
 ---
@@ -450,7 +451,16 @@ Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are a
   answer: "Outbound traffic is limited to 1 Gbps sustained."
 ```
 
-The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Custom entries are plain text; built-in entries can carry richer modal formatting from the backend while still exposing plain-text answers to the `faq` helper command.
+The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Custom entries can use a small safe markup subset in `answer` for bold, italics, underline, inline code, bullet lists, and clickable command chips. Chips behave like the built-in allowlist chips and load the command into the prompt when clicked:
+
+- `**bold**`
+- `*italic*`
+- `__underline__`
+- `` `inline code` ``
+- `- list items`
+- `[[cmd:shortcuts]]` or `[[cmd:ping -c 1 127.0.0.1|custom label]]`
+
+Use `answer_html` if you need exact HTML. Built-in entries can still carry richer modal formatting from the backend while exposing plain-text answers to the `faq` helper command.
 
 ---
 
@@ -849,7 +859,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **465 pytest + 231 Vitest + 126 Playwright = 822 tests**.
+Current totals in this branch: **466 pytest + 232 Vitest + 126 Playwright = 824 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

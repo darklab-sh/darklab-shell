@@ -6,6 +6,7 @@ pure functions that can be imported and tested in isolation.
 """
 
 from copy import deepcopy
+import html
 import os
 import re
 import shlex
@@ -47,42 +48,37 @@ BUILTIN_FAQ = [
         "ui_kind": "allowed_commands",
     },
     {
-        "question": "Why does mtr look different here?",
-        "answer": (
-            "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
-            "available in a web shell. It runs in --report-wide mode instead."
-        ),
+        "question": "How do I save or share my results?",
+        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
         "answer_html": (
-            "<code>mtr</code> requires a real terminal (TTY) for its live interactive display, "
-            "which isn't available in a web shell. It's automatically run in "
-            "<code>--report-wide</code> mode instead, which runs 10 probe cycles and prints a "
-            "summary table. You can control the cycle count with <code>-c</code>, e.g. "
-            "<code class=\"faq-example\">mtr -c 20 google.com</code>"
-        ),
-    },
-    {
-        "question": "Can I request a new tool?",
-        "answer": "Yes. Contact the instance operator to request additional allowlisted tools.",
-        "answer_html": (
-            "Yes! If there's a tool you'd like added, send a request to "
-            "<strong>admin [at] darklab [dot] sh</strong> and we'll consider it for a future update."
+            "There are several options below each tab's output:<br><br>"
+            "<code>permalink</code> — saves a snapshot of everything visible in the tab and "
+            "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
+            "inspect the raw data.<br>"
+            "<code>copy</code> — copies the full plain-text output to your clipboard.<br>"
+            "<code>save .html</code> — downloads a themed HTML file with ANSI colors "
+            "preserved. It uses app-hosted vendor fonts when viewed alongside this shell and "
+            "falls back to browser monospace fonts offline.<br>"
+            "<code>save .txt</code> — downloads a plain-text version of the output.<br><br>"
+            "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
         ),
     },
     {
         "question": "How do tabs and permalinks work?",
         "answer": (
             "Each command runs in the active tab. Use additional tabs to keep results visible "
-            "side by side. The permalink action saves a shareable view of the visible output."
+            "side by side."
         ),
         "answer_html": (
-            "Each command runs in the currently active tab. You can open additional tabs with the "
-            "<strong>+</strong> button to run commands side by side and keep results from "
-            "different sessions visible at the same time. Each tab tracks its own status "
-            "independently. Double-click a tab label to rename it.<br><br>"
-            "The <strong>permalink</strong> button on each tab captures everything currently "
-            "visible in that tab and saves it as a shareable page. The link opens a styled HTML "
-            "view with ANSI color rendering and options to copy to clipboard, save as .html, save "
-            "as .txt, or view raw JSON. Permalinks survive container restarts.<br><br>"
+            "Each command runs in the currently active tab. Open additional tabs with the "
+            "<strong>+</strong> button to keep results from different sessions visible at the "
+            "same time. Each tab tracks its own status independently. Double-click a tab label to "
+            "rename it.<br><br>"
+            "The <strong>permalink</strong> button captures everything currently visible in that "
+            "tab and saves it as a shareable page. If a full saved artifact exists, the permalink "
+            "uses that full output. The link opens a styled HTML view with ANSI color rendering "
+            "and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. "
+            "Permalinks survive container restarts.<br><br>"
             "The <strong>⧖ history</strong> panel shows your recent runs. You can load any past "
             "result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> "
             "a command to pin it to the top of the list."
@@ -98,28 +94,50 @@ BUILTIN_FAQ = [
         ),
     },
     {
+        "question": "Are there keyboard shortcuts?",
+        "answer": (
+            "Yes. Run shortcuts in the web shell for the current shortcut list, including tab, output, "
+            "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
+        ),
+        "answer_html": (
+            "Yes. Current shell-style shortcuts include:<br><br>"
+            "<ul style=\"margin:0 0 0 18px;padding:0;line-height:1.6\">"
+            "<li><code>Ctrl+C</code> — open kill confirmation while a command is running, or "
+            "drop to a fresh prompt line when idle.</li>"
+            "<li><code>Enter</code> on a blank prompt — create a new empty prompt line.</li>"
+            "<li><code>Option+T</code> / <code>Alt+T</code> and <code>Option+W</code> / "
+            "<code>Alt+W</code> — open or close the current tab.</li>"
+            "<li><code>Option+←/→</code> and <code>Option+1...9</code> (<code>Alt+←/→</code>, "
+            "<code>Alt+1...9</code>) — switch tabs.</li>"
+            "<li><code>Option+P</code> (<code>Alt+P</code>) — create a permalink for the active "
+            "tab.</li>"
+            "<li><code>Option+Shift+C</code> (<code>Alt+Shift+C</code>) — copy the active tab "
+            "output.</li>"
+            "<li><code>Ctrl+L</code> — clear the active tab.</li>"
+            "<li><strong>Kill dialog:</strong> <code>Enter</code> confirms and "
+            "<code>Escape</code> cancels.</li>"
+            "<li><code>Ctrl+A</code>, <code>Ctrl+E</code>, <code>Ctrl+W</code>, "
+            "<code>Ctrl+U</code>, <code>Ctrl+K</code>, <code>Option+B</code>, and "
+            "<code>Option+F</code> (<code>Alt+B</code>, <code>Alt+F</code>) provide "
+            "readline-style prompt editing.</li>"
+            "<li><strong>Welcome screen:</strong> printable typing, <code>Enter</code>, and "
+            "<code>Escape</code> all settle the welcome animation immediately.</li>"
+            "<li><strong>Autocomplete:</strong> <code>↑↓</code> navigate, <code>Tab</code> "
+            "accepts, <code>Enter</code> accepts or runs, and <code>Escape</code> dismisses.</li>"
+            "</ul>"
+            "<br>On macOS, the app-safe tab/action shortcuts use the <strong>Option</strong> "
+            "key. The <strong>Ctrl+...</strong> bindings are intentional shell-style controls, "
+            "not replacements for browser <strong>Command</strong> shortcuts.<br><br>You can "
+            "also run <code>shortcuts</code> in the terminal for the current shortcut reference."
+        ),
+    },
+    {
         "question": "How do I access search, history and theme on mobile?",
         "answer": "Use the mobile menu in the top-right corner.",
         "answer_html": (
             "On small screens the header buttons are replaced by a <strong>☰</strong> menu in the "
             "top-right corner. Tap it to access search, run history, line numbers, timestamps, "
             "theme, and this FAQ."
-        ),
-    },
-    {
-        "question": "How do I save or share my results?",
-        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
-        "answer_html": (
-            "There are several options from the action bar below each tab's output:<br><br>"
-            "<strong>permalink</strong> — saves a snapshot of everything visible in the tab and "
-            "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
-            "view the raw data.<br>"
-            "<strong>copy</strong> — copies the full plain-text output to your clipboard.<br>"
-            "<strong>save .html</strong> — downloads a themed HTML file with ANSI colors "
-            "preserved. It uses app-hosted vendor fonts when opened alongside this shell and "
-            "falls back to browser monospace fonts offline.<br>"
-            "<strong>save .txt</strong> — downloads a plain-text version of the output.<br><br>"
-            "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
         ),
     },
     {
@@ -155,40 +173,6 @@ BUILTIN_FAQ = [
         ),
     },
     {
-        "question": "Are there keyboard shortcuts?",
-        "answer": (
-            "Yes. Run shortcuts in the web shell for the current shortcut list, including tab, output, "
-            "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
-        ),
-        "answer_html": (
-            "Yes. Current shell-style shortcuts include:<br><br>"
-            "<strong>Ctrl+C</strong> — open kill confirmation while a command is running, or drop "
-            "to a fresh prompt line when idle.<br>"
-            "<strong>Enter</strong> on a blank prompt — create a new empty prompt line.<br>"
-            "<strong>Option+T</strong> / <strong>Alt+T</strong> and <strong>Option+W</strong> / "
-            "<strong>Alt+W</strong> — open or close the current tab.<br>"
-            "<strong>Option+←/→</strong> and <strong>Option+1...9</strong> "
-            "(<strong>Alt+←/→</strong>, <strong>Alt+1...9</strong>) — switch tabs.<br>"
-            "<strong>Option+P</strong> (<strong>Alt+P</strong>) — create a permalink for the "
-            "active tab.<br><strong>Option+Shift+C</strong> (<strong>Alt+Shift+C</strong>) — copy "
-            "the active tab output.<br><strong>Ctrl+L</strong> — clear the active tab.<br>"
-            "<strong>Kill dialog:</strong> <strong>Enter</strong> confirms and "
-            "<strong>Escape</strong> cancels.<br><strong>Ctrl+A</strong>, <strong>Ctrl+E</strong>, "
-            "<strong>Ctrl+W</strong>, <strong>Ctrl+U</strong>, <strong>Ctrl+K</strong>, "
-            "<strong>Option+B</strong>, and <strong>Option+F</strong> (<strong>Alt+B</strong>, "
-            "<strong>Alt+F</strong>) provide readline-style prompt editing.<br>"
-            "<strong>Welcome screen:</strong> printable typing, <strong>Enter</strong>, "
-            "and <strong>Escape</strong> all settle the welcome animation immediately.<br>"
-            "<strong>Autocomplete:</strong> <strong>↑↓</strong> navigate, <strong>Tab</strong> "
-            "accepts, <strong>Enter</strong> accepts or runs, and <strong>Escape</strong> "
-            "dismisses.<br><br>On macOS, the app-safe tab/action shortcuts use the "
-            "<strong>Option</strong> key. The <strong>Ctrl+...</strong> bindings are intentional "
-            "shell-style controls, not replacements for browser <strong>Command</strong> "
-            "shortcuts.<br><br>You can also run <code>shortcuts</code> in the terminal for the "
-            "current shortcut reference."
-        ),
-    },
-    {
         "question": "Are my commands visible to other users?",
         "answer": "No. History and saved data are scoped to your anonymous browser session.",
         "answer_html": (
@@ -216,7 +200,93 @@ BUILTIN_FAQ = [
             "thorough directory scan</li></ul>"
         ),
     },
+    {
+        "question": "Why does mtr look different here?",
+        "answer": (
+            "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
+            "available in a web shell. It runs in --report-wide mode instead."
+        ),
+        "answer_html": (
+            "<code>mtr</code> needs a real terminal (TTY) for its interactive display, which "
+            "isn't available in a web shell. It automatically runs in <code>--report-wide</code> "
+            "mode here, printing 10 probe cycles and a summary table. You can change the cycle "
+            "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>"
+        ),
+    },
 ]
+
+_FAQ_CHIP_RE = re.compile(r'\[\[(?:cmd|chip):(.+?)\]\]')
+_FAQ_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
+_FAQ_ITALIC_RE = re.compile(r'(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)')
+_FAQ_UNDER_RE = re.compile(r'__(.+?)__')
+_FAQ_CODE_RE = re.compile(r'`([^`]+)`')
+
+
+def _faq_inline_markup(text):
+    text = html.escape(str(text), quote=False)
+
+    def repl_chip(match):
+        raw = match.group(1).strip()
+        if not raw:
+            return ''
+        cmd, label = raw, raw
+        if '|' in raw:
+            cmd, label = raw.split('|', 1)
+            cmd = cmd.strip()
+            label = label.strip() or cmd
+        cmd = html.escape(cmd, quote=True)
+        label = html.escape(label, quote=False)
+        return (
+            f'<span class="allowed-chip faq-chip" role="button" tabindex="0" '
+            f'data-faq-command="{cmd}">{label}</span>'
+        )
+
+    text = _FAQ_CHIP_RE.sub(repl_chip, text)
+    text = _FAQ_CODE_RE.sub(r'<code>\1</code>', text)
+    text = _FAQ_BOLD_RE.sub(r'<strong>\1</strong>', text)
+    text = _FAQ_UNDER_RE.sub(r'<u>\1</u>', text)
+    text = _FAQ_ITALIC_RE.sub(r'<em>\1</em>', text)
+    return text
+
+
+def render_faq_markup(text):
+    """Render a safe FAQ mini-markup string to HTML."""
+    if text is None:
+        return ""
+
+    lines = str(text).replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    blocks = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+
+        stripped = line.lstrip()
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            items = []
+            while i < len(lines):
+                candidate = lines[i]
+                candidate_stripped = candidate.lstrip()
+                if not candidate_stripped or not (candidate_stripped.startswith('- ') or candidate_stripped.startswith('* ')):
+                    break
+                items.append(f"<li>{_faq_inline_markup(candidate_stripped[2:].strip())}</li>")
+                i += 1
+            blocks.append("<ul>" + "".join(items) + "</ul>")
+            continue
+
+        para_lines = []
+        while i < len(lines):
+            candidate = lines[i]
+            candidate_stripped = candidate.lstrip()
+            if not candidate.strip() or candidate_stripped.startswith('- ') or candidate_stripped.startswith('* '):
+                break
+            para_lines.append(_faq_inline_markup(candidate.strip()))
+            i += 1
+        blocks.append("<br>".join(para_lines))
+
+    return "<br><br>".join(blocks)
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -282,11 +352,17 @@ def load_faq():
         data = yaml.safe_load(f) or []
     if not isinstance(data, list):
         return []
-    return [
-        {"question": str(item["question"]), "answer": str(item["answer"])}
-        for item in data
-        if isinstance(item, dict) and item.get("question") and item.get("answer")
-    ]
+    result = []
+    for item in data:
+        if not isinstance(item, dict) or not item.get("question") or not item.get("answer"):
+            continue
+        entry = {"question": str(item["question"]), "answer": str(item["answer"])}
+        if item.get("answer_html"):
+            entry["answer_html"] = str(item["answer_html"])
+        else:
+            entry["answer_html"] = render_faq_markup(entry["answer"])
+        result.append(entry)
+    return result
 
 
 def load_all_faq():
