@@ -20,8 +20,8 @@ Current totals on this branch:
 
 - `pytest`: 476
 - `vitest`: 246
-- `playwright`: 127
-- total: 849
+- `playwright`: 128
+- total: 850
 
 ## Running The Suites
 
@@ -103,6 +103,7 @@ Spec files:
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, running-tab isolation, and closing behavior including kill/reset paths
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
 - `ui.spec.js` - dedicated theme selector modal button and preview-card persistence plus backend-driven FAQ modal rendering, grouped section headers, close behavior, allowlist-chip interaction, options-modal preference persistence, and invalid persisted-theme reload fallback
+- `mobile.spec.js` - mobile shell coverage, including the full-screen theme selector modal layout, two-column grouped sections on wider phones, and uniform grouped-section widths on small screens
 - `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, prompt-key settle behavior, welcome-tab isolation, preferred-command stability, and the mobile welcome banner regression
 - `failure-paths.spec.js` - `/run` denial/rate limit/offline handling, share failure, and history delete/clear failure toasts
 - `boot-resilience.spec.js` - startup fetch fallbacks, core smoke checks, and the no-external-font-request regression

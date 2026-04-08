@@ -40,7 +40,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
-- **Theme selector** — choose a named theme variant from the dedicated theme selector modal preview grid, organized into labeled sections by `group:` metadata. The selected theme is saved in localStorage and cookies. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent. The selector loads named variants from `app/conf/themes/`; `default_theme` in `config.yaml` uses the full filename for copy/paste friendliness, and `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` are copyable templates only. Theme YAML values may reference other resolved theme vars with CSS `var(--name)` syntax, and optional `sort:` metadata controls ordering inside the modal.
+- **Theme selector** — choose a named theme variant from the dedicated theme selector modal preview grid, organized into labeled sections by `group:` metadata. On mobile the selector opens as a full-screen chooser with a two-column preview layout on wider phones so the cards stay readable. The selected theme is saved in localStorage and cookies. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent. The selector loads named variants from `app/conf/themes/`; `default_theme` in `config.yaml` uses the full filename for copy/paste friendliness, and `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` are copyable templates only. Theme YAML values may reference other resolved theme vars with CSS `var(--name)` syntax, and optional `sort:` metadata controls ordering inside the modal.
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed. Theme selection is driven by `app/conf/themes/`, while `default_theme` stores the theme filename and the root `theme_dark.yaml.example` and `theme_light.yaml.example` files are copyable templates only. Theme values can also reference other vars using CSS `var(--name)` syntax
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
@@ -880,7 +880,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **476 pytest + 246 Vitest + 127 Playwright = 849 tests**.
+Current totals in this branch: **476 pytest + 246 Vitest + 128 Playwright = 850 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

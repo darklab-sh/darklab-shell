@@ -210,6 +210,29 @@ test.describe('mobile menu', () => {
     await expect(menu.locator('[data-action="theme"]')).toBeVisible()
   })
 
+  test('mobile theme selector opens full screen with evenly sized grouped sections', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="theme"]').click()
+
+    await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#theme-modal')).toBeVisible()
+
+    const viewport = page.viewportSize()
+    const modalBox = await page.locator('#theme-modal').boundingBox()
+    expect(modalBox).not.toBeNull()
+    expect(modalBox.width).toBeGreaterThanOrEqual(viewport.width * 0.95)
+    expect(modalBox.height).toBeGreaterThanOrEqual(viewport.height * 0.95)
+
+    const mobileColumns = await page.locator('#theme-select').evaluate(el => el.style.getPropertyValue('--theme-picker-columns-mobile'))
+    expect(mobileColumns).toBe('2')
+
+    const gridWidths = await page.locator('#theme-select .theme-picker-group-grid').evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().width)))
+    expect(new Set(gridWidths).size).toBe(1)
+
+    await page.locator('#theme-overlay .theme-close').click()
+    await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
+  })
+
   test('clicking outside the menu closes it', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu')).toHaveClass(/open/)

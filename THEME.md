@@ -13,7 +13,7 @@ Theme support is split into a small pipeline:
 5. `app/templates/theme_vars_style.html` injects the resolved CSS variables into the page so `styles.css` can use them directly.
 6. `app/templates/theme_vars_script.html` exposes the current theme plus the registry as `window.ThemeCssVars` / `window.ThemeRegistry` for browser-side theme switching and export helpers.
 7. `app/app.py` exposes `/themes` so the browser can inspect the active registry.
-8. `app/static/js/app.js` applies the selected theme on the fly from the dedicated theme selector modal preview cards, and persists the choice in cookies/localStorage.
+8. `app/static/js/app.js` applies the selected theme on the fly from the dedicated theme selector modal preview cards, and persists the choice in cookies/localStorage. On mobile, the selector becomes a full-screen chooser with a two-column preview layout on wider phones so the preview cards remain readable and the grouped sections keep a consistent width.
 9. `app/static/js/export_html.js` reads the injected theme vars when generating downloadable HTML, so exported snapshots stay portable and match the active theme.
 
 The live app, permalink pages, runtime preview modal, and exported HTML all read from the same resolved theme values. That is the main reason the theme system was externalized.

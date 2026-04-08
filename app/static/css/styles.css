@@ -2449,6 +2449,10 @@ body .welcome-status-loaded {
     align-items: flex-end;
     justify-content: stretch;
   }
+  body.mobile-terminal-mode #theme-overlay {
+    align-items: stretch;
+    justify-content: stretch;
+  }
   body.mobile-terminal-mode #faq-modal,
   body.mobile-terminal-mode #theme-modal,
   body.mobile-terminal-mode #options-modal {
@@ -2460,6 +2464,18 @@ body .welcome-status-loaded {
     border-bottom: none;
     max-height: 88svh;
     padding-bottom: env(safe-area-inset-bottom, 0);
+  }
+  body.mobile-terminal-mode #theme-modal {
+    align-self: stretch;
+    width: 100vw;
+    max-width: none;
+    height: 100dvh;
+    max-height: 100dvh;
+    min-height: 0;
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    overflow: hidden;
   }
   body.mobile-terminal-mode #faq-modal::before,
   body.mobile-terminal-mode #theme-modal::before,
@@ -2473,18 +2489,35 @@ body .welcome-status-loaded {
     margin: 10px auto 0;
     flex-shrink: 0;
   }
+  body.mobile-terminal-mode #theme-modal::before {
+    display: none;
+  }
+  body.mobile-terminal-mode #theme-modal .faq-header {
+    position: sticky;
+    top: 0;
+    z-index: 2;
+    background: var(--surface);
+  }
   body.mobile-terminal-mode .options-choice {
     min-height: 44px;
     padding: 8px 0;
   }
   body.mobile-terminal-mode .theme-picker-grid {
-    gap: 14px;
+    gap: 12px;
+  }
+  body.mobile-terminal-mode .theme-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    -webkit-overflow-scrolling: touch;
+    padding: 14px 14px calc(18px + env(safe-area-inset-bottom, 0));
   }
   body.mobile-terminal-mode .theme-picker-group-grid {
-    grid-template-columns: repeat(var(--theme-picker-columns, 1), minmax(0, 1fr));
+    grid-template-columns: repeat(var(--theme-picker-columns-mobile, 1), minmax(0, 1fr));
+    gap: 10px;
   }
   body.mobile-terminal-mode .theme-card {
-    min-height: 220px;
+    min-height: 176px;
   }
 
   /* Mobile search bar: larger touch targets and font */

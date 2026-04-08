@@ -1030,6 +1030,8 @@ function renderThemeSelectionOptions() {
   }, {});
   const maxColumns = Math.max(1, ...Object.values(groupCounts));
   themeSelect.style.setProperty('--theme-picker-columns', String(maxColumns));
+  const mobileColumns = Math.max(1, Math.min(maxColumns, 2));
+  themeSelect.style.setProperty('--theme-picker-columns-mobile', String(mobileColumns));
   let currentGroup = null;
   let groupSection = null;
   let groupGrid = null;

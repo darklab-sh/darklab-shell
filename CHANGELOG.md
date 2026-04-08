@@ -10,6 +10,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ### Added
 - **Theme externalization** — the theme palette and component chrome values are now documented in the named YAML files under `app/conf/themes/`, injected into the live pages as shared CSS/JS theme variables, and reused by the permalink/export helpers so exported HTML stays in sync with the selected theme variant. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only.
 - **Runtime theme selector** — the dedicated theme selector modal now exposes a grouped preview grid fed by the theme registry, with `label:`, `group:`, and `sort:` metadata controlling the visible names and section layout, so the live shell can choose among the named YAML variants under `app/conf/themes/` without a page reload while keeping permalinks and exports aligned with the selected theme
+- **Mobile theme selector layout** — the theme picker now opens as a full-screen chooser on mobile with a two-column preview layout on wider phones, so the preview cards stay readable and the grouped sections keep a uniform width instead of collapsing unevenly on small screens
 
 ## [1.3] — 2026-04-07
 
