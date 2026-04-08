@@ -321,6 +321,9 @@
   global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
   global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
   global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
+  global.showThemeOverlay = () => showPanelOverlay(themeOverlay || null);
+  global.hideThemeOverlay = () => hidePanelOverlay(themeOverlay || null);
+  global.isThemeOverlayOpen = () => isPanelOverlayOpen(themeOverlay || null);
   global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
   global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
   global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);

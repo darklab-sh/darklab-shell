@@ -3,6 +3,10 @@
 # A cool, dusty rose theme with lavender undertones.
 # Elegant and minimal — think gallery walls, fine stationery.
 
+label: "Rose"
+group: "Warm Light"
+sort: 40
+
 bg: "#f5eef2"
 surface: "#fdf8fb"
 border: "rgba(88, 40, 70, 0.14)"

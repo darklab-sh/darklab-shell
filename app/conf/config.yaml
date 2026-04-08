@@ -16,9 +16,9 @@
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 
-# Default color theme. Options: dark, light
-# Server default if unset: dark
-# default_theme: dark
+# Default color theme filename. Should match a file under app/conf/themes/.
+# If unset or invalid, the built-in fallback palette is used.
+default_theme: darklab_obsidian.yaml
 
 # ── History & Retention ───────────────────────────────────────────────────────
 

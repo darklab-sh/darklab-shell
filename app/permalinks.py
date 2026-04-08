@@ -9,7 +9,14 @@ from pathlib import Path
 
 from flask import Response, has_request_context, render_template, request
 
-from config import CFG, DARK_THEME, LIGHT_THEME, theme_css_vars
+from config import (
+    CFG,
+    DARK_THEME,
+    THEME_REGISTRY,
+    THEME_REGISTRY_MAP,
+    get_theme_entry,
+    theme_runtime_css_vars,
+)
 
 _FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
 _FONT_FILES = [
@@ -48,11 +55,20 @@ def _font_face_css(*, embed: bool = False) -> str:
 def _current_theme() -> str:
     """Return the current session theme if available, otherwise default to dark."""
     if not has_request_context():
-        return "dark"
+        return CFG.get("default_theme", "darklab_obsidian.yaml")
     try:
-        return "light" if request.cookies.get("pref_theme") == "light" else "dark"
+        theme_name = request.cookies.get("pref_theme_name", "").strip()
+        if theme_name and theme_name in THEME_REGISTRY_MAP:
+            return theme_name
+        legacy = request.cookies.get("pref_theme", "").strip()
+        if legacy and legacy in THEME_REGISTRY_MAP:
+            return legacy
+        default_theme = CFG.get("default_theme", "darklab_obsidian.yaml")
+        if default_theme in THEME_REGISTRY_MAP:
+            return default_theme
+        return default_theme
     except Exception:
-        return "dark"
+        return CFG.get("default_theme", "darklab_obsidian.yaml")
 
 
 def _format_retention(days: int) -> str:
@@ -139,7 +155,7 @@ def _expiry_note(created: str) -> str:
 
 def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None):
     app_name = CFG.get("app_name", "shell.darklab.sh")
-    theme_class = "light" if _current_theme() == "light" else ""
+    theme_entry = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
     created_fmt = created[:19].replace("T", " ") + " UTC"
@@ -147,7 +163,9 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
     return {
         "page_title": f"{app_name} — {title}",
         "app_name": app_name,
-        "theme_class": theme_class,
+        "current_theme": theme_entry,
+        "current_theme_css": theme_entry["vars"],
+        "theme_registry": {"current": theme_entry, "themes": THEME_REGISTRY},
         "label": label,
         "created_fmt": created_fmt,
         "created_json": json.dumps(created),
@@ -160,8 +178,7 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
         "app_name_json": json.dumps(app_name),
         "label_json": json.dumps(label),
         "font_faces_css": _font_face_css(embed=True),
-        "dark_theme_css": theme_css_vars(DARK_THEME),
-        "light_theme_css": theme_css_vars(LIGHT_THEME),
+        "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
     }
 
 
@@ -181,13 +198,15 @@ def _permalink_error_page(noun: str) -> Response:
             f"period ({retention_str})."
         )
     app_name = CFG.get("app_name", "shell.darklab.sh")
+    current_theme = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     html = render_template(
         "permalink_error.html",
         page_title=f"{app_name} — {noun} not found",
         app_name=app_name,
-        theme_class="light" if _current_theme() == "light" else "",
-        dark_theme_css=theme_css_vars(DARK_THEME),
-        light_theme_css=theme_css_vars(LIGHT_THEME),
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+        theme_registry={"current": current_theme, "themes": THEME_REGISTRY},
+        fallback_theme_css=theme_runtime_css_vars(DARK_THEME),
         noun=noun,
         detail=detail,
     )

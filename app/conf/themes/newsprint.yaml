@@ -1,6 +1,10 @@
 # shell.darklab.sh — Light Theme: Newsprint
 # Neutral grayscale paper with restrained cool accents.
 
+label: "Newsprint"
+group: "Neutral Light"
+sort: 100
+
 bg: "#f4f4f1"
 surface: "#fefefc"
 border: "rgba(66, 68, 70, 0.14)"

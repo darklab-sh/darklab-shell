@@ -22,7 +22,16 @@ from pathlib import Path
 
 # Logging must be configured before other local imports — process.py
 # connects to Redis at module import time and emits log calls then.
-from config        import APP_VERSION, CFG, SCANNER_PREFIX, DARK_THEME, LIGHT_THEME, theme_css_vars
+from config        import (
+    APP_VERSION,
+    CFG,
+    SCANNER_PREFIX,
+    DARK_THEME,
+    THEME_REGISTRY,
+    THEME_REGISTRY_MAP,
+    get_theme_entry,
+    theme_runtime_css_vars,
+)
 from logging_setup import configure_logging
 configure_logging(CFG)
 
@@ -134,6 +143,22 @@ def vendor_fonts(filename):
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
+
+def _current_theme_name():
+    theme_name = request.cookies.get("pref_theme_name", "").strip()
+    if theme_name and theme_name in THEME_REGISTRY_MAP:
+        return theme_name
+    legacy = request.cookies.get("pref_theme", "").strip()
+    if legacy and legacy in THEME_REGISTRY_MAP:
+        return legacy
+    default_theme = CFG.get("default_theme", "darklab_obsidian.yaml")
+    if default_theme in THEME_REGISTRY_MAP:
+        return default_theme
+    return default_theme
+
+
+def _current_theme_entry():
+    return get_theme_entry(_current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
 
 def get_session_id():
     """Extract the anonymous session ID from the X-Session-ID request header."""
@@ -312,12 +337,13 @@ def favicon():
 @app.route("/")
 def index():
     log.info("PAGE_LOAD", extra={"ip": get_client_ip()})
+    current_theme = _current_theme_entry()
     return render_template(
         "index.html",
-        dark_theme=DARK_THEME,
-        light_theme=LIGHT_THEME,
-        dark_theme_css=theme_css_vars(DARK_THEME),
-        light_theme_css=theme_css_vars(LIGHT_THEME),
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+        theme_registry={"current": current_theme, "themes": THEME_REGISTRY},
+        fallback_theme_css=theme_runtime_css_vars(DARK_THEME),
     )
 
 
@@ -345,6 +371,15 @@ def get_config():
         "welcome_status_labels":  CFG["welcome_status_labels"],
         "welcome_hint_interval_ms": CFG["welcome_hint_interval_ms"],
         "welcome_hint_rotations": CFG["welcome_hint_rotations"],
+    })
+
+
+@app.route("/themes")
+def get_themes():
+    """Return the available theme registry and the active selection."""
+    return jsonify({
+        "current": _current_theme_entry(),
+        "themes": THEME_REGISTRY,
     })
 
 

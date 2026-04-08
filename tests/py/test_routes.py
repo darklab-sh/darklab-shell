@@ -177,6 +177,86 @@ class TestConfigRoute:
         assert data["command_timeout_seconds"] == 0
 
 
+# ── /themes ──────────────────────────────────────────────────────────────────
+
+class TestThemesRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/themes")
+        assert resp.status_code == 200
+
+    def test_response_has_current_and_themes(self):
+        client = get_client()
+        data = json.loads(client.get("/themes").data)
+        assert "current" in data
+        assert "themes" in data
+        assert isinstance(data["themes"], list)
+
+    def test_includes_named_theme_variants(self):
+        client = get_client()
+        data = json.loads(client.get("/themes").data)
+        themes = {theme["name"]: theme for theme in data["themes"]}
+        assert "blue_paper" in themes
+        assert "olive_grove" in themes
+        assert "darklab_obsidian" in themes
+        assert "obsidian_emerald" in themes
+        assert "charcoal_steel" in themes
+        assert "dark" not in themes
+        assert "light" not in themes
+        assert themes["blue_paper"]["label"] == "Blue Paper"
+        assert themes["olive_grove"]["label"] == "Olive Grove"
+        assert themes["darklab_obsidian"]["label"] == "Darklab Obsidian"
+        assert themes["obsidian_emerald"]["label"] == "Obsidian Emerald"
+        assert themes["charcoal_steel"]["label"] == "Charcoal Steel"
+        assert themes["blue_paper"]["group"] == "Cool Light"
+        assert themes["olive_grove"]["group"] == "Warm Light"
+        assert themes["darklab_obsidian"]["group"] == "Dark Neon"
+        assert themes["obsidian_emerald"]["group"] == "Dark Neon"
+        assert themes["charcoal_steel"]["group"] == "Dark Neutral"
+        assert themes["blue_paper"]["sort"] == 50
+        assert themes["olive_grove"]["sort"] == 20
+        assert themes["darklab_obsidian"]["sort"] == 0
+        assert themes["obsidian_emerald"]["sort"] == 1
+        assert themes["charcoal_steel"]["sort"] == 4
+        assert themes["blue_paper"]["filename"] == "blue_paper.yaml"
+        assert themes["olive_grove"]["filename"] == "olive_grove.yaml"
+        assert themes["darklab_obsidian"]["filename"] == "darklab_obsidian.yaml"
+        assert themes["obsidian_emerald"]["filename"] == "obsidian_emerald.yaml"
+        assert themes["charcoal_steel"]["filename"] == "charcoal_steel.yaml"
+
+    def test_default_theme_filename_selects_variant(self):
+        client = get_client(use_forwarded_for=False)
+        data = json.loads(client.get("/themes").data)
+        assert data["current"]["name"] == "darklab_obsidian"
+        assert data["current"]["filename"] == "darklab_obsidian.yaml"
+        assert data["current"]["label"] == "Darklab Obsidian"
+        assert data["current"]["group"] == "Dark Neon"
+        assert data["current"]["sort"] == 0
+
+    def test_pref_theme_name_cookie_selects_variant(self):
+        client = get_client(use_forwarded_for=False)
+        client.set_cookie("pref_theme_name", "blue_paper")
+        data = json.loads(client.get("/themes").data)
+        assert data["current"]["name"] == "blue_paper"
+        assert data["current"]["label"] == "Blue Paper"
+        assert data["current"]["group"] == "Cool Light"
+
+    def test_empty_registry_falls_back_to_built_in_dark_theme(self, monkeypatch):
+        client = get_client(use_forwarded_for=False)
+        monkeypatch.setattr(shell_app, "CFG", {**shell_app.CFG, "default_theme": "theme_missing.yaml"})
+        monkeypatch.setattr(shell_app, "THEME_REGISTRY", [])
+        monkeypatch.setattr(shell_app, "THEME_REGISTRY_MAP", {})
+        monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY_MAP", {})
+        monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY", [])
+
+        data = json.loads(client.get("/themes").data)
+        assert data["current"]["name"] == "dark"
+        assert data["current"]["source"] == "built-in"
+        assert data["current"]["group"] == "Other"
+        assert data["current"]["sort"] == 0
+        assert data["themes"] == []
+
+
 # ── /vendor assets ───────────────────────────────────────────────────────────
 
 class TestVendorAssets:
@@ -629,18 +709,19 @@ class TestShareRoute:
         assert resp.status_code == 200
         assert b"<html" in resp.data.lower()
 
-    def test_get_share_html_honors_light_theme_cookie(self):
+    def test_get_share_html_honors_theme_name_cookie(self):
         client = get_client()
         create_resp = client.post(
             "/share",
-            json={"label": "light theme test", "content": ["line"]},
+            json={"label": "theme selector test", "content": ["line"]},
             headers={"X-Session-ID": "test-session"}
         )
         share_id = json.loads(create_resp.data)["id"]
-        client.set_cookie("pref_theme", "light")
+        client.set_cookie("pref_theme_name", "blue_paper")
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
-        assert 'class="permalink-page light"' in body
+        assert 'class="permalink-page"' in body
+        assert 'data-theme="blue_paper"' in body
         assert '/static/css/styles.css' in body
 
     def test_get_share_html_contains_label(self):

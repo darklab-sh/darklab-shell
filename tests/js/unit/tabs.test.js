@@ -595,13 +595,7 @@ describe('tabs helpers', () => {
 
   it('builds exported HTML styles from the injected theme vars object', () => {
     window.ThemeCssVars = {
-      dark: {
-        '--bg': '#0d0d0d',
-        '--surface': '#141414',
-        '--text': '#e0e0e0',
-        '--green': '#39ff14',
-      },
-      light: {
+      fallback: {
         '--bg': '#b8c4d0',
         '--surface': '#eef2f6',
         '--text': '#101820',
@@ -615,7 +609,7 @@ describe('tabs helpers', () => {
       document,
     }, `ExportHtmlUtils`)
 
-    const css = buildTerminalExportStyles('light')
+    const css = buildTerminalExportStyles('theme_light_blue')
     expect(css).toContain('--bg: #b8c4d0;')
     expect(css).toContain('--surface: #eef2f6;')
     expect(css).toContain('--text: #101820;')

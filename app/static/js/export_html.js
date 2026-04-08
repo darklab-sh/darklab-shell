@@ -44,12 +44,19 @@
     return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   }
 
-  function getThemeExportVars(themeClass = '') {
-    const source = window.ThemeCssVars && window.ThemeCssVars[themeClass === 'light' ? 'light' : 'dark'];
+  function getThemeExportVars() {
+    const registryCurrent = window.ThemeRegistry
+      && window.ThemeRegistry.current
+      && window.ThemeRegistry.current.vars
+      && typeof window.ThemeRegistry.current.vars === 'object'
+      ? window.ThemeRegistry.current.vars
+      : null;
+    if (registryCurrent && Object.keys(registryCurrent).length) return registryCurrent;
+    const current = window.ThemeCssVars && window.ThemeCssVars.current;
+    if (current && typeof current === 'object' && Object.keys(current).length) return current;
+    const source = window.ThemeCssVars && window.ThemeCssVars.fallback;
     if (source && typeof source === 'object') return source;
-    const target = themeClass === 'light' && document.body && document.body.classList.contains('light')
-      ? document.body
-      : document.documentElement;
+    const target = document.documentElement;
     const computed = getComputedStyle(target);
     const fallback = {};
     for (const name of EXPORT_THEME_VAR_NAMES) {
@@ -60,8 +67,8 @@
     return {};
   }
 
-  function buildTerminalExportStyles(themeClass = '', fontFacesCss = '') {
-    const themeVars = getThemeExportVars(themeClass);
+  function buildTerminalExportStyles(fontFacesCss = '') {
+    const themeVars = getThemeExportVars();
     const themeDecls = Object.entries(themeVars)
       .map(([name, value]) => `    ${name}: ${value};`)
       .join('\n');
@@ -75,12 +82,10 @@ ${themeDecls}
     font-family: 'JetBrains Mono', monospace; font-size: 13px;
     padding: 28px 32px; margin: 0; line-height: 1.65;
   }
-  body.light { color: var(--text); }
   .header {
     margin-bottom: 20px; padding-bottom: 14px;
     border-bottom: 1px solid var(--border);
   }
-  body.light .header { border-bottom-color: var(--border-bright); }
   .app-name { color: var(--green); font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }
   .meta { color: var(--muted); font-size: 11px; }
   .output { white-space: pre-wrap; word-break: break-all; }
@@ -104,20 +109,18 @@ ${themeDecls}
     title,
     metaHtml = '',
     linesHtml = '',
-    themeClass = '',
     fontFacesCss = '',
   }) {
-    const bodyClass = themeClass ? ` class="${themeClass}"` : '';
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
 <title>${escapeExportHtml(title)} — ${escapeExportHtml(appName)}</title>
 <style>
-${buildTerminalExportStyles(themeClass, fontFacesCss)}
+${buildTerminalExportStyles(fontFacesCss)}
 </style>
 </head>
-<body${bodyClass}>
+<body>
 <div class="header">
   <div class="app-name">${escapeExportHtml(appName)}</div>
   ${metaHtml ? `<div class="meta">${metaHtml}</div>` : ''}

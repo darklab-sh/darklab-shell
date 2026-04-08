@@ -1,0 +1,191 @@
+# shell.darklab.sh — Theme Reference Template
+# -------------------------------------------
+# Copy this file to app/conf/themes/<filename>.yaml to create a selectable
+# theme variant. The runtime selector ignores *.yaml.example files and only
+# scans app/conf/themes/*.yaml.
+# Full reference: THEME.md
+# label: is optional and becomes the friendly name shown in the theme preview
+# modal. If omitted, the selector falls back to a humanized filename stem.
+# group: is optional and controls the preview-modal section header.
+# sort: is optional and controls ordering within the modal and between groups.
+# Theme values are plain CSS strings. You may reference other resolved theme
+# variables with CSS var(--name) syntax, or use CSS functions like color-mix();
+# the browser resolves those strings after the theme vars are injected.
+# app/conf/config.yaml default_theme should point at a full filename from
+# app/conf/themes/ (for example darklab_obsidian.yaml).
+# All values are CSS color strings (hex, rgb, rgba, hsl, etc.) or other valid
+# CSS values for the given key.
+# Changes take effect after a container restart (docker compose restart).
+# No rebuild needed.
+#
+# Leave a value commented out or omit it entirely to keep the app's built-in
+# fallback defaults from app/config.py.
+
+# ── Backgrounds ───────────────────────────────────────────────────────────────
+
+# Page background (body) — shown around and behind the terminal window
+bg: "#b8c4d0"
+
+# Surface background — used for modals, panels, and dropdowns
+surface: "#eef2f6"
+
+# ── Borders ───────────────────────────────────────────────────────────────────
+
+# Subtle border (dividers, section separators)
+border: "rgba(0,0,0,0.15)"
+
+# Prominent border (input focus rings, modal outlines)
+border_bright: "rgba(0,0,0,0.28)"
+
+# ── Text ──────────────────────────────────────────────────────────────────────
+
+# Primary text color
+text: "#101820"
+
+# Muted / secondary text color (labels, hints, timestamps)
+muted: "#5a6878"
+
+# ── Accent Colors ─────────────────────────────────────────────────────────────
+
+# Primary green — used for the terminal prompt, run button, highlights, and
+# success indicators
+green: "#2a5d18"
+
+# Dimmed green — used for borders, focus rings, and subtle highlights
+green_dim: "#355f24"
+
+# Green glow — used for box-shadows and background tints (should be rgba)
+green_glow: "rgba(42,93,24,0.08)"
+
+# Amber — used for warnings, the RUNNING status pill, starred items, and
+# denied-command messages. Should be dark enough to contrast on a light background.
+amber: "#9a4200"
+
+# Red — used for errors, the FAIL/KILLED status, and the kill-task modal border
+red: "#cc2200"
+
+# Blue — used for the prompt prefix, welcome screen labels, notice lines, and command badges
+blue: "#1a5aaa"
+
+# ── Typography ────────────────────────────────────────────────────────────────
+
+# Terminal output font size
+terminal_font_size: "14px"
+
+# Terminal output line height
+terminal_line_height: "1.65"
+
+# ── Component Chrome ─────────────────────────────────────────────────────────
+
+# Text used for the live prompt line shown above the hidden input
+prompt_line_text: "#1c201a"
+
+# Terminal pane / panel styling
+panel_bg: "#d4e0ec"
+panel_alt_bg: "#e8eef6"
+panel_border: "rgba(0,0,0,0.28)"
+panel_shadow: "rgba(0,0,0,0.22)"
+terminal_bar_bg: "#b8c4d0"
+terminal_bar_border: "#8898b0"
+terminal_actions_bg: "rgba(0,0,0,0.025)"
+terminal_wrap_border: "rgba(0,0,0,0.42)"
+terminal_wrap_shadow: "rgba(0,0,0,0.22)"
+
+# Header / toolbar buttons
+toolbar_button_bg: "#c8d4e0"
+toolbar_button_border: "#8898b0"
+toolbar_button_text: "#202838"
+toolbar_button_hover_bg: "#b8c8d8"
+toolbar_button_hover_border: "#6880a0"
+toolbar_button_hover_text: "#101820"
+toolbar_button_active_bg: "#a0b4c8"
+toolbar_button_active_border: "#6880a0"
+toolbar_button_active_text: "#101820"
+
+# History chips / starred chips
+chip_bg: "#c8d4e0"
+chip_border: "#8898b0"
+chip_text: "#202838"
+chip_hover_bg: "#b8c8d8"
+chip_hover_border: "#6880a0"
+chip_hover_text: "#101820"
+chip_overflow_text: "#274f17"
+
+# Tabs bar / tabs
+tabs_bar_bg: "#a0b0c4"
+tabs_bar_scrollbar_track: "rgba(0,0,0,0.08)"
+tabs_bar_scrollbar_thumb: "#7890a8"
+tabs_bar_scrollbar_thumb_hover: "#5a6878"
+tabs_scroll_btn_bg: "#c4d0dc"
+tabs_scroll_btn_border: "#8898b0"
+tabs_scroll_btn_text: "#202838"
+tabs_scroll_btn_hover_bg: "#b4c4d4"
+tabs_scroll_btn_hover_border: "#6880a0"
+tabs_scroll_btn_hover_text: "#101010"
+tab_bg: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))"
+tab_border: "rgba(0,0,0,0.15)"
+tab_text: "#5a6878"
+tab_hover_text: "#101820"
+tab_active_bg: "#c0cedd"
+tab_active_border: "#8898b0"
+tab_active_text: "#101820"
+tab_active_shadow: "inset 0 0 0 1px rgba(255,255,255,0.22)"
+tab_close_bg: "rgba(255,255,255,0.02)"
+tab_close_border: "rgba(255,255,255,0.06)"
+tab_close_hover_bg: "color-mix(in srgb, var(--red) 18%, transparent)"
+tab_close_hover_border: "color-mix(in srgb, var(--red) 30%, transparent)"
+tab_close_hover_text: "inherit"
+tab_touch_drag_text_shadow: "0 0 10px rgba(42,93,24,0.08)"
+tab_drop_shadow: "0 0 10px rgba(42,93,24,0.18)"
+
+# History panel and restore overlay
+history_panel_bg: "#c8d8e8"
+history_entry_hover_bg: "rgba(26,90,170,0.06)"
+history_load_overlay_bg: "rgba(0,0,0,0.76)"
+history_load_modal_bg: "#e8eef6"
+history_load_modal_shadow: "rgba(0,0,0,0.35)"
+
+# Modals
+faq_modal_bg: "#e8eef6"
+options_modal_bg: "#e8eef6"
+kill_modal_bg: "#d4e0ec"
+hist_del_modal_bg: "#d4e0ec"
+
+# Dropdowns / autocomplete
+dropdown_bg: "#d4e0ec"
+dropdown_border: "rgba(26,90,170,0.25)"
+dropdown_shadow: "rgba(0,0,0,0.14)"
+dropdown_up_bg: "#d4e0ec"
+dropdown_up_border: "rgba(26,90,170,0.35)"
+dropdown_up_shadow: "rgba(0,0,0,0.14)"
+dropdown_item_text: "#4a5868"
+
+# FAQ / options controls
+faq_code_bg: "#dce6f0"
+allowed_chip_bg: "#dce6f0"
+options_select_bg: "#e0e8f4"
+
+# Status / toasts
+tab_status_ok_bg: "#22a040"
+toast_bg: "#e4eef8"
+toast_text: "#2a5d18"
+toast_border: "rgba(0,0,0,0.28)"
+toast_error_bg: "#e4eef8"
+toast_error_text: "#cc2200"
+toast_error_border: "rgba(204,34,0,0.38)"
+
+# Mobile shell / menu
+mobile_composer_host_bg: "linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))"
+mobile_composer_host_light_bg: "linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))"
+mobile_menu_bg: "#eef2f6"
+mobile_menu_border: "rgba(0,0,0,0.28)"
+mobile_menu_shadow: "rgba(0,0,0,0.6)"
+mobile_menu_button_border: "#dce6f0"
+mobile_menu_button_hover_bg: "var(--bg)"
+mobile_menu_button_hover_text: "#101820"
+
+# Welcome / onboarding styling
+welcome_command_hover_bg: "rgba(42,93,24,0.06)"
+welcome_command_hover_shadow: "0 0 0 1px rgba(42,93,24,0.1)"
+welcome_ascii_text_shadow: "0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)"
+welcome_ascii_filter: "saturate(0.9) contrast(0.95) brightness(0.9)"

@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 466
-- `vitest`: 239
-- `playwright`: 126
-- total: 831
+- `pytest`: 476
+- `vitest`: 246
+- `playwright`: 127
+- total: 849
 
 ## Running The Suites
 
@@ -48,10 +48,10 @@ npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 Pytest lives in `tests/py/` and is organized by backend concern:
 
 - `test_validation.py` - command validation, shell operator blocking, path blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
-- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, template-backed permalink behavior for `/history/<run_id>` and `/share/<id>` when full-output artifacts exist, permalink line-number/timestamp toggle behavior, the vendor asset routes for fonts and `ansi_up` including copied-in/repo fallback serving and unknown-path rejection, and the backward-compatible `/history/<run_id>/full` alias
+- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, template-backed permalink behavior for `/history/<run_id>` and `/share/<id>` when full-output artifacts exist, permalink line-number/timestamp toggle behavior, the theme registry route and current-theme selection including YAML-provided friendly labels, `group`/`sort` metadata, filename-based `default_theme` selection, the empty-registry baked-in-dark fallback, and the fallback behavior when a configured or persisted theme name does not exist; the vendor asset routes for fonts and `ansi_up` including copied-in/repo fallback serving and unknown-path rejection, and the backward-compatible `/history/<run_id>/full` alias
 - `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
 - `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
-- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` built-ins-first ordering with appended custom FAQ entries and FAQ markup rendering, `load_ascii_art()`, `load_ascii_mobile_art()`, FAQ schema handling, and module-level utility coverage
+- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` built-ins-first ordering with appended custom FAQ entries and FAQ markup rendering, `load_ascii_art()`, `load_ascii_mobile_art()`, FAQ schema handling, theme-registry label fallback, `group`/`sort` metadata, unknown-key preservation/ignoring, malformed-YAML fallback, one-theme registry behavior, and module-level utility coverage
 - `test_logging.py` - structured logging, formatter output, and log-event assertions
 
 Notes:
@@ -74,7 +74,7 @@ Files and focus:
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, currentRunStartIndex alignment when old raw lines are pruned from the front, refocus behavior after copy/save/html export actions, clearing un-ran composer input, and the export helper’s injected theme-vars plumbing
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, featured-sample interaction behavior, and mobile banner loading
-- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, and the shared mobile focus/blur helpers
+- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, theme selector modal preview-card population and switching, group-section rendering, filename-based startup resolution plus fallback handling when a saved theme or configured default theme is missing, single-theme registry rendering, modal Escape-close behavior for the theme picker, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, and the shared mobile focus/blur helpers
 - `search.test.js` - search helper boundaries and no-op behavior
 - `output.test.js` - output rendering, batched live flushing, shared timestamp/line-number prefix support, welcome-prefix exclusion, no-output edge cases, and self-contained HTML export font embedding
 
@@ -102,7 +102,7 @@ Spec files:
 - `share.spec.js` - snapshot permalinks, canonical single-run permalinks, template-backed permalink pages, permalink line-number/timestamp toggles, preference-cookie defaults on load, permalink page cookie defaults, mobile permalink toast hide behavior, permalink export filename/content assertions, embedded-font HTML export assertions, resolved-theme export assertions, and clipboard failure handling
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, running-tab isolation, and closing behavior including kill/reset paths
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
-- `ui.spec.js` - theme toggle plus backend-driven FAQ modal rendering, close behavior, allowlist-chip interaction, and options-modal preference persistence
+- `ui.spec.js` - dedicated theme selector modal button and preview-card persistence plus backend-driven FAQ modal rendering, grouped section headers, close behavior, allowlist-chip interaction, options-modal preference persistence, and invalid persisted-theme reload fallback
 - `welcome.spec.js` - welcome interruption, clickable and keyboard-activatable sampled commands and badge, prompt-key settle behavior, welcome-tab isolation, preferred-command stability, and the mobile welcome banner regression
 - `failure-paths.spec.js` - `/run` denial/rate limit/offline handling, share failure, and history delete/clear failure toasts
 - `boot-resilience.spec.js` - startup fetch fallbacks, core smoke checks, and the no-external-font-request regression

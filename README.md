@@ -40,9 +40,9 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
-- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent. Operator overrides live in `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`
+- **Theme selector** — choose a named theme variant from the dedicated theme selector modal preview grid, organized into labeled sections by `group:` metadata. The selected theme is saved in localStorage and cookies. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent. The selector loads named variants from `app/conf/themes/`; `default_theme` in `config.yaml` uses the full filename for copy/paste friendliness, and `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` are copyable templates only. Theme YAML values may reference other resolved theme vars with CSS `var(--name)` syntax, and optional `sort:` metadata controls ordering inside the modal.
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
-- **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed. Theme palette and component chrome overrides live in `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`
+- **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed. Theme selection is driven by `app/conf/themes/`, while `default_theme` stores the theme filename and the root `theme_dark.yaml.example` and `theme_light.yaml.example` files are copyable templates only. Theme values can also reference other vars using CSS `var(--name)` syntax
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
 - **Anonymous session tracking** — the client generates a UUID session ID once (`session.js`) and sends it on every API call via `X-Session-ID`; this keeps history/test data scoped to each browser/tab and allows the server tests to isolate rate-limit buckets
 - **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
@@ -284,7 +284,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 |---------|---------|-------------|
 | `app_name` | `shell.darklab.sh` | Name shown in the browser tab, header, and permalink pages |
 | `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
-| `default_theme` | `dark` | Default color theme for new visitors. Options: `dark`, `light`. Overridden by the user's saved preference |
+| `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
@@ -313,11 +313,16 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 
 Theme configuration is documented in [THEME.md](THEME.md). The theme externalization work is part of the v1.4 line. In short:
 
-- `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml` are the operator-editable source files for the palette and component chrome
-- `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables
+- `app/conf/themes/` contains the selectable theme variants; the root `theme_dark.yaml.example` / `theme_light.yaml.example` files are copyable templates only and are not used by the runtime selector; `default_theme` in `config.yaml` points at a full filename from that directory
+- `app/conf/themes/` holds the runtime theme variants; the loader scans that directory and exposes the results to the browser
+- each theme YAML may include an optional `label:` field; the selector uses that friendly name when present and falls back to a humanized filename stem otherwise
+- theme resolution order is: `localStorage.theme`, then `default_theme` from `config.yaml` (full filename, normalized to the registry entry), then the baked-in dark fallback palette
+- `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables and a theme registry
 - `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell and permalink pages share one theme source of truth
-- `app/templates/theme_vars_script.html` exposes the same resolved values to the browser-side export helpers
+- `app/templates/theme_vars_script.html` exposes the same resolved values plus the full theme registry to the browser-side runtime selector and export helpers
+- `app/static/js/app.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
 - `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
+- `app/app.py` also exposes `/themes` for clients that want to inspect the available registry
 
 See [THEME.md](THEME.md) for the full architecture walkthrough and a complete appendix of every supported theme option and default.
 
@@ -713,9 +718,9 @@ Both toggles re-run the search immediately when clicked.
 
 ---
 
-## Dark / Light Theme
+## Theme Selector
 
-Click **◑ theme** in the header to toggle between dark and light mode. Your preference is saved in `localStorage` and persists across sessions.
+Click **◑ theme** in the header to open the dedicated theme selector modal. Pick any registered theme variant and the choice is saved in `localStorage` and persists across sessions.
 
 ---
 
@@ -875,7 +880,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **466 pytest + 239 Vitest + 126 Playwright = 831 tests**.
+Current totals in this branch: **476 pytest + 246 Vitest + 127 Playwright = 849 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

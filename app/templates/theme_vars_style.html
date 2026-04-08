@@ -1,11 +1,6 @@
 <style>
   :root {
-  {% for name, value in dark_theme_css.items() %}
-    {{ name }}: {{ value }};
-  {% endfor %}
-  }
-  body.light {
-  {% for name, value in light_theme_css.items() %}
+  {% for name, value in current_theme_css.items() %}
     {{ name }}: {{ value }};
   {% endfor %}
   }

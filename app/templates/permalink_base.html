@@ -13,7 +13,7 @@
 <script src="/static/js/export_html.js"></script>
 {% block extra_head %}{% endblock %}
 </head>
-<body class="permalink-page{% if theme_class == 'light' %} light{% endif %}">
+<body class="permalink-page" data-theme="{{ current_theme.name }}">
 <header class="permalink-header">
   <div class="permalink-header-copy">
     <h1 class="permalink-title">{{ app_name }}</h1>

@@ -1,6 +1,10 @@
 # shell.darklab.sh — Light Theme: Mint Glass
 # Crisp pale mint and cool gray with airy contrast.
 
+label: "Mint Glass"
+group: "Cool Light"
+sort: 70
+
 bg: "#eef8f4"
 surface: "#fbfffd"
 border: "rgba(43, 79, 71, 0.14)"

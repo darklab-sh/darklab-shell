@@ -342,17 +342,20 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
 
-Theme styling is resolved from `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS and export helpers. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots. This theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
+Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. Each YAML variant may provide an optional `label:` field; that label is what the selector preview card shows, `group:` controls the modal section header, and `sort:` controls the order inside the preview grid while the filename stem remains the persisted theme name. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only; they are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in dark fallback palette in `app/config.py`. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots. This theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
 
 ### Theme System
 
 The theme implementation is intentionally split so the operator-facing config, live UI, permalink pages, and exported HTML all read from the same resolved values:
 
-1. `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml` are the operator-editable source files for the palette and component chrome.
-2. `app/config.py` merges those YAML overrides with `_THEME_DEFAULTS` and exposes the final values via `theme_css_vars()`.
-3. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so `styles.css` can use `var(--name)` everywhere.
-4. `app/templates/theme_vars_script.html` publishes the same resolved variables as `window.ThemeCssVars` so browser-side export helpers can build downloadable HTML without a duplicate hardcoded palette.
-5. `app/static/js/export_html.js` consumes the injected values and embeds them into saved HTML exports, keeping the downloaded file portable and theme-consistent.
+1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes.
+2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are copyable templates only and are not loaded into the runtime selector.
+3. `app/config.py` merges those YAML overrides with `_THEME_DEFAULTS`, exposes the current theme as runtime CSS vars, and builds the selectable theme registry. If a theme file has a `label:` field, that becomes the friendly selector label; otherwise the filename stem is humanized. The registry keeps the stem as the persisted theme name, but also exposes the filename so `default_theme` can be written as a full `*.yaml` path fragment in config. Theme values are passed through as literal CSS strings, so `var(--...)` references and other CSS functions survive the YAML load unchanged and resolve in the browser.
+4. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so `styles.css` can use `var(--name)` everywhere.
+5. `app/templates/theme_vars_script.html` publishes the same resolved values plus the registry as `window.ThemeRegistry` and `window.ThemeCssVars` so browser-side theme selection and export helpers can build downloadable HTML without a duplicate hardcoded palette.
+6. `app/app.py` exposes `/themes` so the frontend and tests can inspect the available registry.
+7. `app/static/js/app.js` applies the selected theme on the fly via the dedicated theme selector modal preview cards, updates cookies/localStorage, and keeps the shell chrome consistent while switching.
+8. `app/static/js/export_html.js` consumes the injected values and embeds them into saved HTML exports, keeping the downloaded file portable and theme-consistent.
 
 This design replaced the older pattern of duplicating theme values in separate template/JS snippets. The current arrangement keeps the live shell, permalink pages, and export HTML aligned without making the export depend on the app being online after download. This is part of the v1.4 theme refactor. See [THEME.md](THEME.md) for the full appendix of configurable keys and defaults.
 
@@ -398,10 +401,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 466
-- `vitest`: 239
-- `playwright`: 126
-- total: 831
+- `pytest`: 476
+- `vitest`: 246
+- `playwright`: 127
+- total: 849
 
 ### Testing Architecture
 

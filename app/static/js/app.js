@@ -96,6 +96,7 @@ const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && perma
 const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay ? killOverlay.parentElement : null;
 const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
+const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
 const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
@@ -160,6 +161,7 @@ const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
+  themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
   killOverlay: typeof killOverlay !== 'undefined' && killOverlay ? killOverlay : null,
@@ -244,7 +246,8 @@ const _mobileShellOverlayNodes = [
   { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: killOverlay || null },
   { node: killOverlay, homeParent: _killOverlayHomeParent, desktopAnchor: histDelOverlay || null },
   { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: faqOverlay || null },
-  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: optionsOverlay || null },
+  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
+  { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: null },
 ];
 
@@ -386,10 +389,6 @@ function getPreference(name) {
 }
 
 function syncOptionsControls() {
-  const themeValue = document.body.classList.contains('light') ? 'light' : 'dark';
-  themePrefInputs.forEach(input => {
-    input.checked = input.value === themeValue;
-  });
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
   const lnToggle = optionsLnToggle;
@@ -397,13 +396,7 @@ function syncOptionsControls() {
 }
 
 function applyThemePreference(theme, persist = true) {
-  const nextTheme = theme === 'light' ? 'light' : 'dark';
-  document.body.classList.toggle('light', nextTheme === 'light');
-  if (persist) {
-    setPreferenceCookie('pref_theme', nextTheme);
-    localStorage.setItem('theme', nextTheme);
-  }
-  syncOptionsControls();
+  applyThemeSelection(theme, persist);
 }
 
 function applyTimestampPreference(mode, persist = true) {
@@ -423,6 +416,7 @@ function applyLineNumberPreference(mode, persist = true) {
 function _closeMajorOverlays() {
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isFaqOverlayOpen()) hideFaqOverlay();
+  if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
 }
 
@@ -435,6 +429,38 @@ function openOptions() {
 
 function closeOptions() {
   hideOptionsOverlay();
+  refocusTerminalInput();
+}
+
+function openThemeSelector() {
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  renderThemeSelectionOptions();
+  syncThemeSelectionControls();
+  showThemeOverlay();
+  setTimeout(() => {
+    const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
+    const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
+    if (target && typeof target.focus === 'function') {
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_) {
+        target.focus();
+      }
+      return;
+    }
+    if (themeSelect && typeof themeSelect.focus === 'function') {
+      try {
+        themeSelect.focus({ preventScroll: true });
+      } catch (_) {
+        themeSelect.focus();
+      }
+    }
+  }, 0);
+}
+
+function closeThemeSelector() {
+  hideThemeOverlay();
   refocusTerminalInput();
 }
 
@@ -814,9 +840,255 @@ function findWordBoundaryRight(value, index) {
 }
 
 // ── Theme ──
-const savedTheme = getPreference('pref_theme') || localStorage.getItem('theme');
-if (!getPreference('pref_theme') && savedTheme) setPreferenceCookie('pref_theme', savedTheme);
-if (savedTheme === 'light') document.body.classList.add('light');
+function _getThemeRegistry() {
+  if (typeof window !== 'undefined' && window.ThemeRegistry && typeof window.ThemeRegistry === 'object') {
+    return window.ThemeRegistry;
+  }
+  const currentThemeName = (document.body && document.body.dataset && document.body.dataset.theme) || _savedThemeName() || '';
+  const currentThemeVars = typeof window !== 'undefined' && window.ThemeCssVars && window.ThemeCssVars.current
+    && typeof window.ThemeCssVars.current === 'object'
+    ? window.ThemeCssVars.current
+    : {};
+  return {
+    current: currentThemeName
+      ? { name: currentThemeName, label: currentThemeName, source: 'fallback', vars: currentThemeVars }
+      : null,
+    themes: [],
+  };
+}
+
+function _getThemeThemes() {
+  const registry = _getThemeRegistry();
+  return Array.isArray(registry.themes) ? registry.themes : [];
+}
+
+function _normalizeThemeName(name) {
+  const value = typeof name === 'string' ? name.trim() : '';
+  return value.endsWith('.yaml') ? value.slice(0, -5) : value;
+}
+
+function _themeEntryMatches(entry, name) {
+  const needle = _normalizeThemeName(name);
+  if (!needle) return false;
+  return _normalizeThemeName(entry?.name) === needle || _normalizeThemeName(entry?.filename) === needle;
+}
+
+function _themeEntryGroup(entry) {
+  const group = typeof entry?.group === 'string' ? entry.group.trim() : '';
+  return group || 'Other';
+}
+
+function _themeEntrySortValue(entry) {
+  const value = Number(entry?.sort);
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function _compareThemeEntries(a, b) {
+  const sortA = _themeEntrySortValue(a);
+  const sortB = _themeEntrySortValue(b);
+  if (sortA !== sortB) return sortA - sortB;
+  const groupA = _themeEntryGroup(a).toLowerCase();
+  const groupB = _themeEntryGroup(b).toLowerCase();
+  if (groupA !== groupB) return groupA.localeCompare(groupB);
+  const labelA = String(a?.label || a?.name || '').toLowerCase();
+  const labelB = String(b?.label || b?.name || '').toLowerCase();
+  if (labelA !== labelB) return labelA.localeCompare(labelB);
+  return String(a?.name || '').localeCompare(String(b?.name || ''));
+}
+
+function _findThemeEntry(name) {
+  const needle = _normalizeThemeName(name);
+  if (!needle) return null;
+  const registry = _getThemeRegistry();
+  if (registry.current && _themeEntryMatches(registry.current, needle)) return registry.current;
+  return _getThemeThemes().find(theme => theme && _themeEntryMatches(theme, needle)) || null;
+}
+
+function _defaultThemeEntry() {
+  const registry = _getThemeRegistry();
+  return registry.current || _findThemeEntry(APP_CONFIG?.default_theme || '') || {
+    name: 'dark',
+    label: 'Dark',
+    source: 'built-in',
+    vars: (window.ThemeCssVars && window.ThemeCssVars.fallback) || {},
+    theme_vars: (window.ThemeCssVars && window.ThemeCssVars.fallback) || {},
+  };
+}
+
+function _applyThemeVars(entry) {
+  if (!entry || !entry.vars || !document.documentElement) return;
+  Object.entries(entry.vars).forEach(([name, value]) => {
+    document.documentElement.style.setProperty(name, value);
+  });
+}
+
+function _applyThemePreviewVars(target, vars) {
+  if (!target || !vars || !target.style) return;
+  Object.entries(vars).forEach(([name, value]) => {
+    target.style.setProperty(name, value);
+  });
+}
+
+function _persistThemeEntry(entry) {
+  if (!entry) return;
+  setPreferenceCookie('pref_theme_name', entry.name);
+  localStorage.setItem('theme', entry.name);
+}
+
+function _savedThemeName() {
+  return getPreference('pref_theme_name')
+    || localStorage.getItem('theme')
+    || getPreference('pref_theme')
+    || '';
+}
+
+function _resolveThemeEntry(name) {
+  return _findThemeEntry(name) || _defaultThemeEntry();
+}
+
+function _buildThemePreviewCard(theme) {
+  const card = document.createElement('button');
+  const themeName = theme?.name || '';
+  const themeLabel = theme?.label || themeName;
+  card.type = 'button';
+  card.className = 'theme-card';
+  card.dataset.themeName = themeName;
+  card.dataset.themeLabel = themeLabel;
+  card.setAttribute('aria-label', `${themeLabel} theme`);
+  card.setAttribute('aria-pressed', 'false');
+  _applyThemePreviewVars(card, theme?.vars || {});
+  const preview = document.createElement('span');
+  preview.className = 'theme-card-preview';
+  preview.setAttribute('aria-hidden', 'true');
+
+  const bar = document.createElement('span');
+  bar.className = 'theme-card-preview-bar';
+  ['dot-r', 'dot-y', 'dot-g'].forEach(dotClass => {
+    const dot = document.createElement('span');
+    dot.className = `dot ${dotClass}`;
+    bar.appendChild(dot);
+  });
+  const pill = document.createElement('span');
+  pill.className = 'theme-card-preview-pill';
+  bar.appendChild(pill);
+
+  const panel = document.createElement('span');
+  panel.className = 'theme-card-preview-panel';
+  const prompt = document.createElement('span');
+  prompt.className = 'theme-card-preview-prompt';
+  const prefix = document.createElement('span');
+  prefix.className = 'theme-card-preview-prefix';
+  prefix.textContent = 'anon@shell.darklab.sh:~$';
+  prompt.appendChild(prefix);
+
+  const line1 = document.createElement('span');
+  line1.className = 'theme-card-preview-line';
+  const line2 = document.createElement('span');
+  line2.className = 'theme-card-preview-line theme-card-preview-line-short';
+  const chipRow = document.createElement('span');
+  chipRow.className = 'theme-card-preview-chip-row';
+  for (let i = 0; i < 2; i += 1) {
+    const chip = document.createElement('span');
+    chip.className = 'theme-card-preview-chip';
+    chipRow.appendChild(chip);
+  }
+
+  panel.appendChild(prompt);
+  panel.appendChild(line1);
+  panel.appendChild(line2);
+  panel.appendChild(chipRow);
+  preview.appendChild(bar);
+  preview.appendChild(panel);
+
+  const label = document.createElement('span');
+  label.className = 'theme-card-label';
+  label.textContent = themeLabel;
+  card.appendChild(preview);
+  card.appendChild(label);
+  card.addEventListener('click', () => {
+    applyThemeSelection(themeName);
+  });
+  return card;
+}
+
+function renderThemeSelectionOptions() {
+  if (!themeSelect || themeSelect.dataset.wired === '1') return;
+  const themes = [..._getThemeThemes()].sort(_compareThemeEntries);
+  themeSelect.innerHTML = '';
+  if (!themes.length) {
+    const empty = document.createElement('div');
+    empty.className = 'theme-picker-empty';
+    empty.textContent = 'No themes available';
+    themeSelect.appendChild(empty);
+    themeSelect.dataset.wired = '1';
+    return;
+  }
+  const groupCounts = themes.reduce((counts, theme) => {
+    const themeGroup = _themeEntryGroup(theme);
+    counts[themeGroup] = (counts[themeGroup] || 0) + 1;
+    return counts;
+  }, {});
+  const maxColumns = Math.max(1, ...Object.values(groupCounts));
+  themeSelect.style.setProperty('--theme-picker-columns', String(maxColumns));
+  let currentGroup = null;
+  let groupSection = null;
+  let groupGrid = null;
+  themes.forEach(theme => {
+    const themeGroup = _themeEntryGroup(theme);
+    if (themeGroup !== currentGroup) {
+      currentGroup = themeGroup;
+      groupSection = document.createElement('section');
+      groupSection.className = 'theme-picker-group';
+      groupSection.dataset.themeGroup = themeGroup;
+      const groupTitle = document.createElement('div');
+      groupTitle.className = 'theme-picker-group-title';
+      groupTitle.textContent = themeGroup;
+      groupGrid = document.createElement('div');
+      groupGrid.className = 'theme-picker-group-grid';
+      groupSection.appendChild(groupTitle);
+      groupSection.appendChild(groupGrid);
+      themeSelect.appendChild(groupSection);
+    }
+    if (groupGrid) groupGrid.appendChild(_buildThemePreviewCard(theme));
+  });
+  themeSelect.dataset.wired = '1';
+}
+
+function syncThemeSelectionControls() {
+  const current = _resolveThemeEntry(document.body?.dataset?.theme || _savedThemeName());
+  const themeName = current?.name || '';
+  if (!themeSelect) return;
+  themeSelect.dataset.theme = themeName;
+  themeSelect.querySelectorAll('[data-theme-name]').forEach(card => {
+    const active = card.dataset.themeName === themeName;
+    card.classList.toggle('theme-card-active', active);
+    card.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function applyThemeSelection(themeName, persist = true) {
+  const entry = _resolveThemeEntry(themeName);
+  if (!entry) return;
+  if (document.body) document.body.dataset.theme = entry.name;
+  _applyThemeVars(entry);
+  if (typeof window !== 'undefined') {
+    const registry = _getThemeRegistry();
+    registry.current = entry;
+    window.ThemeRegistry = registry;
+    if (window.ThemeCssVars && typeof window.ThemeCssVars === 'object') {
+      window.ThemeCssVars.current = entry.vars || {};
+    }
+  }
+  if (persist) _persistThemeEntry(entry);
+  syncThemeSelectionControls();
+}
+
+renderThemeSelectionOptions();
+const initialThemeName = _savedThemeName();
+const initialTheme = initialThemeName ? _findThemeEntry(initialThemeName) : null;
+const resolvedInitialTheme = initialTheme || _defaultThemeEntry();
+if (resolvedInitialTheme) applyThemeSelection(resolvedInitialTheme.name, false);
+else syncThemeSelectionControls();
 
 // ── Timestamps ──
 const _tsModes  = ['off', 'elapsed', 'clock'];
@@ -846,8 +1118,7 @@ lnBtn.addEventListener('click', () => {
 });
 
 themeBtn.addEventListener('click', () => {
-  applyThemePreference(document.body.classList.contains('light') ? 'dark' : 'light');
-  refocusTerminalInput();
+  openThemeSelector();
 });
 
 let allowedCommandsFaqData = null;
@@ -1008,13 +1279,10 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const verEl = versionLabel;
   if (verEl) verEl.textContent = cfg.version ? `v${cfg.version} · real-time` : 'real-time';
-  // Only apply server default theme if the user hasn't saved a local preference
-  if (!getPreference('pref_theme') && !localStorage.getItem('theme') && cfg.default_theme === 'light') {
-    applyThemePreference('light', false);
-  }
   if (cfg.motd) {
     if (motd && motdWrap) { motd.innerHTML = renderMotd(cfg.motd); showMotdWrap(); }
   }
+  syncThemeSelectionControls();
   updateNewTabBtn();
   renderFaqLimits(cfg);
 }).catch(err => {
@@ -1061,8 +1329,7 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn =
     }
     if (action === 'options') openOptions();
     if (action === 'theme') {
-      applyThemePreference(document.body.classList.contains('light') ? 'dark' : 'light');
-      refocusTerminalInput();
+      openThemeSelector();
     }
     if (action === 'faq') openFaq();
   });
@@ -1084,14 +1351,15 @@ _uiOverlayRefs.faqOverlay.addEventListener('click', e => {
   if (e.target === _uiOverlayRefs.faqOverlay) closeFaq();
 });
 faqCloseBtn.addEventListener('click', closeFaq);
+_uiOverlayRefs.themeOverlay?.addEventListener('click', e => {
+  if (e.target === _uiOverlayRefs.themeOverlay) closeThemeSelector();
+});
+themeCloseBtn?.addEventListener('click', closeThemeSelector);
 optionsBtn?.addEventListener('click', openOptions);
 _uiOverlayRefs.optionsOverlay?.addEventListener('click', e => {
   if (e.target === _uiOverlayRefs.optionsOverlay) closeOptions();
 });
 optionsCloseBtn?.addEventListener('click', closeOptions);
-themePrefInputs.forEach(input => {
-  input.addEventListener('change', () => applyThemePreference(input.value));
-});
 optionsTsSelect?.addEventListener('change', e => {
   applyTimestampPreference(e.target.value);
 });
@@ -1337,6 +1605,7 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     closeFaq();
     closeOptions();
+    closeThemeSelector();
     hideSearchBar();
     clearSearch();
     if (isHistoryPanelOpen()) hideHistoryPanel();

@@ -2,6 +2,10 @@
 # -------------------------------------------------
 # A clean, minimal neutral light gray theme with subtle cool accents.
 
+label: "Clean Slate"
+group: "Neutral Light"
+sort: 80
+
 bg: "#f6f8fa"
 surface: "#fdfefe"
 border: "rgba(50, 55, 70, 0.14)"

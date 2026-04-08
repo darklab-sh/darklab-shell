@@ -55,7 +55,7 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
   })
 
-  test('permalink page honors the light theme cookie for the live view and export', async ({ page }) => {
+  test('permalink page honors the theme cookie for the live view and export', async ({ page }) => {
     await runCommand(page, CMD)
 
     const [shareResp] = await Promise.all([
@@ -65,11 +65,11 @@ test.describe('permalink / share', () => {
     const data = await shareResp.json()
 
     await page.context().addCookies([
-      { name: 'pref_theme', value: 'light', url: 'http://localhost:5001' },
+      { name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' },
     ])
     await page.goto(data.url)
 
-    await expect(page.locator('body')).toHaveClass(/light/)
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
 
     const [htmlDownload] = await Promise.all([
@@ -80,8 +80,8 @@ test.describe('permalink / share', () => {
     const htmlChunks = []
     for await (const chunk of htmlStream) htmlChunks.push(chunk)
     const html = Buffer.concat(htmlChunks).toString('utf8')
-    expect(html).toContain('body class="light"')
-    expect(html).toContain('--theme-bg: #b8c4d0')
+    expect(html).toContain('<body')
+    expect(html).toContain('--theme-bg: #eef4fa')
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {

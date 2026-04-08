@@ -23,6 +23,7 @@ from datetime import datetime, timedelta, timezone
 import process
 import database
 import app as shell_app
+import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
@@ -216,6 +217,85 @@ class TestLoadFaq:
             os.unlink(path)
         assert len(result) == 1
         assert result[0]["question"] == "Has both."
+
+
+# ── load_theme_registry / load_theme ─────────────────────────────────────────
+
+class TestThemeRegistry:
+    def _write_theme(self, root, name, content):
+        theme_dir = root / "themes"
+        theme_dir.mkdir(parents=True, exist_ok=True)
+        path = theme_dir / f"{name}.yaml"
+        path.write_text(textwrap.dedent(content))
+        return theme_dir, path
+
+    def test_missing_label_falls_back_to_humanized_filename(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "custom_simple_theme",
+            """
+            bg: "#123456"
+            surface: "#234567"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        assert len(themes) == 1
+        entry = themes[0]
+        assert entry["name"] == "custom_simple_theme"
+        assert entry["filename"] == "custom_simple_theme.yaml"
+        assert entry["label"] == "Custom Simple Theme"
+
+    def test_unknown_keys_are_ignored_but_valid_css_values_survive(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "custom_theme",
+            """
+            label: "Custom Theme"
+            bg: "not-a-real-color"
+            surface: "linear-gradient(180deg, #111, #222)"
+            extra_key: "should be ignored"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        theme = app_config.load_theme("custom_theme")
+        assert theme["bg"] == "not-a-real-color"
+        assert theme["surface"] == "linear-gradient(180deg, #111, #222)"
+        assert "extra_key" not in theme
+
+    def test_malformed_yaml_falls_back_to_defaults_without_crashing(self, tmp_path, monkeypatch):
+        theme_dir = tmp_path / "themes"
+        theme_dir.mkdir(parents=True, exist_ok=True)
+        (theme_dir / "broken_theme.yaml").write_text(
+            "label: Broken Theme\nbg: [\n"
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        themes_map = {theme["name"]: theme for theme in themes}
+        assert "broken_theme" in themes_map
+        assert themes_map["broken_theme"]["label"] == "Broken Theme"
+        assert app_config.load_theme("broken_theme")["bg"] == app_config._THEME_DEFAULTS["dark"]["bg"]
+
+    def test_single_theme_registry_loads_and_can_be_selected(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "only_theme",
+            """
+            label: "Only Theme"
+            bg: "#101010"
+            surface: "#1a1a1a"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        assert len(themes) == 1
+        assert themes[0]["name"] == "only_theme"
+        assert themes[0]["label"] == "Only Theme"
+        assert app_config.load_theme("only_theme")["bg"] == "#101010"
 
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"

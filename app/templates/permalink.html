@@ -202,7 +202,6 @@
     const appName = {{ app_name_json | safe }};
     const label   = {{ label_json | safe }};
     const created = {{ created_json | safe }};
-    const themeClass = document.body.classList.contains('light') ? 'light' : '';
     const fontFacesCss = {{ font_faces_css | tojson }};
 
     const prefixWidth = Math.max(0, ...lines.map((entry, index) => formatPrefix(index + 1, entry).length));
@@ -225,7 +224,6 @@
       title: label,
       metaHtml: `exported ${escHtml(created)}`,
       linesHtml,
-      themeClass,
       fontFacesCss,
     });
 

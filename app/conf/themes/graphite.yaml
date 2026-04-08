@@ -3,6 +3,10 @@
 # A cool, near-neutral grey theme with almost no hue.
 # Clean and clinical — like brushed aluminum, matte white paper.
 
+label: "Graphite"
+group: "Neutral Light"
+sort: 90
+
 bg: "#f0f0f2"
 surface: "#fafafb"
 border: "rgba(30, 30, 50, 0.14)"

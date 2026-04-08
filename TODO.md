@@ -1,45 +1,47 @@
 # TODO
 
-## Runtime Theme Switcher
+## Runtime Theme Selector
 
 This work is separate from the main post-v1.3 cleanup track. Do it in order so the YAML source-of-truth, server discovery, browser application, and docs stay aligned.
 
-1. [ ] Create a canonical theme directory under `app/conf/themes/`
+Design note: the selector is a dedicated modal launched from the theme button, while the options modal stays for non-theme controls. Theme resolution must follow this order: `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, then the baked-in dark fallback palette. If the registry is empty or a saved/default theme name is missing, the app should degrade gracefully instead of inventing a first registry theme or breaking the UI.
+
+1. [x] Create a selectable theme directory under `app/conf/themes/`
    - move the operator-editable theme YAMLs there
-   - keep `theme_dark.yaml` and `theme_light.yaml` as the baseline files or aliases
+   - keep `theme_dark.yaml.example` and `theme_light.yaml.example` as copyable templates only
    - decide whether the sample variants stay as examples or become registry contents
-2. [ ] Add a theme registry loader in `app/config.py`
+2. [x] Add a theme registry loader in `app/config.py`
    - scan the theme directory at startup
    - load and validate every YAML file
    - preserve the current theme schema and reject unknown keys
    - keep the existing built-in defaults as the fallback layer
-3. [ ] Expose the available themes to the browser
+3. [x] Expose the available themes to the browser
    - add a `/themes` or equivalent config endpoint
    - return theme names, labels, and resolved CSS vars
    - keep `default_theme` as the initial selection for first-time visitors
-4. [ ] Add the client-side theme switcher UI
-   - place the dropdown in the top bar or options area
+4. [x] Add the client-side theme selector UI
+   - place the selector in its own dedicated modal, launched from the top-bar theme button
    - switch CSS custom properties on the fly without reloading
    - persist the selected theme in `localStorage`
-   - keep the current light/dark toggle behavior working during migration
-5. [ ] Apply the selected theme consistently across all surfaces
+   - keep the theme selector and legacy cookies working during migration
+5. [x] Apply the selected theme consistently across all surfaces
    - live shell
    - history drawer and overlays
    - permalink pages
    - downloadable HTML exports
    - mobile shell chrome
-6. [ ] Decide and document theme naming conventions
+6. [x] Decide and document theme naming conventions
    - filename-based labels, or
    - an optional label field inside each YAML file
    - document the operator convention once the implementation shape is final
-7. [ ] Add regression coverage
+7. [x] Add regression coverage
    - loading the theme registry
    - switching themes without a page reload
    - persistence across refreshes
    - permalink and export pages honoring the selected theme
    - ignoring invalid or unknown theme keys
-8. [ ] Update docs after the implementation stabilizes
-   - explain the registry and runtime switcher in `README.md`
+8. [x] Update docs after the implementation stabilizes
+   - explain the registry and runtime selector in `README.md`
    - add architecture notes for discovery, selection, and runtime application
    - keep `THEME.md` accurate if the schema or loader behavior changes
 
@@ -143,7 +145,7 @@ This work is separate from the main post-v1.3 cleanup track. Do it in order so t
   - [app/templates/index.html](/Users/nona/repos/shell.darklab.sh/app/templates/index.html)
   - runtime HTML snippets in JS
   - built-in FAQ HTML in [app/commands.py](/Users/nona/repos/shell.darklab.sh/app/commands.py)
-- Move presentation details into CSS classes where possible so the light/dark theme work stays centralized
+- Move presentation details into CSS classes where possible so the theme-selector styling stays centralized
 - Keep the behavior and semantics unchanged:
   - action button labels
   - modal copy

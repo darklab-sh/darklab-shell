@@ -1,6 +1,10 @@
 # shell.darklab.sh — Light Theme: Rose Quartz
 # Dusty pinks and warm slate for a softer editorial interface.
 
+label: "Rose Quartz"
+group: "Warm Light"
+sort: 30
+
 bg: "#faf1f3"
 surface: "#fffafb"
 border: "rgba(96, 72, 84, 0.14)"

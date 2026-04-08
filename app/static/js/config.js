@@ -4,7 +4,7 @@
 let APP_CONFIG = {
   version: '',
   app_name: 'shell.darklab.sh',
-  default_theme: 'dark',
+  default_theme: 'darklab_obsidian.yaml',
   motd: '',
   recent_commands_limit: 8,
   max_output_lines: 2000,

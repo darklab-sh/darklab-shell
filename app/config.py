@@ -5,6 +5,7 @@ Imported by database, process, permalinks, and app modules.
 
 import os
 import pwd
+from pathlib import Path
 import yaml
 
 APP_VERSION = "1.3"
@@ -15,7 +16,7 @@ def load_config():
     defaults = {
         "app_name":                   "shell.darklab.sh",
         "motd":                       "",
-        "default_theme":              "dark",
+        "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,
         "recent_commands_limit":      8,
         "permalink_retention_days":   365,
@@ -268,6 +269,25 @@ _THEME_DEFAULTS = {
     },
 }
 
+_THEME_CONF_DIR = Path(__file__).resolve().parent / "conf"
+_THEME_VARIANT_DIR = _THEME_CONF_DIR / "themes"
+_THEME_BASE_CSS_KEYS = (
+    "bg",
+    "surface",
+    "border",
+    "border_bright",
+    "text",
+    "muted",
+    "green",
+    "green_dim",
+    "green_glow",
+    "amber",
+    "red",
+    "blue",
+    "terminal_font_size",
+    "terminal_line_height",
+)
+
 
 _THEME_CSS_ORDER = (
     "bg",
@@ -385,19 +405,150 @@ def theme_css_vars(theme: dict) -> dict:
     return css_vars
 
 
+def theme_runtime_css_vars(theme: dict) -> dict:
+    """Return the full runtime CSS custom property map for a theme dict."""
+    css_vars = {}
+    for key in _THEME_BASE_CSS_KEYS:
+        if key in theme:
+            css_vars[f"--{key.replace('_', '-')}"] = theme[key]
+    css_vars.update(theme_css_vars(theme))
+    return css_vars
+
+
+def _theme_name_stem(name: str) -> str:
+    stem = str(name).strip()
+    if stem.lower().endswith(".yaml"):
+        stem = stem[:-5]
+    return stem
+
+
+def _theme_label_from_name(name: str) -> str:
+    stem = _theme_name_stem(name)
+    for prefix in ("cg_", "c_", "g_"):
+        if stem.startswith(prefix):
+            stem = stem[len(prefix):]
+            break
+    if stem.startswith("theme_light_"):
+        stem = stem[len("theme_light_"):]
+    elif stem.startswith("theme_dark_"):
+        stem = stem[len("theme_dark_"):]
+    elif stem.startswith("light_"):
+        stem = stem[len("light_"):]
+    elif stem.startswith("dark_"):
+        stem = stem[len("dark_"):]
+    stem = stem.replace("_", " ").strip()
+    return stem.title() if stem else name.replace("_", " ").title()
+
+
+def _theme_sort_value(value):
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _theme_file_candidates(name):
+    stem = _theme_name_stem(name)
+    return (_THEME_VARIANT_DIR / f"{stem}.yaml",)
+
+
+def _load_theme_yaml(name):
+    for theme_path in _theme_file_candidates(name):
+        if os.path.exists(theme_path):
+            try:
+                with open(theme_path) as f:
+                    return yaml.safe_load(f) or {}
+            except yaml.YAMLError:
+                return {}
+    return {}
+
+
 def load_theme(name):
     """Load a theme YAML file, falling back to built-in defaults for missing keys."""
-    defaults = dict(_THEME_DEFAULTS.get(name, _THEME_DEFAULTS["dark"]))
-    theme_path = os.path.join(os.path.dirname(__file__), "conf", f"theme_{name}.yaml")
-    if os.path.exists(theme_path):
-        with open(theme_path) as f:
-            user_theme = yaml.safe_load(f) or {}
-        defaults.update({k: str(v) for k, v in user_theme.items() if k in defaults})
+    name = _theme_name_stem(name)
+    defaults = dict(_THEME_DEFAULTS["dark"])
+    user_theme = _load_theme_yaml(name)
+    defaults.update({k: str(v) for k, v in user_theme.items() if k in defaults})
     return defaults
 
 
-DARK_THEME = load_theme("dark")
-LIGHT_THEME = load_theme("light")
+def _builtin_theme_entry(name):
+    theme = dict(_THEME_DEFAULTS["dark"])
+    return {
+        "name": name,
+        "label": _theme_label_from_name(name),
+        "group": "Other",
+        "sort": 0,
+        "source": "built-in",
+        "vars": theme_runtime_css_vars(theme),
+        "theme_vars": theme_css_vars(theme),
+    }
+
+
+DARK_THEME = dict(_THEME_DEFAULTS["dark"])
+
+
+def _theme_entry(name, *, source="variant"):
+    theme_name = _theme_name_stem(name)
+    user_theme = _load_theme_yaml(theme_name)
+    label = str(user_theme.get("label", "")).strip() or _theme_label_from_name(theme_name)
+    group = str(user_theme.get("group", "")).strip() or "Other"
+    theme = load_theme(theme_name)
+    return {
+        "name": theme_name,
+        "filename": f"{theme_name}.yaml",
+        "label": label,
+        "group": group,
+        "sort": _theme_sort_value(user_theme.get("sort")),
+        "source": source,
+        "vars": theme_runtime_css_vars(theme),
+        "theme_vars": theme_css_vars(theme),
+    }
+
+
+def load_theme_registry():
+    """Return the full list of selectable themes."""
+    entries = []
+    seen = set()
+    if _THEME_VARIANT_DIR.exists():
+        for theme_path in sorted(_THEME_VARIANT_DIR.glob("*.yaml")):
+            name = theme_path.stem
+            if name in seen:
+                continue
+            entries.append(_theme_entry(name, source="variant"))
+            seen.add(name)
+    entries.sort(key=lambda entry: (
+        entry.get("sort") is None,
+        entry.get("sort") if entry.get("sort") is not None else 0,
+        str(entry.get("group", "")),
+        str(entry.get("label", "")),
+        str(entry.get("name", "")),
+    ))
+    return entries
+
+
+THEME_REGISTRY = load_theme_registry()
+THEME_REGISTRY_MAP = {}
+for entry in THEME_REGISTRY:
+    THEME_REGISTRY_MAP[entry["name"]] = entry
+    filename = entry.get("filename")
+    if filename:
+        THEME_REGISTRY_MAP[filename] = entry
+
+
+def get_theme_entry(name, fallback="dark"):
+    """Return a resolved theme registry entry."""
+    if name in THEME_REGISTRY_MAP:
+        return THEME_REGISTRY_MAP[name]
+    if _theme_name_stem(name) in THEME_REGISTRY_MAP:
+        return THEME_REGISTRY_MAP[_theme_name_stem(name)]
+    if fallback in THEME_REGISTRY_MAP:
+        return THEME_REGISTRY_MAP[fallback]
+    if _theme_name_stem(fallback) in THEME_REGISTRY_MAP:
+        return THEME_REGISTRY_MAP[_theme_name_stem(fallback)]
+    return _builtin_theme_entry("dark")
 
 # Scanner user wrapping — prepend sudo -u scanner to run commands as the
 # unprivileged scanner user. appuser (Gunicorn) is granted NOPASSWD sudo

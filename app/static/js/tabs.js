@@ -688,7 +688,6 @@ async function exportTabHtml(id) {
   try {
     const appName = APP_CONFIG.app_name || 'shell.darklab.sh';
     const exportedAt = new Date().toLocaleString();
-    const themeClass = document.body.classList.contains('light') ? 'light' : '';
 
     const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {
       const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
@@ -709,7 +708,6 @@ async function exportTabHtml(id) {
       title: t.label,
       metaHtml: `exported ${ExportHtmlUtils.escapeExportHtml(exportedAt)}`,
       linesHtml,
-      themeClass,
       fontFacesCss,
     });
 

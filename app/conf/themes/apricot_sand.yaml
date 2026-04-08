@@ -1,6 +1,10 @@
 # shell.darklab.sh — Light Theme: Apricot Sand
 # Warm desert paper tones with subtle terracotta accents.
 
+label: "Apricot Sand"
+group: "Warm Light"
+sort: 10
+
 bg: "#fbf2e8"
 surface: "#fffaf3"
 border: "rgba(102, 74, 52, 0.14)"

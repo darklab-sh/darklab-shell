@@ -12,7 +12,7 @@
 <script src="/vendor/ansi_up.js"></script>
 <script src="/static/js/export_html.js"></script>
 </head>
-<body>
+<body data-theme="{{ current_theme.name }}">
 
 <header>
   <h1>shell.darklab.sh</h1>
@@ -20,7 +20,7 @@
   <div class="header-btns" id="header-btns">
     <button id="hist-btn" title="Run history">⧖ history</button>
     <button id="options-btn" title="Display and preference options">≡ options</button>
-    <button id="theme-btn" title="Toggle theme">◑ theme</button>
+    <button id="theme-btn" title="Theme selector">◑ theme</button>
     <button id="faq-btn">? FAQ</button>
   </div>
   <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
@@ -175,6 +175,19 @@
   </div>
 </div>
 
+<!-- Theme Modal -->
+<div id="theme-overlay">
+  <div id="theme-modal">
+    <div class="faq-header">
+      <span class="faq-title">THEME</span>
+      <button class="theme-close" aria-label="Close theme selector">✕</button>
+    </div>
+    <div class="faq-body theme-body">
+      <div id="theme-select" class="theme-picker-grid" aria-label="Theme selector" tabindex="-1"></div>
+    </div>
+  </div>
+</div>
+
 <!-- Options Modal -->
 <div id="options-overlay">
   <div id="options-modal">
@@ -183,19 +196,6 @@
       <button class="options-close" aria-label="Close options">✕</button>
     </div>
     <div class="faq-body options-body">
-      <div class="faq-item">
-        <div class="faq-q">Theme</div>
-        <div class="faq-a options-fieldset" role="radiogroup" aria-label="Theme">
-          <label class="options-choice">
-            <input type="radio" name="theme-pref" value="dark">
-            <span>Dark</span>
-          </label>
-          <label class="options-choice">
-            <input type="radio" name="theme-pref" value="light">
-            <span>Light</span>
-          </label>
-        </div>
-      </div>
       <div class="faq-item">
         <div class="faq-q">Timestamps</div>
         <div class="faq-a">

@@ -1,6 +1,7 @@
 <script>
+  window.ThemeRegistry = {{ theme_registry | tojson }};
   window.ThemeCssVars = {
-    dark: {{ dark_theme_css | tojson }},
-    light: {{ light_theme_css | tojson }},
+    current: {{ current_theme_css | tojson }},
+    fallback: {{ fallback_theme_css | tojson }},
   };
 </script>

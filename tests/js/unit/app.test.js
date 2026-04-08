@@ -2,6 +2,7 @@ import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 async function loadAppFns({
   theme = null,
+  themeRegistry = null,
   cookies = {},
   apiFetch: apiFetchOverride = null,
   doKill: doKillOverride = vi.fn(),
@@ -122,22 +123,24 @@ async function loadAppFns({
         </div>
       </div>
       <div id="tab-panels"></div>
-      <div id="faq-limits-text"></div>
-      <div id="faq-allowed-text"></div>
-      <div id="faq-overlay"></div>
-      <button class="faq-close"></button>
-      <div class="faq-body"></div>
-      <div id="options-overlay"></div>
-      <button class="options-close"></button>
-      <div id="options-modal"></div>
-      <select id="options-ts-select">
-        <option value="off">off</option>
-        <option value="elapsed">elapsed</option>
-        <option value="clock">clock</option>
+    <div id="faq-limits-text"></div>
+    <div id="faq-allowed-text"></div>
+    <div id="faq-overlay"></div>
+    <button class="faq-close"></button>
+    <div class="faq-body"></div>
+    <div id="theme-overlay"></div>
+    <button class="theme-close"></button>
+    <div id="theme-modal"></div>
+    <div id="theme-select" tabindex="-1"></div>
+    <div id="options-overlay"></div>
+    <button class="options-close"></button>
+    <div id="options-modal"></div>
+    <select id="options-ts-select">
+      <option value="off">off</option>
+      <option value="elapsed">elapsed</option>
+      <option value="clock">clock</option>
       </select>
       <input id="options-ln-toggle" type="checkbox" />
-      <label><input type="radio" name="theme-pref" value="dark" /></label>
-      <label><input type="radio" name="theme-pref" value="light" /></label>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
       </div>
@@ -162,7 +165,7 @@ async function loadAppFns({
         json: () => Promise.resolve({
           app_name: 'shell.darklab.sh',
           version: '9.9',
-          default_theme: 'dark',
+          default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 0,
           max_output_lines: 0,
@@ -191,6 +194,7 @@ async function loadAppFns({
     faqCloseBtn: document.querySelector('.faq-close'),
     optionsBtn: document.getElementById('options-btn'),
     optionsCloseBtn: document.querySelector('.options-close'),
+    themeCloseBtn: document.querySelector('.theme-close'),
     newTabBtn: document.getElementById('new-tab-btn'),
     searchToggleBtn: document.getElementById('search-toggle-btn'),
     histBtn: document.getElementById('hist-btn'),
@@ -205,11 +209,11 @@ async function loadAppFns({
     searchNextBtn: document.getElementById('search-next'),
     optionsTsSelect: document.getElementById('options-ts-select'),
     optionsLnToggle: document.getElementById('options-ln-toggle'),
+    themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
     themeBtn: document.getElementById('theme-btn'),
     headerTitle: document.querySelector('header h1'),
-    themePrefInputs: document.querySelectorAll('input[name="theme-pref"]'),
     faqBody: document.querySelector('.faq-body'),
     faqLimitsText: document.getElementById('faq-limits-text'),
     faqAllowedText: document.getElementById('faq-allowed-text'),
@@ -220,6 +224,7 @@ async function loadAppFns({
     histRow: document.getElementById('history-row'),
     tabsBar: document.getElementById('tabs-bar'),
     tabPanels: document.getElementById('tab-panels'),
+    themeOverlay: document.getElementById('theme-overlay'),
     mobileShell: document.getElementById('mobile-shell'),
     mobileShellChrome: document.getElementById('mobile-shell-chrome'),
     mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
@@ -238,6 +243,7 @@ async function loadAppFns({
     historyList: document.getElementById('history-list'),
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
+    themeCloseBtn: document.querySelector('.theme-close'),
     killOverlay: document.getElementById('kill-overlay'),
     histDelOverlay: document.getElementById('hist-del-overlay'),
     faqOverlay: document.getElementById('faq-overlay'),
@@ -306,6 +312,9 @@ async function loadAppFns({
     })
   }
 
+  if (themeRegistry !== null) window.ThemeRegistry = themeRegistry
+  else delete window.ThemeRegistry
+
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -325,6 +334,7 @@ async function loadAppFns({
     apiFetch,
     APP_CONFIG: {},
     AnsiUp: FakeAnsiUp,
+    ThemeRegistry: themeRegistry,
     ...domBindings,
     getOutput: () => document.getElementById('history-list'),
     renderMotd: (text) => text,
@@ -480,15 +490,32 @@ async function loadAppFns({
 
 describe('app helpers', () => {
   beforeEach(() => {
-    ;['pref_theme', 'pref_timestamps', 'pref_line_numbers'].forEach(name => {
+    ;['pref_theme', 'pref_theme_name', 'pref_timestamps', 'pref_line_numbers'].forEach(name => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
   })
 
-  it('applies the saved light theme at startup', async () => {
-    await loadAppFns({ theme: 'light' })
+  it('applies the saved theme at startup', async () => {
+    await loadAppFns({
+      theme: 'theme_light_blue',
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+        ],
+      },
+    })
 
-    expect(document.body.classList.contains('light')).toBe(true)
   })
 
   it('applies saved timestamp and line number preferences from cookies at startup', async () => {
@@ -558,15 +585,267 @@ describe('app helpers', () => {
     expect(cmdInput.focus).toHaveBeenCalled()
   })
 
-  it('refocuses the terminal input after toggling theme', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('opens the theme selector from the theme button', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
 
     document.getElementById('theme-btn').click()
-    expect(cmdInput.focus).toHaveBeenCalled()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
+    expect(document.querySelector('#theme-select .theme-card-active')).toBe(document.activeElement)
+  })
 
-    cmdInput.focus.mockClear()
-    document.querySelector('#mobile-menu [data-action="theme"]').click()
-    expect(cmdInput.focus).toHaveBeenCalled()
+  it('populates the theme select from the registry and applies the selected theme', async () => {
+    const themeRegistry = {
+      current: {
+        name: 'theme_light_blue',
+        label: 'Blue Paper',
+        source: 'variant',
+        vars: { '--bg': '#9ab7d0' },
+      },
+      themes: [
+        {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        {
+          name: 'theme_light_olive',
+          label: 'Olive Parchment',
+          source: 'variant',
+          vars: { '--bg': '#c0c0a8' },
+        },
+      ],
+    }
+
+    await loadAppFns({ themeRegistry })
+
+    const themeSelect = document.getElementById('theme-select')
+    expect(themeSelect).not.toBeNull()
+    const themeCards = Array.from(themeSelect.querySelectorAll('[data-theme-name]'))
+    expect(themeCards.map(card => card.dataset.themeName)).toEqual([
+      'theme_light_blue',
+      'theme_light_olive',
+    ])
+    expect(themeCards.map(card => card.querySelector('.theme-card-label')?.textContent)).toEqual([
+      'Blue Paper',
+      'Olive Parchment',
+    ])
+
+    themeSelect.querySelector('[data-theme-name="theme_light_blue"]').click()
+
+    expect(document.body.dataset.theme).toBe('theme_light_blue')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_blue')
+
+    themeSelect.querySelector('[data-theme-name="theme_light_olive"]').click()
+
+    expect(document.body.dataset.theme).toBe('theme_light_olive')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
+  })
+
+  it('groups theme cards into labeled sections in the preview modal', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'blue_paper',
+          label: 'Blue Paper',
+          group: 'Cool Light',
+          sort: 50,
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'blue_paper',
+            label: 'Blue Paper',
+            group: 'Cool Light',
+            sort: 50,
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'olive_grove',
+            label: 'Olive Grove',
+            group: 'Warm Light',
+            sort: 20,
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+          {
+            name: 'rose_quartz',
+            label: 'Rose Quartz',
+            group: 'Warm Light',
+            sort: 30,
+            source: 'variant',
+            vars: { '--bg': '#e6d7dc' },
+          },
+          {
+            name: 'graphite',
+            label: 'Graphite',
+            group: 'Neutral Light',
+            sort: 90,
+            source: 'variant',
+            vars: { '--bg': '#d0d0d0' },
+          },
+        ],
+      },
+    })
+
+    const groupTitles = Array.from(document.querySelectorAll('#theme-select .theme-picker-group-title')).map(node => node.textContent)
+    expect(groupTitles).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    const sectionGroups = Array.from(document.querySelectorAll('#theme-select .theme-picker-group')).map(node => node.dataset.themeGroup)
+    expect(sectionGroups).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    expect(document.getElementById('theme-select')?.style.getPropertyValue('--theme-picker-columns')).toBe('2')
+    expect(document.querySelectorAll('#theme-select [data-theme-name]').length).toBe(4)
+  })
+
+  it('falls back to the current/default theme when localStorage references a missing theme', async () => {
+    await loadAppFns({
+      theme: 'theme_missing',
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
+
+    expect(document.body.dataset.theme).toBe('theme_light_blue')
+    expect(document.querySelector('#theme-select .theme-card-active')?.dataset.themeName).toBe('theme_light_blue')
+  })
+
+  it('falls back to the baked-in dark palette when the configured default theme is missing', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: null,
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+      apiFetch: vi.fn((url) => {
+        if (url === '/config') {
+          return Promise.resolve({
+            json: () => Promise.resolve({
+              app_name: 'shell.darklab.sh',
+              version: '9.9',
+              default_theme: 'theme_missing.yaml',
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+          })
+        }
+        if (url === '/allowed-commands') {
+          return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }) })
+        }
+        if (url === '/faq') {
+          return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+
+    expect(document.body.dataset.theme).toBe('dark')
+    expect(document.querySelector('#theme-select .theme-card-active')).toBeNull()
+  })
+
+  it('shows an empty state when no themes are registered and falls back to the baked-in dark palette', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: null,
+        themes: [],
+      },
+    })
+
+    expect(document.body.dataset.theme).toBe('dark')
+
+    document.getElementById('theme-btn').click()
+    expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('theme-select').textContent).toContain('No themes available')
+  })
+
+  it('renders a single theme card and applies it when only one theme is available', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'only_theme',
+          label: 'Only Theme',
+          filename: 'only_theme.yaml',
+          source: 'variant',
+          vars: { '--bg': '#ccd9e6' },
+        },
+        themes: [
+          {
+            name: 'only_theme',
+            label: 'Only Theme',
+            filename: 'only_theme.yaml',
+            source: 'variant',
+            vars: { '--bg': '#ccd9e6' },
+          },
+        ],
+      },
+    })
+
+    const themeSelect = document.getElementById('theme-select')
+    const themeCards = Array.from(themeSelect.querySelectorAll('[data-theme-name]'))
+    expect(themeCards).toHaveLength(1)
+    expect(themeCards[0].dataset.themeName).toBe('only_theme')
+    expect(themeCards[0].querySelector('.theme-card-label')?.textContent).toBe('Only Theme')
+
+    themeCards[0].click()
+    expect(document.body.dataset.theme).toBe('only_theme')
+    expect(document.cookie).toContain('pref_theme_name=only_theme')
   })
 
   it('refocuses the terminal input after closing the FAQ modal', async () => {
@@ -667,7 +946,6 @@ describe('app helpers', () => {
     expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
     expect(logClientError).toHaveBeenCalledWith('failed to load /allowed-commands', expect.any(Error))
     expect(logClientError).toHaveBeenCalledWith('failed to load /autocomplete', expect.any(Error))
-    expect(document.body.classList.contains('light')).toBe(false)
     expect(storage.getItem('theme')).toBeNull()
   })
 
@@ -1159,7 +1437,7 @@ describe('app helpers', () => {
         json: () => Promise.resolve({
           app_name: 'shell.darklab.sh',
           version: '9.9',
-          default_theme: 'dark',
+          default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 0,
             max_output_lines: 0,
@@ -1764,6 +2042,36 @@ describe('app helpers', () => {
     expect(faqOverlay.classList.contains('open')).toBe(false)
   })
 
+  it('closes the theme overlay and refocuses the terminal on Escape', async () => {
+    await loadAppFns({
+      mobileTouch: false,
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+        ],
+      },
+    })
+    const themeOverlay = document.getElementById('theme-overlay')
+
+    document.getElementById('theme-btn').click()
+    expect(themeOverlay.classList.contains('open')).toBe(true)
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(themeOverlay.classList.contains('open')).toBe(false)
+  })
+
   it('does not refocus the mobile composer when closing options', async () => {
     const { getVisibleComposerInput } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
@@ -1803,21 +2111,45 @@ describe('app helpers', () => {
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
-    await loadAppFns()
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
 
+    document.getElementById('theme-btn').click()
+    document.getElementById('theme-select').querySelector('[data-theme-name="theme_light_olive"]').click()
+    document.getElementById('theme-overlay').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     document.getElementById('options-btn').click()
-    document.querySelector('input[name="theme-pref"][value="light"]').click()
     document.getElementById('options-ts-select').value = 'elapsed'
     document.getElementById('options-ts-select').dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-ln-toggle').checked = true
     document.getElementById('options-ln-toggle').dispatchEvent(new Event('change', { bubbles: true }))
 
-    expect(document.body.classList.contains('light')).toBe(true)
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
-    expect(document.cookie).toContain('pref_theme=light')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
     expect(document.cookie).toContain('pref_timestamps=elapsed')
     expect(document.cookie).toContain('pref_line_numbers=on')
   })
@@ -1829,7 +2161,7 @@ describe('app helpers', () => {
         json: () => Promise.resolve({
           app_name: 'shell.darklab.sh',
           version: '9.9',
-          default_theme: 'dark',
+          default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 120,
             max_output_lines: 5000,
@@ -1878,7 +2210,7 @@ describe('app helpers', () => {
           json: () => Promise.resolve({
             app_name: 'shell.darklab.sh',
             version: '9.9',
-            default_theme: 'dark',
+            default_theme: 'darklab_obsidian.yaml',
             motd: '',
             command_timeout_seconds: 120,
             max_output_lines: 5000,
@@ -1930,7 +2262,7 @@ describe('app helpers', () => {
           json: () => Promise.resolve({
             app_name: 'shell.darklab.sh',
             version: '9.9',
-            default_theme: 'dark',
+            default_theme: 'darklab_obsidian.yaml',
             motd: '',
             command_timeout_seconds: 120,
             max_output_lines: 5000,

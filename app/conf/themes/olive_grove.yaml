@@ -1,6 +1,10 @@
 # shell.darklab.sh — Light Theme: Olive Grove
 # Soft natural greens with parchment neutrals.
 
+label: "Olive Grove"
+group: "Warm Light"
+sort: 20
+
 bg: "#f3f2ea"
 surface: "#fcfbf6"
 border: "rgba(70, 82, 58, 0.14)"

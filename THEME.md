@@ -6,23 +6,44 @@ This document is the full reference for the shell theme system. It explains how 
 
 Theme support is split into a small pipeline:
 
-1. `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml` are the operator-editable source files.
-2. `app/config.py` loads those files, merges them with the built-in defaults, and filters out unknown keys.
-3. `theme_css_vars()` converts the resolved theme values into CSS custom properties such as `--theme-panel-bg`.
-4. `app/templates/theme_vars_style.html` injects the resolved CSS variables into the page so `styles.css` can use them directly.
-5. `app/templates/theme_vars_script.html` exposes the same resolved values as `window.ThemeCssVars` for browser-side export helpers.
-6. `app/static/css/styles.css` consumes the theme vars for the live UI, permalink pages, and shared chrome.
-7. `app/static/js/export_html.js` reads the injected theme vars when generating downloadable HTML, so exported snapshots stay portable and match the active theme.
+1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes.
+2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are copyable template files only; they are not loaded into the runtime selector.
+3. `app/config.py` loads the YAML files under `app/conf/themes/`, merges them with the built-in fallback defaults, filters out unknown keys, and builds the selectable theme registry. If a YAML file includes `label:`, that value becomes the friendly preview-card label; if it includes `group:`, that value becomes the preview-section header; if it includes `sort:`, that numeric value controls the modal ordering. `default_theme` in `app/conf/config.yaml` uses the full filename, while the registry still persists the stem for theme selection and localStorage.
+4. `theme_css_vars()` converts the component-chrome keys into CSS custom properties such as `--theme-panel-bg`, while `theme_runtime_css_vars()` exposes the full live CSS var map used by the runtime selector.
+5. `app/templates/theme_vars_style.html` injects the resolved CSS variables into the page so `styles.css` can use them directly.
+6. `app/templates/theme_vars_script.html` exposes the current theme plus the registry as `window.ThemeCssVars` / `window.ThemeRegistry` for browser-side theme switching and export helpers.
+7. `app/app.py` exposes `/themes` so the browser can inspect the active registry.
+8. `app/static/js/app.js` applies the selected theme on the fly from the dedicated theme selector modal preview cards, and persists the choice in cookies/localStorage.
+9. `app/static/js/export_html.js` reads the injected theme vars when generating downloadable HTML, so exported snapshots stay portable and match the active theme.
 
-The live app, permalink pages, and exported HTML all read from the same resolved theme values. That is the main reason the theme system was externalized.
+The live app, permalink pages, runtime preview modal, and exported HTML all read from the same resolved theme values. That is the main reason the theme system was externalized.
+
+## Theme Resolution Order
+
+The runtime theme choice is resolved in this order:
+
+1. `localStorage.theme`
+2. `default_theme` from `app/conf/config.yaml`
+3. the baked-in dark fallback palette in `app/config.py`
+
+That means the browser always prefers the user’s last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. During the selector migration, legacy `pref_theme_name` / `pref_theme` cookies may still be read for compatibility, but they are not the canonical source of truth.
+
+## Baked-In Fallback Palette
+
+The hardcoded fallback lives in `app/config.py` under `_THEME_DEFAULTS["dark"]`. That is the last-resort palette used when the selected theme cannot be loaded or the registry is empty. It is the same dark reference palette captured in `app/conf/theme_dark.yaml.example` and the active `app/conf/themes/darklab_obsidian.yaml` theme file.
+
+The fallback palette includes the full set of supported keys: base colors, typography, terminal chrome, toolbar buttons, chips, tabs, history, modals, dropdowns, FAQ controls, status/toasts, the mobile shell/menu, and welcome/onboarding styling. In other words, every key listed in the appendix below has a baked-in dark default in code. If you need the exact source of truth, inspect `_THEME_DEFAULTS["dark"]` in [app/config.py](app/config.py).
 
 ## Editing Rules
 
-- Both theme files use commented-out defaults. Uncomment only the keys you want to override.
+- The example template files use commented-out defaults. Uncomment only the keys you want to override, then copy the file into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up.
 - Unknown keys are ignored by `app/config.py`; only keys that exist in `_THEME_DEFAULTS` are accepted.
-- Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
-- Restart the container after changing either theme file. No rebuild is required.
-- Example variants such as `app/conf/theme_light_blue.yaml`, `app/conf/theme_light_olive.yaml`, and `app/conf/theme_light_sand.yaml` can live beside the canonical files as inspiration or starting points, but the loader only reads `theme_dark.yaml` and `theme_light.yaml` directly.
+- Values may be any valid CSS color, length, gradient, or shadow string, depending on the key. You can also reference other resolved theme variables with CSS `var(--name)` syntax; the browser resolves those references after the vars are injected.
+- If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing the app. That means a bad edit will not take down the runtime selector, but the file should still be fixed before it is considered usable.
+- Restart the container after changing any loaded theme file under `app/conf/themes/` or after changing `config.yaml`. No rebuild is required.
+- Example variants under `app/conf/themes/` and the ad-hoc light-theme files in `app/conf/` can live beside the canonical files as inspiration or starting points. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
+- Theme YAMLs may include optional `label:`, `group:`, and `sort:` fields. `label:` is the visible card name, `group:` becomes the section header in the theme modal, and `sort:` controls ordering between cards and sections. If `label:` is missing, the selector falls back to a humanized filename stem. If `group:` is missing, the selector uses `Other`. There is no filename-based or palette-based group inference. If `sort:` is missing, the selector orders the entry after any explicitly sorted themes.
+- If you want one theme value to inherit or derive from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; they are interpreted by the browser, not by YAML parsing.
 - The base palette keys are exposed as normal CSS variables such as `--bg`, `--surface`, `--text`, `--green`, and `--blue`.
 - The component chrome keys are exposed as `--theme-*` variables, for example `--theme-panel-bg`, `--theme-tab-active-text`, and `--theme-toast-border`.
 
@@ -30,19 +51,22 @@ The live app, permalink pages, and exported HTML all read from the same resolved
 
 | File | Role |
 |------|------|
-| `app/conf/theme_dark.yaml` | Dark theme operator overrides and inline documentation |
-| `app/conf/theme_light.yaml` | Light theme operator overrides and inline documentation |
+| `app/conf/theme_dark.yaml.example` | Dark theme template/reference file with every supported key plus metadata comments |
+| `app/conf/theme_light.yaml.example` | Light theme template/reference file with every supported key plus metadata comments |
+| `app/conf/themes/` | Additional named theme variants loaded into the runtime selector |
 | `app/config.py` | Loads, validates, and resolves theme values |
+| `app/app.py` | Exposes `/themes` and injects the current theme into the main shell |
 | `app/templates/theme_vars_style.html` | Injects resolved CSS variables into the page |
-| `app/templates/theme_vars_script.html` | Exposes resolved theme values to browser JS |
+| `app/templates/theme_vars_script.html` | Exposes resolved theme values and the theme registry to browser JS |
 | `app/static/css/styles.css` | Consumes the theme vars for live UI styling |
+| `app/static/js/app.js` | Applies the selected theme on the fly from the theme selector modal preview cards |
 | `app/static/js/export_html.js` | Builds downloadable HTML snapshots from the resolved vars |
 
 ## How The Code Works
 
 ### 1. Load and merge
 
-`load_theme(name)` in `app/config.py` starts with `_THEME_DEFAULTS[name]` and merges any values from `app/conf/theme_<name>.yaml`. If a key is missing, the built-in default remains in effect.
+`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml` and merges any values from that file with the built-in defaults. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. If a key is missing, the built-in default remains in effect.
 
 ### 2. Export as CSS vars
 
@@ -50,19 +74,30 @@ The live app, permalink pages, and exported HTML all read from the same resolved
 
 ### 3. Inject into the templates
 
-`app.py` and `permalinks.py` pass `dark_theme_css` and `light_theme_css` into the templates. `theme_vars_style.html` turns those dictionaries into a `<style>` block containing `:root { ... }` and `body.light { ... }` declarations. That means the browser never needs to guess at the current palette.
+`app.py` and `permalinks.py` pass runtime CSS vars built from the built-in default palettes into the templates. `theme_vars_style.html` turns the selected theme's variables into a `<style>` block containing `:root { ... }` declarations. That means the browser never needs to guess at the current palette.
 
 ### 4. Expose the values to JS
 
-`theme_vars_script.html` serializes the same resolved values into `window.ThemeCssVars`. Browser-side helpers, especially the HTML export builder, can then read the exact runtime theme without duplicating a hardcoded palette.
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder and the runtime theme selector, can then read the exact runtime theme without duplicating a hardcoded palette.
 
 ### 5. Consume from CSS and export helpers
 
-`styles.css` now uses the shared vars for the live shell, tabs, history drawer, FAQ, modals, mobile UI, welcome art, and toast surfaces. `export_html.js` uses the same vars when building downloadable HTML snapshots so the saved file matches the active theme instead of drifting over time.
+`styles.css` now uses the shared vars for the live shell, tabs, history drawer, FAQ, modals, mobile UI, welcome art, and toast surfaces. `app.js` applies the selected theme live by swapping the root CSS variables on `:root`. `export_html.js` uses the same vars when building downloadable HTML snapshots so the saved file matches the active theme instead of drifting over time.
+
+## Runtime Theme Selector
+
+The theme preview grid in the dedicated theme selector modal is driven by the runtime theme registry. The browser:
+
+1. reads the selected theme from `pref_theme_name` / `localStorage.theme`
+2. uses the registry to find the matching entry and apply its CSS vars
+3. persists the exact theme name back to cookies and localStorage
+4. updates the current export state so tab HTML and permalinks stay in sync
+
+The built-in `theme` button is a shortcut to the theme selector modal, but the preview grid is the source of truth for named variants.
 
 ## Appendix: Theme Options
 
-The tables below list every supported theme key from `_THEME_DEFAULTS`. The dark and light files share the same key set; only the values differ.
+The tables below list every supported theme key from `_THEME_DEFAULTS`. The runtime selector simply applies one resolved theme entry at a time. The extra columns are reference data for theme authors and for the example templates; they are not a runtime mode switch.
 
 ### Base Palette
 
@@ -199,8 +234,8 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The dark
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `mobile_composer_host_bg` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | Mobile composer host background in dark mode and base fallback |
-| `mobile_composer_host_light_bg` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | Mobile composer host background in light mode |
+| `mobile_composer_host_bg` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | `linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))` | Mobile composer host background for the default shell variant |
+| `mobile_composer_host_light_bg` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | `linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))` | Mobile composer host background for the lighter shell variants |
 | `mobile_menu_bg` | `#141414` | `#eef2f6` | Mobile overflow/menu panel background |
 | `mobile_menu_border` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Mobile menu border |
 | `mobile_menu_shadow` | `rgba(0,0,0,0.6)` | `rgba(0,0,0,0.6)` | Mobile menu shadow |

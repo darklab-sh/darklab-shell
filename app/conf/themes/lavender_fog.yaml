@@ -1,6 +1,10 @@
 # shell.darklab.sh — Light Theme: Lavender Fog
 # Cool lilac grays with a muted studio look.
 
+label: "Lavender Fog"
+group: "Cool Light"
+sort: 60
+
 bg: "#f2f0f8"
 surface: "#fdfcff"
 border: "rgba(66, 61, 92, 0.14)"
