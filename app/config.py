@@ -22,6 +22,7 @@ def load_config():
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
+        "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
         "max_output_lines":           2000,

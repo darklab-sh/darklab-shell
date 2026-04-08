@@ -33,17 +33,29 @@ def get_client(*, use_forwarded_for=True):
 
 class TestRequestHelpers:
     def test_prefers_valid_forwarded_for(self):
-        with shell_app.app.test_request_context("/", headers={"X-Forwarded-For": "203.0.113.9"}):
+        with shell_app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"X-Forwarded-For": "203.0.113.9"},
+        ):
             assert shell_app.get_client_ip() == "203.0.113.9"
 
-    def test_uses_first_forwarded_for_when_multiple(self):
-        with shell_app.app.test_request_context("/", headers={"X-Forwarded-For": "198.51.100.5, 10.0.0.1"}):
-            assert shell_app.get_client_ip() == "198.51.100.5"
+    def test_uses_last_untrusted_forwarded_for_when_multiple(self):
+        with shell_app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"X-Forwarded-For": "198.51.100.5, 10.0.0.1"},
+        ):
+            assert shell_app.get_client_ip() == "10.0.0.1"
 
     def test_invalid_forwarded_for_falls_back(self):
-        with shell_app.app.test_request_context("/", headers={"X-Forwarded-For": "definitely-not-an-ip"}):
+        with shell_app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"X-Forwarded-For": "definitely-not-an-ip"},
+        ):
             # Flask test client context usually falls back to 127.0.0.1
-            assert shell_app.get_client_ip()
+            assert shell_app.get_client_ip() == "127.0.0.1"
 
     def test_get_session_id_strips_whitespace(self):
         with shell_app.app.test_request_context("/", headers={"X-Session-ID": "  abc123  "}):

@@ -1227,7 +1227,7 @@ class TestContentTypes:
 # ── get_client_ip ─────────────────────────────────────────────────────────────
 
 class TestGetClientIp:
-    """get_client_ip() uses X-Forwarded-For when it contains a valid IP,
+    """get_client_ip() honors X-Forwarded-For only for trusted proxy peers,
     otherwise falls back to the direct connection IP (REMOTE_ADDR)."""
 
     def setup_method(self, method):  # noqa: ARG002
@@ -1249,11 +1249,28 @@ class TestGetClientIp:
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "2001:db8::1"
 
-    def test_first_ip_used_when_xff_has_multiple(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+    def test_last_untrusted_ip_used_when_xff_has_multiple_trusted_hops(self):
+        original_cidrs = list(shell_app.CFG.get("trusted_proxy_cidrs", []))
+        with mock.patch.dict(
+            shell_app.CFG,
+            {"trusted_proxy_cidrs": original_cidrs + ["10.0.0.0/8"]},
+            clear=False,
+        ), mock.patch.object(shell_app.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": "5.6.7.8, 10.0.0.1"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "5.6.7.8"
+
+    def test_untrusted_proxy_logs_proxy_ip_and_falls_back(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warning:
+            with shell_app.app.test_request_context(
+                "/health",
+                environ_base={"REMOTE_ADDR": "203.0.113.10"},
+                headers={"X-Forwarded-For": "1.2.3.4"},
+            ):
+                assert shell_app.get_client_ip() == "203.0.113.10"
+        calls = [c for c in mock_warning.call_args_list if c[0][0] == "UNTRUSTED_PROXY"]
+        assert calls[0].kwargs["extra"]["proxy_ip"] == "203.0.113.10"
+        assert calls[0].kwargs["extra"]["forwarded_for"] == "1.2.3.4"
 
     def test_no_xff_falls_back_to_remote_addr(self):
         with mock.patch.object(shell_app.log, "debug") as mock_debug:

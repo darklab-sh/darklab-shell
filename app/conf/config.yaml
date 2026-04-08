@@ -53,6 +53,17 @@ default_theme: darklab_obsidian.yaml
 # Server default if unset: text
 log_format: gelf
 
+# ── Trusted Proxies ──────────────────────────────────────────────────────────
+
+# IPs or CIDR ranges that are allowed to supply X-Forwarded-For values.
+# Requests from outside these ranges ignore forwarded headers and use the
+# direct connection IP instead. The default keeps loopback trusted for local
+# development and tests; production should list the actual reverse proxy subnet
+# here if it is not already covered.
+# trusted_proxy_cidrs:
+#   - 127.0.0.1/32
+#   - ::1/128
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
 # Maximum number of /run requests per minute per IP

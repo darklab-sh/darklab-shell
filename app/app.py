@@ -5,9 +5,10 @@ Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
-from flask import Flask, Response, request, jsonify, send_file, render_template, abort
+from flask import Flask, Response, request, jsonify, send_file, render_template, abort, g
 from flask_limiter import Limiter
-from flask_limiter.util import get_remote_address
+from functools import lru_cache
+import ipaddress
 import shutil
 import subprocess  # nosec B404
 import json
@@ -68,24 +69,85 @@ _VENDOR_FONT_FILES = frozenset({
     "Syne-700.ttf",
     "Syne-800.ttf",
 })
+_UNTRUSTED_PROXY_LOGGED_FLAG = "_untrusted_proxy_logged"
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
-_IP_RE = re.compile(
-    r"^((\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$"
-)
+_IP_RE = re.compile(r"^((\d{1,3}\.){3}\d{1,3}|[0-9a-fA-F:]{2,39})$")
+
+
+@lru_cache(maxsize=8)
+def _trusted_proxy_networks(cidr_values):
+    networks = []
+    for cidr in cidr_values:
+        if not cidr:
+            continue
+        try:
+            networks.append(ipaddress.ip_network(cidr, strict=False))
+        except ValueError:
+            continue
+    return tuple(networks)
+
+
+def _peer_ip_is_trusted(peer_ip):
+    if not peer_ip:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(peer_ip)
+    except ValueError:
+        return False
+    trusted_networks = _trusted_proxy_networks(tuple(CFG.get("trusted_proxy_cidrs", ())))
+    return any(ip_obj in network for network in trusted_networks)
+
+
+def _resolve_forwarded_client_ip(peer_ip, forwarded_for):
+    if not forwarded_for:
+        return peer_ip
+    trusted_networks = _trusted_proxy_networks(tuple(CFG.get("trusted_proxy_cidrs", ())))
+    forwarded_chain = [part.strip() for part in forwarded_for.split(",") if part.strip()]
+    if not forwarded_chain:
+        return peer_ip
+    for candidate in reversed(forwarded_chain):
+        if not _IP_RE.match(candidate):
+            continue
+        try:
+            candidate_ip = ipaddress.ip_address(candidate)
+        except ValueError:
+            continue
+        if any(candidate_ip in network for network in trusted_networks):
+            continue
+        return candidate
+    return peer_ip
+
+
+def _log_untrusted_proxy(peer_ip, forwarded_for):
+    if getattr(g, _UNTRUSTED_PROXY_LOGGED_FLAG, False):
+        return
+    setattr(g, _UNTRUSTED_PROXY_LOGGED_FLAG, True)
+    log.warning(
+        "UNTRUSTED_PROXY",
+        extra={
+            "ip": peer_ip,
+            "proxy_ip": peer_ip,
+            "forwarded_for": forwarded_for,
+            "path": request.path,
+        },
+    )
 
 
 def get_client_ip():
     """Return the real client IP.
 
-    Uses X-Forwarded-For when it contains a valid IP address (set by a reverse
-    proxy such as nginx-proxy), otherwise falls back to the direct connection IP.
+    Only honors X-Forwarded-For when the direct peer IP is in the configured
+    trusted-proxy list; otherwise falls back to the direct connection IP.
     """
-    forwarded_for = request.headers.get("X-Forwarded-For", "").split(",")[0].strip()
-    if forwarded_for and _IP_RE.match(forwarded_for):
-        return forwarded_for
-    return get_remote_address()
+    peer_ip = request.remote_addr or ""
+    forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
+    if _peer_ip_is_trusted(peer_ip):
+        return _resolve_forwarded_client_ip(peer_ip, forwarded_for)
+    if forwarded_for:
+        _log_untrusted_proxy(peer_ip, forwarded_for)
+    return peer_ip
 
 limiter = Limiter(
     key_func=get_client_ip,

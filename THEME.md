@@ -1,6 +1,6 @@
 # Theme System
 
-This document is the full reference for the shell theme system. It explains how the theme files are loaded, how the values flow into the browser, and what every configurable key does.
+This document is the full reference for the completed shell theme system. It explains how the theme files are loaded, how the values flow into the browser, and what every configurable key does.
 
 ## Overview
 
@@ -86,7 +86,7 @@ The fallback palette includes the full set of supported keys: base colors, typog
 
 ## Runtime Theme Selector
 
-The theme preview grid in the dedicated theme selector modal is driven by the runtime theme registry. The browser:
+The completed theme preview grid in the dedicated theme selector modal is driven by the runtime theme registry. The browser:
 
 1. reads the selected theme from `pref_theme_name` / `localStorage.theme`
 2. uses the registry to find the matching entry and apply its CSS vars
