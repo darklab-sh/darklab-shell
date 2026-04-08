@@ -593,6 +593,37 @@ describe('tabs helpers', () => {
     delete window.ExportHtmlUtils
   })
 
+  it('builds exported HTML styles from the injected theme vars object', () => {
+    window.ThemeCssVars = {
+      dark: {
+        '--bg': '#0d0d0d',
+        '--surface': '#141414',
+        '--text': '#e0e0e0',
+        '--green': '#39ff14',
+      },
+      light: {
+        '--bg': '#b8c4d0',
+        '--surface': '#eef2f6',
+        '--text': '#101820',
+        '--green': '#2a5d18',
+      },
+    }
+
+    const { buildTerminalExportStyles } = fromDomScripts([
+      'app/static/js/export_html.js',
+    ], {
+      document,
+    }, `ExportHtmlUtils`)
+
+    const css = buildTerminalExportStyles('light')
+    expect(css).toContain('--bg: #b8c4d0;')
+    expect(css).toContain('--surface: #eef2f6;')
+    expect(css).toContain('--text: #101820;')
+    expect(css).toContain('--green: #2a5d18;')
+
+    delete window.ThemeCssVars
+  })
+
   it('saveTab shows a toast when there is only welcome output', () => {
     const { createTab, saveTab, _getTabs } = loadTabsFns()
     const id = createTab('tab 1')

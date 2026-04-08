@@ -81,7 +81,7 @@ test.describe('permalink / share', () => {
     for await (const chunk of htmlStream) htmlChunks.push(chunk)
     const html = Buffer.concat(htmlChunks).toString('utf8')
     expect(html).toContain('body class="light"')
-    expect(html).toContain('--bg: #e7e6e1')
+    expect(html).toContain('--theme-bg: #b8c4d0')
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {

@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals on this branch:
 
 - `pytest`: 466
-- `vitest`: 238
+- `vitest`: 239
 - `playwright`: 126
-- total: 830
+- total: 831
 
 ## Running The Suites
 
@@ -72,7 +72,7 @@ Files and focus:
 - `history.test.js` - starred state helpers, startup hydration for blank-input command recall, clipboard fallback handling, history-panel action-button close behavior, history action failures, and the restore-loading overlay for history-to-tab preview fetches
 - `session.test.js` - session ID persistence and `apiFetch()` header injection
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
-- `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, currentRunStartIndex alignment when old raw lines are pruned from the front, refocus behavior after copy/save/html export actions, and clearing un-ran composer input
+- `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, currentRunStartIndex alignment when old raw lines are pruned from the front, refocus behavior after copy/save/html export actions, clearing un-ran composer input, and the export helper’s injected theme-vars plumbing
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, featured-sample interaction behavior, and mobile banner loading
 - `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, and the shared mobile focus/blur helpers
 - `search.test.js` - search helper boundaries and no-op behavior
@@ -94,12 +94,12 @@ Spec files:
 - `history.spec.js` - history drawer load, dedup tab switching, starring, delete, and clear flows
 - `kill.spec.js` - kill confirmation, Ctrl+C shell-kill behavior, Enter/Escape modal confirmation flow, killed-state UI, and closing the only running tab while a command is active; it uses a browser-side fetch mock for the long-running SSE and a per-run `X-Forwarded-For` bucket so the modal flow stays deterministic across repeated suite runs
 - `mobile.spec.js` - mobile startup composer visibility, keyboard open/close transitions, transcript tap dismissal, mobile input tap no-scroll focus, new-tab/close-tab scroll behavior, status-pill placement in the mobile header, mobile tab-row overflow/scrolling, Run/Enter/chip wiring, mobile menu visibility and dismissal, recent-chip overflow behavior, mobile edit-bar actions, mobile autocomplete placement, long-command caret scrolling, action-button focus cleanup, clear/kill preservation while a command is active, Run-button disable/reenable coverage while a command is active, and close-button focus cleanup after single-tab reset
-- `output.spec.js` - copy, clear, save txt/html, clipboard failure handling, and exported HTML assertions for the shared export helper with embedded portable font data
+- `output.spec.js` - copy, clear, save txt/html, clipboard failure handling, and exported HTML assertions for the shared export helper with embedded portable font data and resolved theme vars
 - `rate-limit.spec.js` - per-session `/run` rate limiting
 - `runner-stall.spec.js` - stalled SSE recovery
 - `search.spec.js` - search, highlighting, navigation, and regex/case modes
 - `shortcuts.spec.js` - keyboard shortcut coverage for macOS-style Option bindings including tab actions, permalink/copy, clear, and prompt word-motion behavior
-- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, template-backed permalink pages, permalink line-number/timestamp toggles, preference-cookie defaults on load, permalink page cookie defaults, mobile permalink toast hide behavior, permalink export filename/content assertions, embedded-font HTML export assertions, and clipboard failure handling
+- `share.spec.js` - snapshot permalinks, canonical single-run permalinks, template-backed permalink pages, permalink line-number/timestamp toggles, preference-cookie defaults on load, permalink page cookie defaults, mobile permalink toast hide behavior, permalink export filename/content assertions, embedded-font HTML export assertions, resolved-theme export assertions, and clipboard failure handling
 - `tabs.spec.js` - max tabs, rename, drag reorder, neutral-input switching, blank-prompt Enter behavior, running-tab isolation, and closing behavior including kill/reset paths
 - `timestamps.spec.js` - timestamp mode toggling, line metadata, line-number compatibility, and toggle-to-typing flow
 - `ui.spec.js` - theme toggle plus backend-driven FAQ modal rendering, close behavior, allowlist-chip interaction, and options-modal preference persistence

@@ -5,7 +5,12 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
-## [1.3] — unreleased
+## [1.4] — unreleased
+
+### Added
+- **Theme externalization** — the dark/light palette and component chrome values are now documented in `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`, injected into the live pages as shared CSS/JS theme variables, and reused by the permalink/export helpers so exported HTML stays in sync with the active theme
+
+## [1.3] — 2026-04-07
 
 ### Added
 - **Terminal-native input surface** — the visible command-entry UI is now rendered inline inside terminal output while keeping a hidden real input for browser/mobile keyboard semantics
@@ -49,6 +54,8 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **HTML export wording and behavior notes** — docs and UI copy now describe `save .html` as a themed HTML export that uses app-hosted vendor fonts when available and falls back to browser monospace fonts offline, matching the current implementation
 
 ### Fixed
+
+### Fixed
 - **Prompt alignment** — when line numbers or timestamps are enabled, the new prompt stays aligned under the output gutter instead of leaving the prompt prefix pinned flush left
 - **Tab isolation and close-running-tab kill** — running one tab no longer blocks the others, and closing a running tab now kills that tab before switching away
 - **Kill-spec rate-limit stability** — the kill modal e2e coverage now isolates its limiter bucket per run and stubs the long-running SSE locally so repeated full-suite runs do not hang on a shared `/run` bucket
@@ -79,8 +86,6 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **History drawer action close** — clicking any button in the history drawer now closes the panel immediately
 - **Batched live output** — large output bursts now flush in small chunks so the browser can repaint during fast commands, and the live terminal only stays pinned to the bottom while the user has not scrolled away
 - **Shared Run guard** — desktop and mobile Run buttons now disable together while a command is active, preventing duplicate submits from either input path
-
-
 ## [1.2] — 2026-04-05
 
 ### Added

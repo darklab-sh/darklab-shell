@@ -7,6 +7,8 @@
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+{% include "theme_vars_style.html" %}
+{% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
 <script src="/static/js/export_html.js"></script>
 </head>
@@ -62,7 +64,7 @@
 </div>
 
 <div style="display:none;padding:6px 0" id="motd-wrap">
-  <span id="motd" style="display:inline-block;padding:5px 14px;background:rgba(57,255,20,0.06);border:1px solid var(--green-dim);border-radius:4px;color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></span>
+  <span id="motd" style="display:inline-block;padding:5px 14px;background:var(--green-glow);border:1px solid var(--green-dim);border-radius:4px;color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></span>
 </div>
 
 <div id="history-row" class="history-row" style="display:none">
@@ -138,7 +140,7 @@
 
 <!-- Kill confirmation modal -->
 <div id="kill-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
-  <div id="kill-modal" style="background:#111;border:1px solid var(--red);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
+  <div id="kill-modal" style="background:var(--surface);border:1px solid var(--red);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
     <div style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px">
       Kill the running process in this tab?<br>
       <span style="color:var(--muted);font-size:11px">This sends SIGTERM to the entire process group.</span>
@@ -152,7 +154,7 @@
 
 <!-- History delete confirmation modal -->
 <div id="hist-del-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
-  <div id="hist-del-modal" style="background:#111;border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
+  <div id="hist-del-modal" style="background:var(--surface);border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
     <div id="hist-del-msg" style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button id="hist-del-cancel" class="term-action-btn">Cancel</button>

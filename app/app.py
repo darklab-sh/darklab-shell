@@ -22,7 +22,7 @@ from pathlib import Path
 
 # Logging must be configured before other local imports — process.py
 # connects to Redis at module import time and emits log calls then.
-from config        import APP_VERSION, CFG, SCANNER_PREFIX
+from config        import APP_VERSION, CFG, SCANNER_PREFIX, DARK_THEME, LIGHT_THEME, theme_css_vars
 from logging_setup import configure_logging
 configure_logging(CFG)
 
@@ -312,7 +312,13 @@ def favicon():
 @app.route("/")
 def index():
     log.info("PAGE_LOAD", extra={"ip": get_client_ip()})
-    return render_template("index.html")
+    return render_template(
+        "index.html",
+        dark_theme=DARK_THEME,
+        light_theme=LIGHT_THEME,
+        dark_theme_css=theme_css_vars(DARK_THEME),
+        light_theme_css=theme_css_vars(LIGHT_THEME),
+    )
 
 
 @app.route("/config")

@@ -1,0 +1,178 @@
+# shell.darklab.sh — Dark Theme
+# --------------------------------
+# Customize the dark theme color palette.
+# Full reference: THEME.md
+# All values are CSS color strings (hex, rgb, rgba, hsl, etc.)
+# Changes take effect after a container restart (docker compose restart).
+# No rebuild needed.
+#
+# Uncomment and edit any value to override the default.
+
+# ── Backgrounds ───────────────────────────────────────────────────────────────
+
+# Page background (body)
+# bg: "#0d0d0d"
+
+# Terminal window and surface background (panels, modals, dropdowns)
+# surface: "#141414"
+
+# ── Borders ───────────────────────────────────────────────────────────────────
+
+# Subtle border (dividers, section separators)
+# border: "#1f1f1f"
+
+# Prominent border (input focus rings, modal outlines)
+# border_bright: "#2e2e2e"
+
+# ── Text ──────────────────────────────────────────────────────────────────────
+
+# Primary text color
+# text: "#e0e0e0"
+
+# Muted / secondary text color (labels, hints, timestamps)
+# muted: "#7a7a7a"
+
+# ── Accent Colors ─────────────────────────────────────────────────────────────
+
+# Primary green — used for the terminal prompt, run button, highlights, and
+# success indicators. Works best as a bright, high-contrast color.
+# green: "#39ff14"
+
+# Dimmed green — used for borders, focus rings, and subtle highlights
+# green_dim: "#1a7a08"
+
+# Green glow — used for box-shadows and background tints (should be rgba)
+# green_glow: "rgba(57,255,20,0.12)"
+
+# Amber — used for warnings, the RUNNING status pill, starred items, and
+# denied-command messages
+# amber: "#ffb800"
+
+# Red — used for errors, the FAIL/KILLED status, and the kill-task modal border
+# red: "#ff3c3c"
+
+# Blue — used for the prompt prefix, welcome screen labels, notice lines, and command badges
+# blue: "#6ab0f5"
+
+# ── Typography ────────────────────────────────────────────────────────────────
+
+# Terminal output font size
+# terminal_font_size: "14px"
+
+# Terminal output line height
+# terminal_line_height: "1.65"
+
+# ── Component Chrome ─────────────────────────────────────────────────────────
+
+# Text used for the live prompt line shown above the hidden input
+# prompt_line_text: "#e8e8e8"
+
+# Terminal pane / panel styling
+# panel_bg: "#141414"
+# panel_alt_bg: "#101010"
+# panel_border: "#2e2e2e"
+# panel_shadow: "rgba(0,0,0,0.7)"
+# terminal_bar_bg: "#0d0d0d"
+# terminal_bar_border: "#1f1f1f"
+# terminal_actions_bg: "transparent"
+# terminal_wrap_border: "#2e2e2e"
+# terminal_wrap_shadow: "rgba(0,0,0,0.7)"
+
+# Header / toolbar buttons
+# toolbar_button_bg: "transparent"
+# toolbar_button_border: "#2e2e2e"
+# toolbar_button_text: "#7a7a7a"
+# toolbar_button_hover_bg: "transparent"
+# toolbar_button_hover_border: "#1a7a08"
+# toolbar_button_hover_text: "#39ff14"
+# toolbar_button_active_bg: "rgba(57,255,20,0.06)"
+# toolbar_button_active_border: "#1a7a08"
+# toolbar_button_active_text: "#39ff14"
+
+# History chips / starred chips
+# chip_bg: "transparent"
+# chip_border: "#2e2e2e"
+# chip_text: "#7a7a7a"
+# chip_hover_bg: "rgba(57,255,20,0.12)"
+# chip_hover_border: "#1a7a08"
+# chip_hover_text: "#e0e0e0"
+# chip_overflow_text: "#39ff14"
+
+# Tabs bar / tabs
+# tabs_bar_bg: "#0d0d0d"
+# tabs_bar_scrollbar_track: "rgba(255,255,255,0.06)"
+# tabs_bar_scrollbar_thumb: "#555555"
+# tabs_bar_scrollbar_thumb_hover: "#777777"
+# tabs_scroll_btn_bg: "transparent"
+# tabs_scroll_btn_border: "#1f1f1f"
+# tabs_scroll_btn_text: "#7a7a7a"
+# tabs_scroll_btn_hover_bg: "transparent"
+# tabs_scroll_btn_hover_border: "#2e2e2e"
+# tabs_scroll_btn_hover_text: "#e0e0e0"
+# tab_bg: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))"
+# tab_border: "#2e2e2e"
+# tab_text: "#7a7a7a"
+# tab_hover_text: "#e0e0e0"
+# tab_active_bg: "rgba(57,255,20,0.04)"
+# tab_active_border: "color-mix(in srgb, var(--green) 42%, transparent)"
+# tab_active_text: "#39ff14"
+# tab_active_shadow: "none"
+# tab_close_bg: "rgba(255,255,255,0.02)"
+# tab_close_border: "rgba(255,255,255,0.06)"
+# tab_close_hover_bg: "color-mix(in srgb, var(--red) 18%, transparent)"
+# tab_close_hover_border: "color-mix(in srgb, var(--red) 30%, transparent)"
+# tab_close_hover_text: "inherit"
+# tab_touch_drag_text_shadow: "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)"
+# tab_drop_shadow: "0 0 10px color-mix(in srgb, var(--green) 45%, transparent)"
+
+# History panel and restore overlay
+# history_panel_bg: "#0d0d0d"
+# history_entry_hover_bg: "rgba(57,255,20,0.12)"
+# history_load_overlay_bg: "rgba(0,0,0,0.76)"
+# history_load_modal_bg: "color-mix(in srgb, var(--surface) 88%, #000)"
+# history_load_modal_shadow: "rgba(0,0,0,0.35)"
+
+# Modals
+# faq_modal_bg: "#141414"
+# options_modal_bg: "#141414"
+# kill_modal_bg: "#141414"
+# hist_del_modal_bg: "#141414"
+
+# Dropdowns / autocomplete
+# dropdown_bg: "color-mix(in srgb, var(--surface) 96%, transparent)"
+# dropdown_border: "color-mix(in srgb, var(--green) 18%, transparent)"
+# dropdown_shadow: "rgba(0,0,0,0.35)"
+# dropdown_up_bg: "color-mix(in srgb, var(--surface) 98%, transparent)"
+# dropdown_up_border: "color-mix(in srgb, var(--green) 28%, transparent)"
+# dropdown_up_shadow: "rgba(0,0,0,0.45)"
+# dropdown_item_text: "#7a7a7a"
+
+# FAQ / options controls
+# faq_code_bg: "#141414"
+# allowed_chip_bg: "#141414"
+# options_select_bg: "#141414"
+
+# Status / toasts
+# tab_status_ok_bg: "#39ff14"
+# toast_bg: "#141414"
+# toast_text: "#39ff14"
+# toast_border: "#1a7a08"
+# toast_error_bg: "color-mix(in srgb, var(--red) 8%, var(--bg))"
+# toast_error_text: "#ff3c3c"
+# toast_error_border: "color-mix(in srgb, var(--red) 45%, transparent)"
+
+# Mobile shell / menu
+# mobile_composer_host_bg: "linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))"
+# mobile_composer_host_light_bg: "linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))"
+# mobile_menu_bg: "#141414"
+# mobile_menu_border: "#2e2e2e"
+# mobile_menu_shadow: "rgba(0,0,0,0.6)"
+# mobile_menu_button_border: "#1f1f1f"
+# mobile_menu_button_hover_bg: "var(--green-glow)"
+# mobile_menu_button_hover_text: "#39ff14"
+
+# Welcome / onboarding styling
+# welcome_command_hover_bg: "color-mix(in srgb, var(--green) 6%, transparent)"
+# welcome_command_hover_shadow: "0 0 0 1px var(--green-glow)"
+# welcome_ascii_text_shadow: "0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)"
+# welcome_ascii_filter: "saturate(1.12) contrast(1.08) brightness(1.08)"

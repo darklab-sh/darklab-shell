@@ -36,13 +36,13 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
 - **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, fetches and shares that full saved output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (themed HTML export with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
-- **HTML export** — download a tab's output as a themed HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar. The downloaded file embeds fonts at export time so it stays portable, and the live app still serves the same vendor fonts for on-page rendering
+- **HTML export** — download a tab's output as a themed HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar. The downloaded file embeds fonts and the resolved theme variables at export time so it stays portable, and the live app still serves the same vendor fonts for on-page rendering
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
-- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent
+- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent. Operator overrides live in `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
-- **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
+- **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed. Theme palette and component chrome overrides live in `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
 - **Anonymous session tracking** — the client generates a UUID session ID once (`session.js`) and sends it on every API call via `X-Session-ID`; this keeps history/test data scoped to each browser/tab and allows the server tests to isolate rate-limit buckets
 - **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
@@ -308,6 +308,18 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `welcome_hint_rotations` | `2` | Number of footer-hint rotations after the first hint is shown. `0` keeps the first hint static |
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG`. See [Logging](#logging) |
 | `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog). See [Logging](#logging) |
+
+### Theme System
+
+Theme configuration is documented in [THEME.md](THEME.md). The theme externalization work is part of the v1.4 line. In short:
+
+- `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml` are the operator-editable source files for the palette and component chrome
+- `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables
+- `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell and permalink pages share one theme source of truth
+- `app/templates/theme_vars_script.html` exposes the same resolved values to the browser-side export helpers
+- `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
+
+See [THEME.md](THEME.md) for the full architecture walkthrough and a complete appendix of every supported theme option and default.
 
 ---
 
@@ -863,7 +875,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **466 pytest + 238 Vitest + 126 Playwright = 830 tests**.
+Current totals in this branch: **466 pytest + 239 Vitest + 126 Playwright = 831 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

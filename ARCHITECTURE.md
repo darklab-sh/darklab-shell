@@ -342,6 +342,20 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
 
+Theme styling is resolved from `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS and export helpers. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots. This theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
+
+### Theme System
+
+The theme implementation is intentionally split so the operator-facing config, live UI, permalink pages, and exported HTML all read from the same resolved values:
+
+1. `app/conf/theme_dark.yaml` and `app/conf/theme_light.yaml` are the operator-editable source files for the palette and component chrome.
+2. `app/config.py` merges those YAML overrides with `_THEME_DEFAULTS` and exposes the final values via `theme_css_vars()`.
+3. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so `styles.css` can use `var(--name)` everywhere.
+4. `app/templates/theme_vars_script.html` publishes the same resolved variables as `window.ThemeCssVars` so browser-side export helpers can build downloadable HTML without a duplicate hardcoded palette.
+5. `app/static/js/export_html.js` consumes the injected values and embeds them into saved HTML exports, keeping the downloaded file portable and theme-consistent.
+
+This design replaced the older pattern of duplicating theme values in separate template/JS snippets. The current arrangement keeps the live shell, permalink pages, and export HTML aligned without making the export depend on the app being online after download. This is part of the v1.4 theme refactor. See [THEME.md](THEME.md) for the full appendix of configurable keys and defaults.
+
 Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_bytes` stay backend-only because the frontend does not need to know them to render the normal tab or history flows.
 
 ### Session Identity
@@ -385,9 +399,9 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 Current totals on this branch:
 
 - `pytest`: 466
-- `vitest`: 238
+- `vitest`: 239
 - `playwright`: 126
-- total: 830
+- total: 831
 
 ### Testing Architecture
 

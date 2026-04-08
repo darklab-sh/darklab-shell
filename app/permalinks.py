@@ -9,7 +9,7 @@ from pathlib import Path
 
 from flask import Response, has_request_context, render_template, request
 
-from config import CFG
+from config import CFG, DARK_THEME, LIGHT_THEME, theme_css_vars
 
 _FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
 _FONT_FILES = [
@@ -160,6 +160,8 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
         "app_name_json": json.dumps(app_name),
         "label_json": json.dumps(label),
         "font_faces_css": _font_face_css(embed=True),
+        "dark_theme_css": theme_css_vars(DARK_THEME),
+        "light_theme_css": theme_css_vars(LIGHT_THEME),
     }
 
 
@@ -184,6 +186,8 @@ def _permalink_error_page(noun: str) -> Response:
         page_title=f"{app_name} — {noun} not found",
         app_name=app_name,
         theme_class="light" if _current_theme() == "light" else "",
+        dark_theme_css=theme_css_vars(DARK_THEME),
+        light_theme_css=theme_css_vars(LIGHT_THEME),
         noun=noun,
         detail=detail,
     )

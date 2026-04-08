@@ -7,6 +7,22 @@
     { family: 'Syne', weight: 700, filename: 'Syne-700.ttf' },
     { family: 'Syne', weight: 800, filename: 'Syne-800.ttf' },
   ];
+  const EXPORT_THEME_VAR_NAMES = [
+    '--bg',
+    '--surface',
+    '--border',
+    '--border-bright',
+    '--text',
+    '--muted',
+    '--green',
+    '--green-dim',
+    '--green-glow',
+    '--amber',
+    '--red',
+    '--blue',
+    '--terminal-font-size',
+    '--terminal-line-height',
+  ];
 
   function escapeExportHtml(text) {
     return String(text ?? '')
@@ -28,17 +44,30 @@
     return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   }
 
-  function buildTerminalExportStyles(fontFacesCss = '') {
+  function getThemeExportVars(themeClass = '') {
+    const source = window.ThemeCssVars && window.ThemeCssVars[themeClass === 'light' ? 'light' : 'dark'];
+    if (source && typeof source === 'object') return source;
+    const target = themeClass === 'light' && document.body && document.body.classList.contains('light')
+      ? document.body
+      : document.documentElement;
+    const computed = getComputedStyle(target);
+    const fallback = {};
+    for (const name of EXPORT_THEME_VAR_NAMES) {
+      const value = computed.getPropertyValue(name).trim();
+      if (value) fallback[name] = value;
+    }
+    if (Object.keys(fallback).length) return fallback;
+    return {};
+  }
+
+  function buildTerminalExportStyles(themeClass = '', fontFacesCss = '') {
+    const themeVars = getThemeExportVars(themeClass);
+    const themeDecls = Object.entries(themeVars)
+      .map(([name, value]) => `    ${name}: ${value};`)
+      .join('\n');
     return `${fontFacesCss}
   :root {
-    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e; --border-bright: #2e2e2e;
-    --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
-    --amber: #ffb800; --red: #ff3c3c; --muted: #606060; --text: #e0e0e0;
-  }
-  body.light {
-    --bg: #e7e6e1; --surface: #f2f0eb; --border: #b8b7b0; --border-bright: #a9a79f;
-    --green: #2a5d18; --green-dim: #355f24; --green-glow: rgba(42,93,24,0.08);
-    --amber: #b37000; --red: #cc2200; --muted: #45453f; --text: #101010;
+${themeDecls}
   }
   *, *::before, *::after { box-sizing: border-box; }
   body {
@@ -59,16 +88,15 @@
   .line.exit-ok   { color: var(--green); font-weight: 700; margin-top: 8px; }
   .line.exit-fail { color: var(--red); font-weight: 700; margin-top: 8px; }
   .line.denied    { color: var(--amber); font-weight: 700; }
-  .line.notice    { color: #6ab0f5; font-style: italic; }
+  .line.notice    { color: var(--blue); font-style: italic; }
   .ts {
     display: inline-block; min-width: 58px; text-align: right;
-    color: #505050; font-size: 10px; user-select: none;
+    color: var(--muted); font-size: 10px; user-select: none;
     padding-right: 8px; margin-right: 6px;
     border-right: 1px solid var(--border);
     font-variant-numeric: tabular-nums;
   }
-  .prompt-prefix { color: #6ab0f5; font-weight: 700; margin-right: 8px; }
-  body.light .prompt-prefix { color: #335d83; }`;
+  .prompt-prefix { color: var(--blue); font-weight: 700; margin-right: 8px; }`;
   }
 
   function buildTerminalExportHtml({
@@ -86,7 +114,7 @@
 <meta charset="UTF-8">
 <title>${escapeExportHtml(title)} — ${escapeExportHtml(appName)}</title>
 <style>
-${buildTerminalExportStyles(fontFacesCss)}
+${buildTerminalExportStyles(themeClass, fontFacesCss)}
 </style>
 </head>
 <body${bodyClass}>
