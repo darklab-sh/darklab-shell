@@ -404,10 +404,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 477
+- `pytest`: 478
 - `vitest`: 246
 - `playwright`: 128
-- total: 851
+- total: 852
 
 ### Testing Architecture
 
@@ -426,7 +426,7 @@ Current totals on this branch:
 
 - The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 
-- Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does.
+- Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does. The configuration loader also supports an optional `config.local.yaml` overlay in `app/conf/` so operators can keep private overrides out of git while leaving the checked-in config as the portable base layer.
 
 - Suite-specific coverage inventories, focused run commands, and maintenance notes are intentionally centralized in [tests/README.md](tests/README.md) rather than duplicated here.
 

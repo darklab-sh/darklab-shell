@@ -11,8 +11,20 @@ import yaml
 APP_VERSION = "1.3"
 
 
-def load_config():
-    """Load config.yaml, falling back to defaults for any missing keys."""
+def _load_yaml_config(path):
+    if not path.exists():
+        return {}
+    with open(path) as f:
+        loaded = yaml.safe_load(f) or {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def load_config(conf_dir=None):
+    """Load config.yaml plus optional config.local.yaml overlays.
+
+    config.local.yaml is read after config.yaml, so it can override selected
+    keys while leaving the checked-in defaults in place.
+    """
     defaults = {
         "app_name":                   "shell.darklab.sh",
         "motd":                       "",
@@ -42,11 +54,9 @@ def load_config():
         "welcome_hint_interval_ms":   4200,
         "welcome_hint_rotations":     2,
     }
-    config_path = os.path.join(os.path.dirname(__file__), "conf", "config.yaml")
-    if os.path.exists(config_path):
-        with open(config_path) as f:
-            user_config = yaml.safe_load(f) or {}
-        defaults.update(user_config)
+    conf_path = Path(conf_dir) if conf_dir is not None else Path(__file__).resolve().parent / "conf"
+    defaults.update(_load_yaml_config(conf_path / "config.yaml"))
+    defaults.update(_load_yaml_config(conf_path / "config.local.yaml"))
     return defaults
 
 

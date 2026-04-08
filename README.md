@@ -106,7 +106,8 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customise the instance
-    │   ├── config.yaml         # Application configuration (see Configuration section)
+    │   ├── config.yaml             # Application configuration (see Configuration section)
+    │   ├── config.local.yaml       # Optional untracked per-server overrides loaded after config.yaml
     │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
     │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
@@ -278,7 +279,7 @@ npm install
 
 ## Configuration
 
-All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the instance-specific differences stay active.
+All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the instance-specific differences stay active. If you want a private server-specific layer, add `app/conf/config.local.yaml`; it is loaded after `config.yaml` and can override any subset of keys without affecting the checked-in file.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -881,7 +882,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **477 pytest + 246 Vitest + 128 Playwright = 851 tests**.
+Current totals in this branch: **478 pytest + 246 Vitest + 128 Playwright = 852 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

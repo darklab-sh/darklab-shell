@@ -90,6 +90,33 @@ class TestSplitChainedCommands:
 
 # ── load_allowed_commands ─────────────────────────────────────────────────────
 
+class TestLoadConfig:
+    def test_local_config_overrides_base_config_without_replacing_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "config.yaml")
+            local_path = os.path.join(tmp, "config.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    app_name: base-shell
+                    default_theme: base-theme.yaml
+                    rate_limit_per_minute: 30
+                    """
+                ))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    app_name: local-shell
+                    rate_limit_per_minute: 99
+                    """
+                ))
+            cfg = app_config.load_config(tmp)
+
+        assert cfg["app_name"] == "local-shell"
+        assert cfg["default_theme"] == "base-theme.yaml"
+        assert cfg["rate_limit_per_minute"] == 99
+        assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
+
 class TestLoadAllowedCommands:
     def _write(self, content, tmp_dir):
         path = os.path.join(tmp_dir, "allowed_commands.txt")

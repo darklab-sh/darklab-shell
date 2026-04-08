@@ -2,6 +2,9 @@
 # ----------------------------------
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
+# Optional: add app/conf/config.local.yaml for untracked server-specific overrides.
+# If present, it is loaded after this file and only needs to define the keys you
+# want to change locally.
 
 # ── Branding ──────────────────────────────────────────────────────────────────
 

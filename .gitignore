@@ -17,6 +17,9 @@ app/static/js/vendor/*
  
 # Persistent data (SQLite run history — contains user data, should not be committed)
 data/
+
+# Optional local config overlay for production/server-specific overrides.
+app/conf/config.local.yaml
  
 # Node / JS tooling
 node_modules/
