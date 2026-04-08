@@ -1,4 +1,4 @@
-// ── SSE stall detection ──
+// ── Shared command execution + desktop input wrapper ──
 // If no chunk arrives from the SSE stream for 45 seconds (> 2× the 20s server heartbeat),
 // the connection has silently died. Surface a notice and reset the UI so the user isn't
 // left with a perpetually-spinning tab. The command may still be running server-side;
@@ -9,13 +9,13 @@ const _stalledTimeouts = new Map();
 function _resetStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
   _stalledTimeouts.set(tabId, setTimeout(() => {
-    const t = tabs.find(t => t.id === tabId);
+    const t = getTab(tabId);
     if (!t || t.killed) return;  // already handled
-    appendLine('\n[connection stalled — command may still be running on the server]', 'notice', tabId);
+    appendLine('[connection stalled — command may still be running on the server]', 'notice', tabId);
     appendLine('[check the history panel for the result once it completes]', 'notice', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
-    stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+    stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
   }, 45000));
 }
 
@@ -32,8 +32,6 @@ function setStatus(s) {
 }
 
 // ── Run timer ──
-let timerInterval = null;
-let timerStart = null;
 
 // Format a duration in seconds as a compact human-readable string.
 // Examples: 32.6 → "32.6s", 125.0 → "2m 5.0s", 3812.3 → "1h 3m 32.3s"
@@ -47,7 +45,7 @@ function _formatElapsed(totalSecs) {
 
 function startTimer() {
   timerStart = Date.now();
-  runTimer.style.display = 'inline';
+  showRunTimer();
   timerInterval = setInterval(() => {
     runTimer.textContent = _formatElapsed((Date.now() - timerStart) / 1000);
   }, 100);
@@ -56,8 +54,7 @@ function startTimer() {
 function stopTimer() {
   clearInterval(timerInterval);
   timerInterval = null;
-  runTimer.style.display = 'none';
-  runTimer.textContent = '';
+  hideRunTimer();
 }
 
 function elapsedSeconds() {
@@ -66,27 +63,37 @@ function elapsedSeconds() {
 
 // ── Kill button ──
 function getTabKillBtn(tabId) {
-  return document.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`);
+  return tabPanels ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
 }
 
-function showTabKillBtn(tabId) {
+function _showTabKillBtnFallback(tabId) {
   const btn = getTabKillBtn(tabId);
-  if (btn) btn.style.display = 'inline-block';
+  setDisplayState(btn, true, 'inline-block');
 }
 
-function hideTabKillBtn(tabId) {
+function _hideTabKillBtnFallback(tabId) {
   const btn = getTabKillBtn(tabId);
-  if (btn) btn.style.display = 'none';
+  setDisplayState(btn, false, 'inline-block');
+}
+
+function _setRunButtonDisabled(disabled) {
+  if (typeof syncRunButtonDisabled === 'function') {
+    syncRunButtonDisabled();
+    return;
+  }
+  if (typeof setRunButtonDisabled === 'function') {
+    setRunButtonDisabled(disabled);
+    return;
+  }
+  if (runBtn) runBtn.disabled = !!disabled;
 }
 
 function _describeRunnerFetchError(err, context = 'server') {
-  if (typeof describeFetchError === 'function') return describeFetchError(err, context);
-  const message = err && err.message ? err.message : 'unknown network error';
-  return `Request to the ${context} failed: ${message}`;
+  return describeFetchError(err, context);
 }
 
 function _logRunnerError(context, err) {
-  if (typeof logClientError === 'function') logClientError(context, err);
+  logClientError(context, err);
 }
 
 function _handleKillRequestFailure(err, tabId) {
@@ -97,10 +104,10 @@ function _handleKillRequestFailure(err, tabId) {
 
 function _handleRunTransportFailure(err, tabId) {
   _logRunnerError('run request failed', err);
-  appendLine('\n[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
+  appendLine('[connection error] ' + _describeRunnerFetchError(err), 'exit-fail', tabId);
   if (tabId === activeTabId) setStatus('fail');
   setTabStatus(tabId, 'fail');
-  stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+  stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
 }
 
 async function _readRunErrorMessage(res) {
@@ -123,21 +130,46 @@ function _previewTruncationNotice(outputLineCount, fullOutputAvailable) {
   const shown = APP_CONFIG.max_output_lines || outputLineCount || 0;
   const total = outputLineCount || shown;
   if (fullOutputAvailable) {
-    return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Use the permalink button below or in the history panel for complete results]`;
+    return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]`;
   }
   return `[preview truncated — only the last ${shown} lines are shown here, but the full output had ${total} lines. Full output persistence is disabled or unavailable]`;
 }
 
-// ── Kill confirmation modal ──
-let pendingKillTabId = null;
+function appendCommandEcho(cmd, tabId) {
+  appendLine(cmd, 'prompt-echo', tabId);
+}
 
+function appendPromptNewline(tabId) {
+  appendLine('', 'prompt-echo', tabId);
+}
+
+function _clearDesktopInput() {
+  setComposerValue('', 0, 0);
+}
+
+function focusComposerInputAfterRun() {
+  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
+}
+
+function interruptPromptLine(tabId = activeTabId) {
+  const t = getTab(tabId);
+  if (t && t.st === 'running') return false;
+  appendPromptNewline(tabId);
+  _clearDesktopInput();
+  focusComposerInputAfterRun();
+  if (tabId === activeTabId) setStatus('idle');
+  return true;
+}
+
+// ── Kill confirmation modal ──
 function confirmKill(tabId) {
   pendingKillTabId = tabId;
-  killOverlay.style.display = 'flex';
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  showKillOverlay();
 }
 
 function doKill(tabId) {
-  const t = tabs.find(t => t.id === tabId);
+  const t = getTab(tabId);
   if (!t || t.st !== 'running') return;
   const secs = elapsedSeconds();
   if (t.runId) {
@@ -155,19 +187,35 @@ function doKill(tabId) {
   }
   t.killed = true;
   stopTimer();
-  appendLine(`\n[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
+  appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
     setStatus('killed');
-    runBtn.disabled = false;
+    _setRunButtonDisabled(false);
   }
 }
 
 // ── Run command ──
-function runCommand() {
-  const cmd = cmdInput.value.trim();
-  if (!cmd) return;
+// submitCommand(rawCmd) is the shared entry point for executing a command
+// string. It does not read from or write to any DOM input — the caller
+// supplies the value and owns input cleanup afterward.
+//
+// Return values (callers use these to decide what to do with their input):
+//   'settle'  — empty input during welcome; caller should focus without clearing
+//   true      — command submitted; caller should clear input and focus
+//   false     — rejected or blocked; caller should leave input as-is
+function submitCommand(rawCmd) {
+  const cmd = (rawCmd || '').trim();
+  if (!cmd) {
+    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
+      requestWelcomeSettle(activeTabId);
+      return 'settle';
+    }
+    appendPromptNewline(activeTabId);
+    setStatus('idle');
+    return true;
+  }
 
   // If the active tab is currently running a command, open a new tab automatically
   // rather than streaming two commands' output on top of each other.
@@ -180,40 +228,50 @@ function runCommand() {
     clearTab(activeTabId);
   }
 
-  const activeTab = tabs.find(t => t.id === activeTabId);
+  const activeTab = getActiveTab();
   if (activeTab && activeTab.st === 'running') {
     const newId = createTab('tab ' + (tabs.length + 1));
-    if (!newId) return; // tab limit reached — createTab already showed a toast
+    if (!newId) return false; // tab limit reached — createTab already showed a toast
     // createTab calls activateTab internally, so activeTabId now points to the new tab
   }
 
   // Client-side validation mirrors server-side checks for immediate feedback
   const shellOps = /&&|\|\|?|;;?|`|\$\(|>>?|</;
   if (shellOps.test(cmd)) {
-    appendLine('\n$ ' + cmd + '\n', '');
+    appendCommandEcho(cmd);
     appendLine('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied');
     setStatus('fail');
-    return;
+    return false;
   }
 
   if (/(?<![\w:\/])\/data\b/.test(cmd) || /(?<![\w:\/])\/tmp\b/.test(cmd)) {
-    appendLine('\n$ ' + cmd + '\n', '');
+    appendCommandEcho(cmd);
     appendLine('[denied] Access to /data and /tmp is not permitted.', 'denied');
     setStatus('fail');
-    return;
+    return false;
   }
 
   addToHistory(cmd);
-  if (!activeTab || !activeTab.renamed) setTabLabel(activeTabId, cmd);
-  const _cmdTab = tabs.find(t => t.id === activeTabId);
-  if (_cmdTab) _cmdTab.command = cmd;
-  appendLine('\n$ ' + cmd + '\n', '');
+  // Re-lookup the active tab after the potential createTab() call above, which
+  // may have changed activeTabId to point at the newly created tab.
+  const _runTab = getActiveTab();
+  if (!_runTab || !_runTab.renamed) setTabLabel(activeTabId, cmd);
+  if (_runTab) _runTab.command = cmd;
+  appendCommandEcho(cmd);
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
-  const _runTab = tabs.find(t => t.id === activeTabId);
-  if (_runTab) _runTab.runStart = Date.now();
+  if (_runTab) {
+    _runTab.runStart = Date.now();
+    _runTab.currentRunStartIndex = _runTab.rawLines.length;
+    _runTab.previewTruncated = false;
+    _runTab.fullOutputAvailable = false;
+    _runTab.fullOutputLoaded = false;
+    _runTab.historyRunId = null;
+    _runTab.followOutput = true;
+    _runTab.deferPromptMount = false;
+  }
   setStatus('running');
   setTabStatus(activeTabId, 'running');
-  runBtn.disabled = true;
+  _setRunButtonDisabled(true);
   showTabKillBtn(activeTabId);
   startTimer();
 
@@ -228,13 +286,13 @@ function runCommand() {
       return res.json().then(data => {
         appendLine('[denied] ' + (data.error || 'Command not allowed.'), 'denied', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
-        stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+        stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });
     }
     if (res.status === 429) {
       appendLine('[rate limited] Too many requests. Please wait a moment.', 'denied', tabId);
       setStatus('fail'); setTabStatus(tabId, 'fail');
-      stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       return;
     }
     if (!res.ok) {
@@ -242,13 +300,13 @@ function runCommand() {
         const suffix = message ? ` ${message}` : '';
         appendLine(`[server error] The server could not start the command.${suffix}`, 'exit-fail', tabId);
         setStatus('fail'); setTabStatus(tabId, 'fail');
-        stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+        stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       });
     }
     if (!res.body || typeof res.body.getReader !== 'function') {
       appendLine('[server error] The server returned an invalid streaming response.', 'exit-fail', tabId);
       setStatus('fail'); setTabStatus(tabId, 'fail');
-      stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+      stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
       return;
     }
 
@@ -260,7 +318,7 @@ function runCommand() {
 
     function read() {
       reader.read().then(({ done, value }) => {
-        if (done) { _clearStalledTimeout(tabId); stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId); return; }
+        if (done) { _clearStalledTimeout(tabId); stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId); return; }
         _resetStalledTimeout(tabId);
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');
@@ -270,9 +328,10 @@ function runCommand() {
             try {
               const msg = JSON.parse(part.slice(6));
               if (msg.type === 'started') {
-                const t = tabs.find(t => t.id === tabId);
+                const t = getTab(tabId);
                 if (t) {
                   t.runId = msg.run_id;
+                  t.historyRunId = msg.run_id;
                   if (t.pendingKill) {
                     // Kill was requested before runId was available — send it now
                     t.pendingKill = false;
@@ -290,7 +349,7 @@ function runCommand() {
                 appendLine(msg.text, 'notice', tabId);
               } else if (msg.type === 'clear') {
                 clearTab(tabId);
-                const t = tabs.find(t => t.id === tabId);
+                const t = getTab(tabId);
                 if (t) t.syntheticClear = true;
               } else if (msg.type === 'output') {
                 msg.text.split('\n').forEach((line, i, arr) => {
@@ -298,14 +357,25 @@ function runCommand() {
                 });
               } else if (msg.type === 'exit') {
                 _clearStalledTimeout(tabId);
-                const t = tabs.find(t => t.id === tabId);
-                if (t) { t.exitCode = msg.code; t.runId = null; }
+                const t = getTab(tabId);
+                if (t) {
+                  t.exitCode = msg.code;
+                  t.runId = null;
+                  t.deferPromptMount = true;
+                  t.previewTruncated = !!msg.preview_truncated;
+                  t.fullOutputAvailable = !!msg.full_output_available;
+                  t.fullOutputLoaded = !msg.preview_truncated;
+                }
                 // If already killed by user, ignore the subsequent -15 exit code
                 if (t && t.killed) {
                   t.killed = false;
                   stopTimer();
-                  runBtn.disabled = false; hideTabKillBtn(tabId);
-                  if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+                  _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+                  if (t.closing && typeof finalizeClosingTab === 'function') {
+                    finalizeClosingTab(tabId);
+                    if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  }
+                  if (isHistoryPanelOpen()) refreshHistoryPanel();
                   return;
                 }
                 const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
@@ -314,23 +384,29 @@ function runCommand() {
                   appendLine(_previewTruncationNotice(msg.output_line_count, msg.full_output_available), 'notice', tabId);
                 }
                 if (msg.code === 0) {
-                  if (!(t && t.syntheticClear)) appendLine(`\n[process exited with code 0${dur}]`, 'exit-ok', tabId);
+                  if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
                   if (tabId === activeTabId) setStatus('ok');
                   setTabStatus(tabId, 'ok');
                 } else {
-                  appendLine(`\n[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
+                  appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
                   if (tabId === activeTabId) setStatus('fail');
                   setTabStatus(tabId, 'fail');
                 }
                 if (t) t.syntheticClear = false;
-                runBtn.disabled = false; hideTabKillBtn(tabId);
-                if (historyPanel.classList.contains('open')) refreshHistoryPanel();
+                _setRunButtonDisabled(false); hideTabKillBtn(tabId);
+                if (t && t.closing && typeof finalizeClosingTab === 'function') {
+                  finalizeClosingTab(tabId);
+                  if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  return;
+                }
+                if (isHistoryPanelOpen()) refreshHistoryPanel();
+                if (typeof _maybeMountDeferredPrompt === 'function') _maybeMountDeferredPrompt(tabId);
               } else if (msg.type === 'error') {
                 _clearStalledTimeout(tabId);
-                appendLine('\n[error] ' + msg.text, 'exit-fail', tabId);
+                appendLine('[error] ' + msg.text, 'exit-fail', tabId);
                 if (tabId === activeTabId) setStatus('fail');
                 setTabStatus(tabId, 'fail');
-                stopTimer(); runBtn.disabled = false; hideTabKillBtn(tabId);
+                stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
               }
             } catch(e) {}
           }
@@ -343,4 +419,31 @@ function runCommand() {
     _clearStalledTimeout(tabId);
     _handleRunTransportFailure(err, tabId);
   });
+  return true;
+}
+
+function submitComposerCommand(rawCmd, { dismissKeyboard = false, focusAfterSubmit = true } = {}) {
+  const result = submitCommand(rawCmd);
+  if (result === true) {
+    _clearDesktopInput();
+    if (focusAfterSubmit) focusComposerInputAfterRun();
+    if (dismissKeyboard && typeof dismissMobileKeyboardAfterSubmit === 'function') {
+      dismissMobileKeyboardAfterSubmit();
+    }
+  } else if (result === 'settle') {
+    focusComposerInputAfterRun();
+  }
+  return result;
+}
+
+function submitVisibleComposerCommand({ rawCmd = null, dismissKeyboard = false, focusAfterSubmit = true } = {}) {
+  const value = typeof rawCmd === 'string'
+    ? rawCmd
+    : ((typeof getComposerValue === 'function') ? getComposerValue() : '');
+  return submitComposerCommand(value, { dismissKeyboard, focusAfterSubmit });
+}
+
+function runCommand() {
+  if (typeof isRunButtonDisabled === 'function' && isRunButtonDisabled()) return;
+  submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
 }

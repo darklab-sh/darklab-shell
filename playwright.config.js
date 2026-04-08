@@ -35,7 +35,7 @@ export default defineConfig({
   webServer: {
     command: `FLASK_APP=app.py ${python} -m flask run --port 5001`,
     cwd: resolve(__dirname, 'app'),
-    port: 5001,
+    url: 'http://localhost:5001/health',
     reuseExistingServer: !process.env.CI,
     timeout: 30_000,
   },

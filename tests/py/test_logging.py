@@ -266,6 +266,10 @@ class TestGELFFormatter:
         data = json.loads(_emit(GELFFormatter("myapp"), logging.INFO, "TEST"))
         assert data["_app"] == "myapp"
 
+    def test_app_version_in_payload_comes_from_config(self):
+        data = json.loads(_emit(GELFFormatter(), logging.INFO, "TEST"))
+        assert data["_app_version"] == shell_app.APP_VERSION
+
     def test_logger_name_in_payload(self):
         data = json.loads(_emit(GELFFormatter(), logging.INFO, "TEST"))
         assert "_logger" in data
@@ -334,6 +338,7 @@ class TestConfigureLogging:
         formatter = self._logger().handlers[0].formatter
         assert isinstance(formatter, GELFFormatter)
         assert formatter._app_name == "test-app"
+        assert formatter._app_version == shell_app.APP_VERSION
 
     def test_log_level_info_by_default(self):
         configure_logging({})
@@ -358,6 +363,13 @@ class TestConfigureLogging:
     def test_propagate_is_false(self):
         configure_logging({})
         assert self._logger().propagate is False
+
+    def test_logging_configured_includes_app_version(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            configure_logging(shell_app.CFG)
+        mock_info.assert_called_once()
+        _, kwargs = mock_info.call_args
+        assert kwargs["extra"]["app_version"] == shell_app.APP_VERSION
 
     def test_exactly_one_handler_attached(self):
         configure_logging(shell_app.CFG)

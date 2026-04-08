@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(69)
 
 test.describe('runner stall handling', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       const originalFetch = window.fetch.bind(window)
       const originalSetTimeout = window.setTimeout.bind(window)
@@ -46,6 +48,7 @@ test.describe('runner stall handling', () => {
     await expect(output).toContainText('connection stalled', { timeout: 5_000 })
     await expect(page.locator('.status-pill')).toHaveText('ERROR')
     await expect(page.locator('.tab-kill-btn')).toBeHidden()
-    await expect(page.locator('#run-btn')).toBeEnabled()
+    await expect(page.locator('#run-btn')).toBeHidden()
+    await expect(page.locator('#run-btn')).toHaveJSProperty('disabled', false)
   })
 })

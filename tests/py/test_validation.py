@@ -68,7 +68,7 @@ class TestShellOperators:
         assert not ok
 
     def test_redirect_in(self):
-        ok, _ = _check("curl example.com < /etc/passwd")
+        ok, _ = _check("curl darklab.sh < /etc/passwd")
         assert not ok
 
 
@@ -84,12 +84,12 @@ class TestPathBlocking:
         assert not ok
 
     def test_url_with_data_segment(self):
-        # URLs like https://example.com/data/file should NOT be blocked
-        ok, _ = _check("curl https://example.com/data/file")
+        # URLs like https://darklab.sh/data/file should NOT be blocked
+        ok, _ = _check("curl https://darklab.sh/data/file")
         assert ok
 
     def test_url_with_tmp_segment(self):
-        ok, _ = _check("curl https://example.com/tmp/thing")
+        ok, _ = _check("curl https://darklab.sh/tmp/thing")
         assert ok
 
 
@@ -150,7 +150,7 @@ class TestDenyPrefix:
 
     def test_deny_flag_anywhere_in_command(self):
         # Flag should be denied even when other flags precede it
-        ok, _ = _check("curl -s -o /tmp/out https://example.com", allow=["curl"], deny=["curl -o"])
+        ok, _ = _check("curl -s -o /tmp/out https://darklab.sh", allow=["curl"], deny=["curl -o"])
         assert not ok
 
     def test_deny_flag_at_end(self):
@@ -165,18 +165,18 @@ class TestDenyPrefix:
 
     def test_devnull_exception_prefix(self):
         # curl -o /dev/null ... is a common pattern for checking HTTP status — should be allowed
-        ok, _ = _check("curl -o /dev/null -s -w \"%{http_code}\" https://example.com",
+        ok, _ = _check("curl -o /dev/null -s -w \"%{http_code}\" https://darklab.sh",
                         allow=["curl"], deny=["curl -o"])
         assert ok
 
     def test_devnull_exception_anywhere(self):
         # Flag anywhere in command pointing to /dev/null should also be allowed
-        ok, _ = _check("wget -q -o /dev/null --server-response https://example.com",
+        ok, _ = _check("wget -q -o /dev/null --server-response https://darklab.sh",
                         allow=["wget"], deny=["wget -o"])
         assert ok
 
     def test_devnull_exception_does_not_allow_real_paths(self):
-        ok, _ = _check("curl -o /tmp/out https://example.com", allow=["curl"], deny=["curl -o"])
+        ok, _ = _check("curl -o /tmp/out https://darklab.sh", allow=["curl"], deny=["curl -o"])
         assert not ok
 
     # Single-char combined flag matching
@@ -249,22 +249,22 @@ class TestRewrites:
         assert cmd.count("--privileged") == 1
 
     def test_nuclei_adds_template_dir(self):
-        cmd, notice = rewrite_command("nuclei -u https://example.com")
+        cmd, notice = rewrite_command("nuclei -u https://darklab.sh")
         assert "-ud /tmp/nuclei-templates" in cmd
         assert notice is None
 
     def test_nuclei_no_rewrite_if_ud_present(self):
-        cmd, _ = rewrite_command("nuclei -ud /tmp/my-templates -u https://example.com")
+        cmd, _ = rewrite_command("nuclei -ud /tmp/my-templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
 
     def test_wapiti_adds_stdout_redirect(self):
-        cmd, notice = rewrite_command("wapiti http://example.com")
+        cmd, notice = rewrite_command("wapiti http://darklab.sh")
         assert "-f txt" in cmd
         assert "/dev/stdout" in cmd
         assert notice is not None
 
     def test_wapiti_no_rewrite_if_output_set(self):
-        cmd, notice = rewrite_command("wapiti http://example.com -o /tmp/report.txt")
+        cmd, notice = rewrite_command("wapiti http://darklab.sh -o /tmp/report.txt")
         assert "/dev/stdout" not in cmd
         assert notice is None
 
@@ -278,23 +278,23 @@ class TestRewrites:
 
 class TestRuntimeCommandHelpers:
     def test_split_command_argv_uses_shell_like_tokenization(self):
-        assert split_command_argv('curl -H "X-Test: 1" https://example.com') == [
-            "curl", "-H", "X-Test: 1", "https://example.com"
+        assert split_command_argv('curl -H "X-Test: 1" https://darklab.sh') == [
+            "curl", "-H", "X-Test: 1", "https://darklab.sh"
         ]
 
     def test_command_root_returns_lowercased_first_token(self):
-        assert command_root("NMAP -sV example.com") == "nmap"
+        assert command_root("NMAP -sV darklab.sh") == "nmap"
 
     def test_command_root_returns_none_for_blank_input(self):
         assert command_root("   ") is None
 
     def test_runtime_missing_command_name_returns_none_when_installed(self):
         with mock.patch("commands.resolve_runtime_command", return_value="/usr/bin/curl"):
-            assert runtime_missing_command_name("curl https://example.com") is None
+            assert runtime_missing_command_name("curl https://darklab.sh") is None
 
     def test_runtime_missing_command_name_returns_root_when_missing(self):
         with mock.patch("commands.resolve_runtime_command", return_value=None):
-            assert runtime_missing_command_name("nmap -sV example.com") == "nmap"
+            assert runtime_missing_command_name("nmap -sV darklab.sh") == "nmap"
 
     def test_runtime_missing_command_message_is_stable(self):
         assert runtime_missing_command_message("nmap") == "Command is not installed on this instance: nmap"

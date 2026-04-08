@@ -1,8 +1,8 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries } from './helpers.js'
+import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
-const TEST_IP = '203.0.113.42'
+const TEST_IP = makeTestIp(42)
 
 test.describe('failure paths', () => {
   test.beforeEach(async ({ page }) => {

@@ -260,7 +260,7 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "APP_NAME=shell.darklab.sh\\n" in body
         assert "SESSION_ID=sess-env\\n" in body
-        assert "SHELL=/shell.darklab.sh\\n" in body
+        assert "SHELL=/app/shell.darklab.sh/bin/bash\\n" in body
         assert "TERM=xterm-256color\\n" in body
         assert '"type": "exit"' in body
 
@@ -286,6 +286,7 @@ class TestRunStreaming:
         assert "man <cmd>  Show the real man page for an allowed command.\\n" in body
         assert "last       Show recent completed runs with timestamps and exit codes.\\n" in body
         assert "retention  Show retention and full-output persistence settings.\\n" in body
+        assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert "status     Summarize the current session and instance settings.\\n" in body
         assert "tty        Show the web terminal device path.\\n" in body
         assert "type <cmd> Describe whether a command is a helper command, real command, or missing.\\n" in body
@@ -294,6 +295,20 @@ class TestRunStreaming:
         assert "version    Show web shell, app, Flask, and Python version details.\\n" in body
         assert "which <cmd> Locate a web helper or real command.\\n" in body
         assert "who        Show the current web shell user/session.\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_shortcuts_lists_current_shortcuts(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "shortcuts"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Current shortcuts:\\n" in body
+        assert "Alt+T" in body
+        assert "Option+Shift+C" in body
+        assert "Ctrl+U" in body
+        assert "browser Command shortcuts remain environment-dependent" in body
         assert '"type": "exit"' in body
 
     def test_fake_banner_renders_ascii_art(self):
@@ -348,13 +363,13 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-last-1", "sess-last", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                ("run-last-1", "sess-last", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 (
-                    "run-last-2", "sess-last", "dig example.com A",
+                    "run-last-2", "sess-last", "dig darklab.sh A",
                     "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 1, "[]",
                 )
             )
@@ -364,8 +379,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  [1]  dig example.com A\\n" in body
-        assert f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  [0]  ping example.com\\n" in body
+        assert f"{self._local_dt_text('2026-01-01T00:00:05+00:00')}  [1]  dig darklab.sh A\\n" in body
+        assert f"{self._local_dt_text('2026-01-01T00:00:00+00:00')}  [0]  ping darklab.sh\\n" in body
 
     def test_fake_who_tty_groups_and_version_render_shell_identity(self):
         client = get_client()
@@ -442,11 +457,37 @@ class TestRunStreaming:
     def test_fake_sudo_reports_web_shell_restriction(self):
         client = get_client()
 
-        resp = client.post("/run", json={"command": "sudo ping example.com"})
+        resp = client.post("/run", json={"command": "sudo ping darklab.sh"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "sudo: 'ping example.com' is not happening today.\\n" in body
+        assert (
+            "sudo: 'ping darklab.sh' is not happening today.\\n" in body
+            or "sudo: 'ping darklab.sh' is still not a privilege escalation strategy.\\n" in body
+            or "sudo: 'ping darklab.sh' has been denied by the browser court.\\n" in body
+            or "sudo: 'ping darklab.sh' will remain a non-event.\\n" in body
+            or "sudo: nice try with 'ping darklab.sh', but no.\\n" in body
+            or "sudo: 'ping darklab.sh' is still just a wish with shell syntax.\\n" in body
+            or "sudo: the answer to 'ping darklab.sh' is firmly no.\\n" in body
+            or "sudo: 'ping darklab.sh' will remain below the line.\\n" in body
+            or "sudo: 'ping darklab.sh' was rejected before it could become a plan.\\n" in body
+        )
+
+    def test_fake_sudo_without_arguments_uses_the_snark_pool(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "sudo"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert (
+            "sudo: confidence noted. Privilege escalation is still not happening.\\n" in body
+            or "sudo: that's a local habit, not a capability.\\n" in body
+            or "sudo: request denied by the web shell's sense of self-preservation.\\n" in body
+            or "sudo: the operator badge is decorative here.\\n" in body
+            or "sudo: this browser tab does not recognize your authority.\\n" in body
+            or "sudo: close, but still no root access.\\n" in body
+        )
 
     def test_fake_reboot_reports_web_shell_restriction(self):
         client = get_client()
@@ -455,8 +496,14 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "reboot: bold choice.\\n" in body
-        assert "If this web shell could reboot the host, we would both have bigger problems.\\n" in body
+        assert (
+            "reboot: bold choice.\\n" in body
+            or "reboot: not with this browser tab.\\n" in body
+            or "reboot: the server is not taking user suggestions for downtime.\\n" in body
+            or "reboot: let's not turn a diagnostic console into a blackout.\\n" in body
+            or "reboot: all I can offer is a dramatic sigh.\\n" in body
+            or "reboot: have you tried turning your expectations off and on again?\\n" in body
+        )
 
     def test_fake_rm_root_refuses_exact_root_delete_pattern(self):
         client = get_client()
@@ -465,8 +512,14 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "rm: nice try.\\n" in body
-        assert "Even this web shell has standards.\\n" in body
+        assert (
+            "rm: nice try.\\n" in body
+            or "rm: the web shell prefers not to become a cautionary tale.\\n" in body
+            or "rm: not even for dramatic effect.\\n" in body
+            or "rm: that's a hard no from the entire stack.\\n" in body
+            or "rm: the filesystem would like to keep existing, thanks.\\n" in body
+            or "rm: asking for `/` is a little too committed.\\n" in body
+        )
 
     def test_fake_date_hostname_and_uptime_render_shell_style_information(self):
         client = get_client()
@@ -560,6 +613,16 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Web shell helpers:\\n" in body
         assert "history    Show recent commands from this session.\\n" in body
+
+    def test_fake_man_for_shortcuts_topic_returns_web_shell_help(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "man shortcuts"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Web shell helpers:\\n" in body
+        assert "shortcuts  Show current keyboard shortcuts.\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_history_lists_recent_session_commands(self):
@@ -568,12 +631,12 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-h1", "sess-history", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                ("run-h1", "sess-history", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-h2", "sess-history", "dig example.com A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+                ("run-h2", "sess-history", "dig darklab.sh A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
             )
             conn.commit()
 
@@ -581,8 +644,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "1  ping example.com\\n" in body
-        assert "2  dig example.com A\\n" in body
+        assert "1  ping darklab.sh\\n" in body
+        assert "2  dig darklab.sh A\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_pwd_returns_synthetic_path(self):
@@ -632,12 +695,12 @@ class TestRunStreaming:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-1", "sess-ps", "ping example.com", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
+                ("run-1", "sess-ps", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
             )
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-2", "sess-ps", "dig example.com A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
+                ("run-2", "sess-ps", "dig darklab.sh A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
             )
             conn.commit()
 
@@ -649,11 +712,11 @@ class TestRunStreaming:
         assert " 9000 pts/0    -    -        -        ps aux\\n" in body
         assert (
             f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:05+00:00')} "
-            f"{self._local_clock_text('2026-01-01T00:00:06+00:00')} dig example.com A\\n"
+            f"{self._local_clock_text('2026-01-01T00:00:06+00:00')} dig darklab.sh A\\n"
         ) in body
         assert (
             f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:00+00:00')} "
-            f"{self._local_clock_text('2026-01-01T00:00:03+00:00')} ping example.com\\n"
+            f"{self._local_clock_text('2026-01-01T00:00:03+00:00')} ping darklab.sh\\n"
         ) in body
         assert '"type": "exit"' in body
 
@@ -661,10 +724,10 @@ class TestRunStreaming:
         client = get_client()
 
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
              mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("app.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV example.com"}, headers={"X-Session-ID": "sess-missing"})
+            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
@@ -675,17 +738,17 @@ class TestRunStreaming:
 
         hist = client.get("/history", headers={"X-Session-ID": "sess-missing"})
         data = json.loads(hist.data)
-        assert [r["command"] for r in data["runs"]] == ["nmap -sV example.com"]
+        assert [r["command"] for r in data["runs"]] == ["nmap -sV darklab.sh"]
 
     def test_run_checks_missing_binary_after_rewrite(self):
         client = get_client()
         client.environ_base["HTTP_X_FORWARDED_FOR"] = "2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa"
 
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV example.com", None)), \
+             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
              mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("app.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200

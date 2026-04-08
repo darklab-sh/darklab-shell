@@ -1,11 +1,20 @@
 # Custom FAQ entries for this instance.
 # Each entry requires a 'question' and an 'answer' field.
+# Use lightweight markup in 'answer' for formatting:
+#   **bold**  *italic*  __underline__  `inline code`
+#   [[cmd:ping]] or [[cmd:ping -c 1 127.0.0.1|ping chip]] for clickable command chips
+# Bullet lists can be written with leading "- " lines.
 # Entries are appended after the built-in FAQ items in the FAQ modal.
 # Changes take effect immediately — no restart needed.
 #
 # Example:
 # - question: "Where is this server located?"
-#   answer: "This server is hosted in New York, USA on a 10 Gbps uplink via Cogent and Zayo."
+#   answer: "This server is hosted in **New York, USA** on a 10 Gbps uplink via Cogent and Zayo."
+# - question: "What shortcuts are available?"
+#   answer: |
+#     Try [[cmd:shortcuts]] for the current shortcut reference.
+#     - Ctrl+C opens kill confirmation
+#     - Escape dismisses the FAQ
 
 - question: "Where is this server located?"
-  answer: "This 10Gbps dedicated server is located in Tempe, Arizona, USA on multihomed 100 Gbps uplinks via NTT, Cogent, Hurricane Electric, GTT, and TATA"
+  answer: "This 10Gbps dedicated server is located in **Tempe, Arizona, USA** on multihomed 100 Gbps uplinks via NTT, Cogent, Hurricane Electric, GTT, and TATA"

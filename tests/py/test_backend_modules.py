@@ -12,6 +12,7 @@ Tests for pure utility functions across the app modules:
 Run with: pytest tests/ (from the repo root)
 """
 
+import gzip
 import os
 import sqlite3
 import tempfile
@@ -21,14 +22,17 @@ from datetime import datetime, timedelta, timezone
 
 import process
 import database
+import app as shell_app
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
-    load_welcome, load_ascii_art, load_welcome_hints, load_autocomplete, load_allowed_commands_grouped,
+    load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
+    load_mobile_welcome_hints, load_autocomplete,
+    load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
-from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_lines
+from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -71,7 +75,7 @@ class TestSplitChainedCommands:
         assert len(parts) == 2
 
     def test_redirect_in(self):
-        parts = split_chained_commands("curl example.com < /etc/hosts")
+        parts = split_chained_commands("curl darklab.sh < /etc/hosts")
         assert len(parts) == 2
 
     def test_empty_parts_stripped(self):
@@ -172,6 +176,34 @@ class TestLoadFaq:
         assert result[0]["question"] == "What is this?"
         assert result[0]["answer"] == "A web shell."
 
+    def test_markdown_style_markup_renders_to_answer_html(self):
+        yaml_content = textwrap.dedent(
+            """
+            - question: Styled entry?
+              answer: |
+                Use **bold**, *italic*, __underline__, `code`, and [[cmd:ping -c 1 127.0.0.1|ping chip]].
+
+                - first item
+                - second item
+            """
+        )
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(yaml_content)
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_faq()
+        finally:
+            os.unlink(path)
+        assert len(result) == 1
+        html = result[0]["answer_html"]
+        assert "<strong>bold</strong>" in html
+        assert "<em>italic</em>" in html
+        assert "<u>underline</u>" in html
+        assert "<code>code</code>" in html
+        assert 'data-faq-command="ping -c 1 127.0.0.1"' in html
+        assert '<ul>' in html and '<li>first item</li>' in html
+
     def test_entries_missing_answer_filtered_out(self):
         yaml_content = "- question: No answer here.\n- question: Has both.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -255,11 +287,11 @@ class TestPathBlockingEdgeCases:
         assert not ok
 
     def test_tmp_in_url_path_allowed(self):
-        ok, _ = _check("curl https://example.com/tmp/file")
+        ok, _ = _check("curl https://darklab.sh/tmp/file")
         assert ok
 
     def test_tmp_in_url_with_port_allowed(self):
-        ok, _ = _check("curl https://example.com:8080/tmp/resource")
+        ok, _ = _check("curl https://darklab.sh:8080/tmp/resource")
         assert ok
 
     def test_data_path_blocked(self):
@@ -267,7 +299,7 @@ class TestPathBlockingEdgeCases:
         assert not ok
 
     def test_data_in_url_path_allowed(self):
-        ok, _ = _check("curl https://example.com/data/file")
+        ok, _ = _check("curl https://darklab.sh/data/file")
         assert ok
 
     def test_tmp_as_scheme_relative_blocked(self):
@@ -281,7 +313,7 @@ class TestPathBlockingEdgeCases:
 class TestIsDeniedMultiWordTool:
     def test_subcommand_specific_deny(self):
         # "gobuster dir -o" deny should NOT fire for "gobuster dns ..."
-        ok, _ = _check("gobuster dns -d example.com", allow=["gobuster"], deny=["gobuster dir -o"])
+        ok, _ = _check("gobuster dns -d darklab.sh", allow=["gobuster"], deny=["gobuster dir -o"])
         assert ok
 
     def test_subcommand_specific_deny_fires_for_correct_subcommand(self):
@@ -311,11 +343,11 @@ class TestRewriteCaseInsensitive:
         assert "--privileged" in cmd
 
     def test_nuclei_uppercase(self):
-        cmd, _ = rewrite_command("NUCLEI -u https://example.com")
+        cmd, _ = rewrite_command("NUCLEI -u https://darklab.sh")
         assert "-ud /tmp/nuclei-templates" in cmd
 
     def test_wapiti_uppercase(self):
-        cmd, notice = rewrite_command("WAPITI http://example.com")
+        cmd, notice = rewrite_command("WAPITI http://darklab.sh")
         assert "/dev/stdout" in cmd
         assert notice is not None
 
@@ -427,7 +459,7 @@ class TestWelcomeLoading:
         assert result[0]["featured"] is False
 
     def test_entry_with_group_and_featured_metadata(self):
-        path = self._write("- cmd: dig example.com A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
+        path = self._write("- cmd: dig darklab.sh A\n  out: \"answer\"\n  group: DNS\n  featured: true\n")
         try:
             with mock.patch("commands.WELCOME_FILE", path):
                 result = load_welcome()
@@ -475,7 +507,7 @@ class TestWelcomeLoading:
         assert result == []
 
 
-# ── load_ascii_art / load_welcome_hints ──────────────────────────────────────
+# ── load_ascii_art / load_ascii_mobile_art / load_welcome_hints ──────────────
 
 class TestWelcomeAssetLoading:
     def test_missing_ascii_file_returns_empty_string(self):
@@ -489,6 +521,20 @@ class TestWelcomeAssetLoading:
         try:
             with mock.patch("commands.ASCII_FILE", path):
                 assert load_ascii_art() == "  banner"
+        finally:
+            os.unlink(path)
+
+    def test_missing_mobile_ascii_file_returns_empty_string(self):
+        with mock.patch("commands.ASCII_MOBILE_FILE", "/nonexistent/ascii_mobile.txt"):
+            assert load_ascii_mobile_art() == ""
+
+    def test_mobile_ascii_art_trims_only_trailing_whitespace(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("  mobile banner  \n\n")
+            path = f.name
+        try:
+            with mock.patch("commands.ASCII_MOBILE_FILE", path):
+                assert load_ascii_mobile_art() == "  mobile banner"
         finally:
             os.unlink(path)
 
@@ -509,7 +555,10 @@ class TestRunOutputCapture:
         capture.add_line("three")
         capture.finalize()
 
-        assert list(capture.preview_lines) == ["two", "three"]
+        assert list(capture.preview_lines) == [
+            {"text": "two", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "three", "cls": "", "tsC": "", "tsE": ""},
+        ]
         assert capture.preview_truncated is True
         assert capture.output_line_count == 3
 
@@ -523,9 +572,13 @@ class TestRunOutputCapture:
         artifact_rel_path = capture.artifact_rel_path
         assert artifact_rel_path is not None
         assert load_full_output_lines(artifact_rel_path) == ["alpha", "beta"]
+        assert load_full_output_entries(artifact_rel_path) == [
+            {"text": "alpha", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "beta", "cls": "", "tsC": "", "tsE": ""},
+        ]
 
     def test_full_output_artifact_respects_byte_cap(self):
-        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=5)
+        capture = RunOutputCapture("test-run-output-cap", preview_limit=10, persist_full_output=True, full_output_max_bytes=60)
         capture.add_line("1234")
         capture.add_line("5678")
         capture.finalize()
@@ -535,6 +588,18 @@ class TestRunOutputCapture:
         artifact_rel_path = capture.artifact_rel_path
         assert artifact_rel_path is not None
         assert load_full_output_lines(artifact_rel_path) == ["1234"]
+
+    def test_full_output_artifact_loads_legacy_plain_text_rows(self):
+        artifact_rel_path = "test-run-output-legacy.txt.gz"
+        path = os.path.join(RUN_OUTPUT_DIR, artifact_rel_path)
+        os.makedirs(RUN_OUTPUT_DIR, exist_ok=True)
+        with gzip.open(path, "wt", encoding="utf-8") as f:
+            f.write("legacy one\nlegacy two\n")
+
+        assert load_full_output_entries(artifact_rel_path) == [
+            {"text": "legacy one", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "legacy two", "cls": "", "tsC": "", "tsE": ""},
+        ]
 
     def test_missing_hints_file_returns_empty_list(self):
         with mock.patch("commands.APP_HINTS_FILE", "/nonexistent/app_hints.txt"):
@@ -547,6 +612,22 @@ class TestRunOutputCapture:
         try:
             with mock.patch("commands.APP_HINTS_FILE", path):
                 assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
+        finally:
+            os.unlink(path)
+
+
+class TestMobileWelcomeHintLoading:
+    def test_missing_mobile_hints_file_returns_empty_list(self):
+        with mock.patch("commands.APP_HINTS_MOBILE_FILE", "/nonexistent/app_hints_mobile.txt"):
+            assert load_mobile_welcome_hints() == []
+
+    def test_mobile_hints_loader_ignores_blank_lines_and_comments(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
+            f.write("# comment\n\nTap the prompt.\n  \n# another\nUse the mobile menu.\n")
+            path = f.name
+        try:
+            with mock.patch("commands.APP_HINTS_MOBILE_FILE", path):
+                assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
         finally:
             os.unlink(path)
 
@@ -679,11 +760,11 @@ class TestRewriteIdempotent:
         assert cmd.count("--privileged") == 1
 
     def test_nuclei_already_ud_unchanged(self):
-        cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://example.com")
+        cmd, _ = rewrite_command("nuclei -ud /my/templates -u https://darklab.sh")
         assert cmd.count("-ud") == 1
 
     def test_wapiti_already_output_unchanged(self):
-        cmd, notice = rewrite_command("wapiti -u http://example.com -o /tmp/report")
+        cmd, notice = rewrite_command("wapiti -u http://darklab.sh -o /tmp/report")
         assert "/dev/stdout" not in cmd
         assert notice is None
 
@@ -737,27 +818,32 @@ class TestExpiryNote:
 class TestPermalinkErrorPage:
     def test_returns_404_status(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         assert resp.status_code == 404
 
     def test_includes_noun_in_body(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            resp = _permalink_error_page("run")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("run")
         assert b"run" in resp.data
 
     def test_includes_app_name(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "my-shell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         assert b"my-shell" in resp.data
 
     def test_mentions_retention_when_configured(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 30, "app_name": "testshell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         assert b"30 days" in resp.data or b"1 month" in resp.data
 
     def test_no_retention_mention_when_unlimited(self):
         with mock.patch("permalinks.CFG", {"permalink_retention_days": 0, "app_name": "testshell"}):
-            resp = _permalink_error_page("snapshot")
+            with shell_app.app.app_context():
+                resp = _permalink_error_page("snapshot")
         # Unlimited mode should not mention an automatic deletion period
         assert b"retention" not in resp.data.lower()
 

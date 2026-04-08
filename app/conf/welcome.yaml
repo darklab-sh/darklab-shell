@@ -13,7 +13,7 @@
   group: "basics"
   out: "check basic reachability and round-trip latency"
 
-- cmd: "ping -c 4 example.com"
+- cmd: "ping -c 4 darklab.sh"
   group: "basics"
   featured: true
   out: "confirm that a hostname resolves and responds"
@@ -22,121 +22,121 @@
   group: "basics"
   out: "probe a host quickly with repeated ICMP checks"
 
-- cmd: "hping3 -S -p 443 example.com"
+- cmd: "hping3 -S -p 443 darklab.sh"
   group: "advanced"
   out: "send a custom TCP SYN probe to a remote port"
 
-- cmd: "traceroute example.com"
+- cmd: "traceroute darklab.sh"
   group: "basics"
   out: "trace the route packets take to a destination"
 
-- cmd: "tcptraceroute example.com 443"
+- cmd: "tcptraceroute darklab.sh 443"
   group: "advanced"
   out: "trace a TCP path to a specific service port"
 
-- cmd: "nc -zv example.com 443"
+- cmd: "nc -zv darklab.sh 443"
   group: "basics"
   out: "check whether a port is open and reachable"
 
-- cmd: "mtr --report-wide example.com"
+- cmd: "mtr --report-wide darklab.sh"
   group: "advanced"
   out: "combine ping and traceroute for hop-by-hop latency"
 
-- cmd: "dig example.com A"
+- cmd: "dig darklab.sh A"
   group: "dns"
   featured: true
   out: "query DNS records and inspect the answer section"
 
-- cmd: "dig example.com MX"
+- cmd: "dig darklab.sh MX"
   group: "dns"
   out: "inspect mail exchanger records for a domain"
 
-- cmd: "nslookup example.com"
+- cmd: "nslookup darklab.sh"
   group: "dns"
   out: "run a quick DNS lookup with compact output"
 
-- cmd: "host example.com"
+- cmd: "host darklab.sh"
   group: "dns"
   out: "print a terse DNS resolution result"
 
-- cmd: "whois example.com"
+- cmd: "whois darklab.sh"
   group: "dns"
   out: "inspect registration and ownership metadata"
 
-- cmd: "curl -I https://example.com"
+- cmd: "curl -I https://darklab.sh"
   group: "web"
   featured: true
   out: "fetch HTTP headers without downloading the body"
 
-- cmd: "wget --spider https://example.com"
+- cmd: "wget --spider https://darklab.sh"
   group: "web"
   out: "check a URL without writing a local file"
 
-- cmd: "dnsrecon -d example.com"
+- cmd: "dnsrecon -d darklab.sh"
   group: "recon"
   out: "enumerate DNS records and related data"
 
-- cmd: "subfinder -d example.com"
+- cmd: "subfinder -d darklab.sh"
   group: "recon"
   out: "discover subdomains from passive sources"
 
-- cmd: "dnsx -d example.com"
+- cmd: "dnsx -d darklab.sh"
   group: "recon"
   out: "resolve discovered hostnames quickly"
 
-- cmd: "pd-httpx -u https://example.com"
+- cmd: "pd-httpx -u https://darklab.sh"
   group: "web"
   out: "probe HTTP services and inspect responses"
 
-- cmd: "amass enum -d example.com"
+- cmd: "amass enum -d darklab.sh"
   group: "recon"
   out: "broaden subdomain and asset discovery"
 
-- cmd: "assetfinder example.com"
+- cmd: "assetfinder darklab.sh"
   group: "recon"
   out: "enumerate assets related to a domain"
 
-- cmd: "fierce --domain example.com"
+- cmd: "fierce --domain darklab.sh"
   group: "recon"
   out: "combine DNS brute forcing and recon"
 
-- cmd: "dnsenum example.com"
+- cmd: "dnsenum darklab.sh"
   group: "recon"
   out: "gather DNS records and discover hosts"
 
-- cmd: "masscan example.com -p 80,443 --rate 500"
+- cmd: "masscan darklab.sh -p 80,443 --rate 500"
   group: "advanced"
   out: "scan common web ports quickly with a bounded rate"
 
-- cmd: "gobuster dir -u https://example.com -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+- cmd: "gobuster dir -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
   group: "web"
   out: "brute force directories with an installed wordlist"
 
-- cmd: "ffuf -u https://example.com/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+- cmd: "ffuf -u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
   group: "web"
   out: "fuzz web paths with an installed wordlist"
 
-- cmd: "nmap -sV --open example.com"
+- cmd: "nmap -sV --open darklab.sh"
   group: "advanced"
   featured: true
   out: "identify open ports, services, and versions"
 
-- cmd: "testssl example.com"
+- cmd: "testssl darklab.sh"
   group: "advanced"
   out: "inspect TLS configuration and certificate details"
 
-- cmd: "nikto -h https://example.com"
+- cmd: "nikto -h https://darklab.sh"
   group: "web"
   out: "run a quick web server vulnerability check"
 
-- cmd: "wapiti -u https://example.com"
+- cmd: "wapiti -u https://darklab.sh"
   group: "web"
   out: "scan a web app for common attack surfaces"
 
-- cmd: "wpscan --url https://example.com"
+- cmd: "wpscan --url https://darklab.sh"
   group: "advanced"
   out: "probe WordPress targets for known issues"
 
-- cmd: "nuclei -u https://example.com"
+- cmd: "nuclei -u https://darklab.sh"
   group: "advanced"
   out: "run template-based checks against a target"

@@ -5,6 +5,8 @@ This module has no dependency on Flask or other app modules — it contains
 pure functions that can be imported and tested in isolation.
 """
 
+from copy import deepcopy
+import html
 import os
 import re
 import shlex
@@ -18,7 +20,9 @@ AUTOCOMPLETE_FILE     = os.path.join(_CONF, "auto_complete.txt")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
+ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
+APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 
 BUILTIN_FAQ = [
     {
@@ -28,6 +32,173 @@ BUILTIN_FAQ = [
             "and vulnerability scanning commands against remote endpoints, with output streamed "
             "in real time. It's designed for testing and troubleshooting remote hosts."
         ),
+        "answer_html": (
+            "shell.darklab.sh is a lightweight web interface for running network diagnostic "
+            "and vulnerability scanning commands against remote endpoints, with output streamed "
+            "in real time. It's designed for testing and troubleshooting remote hosts — things "
+            "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
+            "scans — without needing SSH access to a server. For more detailed information, see "
+            "the <a href=\"https://gitlab.com/darklab.sh/shell.darklab.sh\" target=\"_blank\" "
+            "rel=\"noopener\" style=\"color:var(--green)\">README on GitLab</a>."
+        ),
+    },
+    {
+        "question": "What commands are allowed?",
+        "answer": "Use the grouped allowlist shown in the FAQ modal or run ls in the web shell.",
+        "ui_kind": "allowed_commands",
+    },
+    {
+        "question": "How do I save or share my results?",
+        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
+        "answer_html": (
+            "There are several options below each tab's output:<br><br>"
+            "<code>permalink</code> — saves a snapshot of everything visible in the tab and "
+            "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
+            "inspect the raw data.<br>"
+            "<code>copy</code> — copies the full plain-text output to your clipboard.<br>"
+            "<code>save .html</code> — downloads a themed HTML file with ANSI colors "
+            "preserved. It uses app-hosted vendor fonts when viewed alongside this shell and "
+            "falls back to browser monospace fonts offline.<br>"
+            "<code>save .txt</code> — downloads a plain-text version of the output.<br><br>"
+            "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
+        ),
+    },
+    {
+        "question": "How do tabs and permalinks work?",
+        "answer": (
+            "Each command runs in the active tab. Use additional tabs to keep results visible "
+            "side by side."
+        ),
+        "answer_html": (
+            "Each command runs in the currently active tab. Open additional tabs with the "
+            "<strong>+</strong> button to keep results from different sessions visible at the "
+            "same time. Each tab tracks its own status independently. Double-click a tab label to "
+            "rename it.<br><br>"
+            "The <strong>permalink</strong> button captures everything currently visible in that "
+            "tab and saves it as a shareable page. If a full saved artifact exists, the permalink "
+            "uses that full output. The link opens a styled HTML view with ANSI color rendering "
+            "and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. "
+            "Permalinks survive container restarts.<br><br>"
+            "The <strong>⧖ history</strong> panel shows your recent runs. You can load any past "
+            "result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> "
+            "a command to pin it to the top of the list."
+        ),
+    },
+    {
+        "question": "How do I stop a running command?",
+        "answer": "Use the Kill button shown while a command is running.",
+        "answer_html": (
+            "Click the <strong style=\"color:var(--red)\">■ Kill</strong> button that appears "
+            "while a command is running. This sends SIGTERM to the entire process group on the "
+            "server, stopping it immediately."
+        ),
+    },
+    {
+        "question": "Are there keyboard shortcuts?",
+        "answer": (
+            "Yes. Run shortcuts in the web shell for the current shortcut list, including tab, output, "
+            "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
+        ),
+        "answer_html": (
+            "Yes. Current shell-style shortcuts include:<br><br>"
+            "<ul style=\"margin:0 0 0 18px;padding:0;line-height:1.6\">"
+            "<li><code>Ctrl+C</code> — open kill confirmation while a command is running, or "
+            "drop to a fresh prompt line when idle.</li>"
+            "<li><code>Enter</code> on a blank prompt — create a new empty prompt line.</li>"
+            "<li><code>Option+T</code> / <code>Alt+T</code> and <code>Option+W</code> / "
+            "<code>Alt+W</code> — open or close the current tab.</li>"
+            "<li><code>Option+←/→</code> and <code>Option+1...9</code> (<code>Alt+←/→</code>, "
+            "<code>Alt+1...9</code>) — switch tabs.</li>"
+            "<li><code>Option+P</code> (<code>Alt+P</code>) — create a permalink for the active "
+            "tab.</li>"
+            "<li><code>Option+Shift+C</code> (<code>Alt+Shift+C</code>) — copy the active tab "
+            "output.</li>"
+            "<li><code>Ctrl+L</code> — clear the active tab.</li>"
+            "<li><strong>Kill dialog:</strong> <code>Enter</code> confirms and "
+            "<code>Escape</code> cancels.</li>"
+            "<li><code>Ctrl+A</code>, <code>Ctrl+E</code>, <code>Ctrl+W</code>, "
+            "<code>Ctrl+U</code>, <code>Ctrl+K</code>, <code>Option+B</code>, and "
+            "<code>Option+F</code> (<code>Alt+B</code>, <code>Alt+F</code>) provide "
+            "readline-style prompt editing.</li>"
+            "<li><strong>Welcome screen:</strong> printable typing, <code>Enter</code>, and "
+            "<code>Escape</code> all settle the welcome animation immediately.</li>"
+            "<li><strong>Autocomplete:</strong> <code>↑↓</code> navigate, <code>Tab</code> "
+            "accepts, <code>Enter</code> accepts or runs, and <code>Escape</code> dismisses.</li>"
+            "</ul>"
+            "<br>On macOS, the app-safe tab/action shortcuts use the <strong>Option</strong> "
+            "key. The <strong>Ctrl+...</strong> bindings are intentional shell-style controls, "
+            "not replacements for browser <strong>Command</strong> shortcuts.<br><br>You can "
+            "also run <code>shortcuts</code> in the terminal for the current shortcut reference."
+        ),
+    },
+    {
+        "question": "How do I access search, history and theme on mobile?",
+        "answer": "Use the mobile menu in the top-right corner.",
+        "answer_html": (
+            "On small screens the header buttons are replaced by a <strong>☰</strong> menu in the "
+            "top-right corner. Tap it to access search, run history, line numbers, timestamps, "
+            "theme, and this FAQ."
+        ),
+    },
+    {
+        "question": "How do I rename a tab?",
+        "answer": "Double-click the tab label, then press Enter or click away to confirm.",
+        "answer_html": (
+            "Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click "
+            "anywhere outside to confirm, or <strong>Escape</strong> to cancel. Once renamed, "
+            "running a command won't overwrite the label — the tab keeps your chosen name."
+        ),
+    },
+    {
+        "question": "What do the timestamp options do?",
+        "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
+        "answer_html": (
+            "The <strong>timestamps</strong> button in the terminal bar cycles through three modes:"
+            "<br><br><strong>off</strong> — no timestamps shown (default).<br>"
+            "<strong>elapsed</strong> — shows how many seconds after the command started each line "
+            "appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different "
+            "stages of a scan take.<br><strong>clock</strong> — shows the wall-clock time each "
+            "line was received (e.g. <code>14:32:01</code>). Useful for correlating output with "
+            "events elsewhere."
+        ),
+    },
+    {
+        "question": "What do the line number options do?",
+        "answer": "They toggle numbered output lines on and off for easier line-by-line reference.",
+        "answer_html": (
+            "The <strong>line numbers</strong> button in the terminal bar toggles numbered output "
+            "lines on and off.<br><br><strong>off</strong> — no line numbers are shown (default)."
+            "<br><strong>on</strong> — every output line is prefixed with a sequence number so "
+            "you can reference specific rows while reading long scans or copied output."
+        ),
+    },
+    {
+        "question": "Are my commands visible to other users?",
+        "answer": "No. History and saved data are scoped to your anonymous browser session.",
+        "answer_html": (
+            "No. Each browser session is assigned an anonymous ID stored in your browser's local "
+            "storage. Your run history, starred commands, and saved snapshots are only visible to "
+            "sessions sharing that ID — in practice, just your own browser tabs. Commands are not "
+            "broadcast or shared between users."
+        ),
+    },
+    {
+        "question": "What are the retention and limit settings for this instance?",
+        "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
+        "ui_kind": "limits",
+    },
+    {
+        "question": "What wordlists are available?",
+        "answer": "The SecLists collection is installed at /usr/share/wordlists/seclists/.",
+        "answer_html": (
+            "The full <a href=\"https://github.com/danielmiessler/SecLists\" target=\"_blank\" "
+            "rel=\"noopener\" style=\"color:var(--green)\">SecLists</a> collection is installed at "
+            "<code>/usr/share/wordlists/seclists/</code>. Commonly used lists:<ul>"
+            "<li><code>Discovery/Web-Content/common.txt</code> — fast directory scan</li>"
+            "<li><code>Discovery/Web-Content/big.txt</code> — broader directory scan</li>"
+            "<li><code>Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt</code> — "
+            "thorough directory scan</li></ul>"
+        ),
     },
     {
         "question": "Why does mtr look different here?",
@@ -35,43 +206,87 @@ BUILTIN_FAQ = [
             "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
             "available in a web shell. It runs in --report-wide mode instead."
         ),
-    },
-    {
-        "question": "Can I request a new tool?",
-        "answer": "Yes. Contact the instance operator to request additional allowlisted tools.",
-    },
-    {
-        "question": "How do tabs and permalinks work?",
-        "answer": (
-            "Each command runs in the active tab. Use additional tabs to keep results visible "
-            "side by side. The permalink action saves a shareable view of the visible output."
+        "answer_html": (
+            "<code>mtr</code> needs a real terminal (TTY) for its interactive display, which "
+            "isn't available in a web shell. It automatically runs in <code>--report-wide</code> "
+            "mode here, printing 10 probe cycles and a summary table. You can change the cycle "
+            "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>"
         ),
     },
-    {
-        "question": "How do I stop a running command?",
-        "answer": "Use the Kill button shown while a command is running.",
-    },
-    {
-        "question": "How do I access search, history and theme on mobile?",
-        "answer": "Use the mobile menu in the top-right corner.",
-    },
-    {
-        "question": "How do I save or share my results?",
-        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
-    },
-    {
-        "question": "How do I rename a tab?",
-        "answer": "Double-click the tab label, then press Enter or click away to confirm.",
-    },
-    {
-        "question": "What do the timestamp options do?",
-        "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
-    },
-    {
-        "question": "Are my commands visible to other users?",
-        "answer": "No. History and saved data are scoped to your anonymous browser session.",
-    },
 ]
+
+_FAQ_CHIP_RE = re.compile(r'\[\[(?:cmd|chip):(.+?)\]\]')
+_FAQ_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
+_FAQ_ITALIC_RE = re.compile(r'(?<!\w)\*(?!\s)(.+?)(?<!\s)\*(?!\w)')
+_FAQ_UNDER_RE = re.compile(r'__(.+?)__')
+_FAQ_CODE_RE = re.compile(r'`([^`]+)`')
+
+
+def _faq_inline_markup(text):
+    text = html.escape(str(text), quote=False)
+
+    def repl_chip(match):
+        raw = match.group(1).strip()
+        if not raw:
+            return ''
+        cmd, label = raw, raw
+        if '|' in raw:
+            cmd, label = raw.split('|', 1)
+            cmd = cmd.strip()
+            label = label.strip() or cmd
+        cmd = html.escape(cmd, quote=True)
+        label = html.escape(label, quote=False)
+        return (
+            f'<span class="allowed-chip faq-chip" role="button" tabindex="0" '
+            f'data-faq-command="{cmd}">{label}</span>'
+        )
+
+    text = _FAQ_CHIP_RE.sub(repl_chip, text)
+    text = _FAQ_CODE_RE.sub(r'<code>\1</code>', text)
+    text = _FAQ_BOLD_RE.sub(r'<strong>\1</strong>', text)
+    text = _FAQ_UNDER_RE.sub(r'<u>\1</u>', text)
+    text = _FAQ_ITALIC_RE.sub(r'<em>\1</em>', text)
+    return text
+
+
+def render_faq_markup(text):
+    """Render a safe FAQ mini-markup string to HTML."""
+    if text is None:
+        return ""
+
+    lines = str(text).replace('\r\n', '\n').replace('\r', '\n').split('\n')
+    blocks = []
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if not line.strip():
+            i += 1
+            continue
+
+        stripped = line.lstrip()
+        if stripped.startswith('- ') or stripped.startswith('* '):
+            items = []
+            while i < len(lines):
+                candidate = lines[i]
+                candidate_stripped = candidate.lstrip()
+                if not candidate_stripped or not (candidate_stripped.startswith('- ') or candidate_stripped.startswith('* ')):
+                    break
+                items.append(f"<li>{_faq_inline_markup(candidate_stripped[2:].strip())}</li>")
+                i += 1
+            blocks.append("<ul>" + "".join(items) + "</ul>")
+            continue
+
+        para_lines = []
+        while i < len(lines):
+            candidate = lines[i]
+            candidate_stripped = candidate.lstrip()
+            if not candidate.strip() or candidate_stripped.startswith('- ') or candidate_stripped.startswith('* '):
+                break
+            para_lines.append(_faq_inline_markup(candidate.strip()))
+            i += 1
+        blocks.append("<br>".join(para_lines))
+
+    return "<br><br>".join(blocks)
 
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
@@ -79,7 +294,7 @@ BUILTIN_FAQ = [
 SHELL_CHAIN_RE = re.compile(r'&&|\|\|?|;;?|`|\$\(|>>?|<')
 
 # Pre-compiled path blocking patterns — negative lookbehind prevents false
-# positives on URLs such as https://example.com/data/ or /tmp/ path segments.
+# positives on URLs such as https://darklab.sh/data/ or /tmp/ path segments.
 _PATH_DATA_RE = re.compile(r'(?<![\w:/])/data\b')
 _PATH_TMP_RE  = re.compile(r'(?<![\w:/])/tmp\b')
 
@@ -137,16 +352,22 @@ def load_faq():
         data = yaml.safe_load(f) or []
     if not isinstance(data, list):
         return []
-    return [
-        {"question": str(item["question"]), "answer": str(item["answer"])}
-        for item in data
-        if isinstance(item, dict) and item.get("question") and item.get("answer")
-    ]
+    result = []
+    for item in data:
+        if not isinstance(item, dict) or not item.get("question") or not item.get("answer"):
+            continue
+        entry = {"question": str(item["question"]), "answer": str(item["answer"])}
+        if item.get("answer_html"):
+            entry["answer_html"] = str(item["answer_html"])
+        else:
+            entry["answer_html"] = render_faq_markup(entry["answer"])
+        result.append(entry)
+    return result
 
 
 def load_all_faq():
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
-    return [*BUILTIN_FAQ, *load_faq()]
+    return [*(deepcopy(BUILTIN_FAQ)), *load_faq()]
 
 
 def load_welcome():
@@ -179,12 +400,33 @@ def load_ascii_art():
         return f.read().rstrip()
 
 
+def load_ascii_mobile_art():
+    """Read ascii_mobile.txt and return the compact mobile banner art."""
+    if not os.path.exists(ASCII_MOBILE_FILE):
+        return ""
+    with open(ASCII_MOBILE_FILE) as f:
+        return f.read().rstrip()
+
+
 def load_welcome_hints():
     """Read app_hints.txt and return a list of app-usage hints."""
     if not os.path.exists(APP_HINTS_FILE):
         return []
     hints = []
     with open(APP_HINTS_FILE) as f:
+        for line in f:
+            line = line.strip()
+            if line and not line.startswith("#"):
+                hints.append(line)
+    return hints
+
+
+def load_mobile_welcome_hints():
+    """Read app_hints_mobile.txt and return a list of mobile-specific hints."""
+    if not os.path.exists(APP_HINTS_MOBILE_FILE):
+        return []
+    hints = []
+    with open(APP_HINTS_MOBILE_FILE) as f:
         for line in f:
             line = line.strip()
             if line and not line.startswith("#"):

@@ -109,10 +109,12 @@ describe('command history hydration', () => {
     document.body.innerHTML = `
       <div id="history-row"><span class="history-label">Recent:</span></div>
       <input id="cmd" />
+      <div id="history-panel"></div>
     `
 
     const histRow = document.getElementById('history-row')
     const cmdInput = document.getElementById('cmd')
+    const historyPanel = document.getElementById('history-panel')
 
     return fromDomScripts([
       'app/static/js/history.js',
@@ -122,10 +124,14 @@ describe('command history hydration', () => {
       APP_CONFIG: { recent_commands_limit: 3 },
       histRow,
       cmdInput,
+      historyPanel,
+      refreshHistoryPanel: vi.fn(),
+      useMobileTerminalViewportMode: () => false,
     }, `{
       hydrateCmdHistory,
       navigateCmdHistory,
       resetCmdHistoryNav,
+      renderHistory,
       getCmdHistory: () => cmdHistory.slice(),
     }`)
   }
@@ -135,20 +141,20 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig example.com A' },
-      { command: 'curl -I https://example.com' },
-      { command: 'dig example.com A' },
-      { command: 'ping -c 4 example.com' },
+      { command: 'dig darklab.sh A' },
+      { command: 'curl -I https://darklab.sh' },
+      { command: 'dig darklab.sh A' },
+      { command: 'ping -c 4 darklab.sh' },
     ])
 
     expect(getCmdHistory()).toEqual([
-      'dig example.com A',
-      'curl -I https://example.com',
-      'ping -c 4 example.com',
+      'dig darklab.sh A',
+      'curl -I https://darklab.sh',
+      'ping -c 4 darklab.sh',
     ])
 
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(-1)).toBe(true)
     expect(cmdInput.value).toBe('')
   })
@@ -158,17 +164,17 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig example.com A' },
-      { command: 'curl -I https://example.com' },
+      { command: 'dig darklab.sh A' },
+      { command: 'curl -I https://darklab.sh' },
     ])
 
     cmdInput.value = 'pin'
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('curl -I https://example.com')
+    expect(cmdInput.value).toBe('curl -I https://darklab.sh')
     expect(navigateCmdHistory(-1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(-1)).toBe(true)
     expect(cmdInput.value).toBe('pin')
   })
@@ -178,19 +184,57 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig example.com A' },
-      { command: 'curl -I https://example.com' },
+      { command: 'dig darklab.sh A' },
+      { command: 'curl -I https://darklab.sh' },
     ])
 
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
 
     cmdInput.value = 'typed now'
     resetCmdHistoryNav()
 
     expect(navigateCmdHistory(-1)).toBe(false)
     expect(navigateCmdHistory(1)).toBe(true)
-    expect(cmdInput.value).toBe('dig example.com A')
+    expect(cmdInput.value).toBe('dig darklab.sh A')
+  })
+
+  it('limits visible recent chips on mobile and appends an overflow chip', () => {
+    document.body.innerHTML = `
+      <div id="history-row"><span class="history-label">Recent:</span></div>
+      <input id="cmd" />
+      <div id="history-panel"></div>
+    `
+
+    const helpers = fromDomScripts([
+      'app/static/js/history.js',
+    ], {
+      document,
+      localStorage: new MemoryStorage(),
+      APP_CONFIG: { recent_commands_limit: 8 },
+      histRow: document.getElementById('history-row'),
+      cmdInput: document.getElementById('cmd'),
+      historyPanel: document.getElementById('history-panel'),
+      refreshHistoryPanel: vi.fn(),
+      useMobileTerminalViewportMode: () => true,
+    }, `({
+      hydrateCmdHistory,
+    })`)
+
+    helpers.hydrateCmdHistory([
+      { command: 'one' },
+      { command: 'two' },
+      { command: 'three' },
+      { command: 'four' },
+    ])
+
+    const chips = [...document.querySelectorAll('.hist-chip')]
+    expect(chips).toHaveLength(4)
+    expect(chips[0].querySelector('.chip-star')?.textContent).toBe('☆')
+    expect(chips[0].querySelector('span:last-child')?.textContent).toBe('one')
+    expect(chips[1].querySelector('span:last-child')?.textContent).toBe('two')
+    expect(chips[2].querySelector('span:last-child')?.textContent).toBe('three')
+    expect(chips[3].textContent).toBe('+1 more')
   })
 })
 
@@ -215,7 +259,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -223,7 +267,7 @@ describe('history panel actions', () => {
       if (url === '/history/run-1?json&preview=1') {
         return Promise.resolve({
           json: () => Promise.resolve({
-            command: 'ping example.com',
+            command: 'ping darklab.sh',
             output: ['ok'],
             exit_code: 0,
           }),
@@ -242,6 +286,8 @@ describe('history panel actions', () => {
     const historyList = document.getElementById('history-list')
     const historyLoadOverlay = document.getElementById('history-load-overlay')
     const histDelOverlay = document.getElementById('hist-del-overlay')
+    const histDelMsg = document.getElementById('hist-del-msg')
+    const histDelConfirmBtn = document.getElementById('hist-del-confirm')
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
@@ -252,6 +298,8 @@ describe('history panel actions', () => {
         'app/static/js/history.js',
       ], {
         document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 8 },
         apiFetch,
         navigator: { clipboard },
         location,
@@ -260,6 +308,8 @@ describe('history panel actions', () => {
         historyLoadOverlay,
         histRow: document.createElement('div'),
         histDelOverlay,
+        histDelMsg,
+        histDelConfirmBtn,
         cmdInput,
         tabs,
         activateTab,
@@ -271,6 +321,10 @@ describe('history panel actions', () => {
         _saveStarred,
         refreshHistoryPanel: () => {},
         renderHistory: () => {},
+        hideHistoryPanel: vi.fn(() => {
+          historyPanel.classList.remove('open')
+          if (typeof cmdInput.focus === 'function') cmdInput.focus()
+        }),
         confirmHistAction: () => {},
         executeHistAction: () => {},
       }, `{
@@ -281,18 +335,20 @@ describe('history panel actions', () => {
       apiFetch,
       clipboard,
       windowOpen,
+      appendLine,
+      showToast,
     }
   }
 
-  it('refreshHistoryPanel copy actions show failure toasts when clipboard writes reject', async () => {
+  it('refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject', async () => {
     const clipboard = {
-      writeText: vi.fn(() => ({
-        then: () => ({
-          catch: (handler) => handler(new Error('clipboard denied')),
-        }),
-      })),
+      writeText: vi.fn(() => Promise.reject(new Error('clipboard denied'))),
     }
-    const { refreshHistoryPanel, showToast } = loadHistoryPanel({ clipboardImpl: clipboard })
+    const originalExecCommand = document.execCommand
+    document.execCommand = vi.fn(() => true)
+    const { refreshHistoryPanel } = loadHistoryPanel({ clipboardImpl: clipboard })
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.focus = vi.fn()
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -303,7 +359,10 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise(resolve => setImmediate(resolve))
 
-    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to copy command')
+    expect(document.execCommand).toHaveBeenCalledWith('copy')
+    expect(document.getElementById('permalink-toast').textContent).toBe('Command copied to clipboard')
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(cmdInput.focus).toHaveBeenCalled()
 
     entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clipboard.writeText).toHaveBeenCalledTimes(2)
@@ -311,7 +370,34 @@ describe('history panel actions', () => {
     await Promise.resolve()
     await new Promise(resolve => setImmediate(resolve))
 
-    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to copy link')
+    expect(document.execCommand).toHaveBeenCalledTimes(2)
+    expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
+    document.execCommand = originalExecCommand
+  })
+
+  it('closes the history panel when a history action button is clicked', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel()
+    const historyPanel = document.getElementById('history-panel')
+    historyPanel.classList.add('open')
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    entry.querySelector('[data-action="star"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+
+    historyPanel.classList.add('open')
+    entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+
+    historyPanel.classList.add('open')
+    entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+
+    historyPanel.classList.add('open')
+    entry.querySelector('[data-action="delete"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
   })
 
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {
@@ -320,7 +406,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -335,7 +421,7 @@ describe('history panel actions', () => {
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
 
-    confirmHistAction('delete', 'run-1', 'ping example.com')
+    confirmHistAction('delete', 'run-1', 'ping darklab.sh')
     executeHistAction('delete')
     await Promise.resolve()
     await Promise.resolve()
@@ -351,7 +437,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -382,7 +468,7 @@ describe('history panel actions', () => {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })
@@ -391,7 +477,7 @@ describe('history panel actions', () => {
         return new Promise((resolve) => {
           resolveRun = () => resolve({
             json: () => Promise.resolve({
-              command: 'ping example.com',
+              command: 'ping darklab.sh',
               output: ['ok'],
               exit_code: 0,
             }),
@@ -400,7 +486,7 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, appendLine } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -415,13 +501,58 @@ describe('history panel actions', () => {
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
   })
 
+  it('restores the full history payload when full output is available', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            runs: [
+              {
+                id: 'run-1',
+                command: 'ping darklab.sh',
+                started: '2026-01-01T00:00:00Z',
+                exit_code: 0,
+                full_output_available: true,
+              },
+            ],
+          }),
+        })
+      }
+      if (url === '/history/run-1?json') {
+        return Promise.resolve({
+          json: () => Promise.resolve({
+            command: 'ping darklab.sh',
+            output: ['ok line 1', 'ok line 2'],
+            exit_code: 0,
+            full_output_available: true,
+          }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { refreshHistoryPanel, appendLine } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
+    expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
+    expect(appendLine).toHaveBeenCalledWith('$ ping darklab.sh', '', 'tab-2')
+    expect(appendLine).toHaveBeenCalledWith('ok line 1', '', 'tab-2')
+    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('preview truncated'), 'notice', 'tab-2')
+  })
+
   it('clears the history loading overlay and shows a failure toast when a restore fetch fails', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/history') {
         return Promise.resolve({
           json: () => Promise.resolve({
             runs: [
-              { id: 'run-1', command: 'ping example.com', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
           }),
         })

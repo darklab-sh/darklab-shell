@@ -1,10 +1,13 @@
+import { vi } from 'vitest'
 import { fromScript } from './helpers/extract.js'
 
-const { escapeHtml, escapeRegex, renderMotd } = fromScript(
+const { escapeHtml, escapeRegex, renderMotd, showToast, copyTextToClipboard } = fromScript(
   'app/static/js/utils.js',
   'escapeHtml',
   'escapeRegex',
   'renderMotd',
+  'showToast',
+  'copyTextToClipboard',
 )
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
@@ -86,14 +89,14 @@ describe('renderMotd', () => {
   })
 
   it('converts [text](https://url) to an <a> with target and rel', () => {
-    expect(renderMotd('[visit](https://example.com)')).toBe(
-      '<a href="https://example.com" target="_blank" rel="noopener">visit</a>',
+    expect(renderMotd('[visit](https://darklab.sh)')).toBe(
+      '<a href="https://darklab.sh" target="_blank" rel="noopener">visit</a>',
     )
   })
 
   it('also renders http:// links (not just https)', () => {
-    expect(renderMotd('[link](http://example.com)')).toBe(
-      '<a href="http://example.com" target="_blank" rel="noopener">link</a>',
+    expect(renderMotd('[link](http://darklab.sh)')).toBe(
+      '<a href="http://darklab.sh" target="_blank" rel="noopener">link</a>',
     )
   })
 
@@ -113,10 +116,56 @@ describe('renderMotd', () => {
   })
 
   it('renders multiple Markdown constructs in one string', () => {
-    const out = renderMotd('**Welcome** — run `ping` or [docs](https://example.com)\nnew line')
+    const out = renderMotd('**Welcome** — run `ping` or [docs](https://darklab.sh)\nnew line')
     expect(out).toContain('<strong>Welcome</strong>')
     expect(out).toContain('<code>ping</code>')
-    expect(out).toContain('<a href="https://example.com"')
+    expect(out).toContain('<a href="https://darklab.sh"')
     expect(out).toContain('<br>')
+  })
+})
+
+describe('showToast', () => {
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="permalink-toast"></div>'
+  })
+
+  it('marks failure toasts with an error tone', () => {
+    showToast('Failed to copy link', 'error')
+
+    const toast = document.getElementById('permalink-toast')
+    expect(toast.classList.contains('toast-error')).toBe(true)
+    expect(toast.classList.contains('toast-success')).toBe(false)
+    expect(toast.textContent).toBe('Failed to copy link')
+  })
+
+  it('marks success toasts with the success tone', () => {
+    showToast('Link copied to clipboard')
+
+    const toast = document.getElementById('permalink-toast')
+    expect(toast.classList.contains('toast-success')).toBe(true)
+    expect(toast.classList.contains('toast-error')).toBe(false)
+  })
+})
+
+describe('copyTextToClipboard', () => {
+  beforeEach(() => {
+    document.body.innerHTML = ''
+  })
+
+  it('falls back to execCommand when the clipboard API rejects', async () => {
+    const execCommand = vi.fn(() => true)
+    document.execCommand = execCommand
+
+    const originalClipboard = navigator.clipboard
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('denied')) },
+    })
+
+    await expect(copyTextToClipboard('copy me')).resolves.toBe(true)
+    expect(execCommand).toHaveBeenCalledWith('copy')
+
+    if (originalClipboard === undefined) delete navigator.clipboard
+    else Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
   })
 })

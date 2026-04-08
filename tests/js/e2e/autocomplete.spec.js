@@ -12,14 +12,14 @@ test.describe('autocomplete', () => {
 
     const dropdown = page.locator('#ac-dropdown')
     await expect(dropdown).toBeVisible()
-    await expect(dropdown).toContainText('man nmap')
     await expect(dropdown).toContainText('nmap -h')
+    await expect(dropdown).not.toContainText('man nmap')
 
     await page.keyboard.press('ArrowDown')
-    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('man nmap')
+    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('nmap -h')
 
     await page.keyboard.press('Tab')
-    await expect(input).toHaveValue('man nmap')
+    await expect(input).toHaveValue('nmap -h')
     await expect(dropdown).toBeHidden()
   })
 
@@ -29,7 +29,7 @@ test.describe('autocomplete', () => {
 
     const dropdown = page.locator('#ac-dropdown')
     await expect(dropdown).toBeVisible()
-    await expect(dropdown).toContainText('whois example.com')
+    await expect(dropdown).toContainText('whois darklab.sh')
 
     await page.locator('header').click({ position: { x: 16, y: 16 } })
 

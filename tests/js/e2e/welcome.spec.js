@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(68)
 
 test.describe('welcome animation', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.route('**/welcome', route => {
       route.fulfill({
         status: 200,
@@ -17,7 +19,7 @@ test.describe('welcome animation', () => {
             out: 'welcome should disappear if the user starts typing',
           },
           {
-            cmd: 'dig example.com A',
+            cmd: 'dig darklab.sh A',
             out: 'second sample should appear instantly when welcome settles',
           },
         ]),
@@ -30,6 +32,22 @@ test.describe('welcome animation', () => {
         body: [
           '           /$$                 /$$ /$$           /$$                     /$$       /$$           /$$                    /$$      ',
           '          | $$                | $$| $$          | $$                    | $$      | $$          | $$                   | $$      ',
+        ].join('\n'),
+      })
+    })
+    await page.route('**/welcome/ascii-mobile', route => {
+      route.fulfill({
+        status: 200,
+        contentType: 'text/plain',
+        body: [
+          '.----[ shell.darklab.sh :: mobile console ]----.',
+          '|                                              |',
+          '|   __  __   ___   ___   ___   ___   ___       |',
+          "|  |  \\/  | / _ \\ / _ \\ / _ \\ / _ \\ / _ \\      |",
+          '|  | |\\/| || (_) | (_) | (_) | (_) | (_) |     |',
+          '|  |_|  |_| \\___/ \\___/ \\___/ \\___/ \\___/      |',
+          '|                                              |',
+          "'----[ status: ready ]----[ prompt: anon@shell.darklab.sh:~$ ]----'",
         ].join('\n'),
       })
     })
@@ -80,9 +98,11 @@ test.describe('welcome animation', () => {
   test('welcome finishes with a hint row after the intro and command blocks', async ({ page }) => {
     await expect(page.locator('.welcome-ascii-art')).toContainText('/$$')
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
+    await expect(page.locator('.welcome-section-header').first()).toContainText('Recommended commands')
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
     await expect(page.locator('.welcome-command-featured')).toHaveCount(0)
     await expect(page.locator('.welcome-command-badge')).toContainText('try this first')
+    await expect(page.locator('.welcome-section-header').nth(1)).toContainText('Helpful hints')
     await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
   })
 
@@ -142,9 +162,58 @@ test.describe('welcome animation', () => {
 
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
-    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig example.com A')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
     await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
     await expect(page.locator('#cmd')).toHaveValue('dig ')
+  })
+
+  test('pressing Space in the prompt settles the remaining welcome intro immediately', async ({ page }) => {
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.wlc-command-text')?.textContent || ''
+      return text.length >= 5
+    })
+
+    await page.locator('#cmd').press(' ')
+
+    await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
+    await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
+    await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('pressing Escape in the prompt settles welcome without changing input text', async ({ page }) => {
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.wlc-command-text')?.textContent || ''
+      return text.length >= 5
+    })
+
+    await page.locator('#cmd').press('Escape')
+
+    await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
+    await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
+    await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(page.locator('#cmd')).toBeFocused()
+  })
+
+  test('pressing Ctrl+C while welcome is active settles the intro without opening kill confirmation', async ({ page }) => {
+    await page.waitForFunction(() => {
+      const text = document.querySelector('.wlc-command-text')?.textContent || ''
+      return text.length >= 5
+    })
+
+    const beforePromptEchoCount = await page.locator('.tab-panel.active .output .line.prompt-echo').count()
+    await page.locator('#cmd').press('Control+C')
+
+    await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
+    await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
+    await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
+    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(beforePromptEchoCount + 1)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(page.locator('#cmd')).toBeFocused()
   })
 
   test('running a command in another tab does not tear down the original welcome tab', async ({ page }) => {
@@ -174,23 +243,20 @@ test.describe('welcome animation', () => {
     await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
   })
 
-  test('mobile welcome layout keeps the prompt and featured badge horizontally readable', async ({ page }) => {
-    await page.setViewportSize({ width: 390, height: 844 })
-    await page.reload()
-    await page.locator('#cmd').waitFor()
+  test.describe('mobile view', () => {
+    test.use({ hasTouch: true })
 
-    const prompt = page.locator('.welcome-command').nth(0).locator('.wlc-prompt')
-    const badge = page.locator('.welcome-command-badge')
+    test('switches to the mobile welcome path with the mobile banner', async ({ page }) => {
+      await page.setViewportSize({ width: 390, height: 844 })
+      await page.reload()
+      await page.locator('#mobile-cmd').waitFor()
 
-    await expect(prompt).toContainText('anon@shell.darklab.sh:~$')
-    await expect(badge).toContainText('try this first')
-
-    const promptBox = await prompt.boundingBox()
-    const badgeBox = await badge.boundingBox()
-
-    expect(promptBox).not.toBeNull()
-    expect(badgeBox).not.toBeNull()
-    expect(promptBox.width).toBeGreaterThan(promptBox.height * 2)
-    expect(badgeBox.width).toBeGreaterThan(badgeBox.height * 2)
+      await expect(page.locator('.welcome-ascii-art')).toContainText('mobile console')
+      await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
+      await expect(page.locator('.welcome-command')).toHaveCount(0)
+      await expect(page.locator('.welcome-section-header')).toContainText('Helpful hints')
+      await expect(page.locator('.line.welcome-hint')).toContainText(/Tap the prompt|Use the mobile menu|helper row|Rotate the device|Long runs/)
+      await expect(page.locator('#mobile-run-btn')).toBeVisible()
+    })
   })
 })

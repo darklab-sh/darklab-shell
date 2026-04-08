@@ -14,33 +14,39 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 
 ## Features
 
-- **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE)
+- **Real-time output streaming** — output appears line by line as the process produces it, via Server-Sent Events (SSE). Large bursts are flushed in batches so fast commands stay responsive, and the live view follows the bottom unless you scroll away
 - **Kill running processes** — each tab has its own **■ Kill** button that appears while a command is running; clicking it shows a confirmation modal before sending SIGTERM to the entire process group. Killed processes show a **KILLED** status (amber) distinct from ERROR
 - **Run timer** — a live elapsed timer runs next to the status pill while a command is executing; displays as seconds (`32.6s`), minutes (`2m 5.0s`), or hours (`1h 3m 32.6s`) depending on duration. The final time is shown in the exit line when the process finishes or is killed
-- **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered via CSS with no DOM rebuild
+- **Timestamps per line** — toggle between elapsed time (`+12.3s`) and clock time (`14:32:01`) stamps on each output line using the **timestamps** button in the terminal bar. Rendered from shared per-line prefix metadata so existing output updates instantly without rebuilding the line DOM
+- **Line numbers per output line** — toggle visible sequence numbers on each output line using the **line numbers** button in the terminal bar. Uses the same shared prefix metadata as timestamps so numbering stays aligned when timestamp mode changes
+- **Permalink display controls** — permalink pages now have their own line-number and timestamp toggles. Snapshot permalinks always preserve saved timestamp metadata, fresh run permalinks do the same when full output was captured with structured line metadata, and both permalink page types honor the browser’s saved line-number and timestamp preferences on load. They also inherit the current session theme so the share page matches the main shell
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
-- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Controlled by `welcome.yaml`, `ascii.txt`, `app_hints.txt`, and the welcome timing keys in `config.yaml`
-- **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
+- **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and `app_hints_mobile.txt` and skips the sampled commands from `welcome.yaml`
+- **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
+- **Mobile composer dock** — on touch-sized screens the app uses a visible mobile composer with a Run button, a compact helper row that appears only while the keyboard is open, and shared syncing for command chips and autocomplete
+- **Terminal-like command flow** — while a command is running, the prompt is hidden and the Run action is disabled; completed commands are echoed inline above their output; pressing **Enter** on a blank line inserts a fresh prompt line; **Ctrl+C** opens kill confirmation when running, or drops to a new prompt line when idle
+- **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `shortcuts` shows current keyboard shortcuts, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
-- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` appear as you type; use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
+- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` render as a terminal-style list aligned to the command start (not a textbox dropdown), with smart above/below placement to avoid pushing the prompt when space is tight. Use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
+- **Tab strip controls** — tabs can be reordered via drag-and-drop, and left/right tab-scroll buttons are shown for overflowed tab bars
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
 - **Full-output permalinks for long runs** — when full-output persistence is enabled, run permalinks automatically serve the complete saved output of that run, while loading a run back into a terminal tab still uses the capped preview so the UI stays fast
 - **Starred / favorites** — star commands in the history drawer or recent-chips bar to always show them first, regardless of age. Starring a command from the history drawer also adds it to the chips bar if it isn't already there, giving instant quick-access regardless of whether it was run in the current session. Starred state is stored in `localStorage` and applied by command text across all runs
-- **Permalinks** — the permalink button on each tab captures all output currently visible and saves it as a shareable HTML page; single-run permalinks from the history drawer link to individual run results. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (self-contained HTML file with ANSI color) buttons
+- **Permalinks** — the permalink button on each tab captures the current tab output and, when a full saved artifact exists, fetches and shares that full saved output as a shareable HTML page; single-run permalinks from the history drawer link to the canonical stored result for that command. Both persist via SQLite. The snapshot view includes **copy** (full text to clipboard) and **save .html** (themed HTML export with ANSI color) buttons
 - **Copy to clipboard** — copy the full plain-text output of any tab to the clipboard via the **copy** button in each tab's action bar
-- **HTML export** — download a tab's output as a self-contained HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar
+- **HTML export** — download a tab's output as a themed HTML file with ANSI color rendering preserved, via the **save .html** button in each tab's action bar. The downloaded file embeds fonts at export time so it stays portable, and the live app still serves the same vendor fonts for on-page rendering
 - **Output search** — search within the active tab's output with match highlighting and prev/next navigation; toggle **case-sensitive** and **regex** mode with the `Aa` and `.*` buttons in the search bar. The search button lives in the terminal bar next to the tabs
 - **Command history** — recent commands shown as clickable chips for quick re-runs; starred commands are always shown first
 - **Save output** — download the terminal output as a timestamped `.txt` file
-- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage
+- **Dark/light theme** — toggle between dark and light mode; preference saved in localStorage. Permalink pages and saved HTML exports follow the same theme so shared views stay consistent
 - **MOTD** — optional message of the day displayed at the top of the terminal on page load; supports `**bold**`, `` `code` ``, `[link](url)`, and newlines
 - **Configurable** — key behavioural settings (rate limits, retention, timeouts, branding, theme) controlled via `config.yaml`, no rebuild needed
 - **Rate limiting** — per-IP request limiting backed by Redis for accurate enforcement across all Gunicorn workers; real client IP is auto-detected from `X-Forwarded-For` when it contains a valid IP address (set by a reverse proxy), otherwise the direct connection IP is used
 - **Anonymous session tracking** — the client generates a UUID session ID once (`session.js`) and sends it on every API call via `X-Session-ID`; this keeps history/test data scoped to each browser/tab and allows the server tests to isolate rate-limit buckets
 - **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
-- **FAQ modal** — built-in help with allowed commands grouped by category; click any command chip to load it into the command bar with autocomplete. The retention/limits entry shows live values for command timeout, output line limit, and permalink retention with a note that they are configurable by the operator. Extend with instance-specific entries via `faq.yaml`
+- **FAQ modal** — the modal is now rendered from the backend FAQ dataset returned by `/faq`, so built-in help and custom `faq.yaml` entries share one source of truth. Allowed commands still appear grouped by category with clickable chips, and the retention/limits entry still shows live operator-configured values
 
 ---
 
@@ -75,7 +81,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │       │   ├── app.test.js     # bootstrap wiring, modal controls, search controls
 │       │   ├── runner.test.js  # _formatElapsed, run/kill edge cases, stall recovery
 │       │   ├── history.test.js # starred state, clipboard, delete/clear failures
-│       │   └── output.test.js  # ANSI rendering and output edge cases
+│       │   └── output.test.js  # ANSI rendering, timestamp/line-number mode, and output edge cases
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── helpers.js      # runCommand/openHistory helpers
 │           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
@@ -83,7 +89,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │           ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
 │           ├── share.spec.js    # snapshot permalinks and clipboard behavior
 │           ├── history.spec.js  # History drawer: load command, dedup tab, star/chip cleanup
-│           └── tabs.spec.js     # Tab command recall and new-tab behaviour
+│           └── tabs.spec.js     # Tab lifecycle, rename, reorder, and new-tab behaviour
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
 │   └── run_local.sh                    # Script to run without Docker using Python directly
@@ -96,7 +102,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── database.py             # SQLite connection, schema init, retention pruning
     ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
-    ├── permalinks.py           # HTML rendering for /history/<id> and /share/<id> pages
+    ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customise the instance
@@ -105,14 +111,20 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
     │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
+    │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
+    │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
     │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
     │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
     ├── templates/
-    │   └── index.html          # Frontend HTML shell rendered by Flask
+    │   ├── index.html          # Frontend HTML shell rendered by Flask
+    │   ├── permalink_base.html # Shared shell for permalink pages
+    │   ├── permalink.html      # Live permalink page template
+    │   └── permalink_error.html # Missing/expired permalink template
     ├── requirements.txt        # Python runtime dependencies
     └── static/
         ├── css/
         │   └── styles.css      # All application styles
+        ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
         └── js/
             ├── session.js      # Session UUID + apiFetch wrapper (loads first)
             ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
@@ -122,13 +134,15 @@ A web-based shell for running network diagnostics and vulnerability scans agains
             ├── output.js       # ANSI rendering and line management
             ├── search.js       # In-output search (with case-sensitive and regex modes)
             ├── autocomplete.js # Command autocomplete dropdown
+            ├── export_html.js  # Shared export HTML builder / embedded-font helper
             ├── history.js      # Command history chips and drawer (with starring)
             ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
             ├── app.js          # Initialization and event wiring (loads last)
             └── vendor/
-                └── ansi_up.js  # ANSI-to-HTML library — committed as a fallback for local/docker-compose
-                                #   runs; overwritten with the latest version at Docker image build time
+                └── ansi_up.js  # ANSI-to-HTML library — committed browser-global build copied into
+                                #   /usr/local/share/shell-assets for the image; repo copy remains the
+                                #   fallback for local/docker-compose runs
 ```
 
 ---
@@ -150,7 +164,9 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 | `conf/allowed_commands.txt` | Immediately — re-read on every request |
 | `conf/faq.yaml` | Immediately — re-read on every request |
 | `conf/ascii.txt` | On next page load — fetched once by the browser on load |
+| `conf/ascii_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/app_hints.txt` | On next page load — fetched once by the browser on load |
+| `conf/app_hints_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
 | `conf/auto_complete.txt` | On next page load — fetched once by the browser |
 | `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
@@ -321,7 +337,7 @@ Log level and format are configured in `config.yaml` and take effect after `dock
 **`gelf`** — newline-delimited GELF 1.1 JSON. `short_message` is the bare event name; all context is in `_`-prefixed additional fields for direct Graylog indexing:
 
 ```json
-{"version":"1.1","host":"shell.darklab.sh","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"shell.darklab.sh","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
+{"version":"1.1","host":"shell.darklab.sh","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"shell.darklab.sh","_app_version":"1.3","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
 ```
 
 ### GELF back-end integration
@@ -413,8 +429,8 @@ This allows all `nmap` invocations except those containing `-sU` or `--script` a
 **`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
 
 ```
-curl -o /dev/null -s -w "%{http_code}" https://example.com
-wget -q -O /dev/null --server-response https://example.com
+curl -o /dev/null -s -w "%{http_code}" https://darklab.sh
+wget -q -O /dev/null --server-response https://darklab.sh
 ```
 
 ### Shell Operator Blocking
@@ -427,7 +443,7 @@ When the allowlist is active, the following operators are blocked outright, both
 
 ## Custom FAQ
 
-Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are appended after the built-in FAQ items in the FAQ modal and are re-read on every request — no restart needed.
+Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are appended after the built-in FAQ items returned by `/faq` and are re-read on every request — no restart needed.
 
 **Format:**
 
@@ -439,7 +455,16 @@ Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are a
   answer: "Outbound traffic is limited to 1 Gbps sustained."
 ```
 
-The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Answers are rendered as plain text.
+The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Custom entries can use a small safe markup subset in `answer` for bold, italics, underline, inline code, bullet lists, and clickable command chips. Chips behave like the built-in allowlist chips and load the command into the prompt when clicked:
+
+- `**bold**`
+- `*italic*`
+- `__underline__`
+- `` `inline code` ``
+- `- list items`
+- `[[cmd:shortcuts]]` or `[[cmd:ping -c 1 127.0.0.1|custom label]]`
+
+Use `answer_html` if you need exact HTML. Built-in entries can still carry richer modal formatting from the backend while exposing plain-text answers to the `faq` helper command.
 
 ---
 
@@ -452,7 +477,9 @@ When the page first loads, the terminal can render a staged welcome sequence:
 - curated sampled commands and their sample output from `app/conf/welcome.yaml`
 - rotating footer hints loaded from `app/conf/app_hints.txt`
 
-If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt` or `app_hints.txt` are absent, those parts are skipped as well.
+On touch-sized screens the welcome flow uses `app/conf/ascii_mobile.txt` and `app/conf/app_hints_mobile.txt` instead of the wide desktop banner and desktop hint file, while keeping the same status and hint timing and skipping the sampled command blocks.
+
+If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt`, `app_hints.txt`, `ascii_mobile.txt`, or `app_hints_mobile.txt` are absent, those parts are skipped as well.
 
 **Format:**
 
@@ -483,13 +510,18 @@ Notes:
 - App hints rotate only briefly; they are not an endless carousel
 - If the user runs a command before the welcome sequence completes, it stops immediately and clears the partial output in that same tab only
 
-The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, or `conf/app_hints.txt` and reload the page to see changes without restarting the server.
+The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, `conf/ascii_mobile.txt`, `conf/app_hints.txt`, or `conf/app_hints_mobile.txt` and reload the page to see changes without restarting the server.
 
 ---
 
 ## Autocomplete
 
-Autocomplete suggestions are loaded from `conf/auto_complete.txt` at page load and matched against what you type. The matched portion of each suggestion is highlighted in green.
+Autocomplete suggestions are loaded from `conf/auto_complete.txt` at page load and matched against what you type. Suggestions are rendered as a terminal-style vertical list aligned with the command text (after the prompt prefix), and the matched portion is highlighted in green.
+
+Placement rules:
+- The list opens below the prompt when there is room
+- If space below is tight, it flips above the prompt
+- When shown above, suggestions are rendered in reverse order so keyboard navigation still feels natural and the prompt position remains visually stable
 
 **Keyboard controls:**
 
@@ -506,6 +538,62 @@ Autocomplete suggestions are loaded from `conf/auto_complete.txt` at page load a
 - Suggestions can be full commands with flags, e.g. `nmap -sT --script vuln`
 
 The file is fetched once on page load. To update suggestions, edit `conf/auto_complete.txt` and reload the page — no server restart needed.
+
+---
+
+## Keyboard Shortcuts
+
+Current keyboard behavior:
+
+- `Enter` on a blank prompt adds a fresh prompt line without calling `/run`
+- `Ctrl+C` opens kill confirmation while a command is running, or drops to a fresh prompt line when idle
+- During welcome, printable typing plus `Enter` and `Escape` immediately settle the animation into the live prompt
+- In autocomplete, `Up` / `Down` navigate, `Tab` accepts, `Enter` accepts-or-runs, and `Escape` dismisses
+- With a blank prompt, `Up` / `Down` cycles through recent command history, including history hydrated from the server on first load
+- `Option+T` (`Alt+T`) opens a new tab
+- `Option+W` (`Alt+W`) closes the current tab
+- `Option+Left` / `Option+Right` (`Alt+Left` / `Alt+Right`) cycle between tabs
+- `Option+1` through `Option+9` (`Alt+1` ... `Alt+9`) jump directly to tabs 1 through 9
+- `Option+P` (`Alt+P`) creates a permalink for the active tab
+- `Option+Shift+C` (`Alt+Shift+C`) copies active-tab output
+- `Ctrl+L` clears the active tab
+- In the kill dialog, `Enter` confirms and `Escape` cancels
+- `Ctrl+W` deletes one word to the left
+- `Ctrl+A` moves the cursor to the start of the line
+- `Ctrl+E` moves the cursor to the end of the line
+- `Ctrl+U` deletes from the cursor to the start of the line
+- `Ctrl+K` deletes from the cursor to the end of the line
+- `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) move backward / forward by word
+
+On macOS, `Option` is the key used for the app-safe `Alt` shortcuts above. The `Ctrl+...` bindings are intentional shell-style controls and are separate from browser `Command` shortcuts.
+
+Shipped app-safe shortcuts:
+
+| Shortcut | Action | Notes |
+|----------|--------|-------|
+| `Option+T` (`Alt+T`) | New tab | Preferred app-safe binding |
+| `Option+W` (`Alt+W`) | Close current tab | Avoids fighting browser `Ctrl/Cmd+W` |
+| `Option+ArrowRight` (`Alt+ArrowRight`) | Next tab | |
+| `Option+ArrowLeft` (`Alt+ArrowLeft`) | Previous tab | |
+| `Option+1` ... `Option+9` (`Alt+1` ... `Alt+9`) | Jump to tab 1 ... 9 | |
+| `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
+| `Option+P` (`Alt+P`) | Create permalink for active tab | |
+| `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
+| `Ctrl+L` | Clear current tab output | Shell-style convenience |
+| `Ctrl+A` | Move cursor to start of line | Readline-style editing |
+| `Ctrl+E` | Move cursor to end of line | Readline-style editing |
+| `Ctrl+U` | Delete from cursor to start of line | Readline-style editing |
+| `Ctrl+K` | Delete from cursor to end of line | Readline-style editing |
+| `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Readline-style editing |
+
+Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
+
+Longer-term plan:
+
+- keep the `shortcuts` helper command aligned with shipped behavior
+- add a user options surface so shortcuts and terminal display preferences can be documented and configured together
+
+The same shortcut reference is also available in-terminal via `shortcuts`.
 
 ---
 
@@ -572,7 +660,7 @@ The full [SecLists](https://github.com/danielmiessler/SecLists) collection is in
 
 ## Tabs & Run History
 
-Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. Switching to a tab automatically restores that tab's last command in the input bar — making it easy to re-run or tweak without copying from the output. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, the tab bar scrolls horizontally.
+Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The prompt input stays neutral when switching tabs (no automatic repopulation), so drafts do not leak across tabs. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, use the tab-scroll arrows or drag tabs to reorder.
 
 The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies a shareable link to that run's output), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions. Large history restores show an in-drawer loading overlay so slower machines do not look hung while the preview is fetched and rendered.
 
@@ -588,9 +676,9 @@ On mobile, the search, history, theme, and FAQ buttons are accessible via the **
 
 There are two types of permalink:
 
-**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures everything currently visible in that tab (all commands and output) and saves it as a snapshot in SQLite. The resulting URL opens a styled, self-contained HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (self-contained HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. This is the recommended way to share results.
+**Tab snapshot** (`/share/<id>`) — clicking the **permalink** button on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (themed HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. It also honors the browser’s saved line-number and timestamp preferences on load. This is the recommended way to share results.
 
-**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite.
+**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite. It also honors the browser’s saved line-number and timestamp preferences on load.
 
 **Full output alias** (`/history/<run_id>/full`) — backward-compatible alias to the same run permalink. This exists so older links and tests continue to resolve cleanly.
 
@@ -747,9 +835,10 @@ docker compose logs -f
 | `GET` | `/config` | Returns frontend-relevant config values as JSON |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
 | `GET` | `/autocomplete` | Returns autocomplete suggestions as JSON |
-| `GET` | `/faq` | Returns custom FAQ entries from `faq.yaml` as JSON |
+| `GET` | `/faq` | Returns the canonical FAQ dataset as JSON: built-in entries plus any custom `faq.yaml` items |
 | `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
 | `GET` | `/welcome/ascii` | Returns the welcome ASCII banner from `ascii.txt` as plain text |
+| `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome banner from `ascii_mobile.txt` as plain text |
 | `GET` | `/welcome/hints` | Returns rotating welcome footer hints from `app_hints.txt` as JSON |
 | `GET` | `/history` | Returns last N completed runs for the current session as JSON |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
@@ -766,38 +855,26 @@ docker compose logs -f
 
 ### Running Tests
 
-**Python tests** — covers command validation, utility functions, all HTTP routes, and structured logging:
+Run the three suites directly:
 
 ```bash
 python3 -m pytest tests/py/ -v
-```
-
-Pytest covers command validation, config/content loaders, malformed-request handling, session isolation, run/history/share routes, split preview/full-output persistence, and structured logging. That includes the grouped welcome-content routes (`/welcome`, `/welcome/ascii`, `/welcome/hints`), stricter JSON body validation on `/run`, `/kill`, and `/share`, backend parsing of `welcome.yaml` metadata like `group` and `featured`, canonical run permalink behavior when full-output artifacts exist, the backward-compatible `/history/<run_id>/full` alias, and artifact cleanup paths. No running server or Docker required — file I/O and Redis are mocked where needed.
-
-**JS unit tests** (Vitest) — covers pure functions and small browser-module behaviors extracted from the client scripts:
-
-```bash
 npm run test:unit
-```
-
-Vitest covers the client-side failure and edge paths that matter most: `escapeHtml`, `escapeRegex`, and `renderMotd` (utils.js); `_formatElapsed`, kill flow, stall recovery, status mapping, synthetic `clear` handling, and truncation notices on exit (runner.js); `_getStarred` / `_saveStarred` / `_toggleStar`, command-history hydration, history action failures, and the history restore-loading overlay (history.js); session ID persistence and `apiFetch()` header injection (session.js); autocomplete rendering and acceptance (autocomplete.js); tab state, rename, export, permalink copy failure, and clipboard guards (tabs.js); welcome animation loading, sampling, config-driven hint behavior, fallback paths, and completion behavior (welcome.js); search helpers; output rendering; and bootstrap/modal wiring in `app.js`. Uses jsdom so no browser is required.
-
-**Testing notes**
-- Vitest exercises `session.js`, so the client-scoped `X-Session-ID` header and the single-run permalink JSON view at `/history/<run_id>?json` are both covered in unit tests.
-- Playwright runs with `workers: 1` because rate limiting is per session. The suite includes deterministic failure-path coverage for clipboard rejection, `/run` denial and rate-limit responses, startup fetch fallbacks, and the SSE stall recovery path.
-- The E2E suite covers `/share/<id>` snapshots, `/history/<run_id>` canonical single-run permalinks (HTML and JSON), welcome interruption, clickable and keyboard-activatable welcome samples, the featured `TRY THIS FIRST` badge, welcome-tab isolation, preferred-command stability, the mobile welcome layout regression, delete-non-favorites, tab rename persistence, output actions, history clipboard failure, and the boot/stall resilience cases.
-- The canonical file-by-file testing guide lives in [tests/README.md](tests/README.md).
-- For the broader testing strategy and implementation notes that tie back to the architecture, see `ARCHITECTURE.md#project-tests`.
-
-**JS e2e tests** (Playwright) — exercises the full UI against a live Flask server:
-
-```bash
 npm run test:e2e
 ```
 
-Playwright starts Flask automatically on port 5001 (see `playwright.config.js`). Covers command execution and denial, kill, history drawer, single-run and snapshot permalinks, rate limiting, clipboard failure handling, boot resilience, runner stall recovery, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu. Tests run sequentially (`workers: 1`) to stay within the server's rate limit. Run these before pushing feature branches; they are not included in the pre-commit hook.
+Current totals in this branch: **466 pytest + 238 Vitest + 126 Playwright = 830 tests**.
 
-For the canonical suite breakdown and maintenance notes, see [tests/README.md](tests/README.md).
+The testing model is intentionally layered:
+- `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
+- `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
+- `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, and history-panel action-button close behavior
+
+Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
+
+The canonical testing guide lives in [tests/README.md](tests/README.md). It contains the full file-by-file appendix, focused run commands, suite-specific notes, and maintenance conventions. `ARCHITECTURE.md` only keeps the architectural rationale for how the suites are split and why they are implemented the way they are.
+
+The permalink/export refactor was primarily about removing duplicated static HTML/CSS/JS and moving the shared page chrome and export styling into reusable templates and helpers, so the live permalink view and downloadable export stay easier to maintain together.
 
 ### Linting & Security Scanning
 

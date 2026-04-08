@@ -5,7 +5,7 @@ Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
 
-from flask import Flask, Response, request, jsonify, send_file, render_template
+from flask import Flask, Response, request, jsonify, send_file, render_template, abort
 from flask_limiter import Limiter
 from flask_limiter.util import get_remote_address
 import shutil
@@ -18,6 +18,7 @@ import signal
 import uuid
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 
 # Logging must be configured before other local imports — process.py
 # connects to Redis at module import time and emits log calls then.
@@ -31,20 +32,33 @@ from database   import db_connect, delete_run_artifacts
 from process    import redis_client, REDIS_URL, pid_register, pid_pop
 from commands   import (
     load_allowed_commands, load_allowed_commands_grouped,
-    load_faq, load_autocomplete, load_welcome,
-    load_ascii_art, load_welcome_hints,
+    load_all_faq, load_autocomplete, load_welcome,
+    load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
+    load_mobile_welcome_hints,
     is_command_allowed, rewrite_command,
     runtime_missing_command_message, runtime_missing_command_name,
 )
 from permalinks import _permalink_error_page, _permalink_page
 from fake_commands import resolve_fake_command, execute_fake_command
-from run_output_store import RunOutputCapture, load_full_output_lines
+from run_output_store import RunOutputCapture, load_full_output_entries
 
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN = shutil.which("kill") or "/bin/kill"
 
 app = Flask(__name__, template_folder="templates")
+
+_ANSI_UP_PATH = Path("/usr/local/share/shell-assets/js/vendor/ansi_up.js")
+_ANSI_UP_FALLBACK = Path(__file__).resolve().parent / "static" / "js" / "vendor" / "ansi_up.js"
+_FONT_DIR = Path("/usr/local/share/shell-assets/fonts")
+_FONT_FALLBACK_DIR = Path(__file__).resolve().parent / "static" / "fonts"
+_VENDOR_FONT_FILES = frozenset({
+    "JetBrainsMono-300.ttf",
+    "JetBrainsMono-400.ttf",
+    "JetBrainsMono-700.ttf",
+    "Syne-700.ttf",
+    "Syne-800.ttf",
+})
 
 # ── Rate limiting ─────────────────────────────────────────────────────────────
 
@@ -98,6 +112,25 @@ def _log_response(response):
             extra["size"] = response.content_length
         log.debug("RESPONSE", extra=extra)
     return response
+
+
+@app.route("/vendor/ansi_up.js")
+def vendor_ansi_up_js():
+    """Serve ansi_up from the build-time vendor path, with a repo fallback."""
+    if _ANSI_UP_PATH.exists():
+        return send_file(_ANSI_UP_PATH, mimetype="application/javascript")
+    return send_file(_ANSI_UP_FALLBACK, mimetype="application/javascript")
+
+
+@app.route("/vendor/fonts/<path:filename>")
+def vendor_fonts(filename):
+    """Serve vendored font files from the build-time path, with a repo fallback."""
+    if filename not in _VENDOR_FONT_FILES:
+        abort(404)
+    font_path = _FONT_DIR / filename
+    if font_path.exists():
+        return send_file(font_path)
+    return send_file(_FONT_FALLBACK_DIR / filename)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────────────
@@ -163,11 +196,29 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
         })
 
 
-def _preview_output_from_run(run):
+def _preview_output_entries_from_run(run):
     raw = run.get("output_preview")
     if raw is None:
         raw = run.get("output")
-    return json.loads(raw) if raw else []
+    loaded = json.loads(raw) if raw else []
+    if loaded and isinstance(loaded[0], str):
+        return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in loaded]
+    entries = []
+    for item in loaded:
+        if isinstance(item, dict) and isinstance(item.get("text"), str):
+            entries.append({
+                "text": item["text"],
+                "cls": str(item.get("cls", "")),
+                "tsC": str(item.get("tsC", "")),
+                "tsE": str(item.get("tsE", "")),
+            })
+        elif isinstance(item, str):
+            entries.append({"text": item, "cls": "", "tsC": "", "tsE": ""})
+    return entries
+
+
+def _preview_output_from_run(run):
+    return [entry["text"] for entry in _preview_output_entries_from_run(run)]
 
 
 def _preview_notice(run):
@@ -178,7 +229,10 @@ def _preview_notice(run):
     if run.get("full_output_available"):
         return (
             f"[preview truncated — only the last {shown} lines are shown here, "
-            f"but the full output had {total} lines. Use the permalink button below or in the history panel for complete results]"
+            "but the full output had "
+            f"{total} lines. To view the full output, use either permalink "
+            "button now; after another command, use this command's history "
+            "permalink.]"
         )
     return (
         f"[preview truncated — only the last {shown} lines are shown here, "
@@ -199,10 +253,17 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
     def generate():
         try:
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
+            run_started_dt = datetime.fromisoformat(run_started)
             for event in events:
                 if event.get("type") == "output":
                     line = event.get("text", "")
-                    capture.add_line(line)
+                    line_dt = datetime.now(timezone.utc)
+                    capture.add_line(
+                        line,
+                        cls=str(event.get("cls", "")),
+                        ts_clock=line_dt.strftime("%H:%M:%S"),
+                        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                    )
                     yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10)})}\n\n"
                 elif event.get("type") == "clear":
                     yield f"data: {json.dumps({'type': 'clear'})}\n\n"
@@ -293,8 +354,8 @@ def allowed_commands():
 
 @app.route("/faq")
 def faq():
-    """Return custom FAQ entries from faq.yaml."""
-    return jsonify({"items": load_faq()})
+    """Return built-in FAQ entries plus any custom faq.yaml entries."""
+    return jsonify({"items": load_all_faq()})
 
 
 @app.route("/autocomplete")
@@ -315,10 +376,22 @@ def get_welcome_ascii():
     return Response(load_ascii_art(), mimetype="text/plain")
 
 
+@app.route("/welcome/ascii-mobile")
+def get_welcome_ascii_mobile():
+    """Return the compact ASCII banner art used by mobile welcome."""
+    return Response(load_ascii_mobile_art(), mimetype="text/plain")
+
+
 @app.route("/welcome/hints")
 def get_welcome_hints():
     """Return rotating footer hints for the welcome animation."""
     return jsonify({"items": load_welcome_hints()})
+
+
+@app.route("/welcome/hints-mobile")
+def get_mobile_welcome_hints():
+    """Return rotating footer hints for the mobile welcome animation."""
+    return jsonify({"items": load_mobile_welcome_hints()})
 
 
 @app.route("/history")
@@ -362,12 +435,20 @@ def get_run(run_id):
     preview_requested = request.args.get("preview") == "1"
     is_full_view = (not preview_requested) and run["full_output_available"] and bool(run.get("rel_path"))
     if is_full_view:
-        run["output"] = load_full_output_lines(run["rel_path"])
+        run["output_entries"] = load_full_output_entries(run["rel_path"])
+        run["output"] = [entry["text"] for entry in run["output_entries"]]
         if run["full_output_truncated"]:
             run["output"].append(
                 f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]"
             )
+            run["output_entries"].append({
+                "text": f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]",
+                "cls": "notice",
+                "tsC": "",
+                "tsE": "",
+            })
     else:
+        run["output_entries"] = _preview_output_entries_from_run(run)
         run["output"] = _preview_output_from_run(run)
     run["preview_notice"] = _preview_notice(run) if not is_full_view else None
     log.info("RUN_VIEWED", extra={
@@ -377,10 +458,10 @@ def get_run(run_id):
     if "json" in request.args:
         return jsonify(run)
 
-    content_lines = list(run["output"])
+    content_lines = list(run["output_entries"])
     preview_notice = run["preview_notice"]
     if preview_notice:
-        content_lines.append(preview_notice)
+        content_lines.append({"text": preview_notice, "cls": "notice", "tsC": "", "tsE": ""})
 
     return _permalink_page(
         title=f"$ {run['command']}" + (" (full output)" if is_full_view else ""),
@@ -571,15 +652,21 @@ def run_command():
         try:
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
+            run_started_dt = datetime.fromisoformat(run_started)
 
             # If the command was rewritten, surface a notice to the user
             if notice:
-                capture.add_line(f"[notice] {notice}")
+                notice_dt = datetime.now(timezone.utc)
+                capture.add_line(
+                    f"[notice] {notice}",
+                    cls="notice",
+                    ts_clock=notice_dt.strftime("%H:%M:%S"),
+                    ts_elapsed=f"+{(notice_dt - run_started_dt).total_seconds():.1f}s",
+                )
                 yield f"data: {json.dumps({'type': 'notice', 'text': notice})}\n\n"
 
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
-            run_started_dt = datetime.fromisoformat(run_started)
             while True:
                 # Check timeout at the top of every iteration so it fires even
                 # during continuous output, not only during idle heartbeat periods.
@@ -609,7 +696,12 @@ def run_command():
                 if ready:
                     line = proc.stdout.readline()
                     if line:
-                        capture.add_line(line)
+                        line_dt = datetime.now(timezone.utc)
+                        capture.add_line(
+                            line,
+                            ts_clock=line_dt.strftime("%H:%M:%S"),
+                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                        )
                         yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
                     else:
                         # EOF — process has finished

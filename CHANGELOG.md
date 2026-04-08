@@ -5,6 +5,82 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
 
+## [1.3] — unreleased
+
+### Added
+- **Terminal-native input surface** — the visible command-entry UI is now rendered inline inside terminal output while keeping a hidden real input for browser/mobile keyboard semantics
+- **Shell-like editing and control behavior** — blank/whitespace `Enter` now emits a fresh prompt line, and `Ctrl+C` now opens kill confirmation during active runs or emits a new prompt line when idle
+- **Keyboard shortcut layer** — app-safe shortcuts now cover tab lifecycle, active-tab actions, and shell-style line editing
+  - `Alt/Option+T`, `Alt/Option+W`, `Alt/Option+ArrowLeft/Right`, and `Alt/Option+1...9` manage tab creation, closing, and navigation
+  - `Alt/Option+P`, `Alt/Option+Shift+C`, and `Ctrl+L` trigger permalink, copy, and clear actions for the active tab
+  - `Ctrl+U`, `Ctrl+K`, and `Alt/Option+B` / `Alt/Option+F` add readline-style prompt editing on top of the existing `Ctrl+W` support
+- **Keyboard shortcut discovery** — new `shortcuts` web-shell helper prints the current shortcut set and is exposed through `help`, autocomplete, the README, and the FAQ modal
+- **Shortcut helper cleanup** — the old `keys` helper alias and fallback-notes wording were removed so `shortcuts` is the only supported name in help, autocomplete, docs, and in-terminal output
+- **Bundled local fonts** — JetBrains Mono and Syne are now served through local vendor routes backed by build-time font downloads, with repo fallbacks for local dev, so the shell and permalink pages no longer make external font requests on load
+- **Bundled local ansi_up** — the browser-facing `ansi_up` asset is now copied from the checked-in repo build into the image at build time, with the repo copy still serving as the local/docker-compose fallback
+- **Template-backed permalink pages** — the live `/history/<id>` and `/share/<id>` pages now share Jinja templates plus shared CSS/JS instead of carrying duplicated inline HTML/CSS in `permalinks.py`, which makes the permalink UI easier to maintain while keeping the downloadable HTML export path self-contained
+- **Shared HTML export helper** — tab `save html` and permalink export now share browser-side HTML/CSS helpers instead of duplicating export markup in two places, and downloaded tab exports embed vendor fonts at export time so the saved file stays portable
+- **Mobile keyboard helper row race** — the mobile helper row now stays visible when viewport resize lands before the focus event, preventing the intermittent gray gap/scroll shift on touch keyboards
+- **Tab overflow controls** — left/right scroll buttons were added to the tab bar for overflowed tab lists
+- **Tab drag reorder** — tabs can now be reordered directly in the strip using drag-and-drop, including mobile touch drag with visual lift/drop indicators
+- **FAQ markup syntax** — custom `faq.yaml` entries can now use lightweight markup for bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt
+- **Autocomplete placement logic** — the suggestion list now supports above/below prompt placement and aligns to command start in the inline prompt model
+- **Display toggles for output prefixes** — line numbers can now be toggled independently from timestamps, with mobile-menu access and shared prefix alignment across output, prompt, and exit rows
+- **User options modal** — a new options modal lets users set theme, timestamp mode, and line-number display from one place, with cookie-backed persistence across sessions while keeping the existing quick-toggle buttons in sync
+- **Permalink display toggles** — permalink pages now expose line-number toggles for all views and timestamp toggles anywhere saved line metadata exists, including fresh canonical run permalinks backed by structured output persistence
+- **Mobile composer UX** — the visible mobile composer now keeps Run, Enter-to-submit, history chips, autocomplete, and the edit-helper row wired to the same visible input so the touch keyboard path stays in sync
+- **Mobile welcome assets** — added `ascii_mobile.txt` and `/welcome/ascii-mobile` for the dedicated mobile banner path
+
+### Changed
+- **FAQ single source of truth** — built-in FAQ entries now come from the backend alongside custom `faq.yaml` entries, `/faq` now returns the merged canonical FAQ dataset, and the modal renders from that backend response instead of a hard-coded HTML copy
+- **Mobile welcome flow** — touch-sized screens now use `ascii_mobile.txt` with the same staged status and rotating-hint timing as desktop, while skipping the sampled-command phase from `welcome.yaml`
+- **Full-output permalink behavior** — tab permalink snapshots now fetch the full persisted run output when it exists, so the main-page permalink button can share the complete result instead of the preview-only tab state
+- **Live-output rendering** — fast bursts now flush in small batches so the browser can repaint during large commands, and the live terminal follows the bottom only while the user remains at the tail
+- **Welcome interruption and settle behavior** — welcome fast-forward now consistently responds to keyboard actions used in the inline-prompt flow and preserves correct prompt mounting after settle
+- **Welcome asset split** — desktop and mobile welcome flows now use separate hint files, with mobile keeping its own `app_hints_mobile.txt`
+- **Tab activation model** — switching tabs now keeps the prompt input neutral (no automatic command repopulation), preventing cross-tab draft leakage
+- **Prompt rendering model** — submitted commands are preserved as styled prompt lines in output and running tabs hide the live prompt until completion, matching shell transcript flow more closely
+- **Autocomplete presentation** — dropdown framing was removed in favor of a terminal-style suggestion list that can flip above the prompt when space is tight
+- **Autocomplete matching and navigation** — suggestions now match from the beginning of commands only, keep the active row in view, and use visual Up/Down navigation even when the list is rendered above the prompt
+- **Output actions UX** — `copy` and `save txt` now report a friendly no-output toast when the tab only contains welcome/decorative lines
+- **Run-output persistence format** — fresh run previews and full-output artifacts now preserve structured `{text, cls, tsC, tsE}` entries instead of flattening everything to plain text, allowing canonical run permalinks to keep prompt echo and timestamp metadata while remaining backward-compatible with older plain-text artifacts
+- **Theme parity and light-mode polish** — light-mode colors were softened across the main shell and permalink pages, and share/permalink views now follow the current session theme so saved output matches the live UI
+- **History and modal UX** — the history drawer now closes on outside click and Escape, and the clear-all / kill confirmation flows honor Escape consistently
+- **HTML export wording and behavior notes** — docs and UI copy now describe `save .html` as a themed HTML export that uses app-hosted vendor fonts when available and falls back to browser monospace fonts offline, matching the current implementation
+
+### Fixed
+- **Prompt alignment** — when line numbers or timestamps are enabled, the new prompt stays aligned under the output gutter instead of leaving the prompt prefix pinned flush left
+- **Tab isolation and close-running-tab kill** — running one tab no longer blocks the others, and closing a running tab now kills that tab before switching away
+- **Kill-spec rate-limit stability** — the kill modal e2e coverage now isolates its limiter bucket per run and stubs the long-running SSE locally so repeated full-suite runs do not hang on a shared `/run` bucket
+- **Vendor font route hardening** — `/vendor/fonts/...` now only serves the known vendored font files instead of accepting arbitrary joined paths, and route coverage now includes unknown/traversal rejection
+- **Release metadata alignment** — the Node package metadata now reports `1.3.0`, matching the app version used elsewhere in the release
+- **Mobile tab close focus** — closing the only mobile tab no longer leaves the reset `X` visually focused, and tab close controls no longer stay highlighted after use
+- **Mobile tab row overflow** — mobile tabs now scroll horizontally with hidden scrollbars, tab labels resist text selection during drag, and tab chrome reads as separate bordered tabs instead of a plain text strip
+- **Mobile header layout** — the mobile app name, status pill, timer, and hamburger control now use the available header space more evenly instead of looking undersized
+- **Mobile action-button focus cleanup** — `permalink`, `copy`, `clear`, and history action buttons now drop focus after tap/click so they don’t remain visually brighter than the rest
+- **Mobile input focus control** — tab switches, close/reset, and other app-driven flows no longer force focus back into the composer on mobile; only an explicit user tap on the input does
+- **Mobile clear / close-tab run preservation** — clearing a running tab and closing a running tab now preserve the command lifecycle correctly so the kill path stays available and output does not leak into a replacement tab
+- **Permalink preference defaults** — permalink pages now honor saved line-number and timestamp cookies on load
+- **macOS keyboard shortcuts** — app-safe `Option` shortcuts now match physical key codes instead of the produced symbol, preventing `Option+T`, `Option+W`, `Option+Shift+C`, and `Option+B/F` from inserting special characters into the prompt
+- **Mobile permalink copy flow** — the `/share/...` permalink page now hides its copy toast correctly on mobile and falls back to `execCommand('copy')` when the Clipboard API is unavailable
+- **Mobile helper-row styling** — the touch helper buttons keep their dark-theme appearance on Chrome and Safari mobile instead of falling back to light browser defaults
+- **Mobile Run guard** — the mobile Run button now disables while a command is active, matching the desktop Run control and preventing duplicate submits
+- **Cursor mirroring** — holding desktop arrow keys now updates the visible prompt cursor immediately instead of waiting for key release
+- **Prefix toggle layout** — enabling line numbers or timestamps no longer reflows wrapped output or jumps the live tail to a mid-buffer line
+- **Permalink truncation notices** — fresh permalinks no longer show stale preview-truncated warnings when the full persisted output is available
+- **Tab output truncation alignment** — long outputs now keep `currentRunStartIndex` aligned when old raw lines are pruned from the front, so shared permalinks do not splice stale output fragments into the saved view
+- **Welcome skip edge case** — pressing Enter while welcome is active no longer leaves a stray legacy prompt marker in output
+- **Prompt cursor rendering** — prompt caret visibility now remains stable after welcome interruption, normal settle, and follow-up command execution
+- **History navigation regression** — blank-input Up/Down recall no longer gets stuck after the first recalled command
+- **Tab-bar resize edge case** — tab overflow controls now recalculate correctly when tab width changes (for example after rename)
+- **Welcome output prefix bleed** — line numbers and timestamps no longer distort the decorative welcome animation or shift its status rows
+- **Mobile helper-row overlap** — the compact `Home` / `←` / `→` / `End` / `Del Word` row now stays hidden until the mobile keyboard is actually open, and helper taps no longer reopen autocomplete over the row
+- **Mobile composer hit-target fix** — taps on the lower half of the mobile composer now focus the input reliably, which stops the intermittent keyboard-open scroll shift in Chrome and Safari
+- **History drawer action close** — clicking any button in the history drawer now closes the panel immediately
+- **Batched live output** — large output bursts now flush in small chunks so the browser can repaint during fast commands, and the live terminal only stays pinned to the bottom while the user has not scrolled away
+- **Shared Run guard** — desktop and mobile Run buttons now disable together while a command is active, preventing duplicate submits from either input path
+
+
 ## [1.2] — 2026-04-05
 
 ### Added
@@ -62,9 +138,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`DB_PRUNED` info** — `db_init()` now logs the number of runs and snapshots deleted when retention pruning removes records on startup
 - **`SHARE_CREATED` info** — share (permalink snapshot) creation is logged at INFO with IP, share ID, and label
 - **JavaScript testing framework** — Vitest (unit) and Playwright (e2e) added with `package.json`, `vitest.config.js`, and `playwright.config.js`
-  - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior; no browser required
+  - Vitest unit tests (`tests/js/unit/`) cover `escapeHtml`, `escapeRegex`, `renderMotd` (utils.js), `_formatElapsed`, kill flow, and status mapping (runner.js), `_getStarred` / `_saveStarred` / `_toggleStar` (history.js), session ID persistence and `apiFetch()` header injection (session.js), autocomplete rendering and acceptance, tab state/rename/export guards, welcome animation cancellation, search helpers, output rendering, and selected app bootstrap behavior including search-bar close handling, copy/save/html export refocus, and clearing un-ran composer input; no browser required
   - `tests/js/unit/helpers/extract.js` provides a `fromScript(file, ...names)` helper that loads browser script files into an isolated execution context via `new Function`, extracting only the named functions; includes a self-contained `MemoryStorage` class that replaces `localStorage` to avoid jsdom opaque-origin quirks
-  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, and mobile menu; `workers: 1` prevents rate-limit collisions between tests
+  - Playwright e2e tests (`tests/js/e2e/`) exercise the full UI against a live Flask server: command execution and denial, kill, history drawer and action-button close behavior, snapshot and single-run permalinks, rate limiting, autocomplete, welcome interruption, search/highlight, output actions (copy, clear, save .txt/.html with embedded-font export assertions and focus-return checks), tab rename/close/recall/max-tabs, timestamp toggle, theme switch, FAQ modal, mobile menu, and the mobile composer hit-target regression; `workers: 1` prevents rate-limit collisions between tests
   - Pre-commit hook updated to run Vitest when `node_modules` is present; Playwright documented as pre-push
   - `.nvmrc` pins Node 22; `node_modules/`, `playwright-report/`, and `test-results/` added to `.gitignore`
 - **Star-to-chips promotion** — starring a command from the history drawer now adds it to the recent-commands chip bar if it isn't already there, giving quick access to commands from previous sessions without needing to re-run them
@@ -117,7 +193,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
   - history-to-tab restores now show an in-drawer loading overlay while large previews are fetched and rendered
 - **Welcome content files** — `app_hints.txt` adds app-specific onboarding hints, and `welcome.yaml` examples were cleaned up to use real installed wordlists and safer sample commands
 - **Welcome styling** — the ASCII banner remains plain terminal content instead of a nested framed widget; the rendered art is larger, uses a solid green treatment, and no longer dims when later welcome blocks appear
-- **Documentation** — README, architecture notes, test guide, and changelog now describe the current welcome system, config keys, extra content files, boot-time history hydration, and updated route/test coverage
+- **Documentation** — README, architecture notes, test guide, and changelog now describe the current welcome system, config keys, extra content files, boot-time history hydration, vendor asset routes, and updated route/test coverage
 - **Welcome route naming** — grouped the newer welcome-content routes under `/welcome/*` for consistency with the existing `/welcome` command-sample endpoint
 - `styles.css` — muted text color brightened for readability: dark theme `#606060` → `#7a7a7a`, light theme `#888` → `#666`
 - `.gitignore` — added `.vscode/` to excluded paths
@@ -135,7 +211,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Timestamps** — terminal bar button cycles through three modes: off / elapsed (seconds since command started) / clock (wall-clock time); implemented via CSS body classes, no per-line overhead
 - **Tab rename** — double-click any tab label to edit it inline; renamed tabs are not overwritten when a new command runs
 - **Copy output** — one-click copy of the current tab's full plain-text output to clipboard
-- **HTML export** — saves a self-contained `.html` file with ANSI color rendering, timestamps, and offline-ready styling
+- **HTML export** — saves a self-contained `.html` file with ANSI color rendering, timestamps, embedded fonts, and offline-ready styling
 - **History starring** — star (★) any run in the history panel to pin it to the top of the list; stars persist across page reloads via localStorage
 - **Permalink expiry notes** — snapshot and run permalink pages now show how long until the link expires (based on `permalink_retention_days`) using a human-readable duration
 - **Version label** — `APP_VERSION` constant in `app.py` exposed via `/config`; displayed in the header as `vX.Y · real-time`
@@ -149,7 +225,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **App modularisation** — `app.py` split into `commands.py`, `config.py`, `database.py`, `permalinks.py`, and `process.py` for cleaner separation of concerns
 - **Permalink error pages** — improved human-readable retention period in 404 messages; `_format_retention()` decomposes days into years, months, and days
 - **Clear button** — now cancels a running welcome animation in addition to clearing tab output
-- **README / ARCHITECTURE** — updated to reflect current test counts and the expanded Vitest/Playwright coverage areas
+- **README / ARCHITECTURE** — updated to reflect current test counts and the expanded Vitest/Playwright coverage areas, including the mobile composer hit-target regression and history drawer action close behavior
 
 ### Fixed
 - `tab.renamed` flag prevents command labels from overwriting user-chosen tab names
@@ -174,7 +250,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **Redis process tracking** — active PIDs stored in Redis (or in-process dict) so any Gunicorn worker can kill a process started by a different worker
 - **Security model** — two non-root users: `appuser` runs the Flask/Gunicorn process; `scanner` runs all user commands; filesystem mounted read-only except `/tmp`; `sudo kill` used for cross-user SIGTERM
 - **Gunicorn WSGI** — production server with configurable timeout (3600 s); heartbeat SSE comments prevent nginx/browser idle disconnects
-- **Custom FAQ** — operator-supplied `faq.yaml` entries appended to the built-in FAQ; clickable command chips load commands directly into the input bar
+- **Custom FAQ** — operator-supplied `faq.yaml` entries append after the built-in FAQ; lightweight markup and clickable command chips load commands directly into the input bar
 - **Custom autocomplete** — `auto_complete.txt` drives the command input dropdown
 - **MOTD** — optional message-of-the-day rendered in the header area
 - **Theme toggle** — dark (default) / light theme; preference persisted in localStorage; operator can set `default_theme: light`

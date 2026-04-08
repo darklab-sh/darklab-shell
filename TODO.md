@@ -1,331 +1,73 @@
 # TODO
 
-## Overview
+## Status
 
-This file tracks follow-up work and planned refactors after the `v1.2` release.
-
-Current priority areas:
-- shell-style input refactor
-- FAQ source-of-truth cleanup
-- version-source cleanup
+- Release line: `v1.3` (unreleased)
+- Current focus: No active refactor work
+- Last major milestone completed: Shared HTML Export Styling Cleanup
 
 ---
 
-## 1. Shell-Style Input Refactor
+## Open TODOs
 
-### Goal
-
-Remove the visible standalone input box and make the terminal itself feel like the command-entry surface, while preserving:
-- the current backend `/run` model
-- autocomplete and Tab completion
-- history recall
-- welcome-flow interactions
-- mobile usability
-
-### Recommended Technical Approach
-
-Keep a real input element internally, but hide it from the visible layout.
-
-Use:
-- a hidden real `<input>` or `<textarea>` for:
-  - browser focus
-  - keyboard input
-  - mobile virtual keyboard support
-  - accessibility
-- a rendered in-terminal prompt line that mirrors the hidden input value
-
-Avoid:
-- `contenteditable` as the primary command-entry surface
-
-Reason:
-- lower implementation risk
-- better mobile behavior
-- easier autocomplete reuse
-- easier testing
-- fewer caret and selection bugs
-
-### Scope
-
-Backend impact should be low:
-- `/run`, `/kill`, history, permalinks, fake commands, and welcome logic can remain mostly unchanged
-
-Frontend impact is moderate to high:
-- prompt rendering
-- keyboard handling
-- autocomplete anchoring
-- scroll behavior
-- history navigation
-- tab restore behavior
-- mobile focus behavior
-
-### Implementation Plan
-
-#### Phase 1: Visual Embed
-
-Objective:
-- make the terminal visually own command entry without changing the underlying command model
-
-Tasks:
-- keep the current real input logic
-- remove the visible input box from the layout
-- render a terminal prompt row at the bottom of the active terminal output
-- mirror the hidden input value into that prompt row
-- keep the existing run button behavior initially
-
-Notes:
-- clicking the terminal should focus the hidden input
-- the prompt should visually match the rest of the terminal
-- the prompt row should remain visible and stable while output scrolls
-
-Risk:
-- low to moderate
-
-#### Phase 2: Inline Interaction
-
-Objective:
-- make the rendered prompt feel like the actual command-entry surface
-
-Tasks:
-- clicking anywhere in the terminal focuses the hidden input
-- render the caret in the inline prompt
-- visually edit command text in place through the mirrored prompt
-- anchor autocomplete to the inline prompt rather than the old visible input area
-
-Notes:
-- keep the hidden input as the source of truth
-- the prompt line is a renderer, not the editable DOM source
-- keep current Tab completion behavior, but reposition the suggestion panel
-
-Risk:
-- moderate
-
-#### Phase 3: Shell-Like Editing
-
-Objective:
-- make command entry feel closer to a shell than a form field
-
-Tasks:
-- refine left/right cursor behavior
-- support Home/End cleanly
-- preserve blank-input Up/Down history recall
-- preserve typed-draft restore during history navigation
-- optionally add limited shell-style shortcuts later:
-  - `Ctrl+A`
-  - `Ctrl+E`
-  - `Ctrl+U`
-
-Notes:
-- do not add full readline behavior in the first pass
-- rely on browser-native editing semantics wherever possible
-
-Risk:
-- moderate to high
-
-#### Phase 4: Cleanup
-
-Objective:
-- remove old visible-input assumptions from the UI
-
-Tasks:
-- delete obsolete visible-input layout code
-- simplify prompt wrapper CSS and DOM
-- update welcome, history, and search integration to reference the shell prompt surface instead of a visible form field
-
-Risk:
-- low once earlier phases are stable
-
-### Affected Areas
-
-#### DOM / Layout
-
-Likely files:
-- `app/templates/index.html`
-- `app/static/css/styles.css`
-- `app/static/js/dom.js`
-
-Expected work:
-- add a dedicated terminal prompt render area
-- remove or hide the visible command bar
-- preserve focusability through the hidden input
-
-#### Input / App Wiring
-
-Likely files:
-- `app/static/js/app.js`
-- `app/static/js/runner.js`
-- `app/static/js/history.js`
-- `app/static/js/welcome.js`
-
-Expected work:
-- mirror hidden-input state into the inline prompt
-- shift click-to-focus behavior to the terminal surface
-- keep submission logic unchanged where possible
-- update history restore and welcome sample loading to write into the hidden input and prompt renderer
-
-#### Autocomplete
-
-Expected work:
-- reuse current filtering logic
-- reposition the dropdown relative to the inline prompt
-- keep Tab and Enter acceptance behavior stable
-
-#### Search / History / Welcome
-
-Expected work:
-- ensure search shortcuts do not interfere with prompt focus
-- preserve blank-input history recall
-- preserve welcome sample click/load behavior
-- preserve typing-to-settle welcome behavior
-
-### Risks
-
-Highest-risk areas:
-1. Mobile keyboard and focus behavior
-2. Caret rendering and long-command wrapping
-3. Autocomplete regressions
-4. Accessibility regression
-5. Scroll behavior that makes the prompt feel detached from the terminal
-
-### Constraints
-
-For the first implementation:
-- no `contenteditable`
-- no attempt to emulate a full terminal editor
-- no shell parsing changes
-- no backend protocol changes unless a real frontend blocker appears
-- do not remove the hidden real input
-
-### Testing Plan
-
-#### Unit Tests
-
-Add or update tests for:
-- hidden-input to inline-prompt mirroring
-- click-to-focus terminal behavior
-- blank-input Up/Down history navigation
-- autocomplete acceptance from the inline prompt
-- welcome sample click/load into the inline prompt
-- typing during welcome settles the intro correctly
-
-#### E2E Tests
-
-Add or update tests for:
-- command entry entirely through the terminal surface
-- autocomplete with Tab from the inline prompt
-- history restore followed by command editing
-- mobile viewport focus and typing behavior
-- welcome flow with the inline prompt active after settle
-
-#### Manual Checks
-
-Required:
-- desktop Chrome/Chromium
-- mobile viewport
-- long command wrapping
-- autocomplete panel placement
-- search bar interaction
-- history drawer interaction
-- tab switching and command recall
-
-### First Milestone
-
-Deliver only this first:
-- hidden real input remains
-- visible old input box is removed from layout
-- inline prompt mirrors hidden input value
-- clicking the terminal focuses the input
-- Enter still runs commands
-- existing autocomplete continues to work
-
-That should deliver most of the visual gain with the least architectural risk.
-
-### Open Decisions
-
-Decide before implementation:
-- should the prompt be pinned to the bottom or flow as part of terminal output?
-- should the run button stay visible, or should Enter become the primary-only affordance?
-- should the terminal click target be the full output area or only the prompt row?
-- how shell-like should editing become in the first pass?
+No open follow-ups.
 
 ---
 
-## 2. FAQ Source Of Truth Cleanup
+## Completed
 
-### Problem
+### Shell-Style Input Refactor
 
-Built-in FAQ content now exists in two places:
-- backend plain-text FAQ data in `app/commands.py`
-- hard-coded modal HTML in `app/templates/index.html`
+- ~~Shared state, desktop/mobile composer splitting, the dedicated mobile shell, transcript/output layout, autocomplete, session/history navigation, welcome flow, overlays, and browser hardening are all in place.~~
+- ~~The remaining mobile work now lives in Phase 10 cleanup and the follow-up bucket above.~~
+- ~~Unit coverage already in place: `tests/js/unit/app.test.js`, `tests/js/unit/autocomplete.test.js`, `tests/js/unit/history.test.js`, `tests/js/unit/runner.test.js`, `tests/js/unit/tabs.test.js`, `tests/js/unit/welcome.test.js`.~~
+- ~~Playwright coverage already in place: `tests/js/e2e/mobile.spec.js`, `tests/js/e2e/share.spec.js`, `tests/js/e2e/kill.spec.js`, `tests/js/e2e/tabs.spec.js`.~~
 
-Current behavior:
-- the `faq` shell command uses backend FAQ data
-- the modal still uses hard-coded HTML plus `/faq` for custom entries only
+### Permalink Page Template Refactor
 
-Risk:
-- the shell `faq` output and modal FAQ can drift over time
+- ~~Split the live permalink rendering into Jinja templates:~~
+  - ~~a shared permalink base/layout template for header, action row, output mount, and toast~~
+  - ~~a small error template for missing `/share/<id>` and `/history/<run_id>` pages~~
+- ~~Move reusable permalink page chrome and theme rules into shared CSS instead of maintaining the full live-page stylesheet inside `app/permalinks.py`.~~
+- ~~Keep permalink pages server-rendered and self-contained at request time; do not turn them into client-fetched shells.~~
+- ~~Extract the repeated permalink-page data shaping in `permalinks.py` into smaller helpers:~~
+  - ~~theme selection~~
+  - ~~line normalization / prompt-echo injection~~
+  - ~~timestamp-availability detection~~
+  - ~~action-button / extra-action context building~~
+- ~~Preserve the current behavior exactly:~~
+  - ~~current theme parity with the main shell~~
+  - ~~line-number and timestamp toggles~~
+  - ~~copy / `save .txt` / `save .html` actions~~
+  - ~~`view json` and back-to-shell links~~
+  - ~~snapshot/run permalink title, metadata, expiry note, and prompt rendering~~
+- ~~Keep the downloadable/exported HTML path fully rendered and portable:~~
+  - ~~do not make saved `.html` depend on live app routes after download~~
+  - ~~keep embedded fonts / inline CSS / inline JS decisions explicit for the export path, even if the live permalink page moves to shared templates and shared CSS~~
+- ~~Keep vendor asset behavior intact for the live page:~~
+  - ~~local `ansi_up` browser build~~
+  - ~~local vendor font routes for the hosted permalink page~~
+- ~~Add regression coverage for both permalink classes and both render paths:~~
+  - ~~`/share/<id>` and `/history/<run_id>`~~
+  - ~~missing/expired permalink error pages~~
+  - ~~live page theme parity and toggle availability~~
+  - ~~exported `.html` output staying portable and free of external asset fetches~~
+- ~~Refresh docs and release notes to describe the template split, the remaining inline export path, and any shared style changes.~~
 
-### Goal
+### FAQ Single Source Of Truth
 
-Create one canonical FAQ source and render it differently for:
-- the modal
-- the `faq` shell command
+- ~~Built-in FAQ entries now live in the backend alongside custom `faq.yaml` entries, and `/faq` is the canonical source for both the modal and terminal `faq` helper output.~~
+- ~~Result: rich HTML in modal, plain text in `faq` helper command.~~
+- ~~Follow-up: keep modal-only `answer_html` content aligned with the plain-text `answer` used by the `faq` helper command, and extend the same backend FAQ schema if future modal sections need new dynamic render kinds.~~
 
-### Recommended Approach
+### Version Source Cleanup
 
-Move built-in FAQ content fully into backend data and render it per surface:
-- rich HTML rendering for the modal
-- plain-text rendering for the shell command
+- ~~The backend `/config` response is the canonical version source, the initial header label is generic, and the frontend updates the visible version label only after config loads.~~
+- ~~Result: `app/config.py` defines the backend version, `/config` exposes it to the frontend, and the UI falls back to a generic `real-time` label until config loads.~~
 
-Avoid:
-- scraping modal HTML into text
-- keeping two independent hard-coded copies
+### Welcome / Helper Follow-ups
 
-### Follow-Up Tasks
-
-- define a canonical FAQ data structure
-- move current built-in FAQ content into backend data
-- update the modal to render from that data
-- keep `/faq` semantics clear:
-  - either custom-only
-  - or merged built-in + custom
-- update tests to cover the single-source behavior
-
----
-
-## 3. Version Source Cleanup
-
-### Problem
-
-The app version is currently duplicated in multiple places:
-- `app/config.py`
-- `app/static/js/config.js`
-- `app/templates/index.html`
-
-They are aligned today, but they can drift in future releases.
-
-### Goal
-
-Reduce the number of manually updated version sources for future releases.
-
-### Recommended Approach
-
-Prefer one canonical backend version source and make the frontend/header depend on it as early as possible.
-
-Possible follow-up options:
-- keep `APP_VERSION` only in backend config and make frontend fallback version less specific
-- or generate the fallback/header version from one shared build/release step
-
-### Follow-Up Tasks
-
-- decide whether frontend fallback version still needs a hard-coded value
-- decide whether the static header should ship with a placeholder or current version
-- document the release-step expectation clearly if duplication remains
-
----
-
-## 4. General Follow-Up Principle
-
-For post-`v1.2` cleanup:
-- prefer single sources of truth for shared content
-- keep backend behavior stable and move UI complexity to isolated frontend layers
-- avoid clever terminal emulation if a simpler browser-safe approach exists
+- ~~Keep the hint rotation running until interrupted, on both the main welcome and the mobile welcome.~~
+- ~~Create separate app hints for mobile that are mobile specific.~~
+- ~~Add a few more snarky easter-egg comments for `sudo`, `rm -fr /`, and `reboot`.~~
+- ~~Add subtle section headers above the recommended commands and hints on the main welcome, and carry the same treatment through to mobile hints.~~

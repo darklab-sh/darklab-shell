@@ -1,10 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand } from './helpers.js'
+import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
+const TEST_IP = makeTestIp(65)
 
 test.describe('output actions', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.resolve() },
@@ -24,10 +26,17 @@ test.describe('output actions', () => {
     await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
   })
 
-  test('copy button shows a failure toast when clipboard writeText rejects', async ({ page }) => {
+  test('copy button falls back when clipboard writeText rejects', async ({ page }) => {
     await page.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: { writeText: () => Promise.reject(new Error('clipboard denied')) },
+        configurable: true,
+      })
+      Object.defineProperty(document, 'execCommand', {
+        value: (cmd) => {
+          window.__copyFallbackUsed = cmd === 'copy'
+          return true
+        },
         configurable: true,
       })
     })
@@ -35,7 +44,8 @@ test.describe('output actions', () => {
     await page.locator('[data-action="copy"]').click()
 
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
-    await expect(page.locator('#permalink-toast')).toContainText('Failed to copy')
+    await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
+    await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
   // ── Clear ─────────────────────────────────────────────────────────────────
@@ -46,7 +56,8 @@ test.describe('output actions', () => {
 
     await page.locator('[data-action="clear"]').click()
 
-    await expect(page.locator('.tab-panel.active .output')).toBeEmpty()
+    await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
+    await expect(page.locator('.tab-panel.active .output .shell-prompt-wrap')).toBeVisible()
   })
 
   test('status reverts to idle after clearing output', async ({ page }) => {
@@ -88,5 +99,35 @@ test.describe('output actions', () => {
     const html = Buffer.concat(chunks).toString('utf8')
 
     expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain('data:font/ttf;base64,')
+    expect(html).not.toContain('/vendor/fonts/')
+    expect(html).not.toContain('fonts.googleapis.com')
+    expect(html).not.toContain('fonts.gstatic.com')
+  })
+})
+
+test.describe('output actions with no exportable output', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
+    await page.addInitScript(() => {
+      Object.defineProperty(navigator, 'clipboard', {
+        value: { writeText: () => Promise.resolve() },
+        configurable: true,
+      })
+    })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('copy button shows a toast when there is no output to copy', async ({ page }) => {
+    await page.locator('[data-action="copy"]').click()
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('No output to copy yet')
+  })
+
+  test('save-txt button shows a toast when there is no output to export', async ({ page }) => {
+    await page.locator('[data-action="save"]').click()
+    await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
+    await expect(page.locator('#permalink-toast')).toContainText('No output to export')
   })
 })

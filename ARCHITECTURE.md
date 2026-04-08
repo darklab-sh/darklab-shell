@@ -1,6 +1,6 @@
 # Architecture & Decision Log
 
-This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of shell.darklab.sh. It is intended as a handoff document for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
+This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of shell.darklab.sh. It is intended as a durable decision log for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
 
 ---
 
@@ -11,6 +11,8 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 ## Table of Contents
 - [Project Overview](#project-overview)
 - [Key Architectural Decisions](#key-architectural-decisions)
+- [Shared Frontend State Layer](#shared-frontend-state-layer)
+- [Dedicated Mobile Shell](#dedicated-mobile-shell)
 - [Project Tests](#project-tests)
 - [Testing Strategy](#testing-strategy)
 
@@ -23,8 +25,10 @@ logging_setup.py — GELFFormatter, _TextFormatter, configure_logging(cfg)
     ↑
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
-permalinks.py  — HTML rendering for permalink pages
+permalinks.py  — Flask context/render helpers for permalink pages
+templates/     — Jinja templates for the main shell and permalink pages
 run_output_store.py — preview/full-output capture and artifact helpers
+export_html.js — shared browser-side HTML export helpers for tab downloads and permalink save HTML
     ↑
 app.py         — Flask app, rate limiter, all route handlers
 
@@ -34,7 +38,7 @@ fake_commands.py — Synthetic shell helpers for /run
 
 `commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. `app.py` imports by name from each module (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
 
-`fake_commands.py` sits alongside that path and provides a small web-shell helper layer for shell-like commands that should be useful in the UI without spawning a real process. `/run` checks that layer before allowlist validation and process launch. Today it handles `banner`, `clear`, `date`, `env`, `faq`, `fortune`, `groups`, `help`, `history`, `hostname`, `id`, `last`, `limits`, `ls`, `man`, `ps`, `pwd`, `reboot`, `retention`, `status`, `sudo`, `tty`, `type`, `uname -a`, `uptime`, `version`, `which`, `who`, and `whoami`, plus exact-match guardrail easter eggs for `rm -fr /` and `rm -rf /`. Most of the commands are intentionally synthetic in implementation but presented as web-shell helpers: they surface app-specific state like the allowlist, runtime limits, configured FAQ entries, and session history, return stable environment strings, or trigger UI-native behavior like clearing the current tab. `faq` now merges the built-in FAQ set with custom `faq.yaml` entries so the terminal view matches the operator-extended help surface more closely. `ps` is intentionally half-synthetic: it shows the current `ps` invocation with a fake PID, then recent completed session commands with separate exit/start/end columns but no PID so they read as completed work, not active processes. `man <topic>` is the other exception: for allowlisted real commands it renders the real system man page, while `man <fake-command>` reuses the helper descriptions instead of rejecting the topic. Runtime command availability is now checked in the shared command layer, so fake commands and normal allowlisted `/run` commands both return the same clean instance-level message when a required binary is missing.
+`fake_commands.py` sits alongside that path and provides a small web-shell helper layer for shell-like commands that should be useful in the UI without spawning a real process. `/run` checks that layer before allowlist validation and process launch. Today it handles `banner`, `clear`, `date`, `env`, `faq`, `fortune`, `groups`, `help`, `history`, `hostname`, `id`, `last`, `limits`, `ls`, `man`, `ps`, `pwd`, `reboot`, `retention`, `status`, `sudo`, `tty`, `type`, `uname -a`, `uptime`, `version`, `which`, `who`, and `whoami`, plus exact-match guardrail easter eggs for `rm -fr /` and `rm -rf /`. Most of the commands are intentionally synthetic in implementation but presented as web-shell helpers: they surface app-specific state like the allowlist, runtime limits, configured FAQ entries, and session history, return stable environment strings, or trigger UI-native behavior like clearing the current tab. `faq` now merges the built-in FAQ set first and appends any `faq.yaml` entries after it, and custom entries can use the same lightweight markup supported by the modal renderer: bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt. `ps` is intentionally half-synthetic: it shows the current `ps` invocation with a fake PID, then recent completed session commands with separate exit/start/end columns but no PID so they read as completed work, not active processes. `man <topic>` is the other exception: for allowlisted real commands it renders the real system man page, while `man <fake-command>` reuses the helper descriptions instead of rejecting the topic. Runtime command availability is now checked in the shared command layer, so fake commands and normal allowlisted `/run` commands both return the same clean instance-level message when a required binary is missing.
 
 `logging_setup.py` depends only on `config.py` and the standard library. It must be imported and `configure_logging(CFG)` called before any other local import in `app.py` — `process.py` attempts a Redis connection at module-import time and emits log records then, so the logger must already be configured with the correct formatter and level when those calls fire.
 
@@ -166,7 +170,7 @@ SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=
 
 ### Path Blocking (/data and /tmp)
 
-Commands referencing `/data` or `/tmp` as filesystem paths are blocked at validation time using the regex `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://example.com/data/` won't match because `/data` is preceded by `m`.
+Commands referencing `/data` or `/tmp` as filesystem paths are blocked at validation time using the regex `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because `/data` is preceded by `m`.
 
 Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
 
@@ -197,17 +201,57 @@ These happen in `rewrite_command()` silently (no user-visible notice unless spec
 
 Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: each module file defines functions and state only; `app.js` loads last and performs all initialization and event wiring. No bundler, no transpilation.
 
-External dependencies: Google Fonts (CDN) and `ansi_up` v5.2.1 for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the file is committed to the repo at `static/js/vendor/ansi_up.js` as a reliable fallback for local dev and docker-compose runs. The Dockerfile also fetches the latest version at image build time (`curl ... || true`), overwriting the committed copy. If the CDN fetch fails the build continues with the committed version. The `vendor/` directory pattern is in `.gitignore` with a negation rule (`!app/static/js/vendor/ansi_up.js`) so only this one file is tracked.
+External dependencies: local vendor routes backed by build-time font downloads and a copied-in `ansi_up` browser build for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the checked-in browser-global file at `static/js/vendor/ansi_up.js` serves as the fallback for local dev and docker-compose runs. The Dockerfile copies that same file into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
 
 **JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
+### Shared Frontend State Layer
+
+The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object.
+
+That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, which lets `getTab()` and `getActiveTab()` resolve the right objects without rewriting the production call sites.
+
+### Dedicated Mobile Shell
+
+The mobile UI uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The mobile composer dock and mobile menu are first-class mobile-owned UI, not runtime-moved siblings of the desktop terminal.
+
+That structure makes the mobile layout easier to reason about:
+
+- `#tab-panels` is reparented into the mobile transcript mount at runtime so output rendering stays shared while the mobile surface gets its own container.
+- `#mobile-composer-host` stays fixed in the mobile composer mount and uses a dynamic spacing variable for keyboard height.
+- Mobile input focus is user-driven; the code avoids forcing focus back into the composer after tab switches or closes on mobile because that was causing browser scroll jumps.
+- Overlays are mounted into a separate mobile overlay area so the shell can manage menu, history, FAQ, and options surfaces independently of the desktop wrapper.
+
+This keeps the mobile surface structured without needing a separate frontend bundle or framework split.
+
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
+
+### Shell Prompt Model
+
+The visible command surface is terminal-native:
+
+- a hidden real `#cmd` input remains the source of truth for browser/mobile keyboard input, selection, and focus
+- a rendered prompt row is mounted into the active tab output and mirrors the hidden input value/caret/selection
+- the prompt unmounts while a command is running and remounts when the run finishes/fails/is killed
+- submitted commands are echoed as styled prompt lines in output so transcript flow reads like a real shell
+- blank/whitespace `Enter` does not call `/run`; it appends a new prompt line
+- `Ctrl+C` maps to shell-like behavior: open kill confirm while running, otherwise emit a fresh prompt line
+
+On mobile, the prompt surface is split into a dedicated visible composer:
+
+- `#mobile-cmd` is the visible source-of-truth input on touch-sized viewports
+- the helper row with `Home`, `←`, `→`, `End`, and `Del Word` appears only while the mobile keyboard is open
+- command chips, autocomplete acceptance, and the Run/Enter paths all sync back to the visible mobile input so the desktop mirror stays in step
+- the desktop and mobile Run buttons stay disabled together while any command in the active tab is running, preventing duplicate submits from either surface
+- mobile keyboard-open state is driven by the visible mobile input when it exists, with a viewport-offset fallback for the legacy/mobile-shell test harness path
+
+This keeps browser editing semantics and accessibility predictable without relying on `contenteditable`.
 
 ### Tab State
 
 Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
 
-- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; restored to the input bar when the tab is activated so the user can re-run or edit it without copying from the output. If a history entry is clicked and an existing tab already has a matching `command`, that tab is activated instead of opening a duplicate
+- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when clicking history entries (if a matching tab already exists, that tab is activated)
 - `runId` — the UUID from the SSE `started` message, used for kill requests
 - `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
 - `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
@@ -215,20 +259,29 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 - `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
 - `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
 
-### Timestamps: CSS-Driven Display
+Tab switching is intentionally input-neutral: activating a different tab clears the hidden input and resets history-navigation cursor state instead of restoring prior tab text into the prompt.
 
-Elapsed and clock timestamps are shown on output lines without any JavaScript DOM re-render. Each `<span>` in the output is given two `data-` attributes at append time:
+### Live Output Rendering
+
+Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
+
+### Output Prefixes: Line Numbers And Timestamps
+
+Elapsed and clock timestamps are shown on output lines without rebuilding those line nodes. Each appended `.line` receives two timestamp `data-` attributes plus a synchronized `data-prefix` string:
 
 - `data-ts-e` — elapsed offset from `tab.runStart` (e.g. `+12.3s`)
 - `data-ts-c` — wall-clock time (e.g. `14:32:01`)
+- `data-prefix` — compact shared prefix text such as `12 +3.4s`, `12 14:32:01`, or just `12`
 
-The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `content: attr(data-ts-c)`, hidden by default. Adding `body.ts-elapsed` or `body.ts-clock` makes the corresponding pseudo-element visible across all lines instantly with zero JavaScript. `_setTsMode()` in `app.js` toggles the body classes and cycles through `['off', 'elapsed', 'clock']`.
+`appendLine()` stores the timestamp metadata at insert time, and `syncOutputPrefixes()` in `output.js` recomputes `data-prefix` plus a shared `--output-prefix-width` per output container whenever rows are appended or the timestamp / line-number mode changes. CSS still renders the visible prefix through `::before`, but the actual text composition happens in JavaScript so line numbers, timestamps, prompt rows, and exit rows all stay aligned as digit widths change.
+
+Welcome-animation rows are excluded from prefix numbering entirely. They keep their original boot-sequence layout, and the first real output line after welcome still becomes line `1`.
 
 `tab.runStart` is set *after* the `$ cmd` prompt line is appended so the prompt itself has no `data-ts-e` attribute and shows no elapsed stamp.
 
 ### Welcome Animation
 
-`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, `requestWelcomeSettle(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout:
+`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, `requestWelcomeSettle(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout, and it has a desktop branch plus a mobile branch:
 
 1. fetch `/welcome/ascii` and stream the ASCII banner from `conf/ascii.txt`
 2. render fake startup-status rows using `APP_CONFIG.welcome_status_labels`
@@ -238,9 +291,13 @@ The CSS uses `::before` pseudo-elements with `content: attr(data-ts-e)` / `conte
 6. attach click and keyboard handlers to the sampled command text and the featured `TRY THIS FIRST` badge so they load into the prompt without executing
 7. fetch `/welcome/hints` and rotate footer hints briefly while the welcome tab is still idle, using `welcome_hint_interval_ms` and `welcome_hint_rotations`
 
+On touch-sized viewports the same timing/config pipeline runs with `/welcome/ascii-mobile` and `conf/ascii_mobile.txt`, but the sampled-command phase is skipped so the mobile welcome stays abbreviated while still showing the desktop-style status and rotating hint rows.
+
 The implementation still types character-by-character using short timed waits, but it now mixes in overlapping loading spinners for the status rows, a staged handoff into the first prompt, and finite hint rotation.
 
 Welcome ownership is tab-scoped. `runWelcome()` records a `welcomeTabId`, and teardown only happens when the action targets that same tab. That avoids the old cross-tab bug where running a command or clearing output in some other tab could wipe the welcome content. `runCommand()` checks whether the active tab is the welcome owner before clearing, and clear/close actions do the same.
+
+Welcome settle behavior is intentionally keyboard-friendly: printable typing, `Escape`, and `Enter` all fast-forward the active welcome sequence to its settled state.
 
 `load_welcome()` now accepts richer blocks from `conf/welcome.yaml`:
 
@@ -251,10 +308,11 @@ Welcome ownership is tab-scoped. `runWelcome()` records a `welcomeTabId`, and te
 
 The route shape is intentional. Frontend-facing config content is exposed through narrow, typed endpoints rather than a generic “serve files from `conf/`” handler:
 
-- `/faq` for `faq.yaml`
+- `/faq` for the canonical FAQ dataset (built-ins first, then `faq.yaml` entries)
 - `/autocomplete` for `auto_complete.txt`
 - `/welcome` for sampled command metadata from `welcome.yaml`
 - `/welcome/ascii` for plain-text banner art from `ascii.txt`
+- `/welcome/ascii-mobile` for the mobile banner art from `ascii_mobile.txt`
 - `/welcome/hints` for hint strings from `app_hints.txt`
 - `/config` for normalized values from `config.yaml`
 
@@ -308,7 +366,7 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 **ansi_up and permalink colors.** ansi_up converts ANSI escape codes to HTML spans, consuming the original codes. If you try to re-render from `element.innerText`, all color information is lost. The `rawLines` array stores the original text before ansi_up processes it, enabling the permalink page to run ansi_up fresh and reproduce the exact same colors.
 
-**`vendor/` directory must exist for local dev.** `ansi_up.js` lives in `static/js/vendor/` which is created by the Dockerfile at build time and is gitignored. If you run the app locally without Docker and the directory doesn't exist, the script tag 404s, `AnsiUp` is undefined, and `appendLine()` crashes before the fetch to `/run` fires. The symptom is: tab label updates (it runs before `appendLine`) but no command output and nothing in the server logs — the fetch never happens. Fix: `mkdir -p app/static/js/vendor && curl -sSL https://cdn.jsdelivr.net/npm/ansi_up@5.2.1/ansi_up.js -o app/static/js/vendor/ansi_up.js`.
+**`vendor/` routes must exist for local dev.** `ansi_up.js` is served through `/vendor/ansi_up.js`, with the copied-in asset living outside `/app` and the repo file as a fallback. If you run the app locally without Docker and the fallback file doesn't exist, the script tag 404s, `AnsiUp` is undefined, and `appendLine()` crashes before the fetch to `/run` fires. The symptom is: tab label updates (it runs before `appendLine`) but no command output and nothing in the server logs — the fetch never happens. Fix: keep `app/static/js/vendor/ansi_up.js` in place or copy it into `/usr/local/share/shell-assets/js/vendor/ansi_up.js` in Docker.
 
 **SSE via fetch vs EventSource.** `EventSource` doesn't support custom request headers. Since we need `X-Session-ID` on every request, we use `fetch()` with a `ReadableStream` reader instead. This requires manually parsing the SSE format (`data: ...\n\n`) from the raw byte stream.
 
@@ -324,78 +382,35 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`templates/`, `conf/`, etc.) and app modules are importable.
 
-### Python tests
+Current totals on this branch:
 
-- **`test_validation.py`** — security-critical path: shell operator blocking, path blocking, allowlist prefix matching, deny prefix logic, `/dev/null` exception, command rewrites, and shared runtime-command availability helpers. These tests mock `load_allowed_commands` or runtime lookups so they do not depend on the actual `conf/allowed_commands.txt` file or installed binaries.
-- **`test_backend_modules.py`** — loader and persistence helpers: `load_welcome()` parsing including `group` / `featured`, `load_ascii_art()`, `load_welcome_hints()`, run-output artifact capture/read helpers, autocomplete loading, database init/migration, and retention behavior.
-- **`test_routes.py`** — Flask integration via `app.test_client()`: all HTTP endpoints, response content types, error cases, history CRUD, session isolation, run/share permalink views, canonical single-run permalink behavior with full-output artifacts, preview forcing via `?preview=1`, the `/history/<run_id>/full` alias, `/welcome/ascii` and `/welcome/hints`, malformed JSON-body handling for `/run`, `/kill`, and `/share`, and `get_client_ip()` XFF validation.
-- **`test_run_history_share.py` / `test_request_kill_and_commands.py`** — focused route flows for persistence, kill behavior, web-shell helper execution, constrained `man` rendering, helper-resolution coverage for the expanded command set, shared missing-binary handling, and artifact cleanup on run delete/clear.
-- **`test_logging.py`** — structured logging formatters, setup, and application log events.
+- `pytest`: 466
+- `vitest`: 238
+- `playwright`: 126
+- total: 830
 
-**Rate limiting in tests.** `app.config["RATELIMIT_ENABLED"] = False` is set in every `get_client()` helper, but Flask-Limiter 4.x with `memory://` storage still increments counters even when this flag is set dynamically at runtime — it only truly disables the limit check, not the counter itself. Test classes that POST to `/run` multiple times (e.g. `TestCmdRewriteEvent`, `TestRunSpawnErrorEvent`) therefore use a dedicated `X-Forwarded-For` IP from the RFC 5737 TEST-NET-3 range (`203.0.113.x`) via the request headers. This gives each class its own isolated rate-limit bucket so accumulated hits from one class cannot exhaust the limit and cause spurious 429s in later classes within the same test run. Redis is not mocked — tests run in the no-Redis fallback path, which is the correct behaviour for the test environment.
+### Testing Architecture
 
-**Mock patch namespaces.** Because `is_command_allowed` lives in `commands.py` and resolves `load_allowed_commands` from `commands`' own namespace, tests that call `is_command_allowed` directly (or via `/run`) must patch `"commands.load_allowed_commands"`. Tests that call route handlers which invoke `load_allowed_commands` directly (e.g. the `/allowed-commands` route) can patch `"app.load_allowed_commands"` because the route uses the name as imported into `app`'s namespace. `TestPidMap` patches `process.redis_client` via `mock.patch.object(process, "redis_client", None)` rather than setting it on the `app` module, since `pid_register`/`pid_pop` check the `process` module's own binding.
+- The project uses a three-layer test strategy:
+  - `pytest` for backend contracts, route behavior, persistence, loaders, and logging
+  - `Vitest` for client-side helpers and DOM-bound browser logic in jsdom
+  - `Playwright` for the integrated browser UI against a live Flask server
 
-### JS unit tests (Vitest)
+- That split is deliberate. Backend coverage stays fast and deterministic, browser-module logic gets isolated without bundling the app, and only browser-specific integration risks are left to Playwright.
 
-The browser JS files share a single global scope (by design — no ES modules, no bundler). This makes tree-shaking impossible but the functions themselves can still be unit-tested by loading each file's source into an isolated execution context via `new Function(src + '\nreturn {fn1, fn2}')(localStorage, APP_CONFIG)`.
+- The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage.
 
-**How it works (`tests/js/unit/helpers/extract.js`):**
-1. Read the raw source of the browser JS file with `fs.readFileSync`
-2. Wrap it in `new Function('localStorage', 'APP_CONFIG', src + '\nreturn {...}')(...)`
-3. `new Function` executes in global scope — DOM-referencing functions (`renderHistory`, `showToast`, etc.) are *defined* but never *called*, so they don't throw even without a real DOM
-4. The requested function names are extracted and returned to the test
+- The jsdom harness mirrors production load order by prepending `app/static/js/state.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
 
-`localStorage` is passed as a parameter (not captured from the outer scope) so the function bodies operate on a self-contained `MemoryStorage` instance defined in `extract.js`, rather than trying to access a browser global. This avoids a jsdom quirk: when jsdom is initialized without a non-opaque origin URL, the `localStorage` object exists but its methods (`getItem`, `setItem`, `removeItem`, `clear`) are all absent. Rather than fighting this with `environmentOptions`, `MemoryStorage` is a minimal but complete in-memory Storage implementation that's fully self-contained. `APP_CONFIG` is passed as a minimal stub `{ recent_commands_limit: 20 }` — it satisfies references inside function bodies without requiring the full `/config` API response.
+- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, the lower-composer tap hit-target fix, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, close-running-tab / clear-preserve behavior, and history-panel action-button close behavior.
 
-`fromScript` returns `{ ...fns, _storage }` so tests that need to pre-populate or inspect localStorage can do so via `_storage.setItem(...)` / `_storage.getItem(...)` instead of the jsdom global.
+- The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 
-**What is tested:**
-- `utils.test.js` — HTML escaping, regex escaping, and MOTD rendering helpers
-- `runner.test.js` — elapsed formatting plus kill/status helpers
-- `history.test.js` — starred-command localStorage helpers, startup hydration of blank-input command recall from `/history`, and history restore overlay/failure behavior
-- `session.test.js` — anonymous session ID persistence and `apiFetch()` header injection
-- `autocomplete.test.js` — dropdown filtering, highlighting, acceptance, and dismissal
-- `tabs.test.js` — tab limits, rename, command recall, export guards, and last-tab reset
-- `welcome.test.js` — welcome animation cancellation, badge behavior, and current DOM/state transitions
-- `app.test.js` — startup theme, timestamp-mode bootstrap behavior, and config/history boot wiring
-- `search.test.js` / `output.test.js` — DOM loader coverage for search and output rendering helpers
+- Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does.
 
-Run with `npm run test:unit`. Added to the pre-commit hook (runs only when `node_modules` exists).
+- Suite-specific coverage inventories, focused run commands, and maintenance notes are intentionally centralized in [tests/README.md](tests/README.md) rather than duplicated here.
 
-### JS e2e tests (Playwright)
-
-Playwright tests exercise the full UI against a real Flask server. `playwright.config.js` starts Flask on port 5001 via `webServer` using the `.venv` Python interpreter run from the `app/` directory (matching `conftest.py`'s `chdir` logic).
-
-**What is tested:**
-- `commands.spec.js` — command execution, denial, and exit-status rendering
-- `history.spec.js` — history loading, tab switching, starring, delete, clear-all, and delete-nonfavorites flows
-- `kill.spec.js` — kill confirmation and killed-state UI
-- `mobile.spec.js` — hamburger/menu visibility and dismissal
-- `output.spec.js` — copy, clear, save .txt/.html, and download fidelity
-- `rate-limit.spec.js` — per-session rate limiting
-- `search.spec.js` — open/close, highlighting, navigation, case-sensitive mode, regex mode, and invalid-regex handling
-- `share.spec.js` — snapshot permalinks plus single-run history permalinks and JSON/HTML views
-- `tabs.spec.js` — max-tabs, rename, rename persistence, command recall, and last-tab reset behavior
-- `timestamps.spec.js` — timestamp mode cycling and output metadata
-- `ui.spec.js` — theme toggling and FAQ modal behavior
-- `autocomplete.spec.js` — command suggestion interaction
-- `welcome.spec.js` — welcome interruption, clickable sampled commands and badge, preferred-command stability, and tab-scoped welcome teardown
-
-**Implementation notes learned during setup:**
-- `workers: 1` is required in `playwright.config.js`. The default 2-worker setup fires parallel `/run` requests that exceed the server's 5-per-second rate limit, causing spurious 429s on the second worker's first command.
-- `openHistory()` must wait for `#history-list > *` to appear — `refreshHistoryPanel()` fires an async `/history` fetch after the panel becomes visible. Use `openHistoryWithEntries()` in tests that expect entries: the server writes the run to SQLite *after* sending the SSE exit event, so the first `/history` fetch may race with the DB commit; `openHistoryWithEntries()` retries by closing and re-opening the panel if no `.history-entry` is found.
-- The history panel must be closed with `#history-close` (the in-panel close button), not by re-clicking `#hist-btn`. When the panel is open it overlays the toolbar, and the panel header intercepts pointer events on `#hist-btn`, causing Playwright to retry the click until timeout.
-- Test commands use `curl http://localhost:5001/health` and `curl http://localhost:5001/config`. These are in the allowlist, complete in under 50 ms, always exit 0, and create real history entries. `echo` is not in the allowlist and cannot be used.
-- Search tests look for `localhost` (from the echoed command line) rather than for text in the actual command output; the echo line is always rendered before the run starts, making the assertion immune to rate-limit contamination from adjacent tests.
-- `data-ts-e` (elapsed) is only set on lines appended while a run is active; the initial command echo line has no elapsed value and must not be used to assert for that attribute.
-
-### Testing Strategy
-- The testing commands described above (`python3 -m pytest`, `npm run test:unit`, `npm run test:e2e`) are reproduced in `README.md` so contributors can run them without leaving the main docs. The file-by-file breakdown and maintenance notes live in [tests/README.md](tests/README.md).
-- Vitest explicitly exercises `session.js`, `autocomplete.js`, and the new `app.js` bootstrapping behavior; the README now links `X-Session-ID` usage and the `/history/<run_id>?json` view to those tests.
-- Playwright stores clipboard writes on `window.__clipboardText` (see `tests/js/e2e/share.spec.js`) and keeps a single worker to stay within the 5-per-second `/run` limit. The suite covers welcome interruption, clickable welcome onboarding, delete-non-favourites, tab rename persistence, and single-run permalink JSON/HTML exports.
-
-Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and requires a writable environment); intended for pre-push or CI verification.
+For the full appendix of suite contents and day-to-day testing notes, see [tests/README.md](tests/README.md).
 
 ---
 
@@ -403,7 +418,7 @@ Run with `npm run test:e2e`. Not included in the pre-commit hook (too slow and r
 
 `./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
 
-- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Persists across restarts. Pruned by `permalink_retention_days`.
+- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews now store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
 
@@ -412,6 +427,9 @@ The storage model is intentionally split:
 - live tabs and normal history restore use `max_output_lines` and the `runs.output_preview` payload, which keeps only the most recent preview lines
 - full-output persistence is controlled by backend-only config keys `persist_full_run_output` and `full_output_max_bytes`
 - `full_output_max_bytes` is enforced on the uncompressed UTF-8 stream before gzip compression, so the limit tracks output volume rather than the final on-disk `.gz` size
+- full-output artifacts for fresh runs are stored as gzip-compressed JSON-lines records, not plain text, so prompt/timestamp/class metadata can be reused by canonical run permalinks
+- the main-page permalink button now upgrades to the persisted full artifact when one exists, so `/share/<id>` and `/history/<run_id>` both surface the same complete result when available
+- artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
 - deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
 
 Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Multi-worker Process Killing above).

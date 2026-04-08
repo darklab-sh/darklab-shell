@@ -5,44 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>shell.darklab.sh</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
-<link rel="preconnect" href="https://fonts.googleapis.com">
-<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@300;400;700&family=Syne:wght@700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
-<script src="/static/js/vendor/ansi_up.js"></script>
+<script src="/vendor/ansi_up.js"></script>
+<script src="/static/js/export_html.js"></script>
 </head>
 <body>
 
 <header>
   <h1>shell.darklab.sh</h1>
-  <span class="version" id="version-label">v1.2 · real-time</span>
+  <span class="version" id="version-label">real-time</span>
   <div class="header-btns" id="header-btns">
     <button id="hist-btn" title="Run history">⧖ history</button>
+    <button id="options-btn" title="Display and preference options">≡ options</button>
     <button id="theme-btn" title="Toggle theme">◑ theme</button>
     <button id="faq-btn">? FAQ</button>
   </div>
   <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
 </header>
 
-<!-- Mobile dropdown menu -->
-<div id="mobile-menu">
-  <button data-action="search">⌕ search</button>
-  <button data-action="history">⧖ history</button>
-  <button data-action="ts">timestamps: off</button>
-  <button data-action="theme">◑ theme</button>
-  <button data-action="faq">? FAQ</button>
+<div id="mobile-shell" aria-hidden="true">
+  <div id="mobile-shell-chrome"></div>
+  <div id="mobile-shell-transcript"></div>
+  <div id="mobile-shell-composer">
+    <div id="mobile-composer-host" aria-hidden="true">
+      <div id="mobile-composer">
+        <div id="mobile-edit-bar" aria-label="Mobile edit controls">
+          <button type="button" data-mobile-edit="home" aria-label="Move to start">Home</button>
+          <button type="button" data-mobile-edit="left" aria-label="Move left">←</button>
+          <button type="button" data-mobile-edit="right" aria-label="Move right">→</button>
+          <button type="button" data-mobile-edit="end" aria-label="Move to end">End</button>
+          <button type="button" data-mobile-edit="delete-word" aria-label="Delete word">Del Word</button>
+        </div>
+        <div id="mobile-composer-row">
+          <span class="mobile-prompt-label">$</span>
+          <input id="mobile-cmd" type="search"
+                 autocomplete="off" autocapitalize="none" autocorrect="off"
+                 spellcheck="false" inputmode="text" enterkeyhint="go"
+                 placeholder="Type a command" aria-label="Command">
+          <button id="mobile-run-btn" type="button">Run</button>
+        </div>
+      </div>
+    </div>
+  </div>
+  <div id="mobile-shell-overlays">
+    <div id="mobile-menu">
+      <button data-action="search">⌕ search</button>
+      <button data-action="history">⧖ history</button>
+      <button data-action="options">≡ options</button>
+      <button data-action="ln">line numbers: off</button>
+      <button data-action="ts">timestamps: off</button>
+      <button data-action="theme">◑ theme</button>
+      <button data-action="faq">? FAQ</button>
+    </div>
+  </div>
 </div>
 
 <div style="display:none;padding:6px 0" id="motd-wrap">
   <span id="motd" style="display:inline-block;padding:5px 14px;background:rgba(57,255,20,0.06);border:1px solid var(--green-dim);border-radius:4px;color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></span>
-</div>
-
-<div class="input-row">
-  <div class="prompt-wrap">
-    <span class="prompt-prefix">$</span>
-    <input id="cmd" type="text" placeholder="Enter bash command…" autocomplete="off" spellcheck="false" autofocus aria-label="Command">
-    <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
-  </div>
-  <button id="run-btn">Run</button>
 </div>
 
 <div id="history-row" class="history-row" style="display:none">
@@ -54,12 +74,15 @@
     <span class="dot dot-r"></span>
     <span class="dot dot-y"></span>
     <span class="dot dot-g"></span>
+    <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
     <div class="tabs-bar" id="tabs-bar">
       <!-- tabs injected here -->
+      <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
     </div>
-    <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+    <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
     <div class="terminal-bar-btns">
       <button id="search-toggle-btn" title="Search output (Ctrl+F)">⌕ search</button>
+      <button id="ln-btn" title="Toggle line numbers">line numbers: off</button>
       <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
     </div>
     <span id="status" class="status-pill idle">IDLE</span>
@@ -79,6 +102,18 @@
   </div>
   <div id="tab-panels">
     <!-- panels injected here -->
+  </div>
+  <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
+    <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
+    <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
+      <span class="shell-prompt-text" id="shell-prompt-text"></span>
+      <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
+    </div>
+  </div>
+  <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
+  <div class="shell-input-row" aria-hidden="true">
+    <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" aria-label="Command">
+    <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
   </div>
 </div>
 
@@ -117,7 +152,7 @@
 
 <!-- History delete confirmation modal -->
 <div id="hist-del-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
-  <div style="background:#111;border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
+  <div id="hist-del-modal" style="background:#111;border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
     <div id="hist-del-msg" style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px"></div>
     <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
       <button id="hist-del-cancel" class="term-action-btn">Cancel</button>
@@ -134,110 +169,62 @@
       <span class="faq-title">FAQ</span>
       <button class="faq-close" aria-label="Close FAQ">✕</button>
     </div>
-    <div class="faq-body">
+    <div class="faq-body"></div>
+  </div>
+</div>
 
+<!-- Options Modal -->
+<div id="options-overlay">
+  <div id="options-modal">
+    <div class="faq-header">
+      <span class="faq-title">OPTIONS</span>
+      <button class="options-close" aria-label="Close options">✕</button>
+    </div>
+    <div class="faq-body options-body">
       <div class="faq-item">
-        <div class="faq-q">What is this?</div>
-        <div class="faq-a">shell.darklab.sh is a lightweight web interface for running network diagnostic and vulnerability scanning commands against remote endpoints, with output streamed in real time. It's designed for testing and troubleshooting remote hosts — things like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability scans — without needing SSH access to a server. For more detailed information, see the <a href="https://gitlab.com/darklab.sh/shell.darklab.sh" target="_blank" rel="noopener" style="color:var(--green)">README on GitLab</a>.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">What commands are allowed?</div>
-        <div class="faq-a" id="faq-allowed-text">Loading…</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">Why does mtr look different here?</div>
-        <div class="faq-a">
-          <code>mtr</code> requires a real terminal (TTY) for its live interactive display, which isn't available in a web shell. It's automatically run in <code>--report-wide</code> mode instead, which runs 10 probe cycles and prints a summary table. You can control the cycle count with <code>-c</code>, e.g. <code class="faq-example">mtr -c 20 google.com</code>
+        <div class="faq-q">Theme</div>
+        <div class="faq-a options-fieldset" role="radiogroup" aria-label="Theme">
+          <label class="options-choice">
+            <input type="radio" name="theme-pref" value="dark">
+            <span>Dark</span>
+          </label>
+          <label class="options-choice">
+            <input type="radio" name="theme-pref" value="light">
+            <span>Light</span>
+          </label>
         </div>
       </div>
-
       <div class="faq-item">
-        <div class="faq-q">Can I request a new tool?</div>
-        <div class="faq-a">Yes! If there's a tool you'd like added, send a request to <strong>admin [at] darklab [dot] sh</strong> and we'll consider it for a future update.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">How do tabs and permalinks work?</div>
+        <div class="faq-q">Timestamps</div>
         <div class="faq-a">
-          Each command runs in the currently active tab. You can open additional tabs with the <strong>+</strong> button to run commands side by side and keep results from different sessions visible at the same time. Each tab tracks its own status independently. Double-click a tab label to rename it.<br><br>
-          The <strong>permalink</strong> button on each tab captures everything currently visible in that tab — all commands and their output — and saves it as a shareable page. The link opens a styled HTML view with ANSI color rendering and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. Permalinks survive container restarts.<br><br>
-          The <strong>⧖ history</strong> panel shows your last 50 runs. You can load any past result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> a command to pin it to the top of the list.
+          <select id="options-ts-select" class="options-select" aria-label="Timestamp mode">
+            <option value="off">Off</option>
+            <option value="elapsed">Elapsed</option>
+            <option value="clock">Clock</option>
+          </select>
         </div>
       </div>
-
       <div class="faq-item">
-        <div class="faq-q">How do I stop a running command?</div>
-        <div class="faq-a">Click the <strong style="color:var(--red)">■ Kill</strong> button that appears while a command is running. This sends SIGTERM to the entire process group on the server, stopping it immediately.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">How do I access search, history and theme on mobile?</div>
-        <div class="faq-a">On small screens the header buttons are replaced by a <strong>☰</strong> menu in the top-right corner. Tap it to access search, run history, timestamps toggle, theme toggle, and this FAQ.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">How do I save or share my results?</div>
-        <div class="faq-a">
-          There are several options from the action bar below each tab's output:<br><br>
-          <strong>permalink</strong> — saves a snapshot of everything visible in the tab and generates a shareable URL. The snapshot page lets the recipient copy, download, or view the raw data.<br>
-          <strong>copy</strong> — copies the full plain-text output to your clipboard.<br>
-          <strong>save .html</strong> — downloads a self-contained HTML file with ANSI colors preserved, suitable for archiving or sending to someone without a browser link.<br>
-          <strong>save .txt</strong> — downloads a plain-text version of the output.<br><br>
-          Single-run permalinks are also available from the <strong>⧖ history</strong> panel.
+        <div class="faq-q">Line Numbers</div>
+        <div class="faq-a options-fieldset">
+          <label class="options-choice">
+            <input type="checkbox" id="options-ln-toggle">
+            <span>Show line numbers beside output and the live prompt</span>
+          </label>
         </div>
       </div>
-
       <div class="faq-item">
-        <div class="faq-q">How do I rename a tab?</div>
-        <div class="faq-a">Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click anywhere outside to confirm, or <strong>Escape</strong> to cancel. Once renamed, running a command won't overwrite the label — the tab keeps your chosen name.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">What do the timestamp options do?</div>
+        <div class="faq-q">Persistence</div>
         <div class="faq-a">
-          The <strong>timestamps</strong> button in the terminal bar cycles through three modes:<br><br>
-          <strong>off</strong> — no timestamps shown (default).<br>
-          <strong>elapsed</strong> — shows how many seconds after the command started each line appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different stages of a scan take.<br>
-          <strong>clock</strong> — shows the wall-clock time each line was received (e.g. <code>14:32:01</code>). Useful for correlating output with events elsewhere.
+          These display preferences are saved in cookies for future sessions on this browser.
         </div>
       </div>
-
-      <div class="faq-item">
-        <div class="faq-q">Are my commands visible to other users?</div>
-        <div class="faq-a">No. Each browser session is assigned an anonymous ID stored in your browser's local storage. Your run history, starred commands, and saved snapshots are only visible to sessions sharing that ID — in practice, just your own browser tabs. Commands are not broadcast or shared between users.</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">What are the retention and limit settings for this instance?</div>
-        <div class="faq-a" id="faq-limits-text">Loading…</div>
-      </div>
-
-      <div class="faq-item">
-        <div class="faq-q">What wordlists are available?</div>
-        <div class="faq-a">
-          The full <a href="https://github.com/danielmiessler/SecLists" target="_blank" rel="noopener" style="color:var(--green)">SecLists</a> collection is installed at <code>/usr/share/wordlists/seclists/</code>. Commonly used lists:
-          <ul>
-            <li><code>Discovery/Web-Content/common.txt</code> — fast directory scan</li>
-            <li><code>Discovery/Web-Content/big.txt</code> — broader directory scan</li>
-            <li><code>Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt</code> — thorough directory scan</li>
-            <li><code>Discovery/Web-Content/raft-large-files.txt</code> — common file names</li>
-            <li><code>Discovery/DNS/subdomains-top1million-5000.txt</code> — fast subdomain brute-force</li>
-            <li><code>Discovery/DNS/subdomains-top1million-20000.txt</code> — broader subdomain brute-force</li>
-            <li><code>Discovery/DNS/subdomains-top1million-110000.txt</code> — thorough subdomain brute-force</li>
-            <li><code>Passwords/Common-Credentials/10-million-password-list-top-10000.txt</code> — common passwords</li>
-            <li><code>Usernames/Names/names.txt</code> — common usernames</li>
-            <li><code>Fuzzing/</code> — XSS, SQLi, path traversal, and other fuzzing payloads</li>
-          </ul>
-        </div>
-      </div>
-
     </div>
   </div>
 </div>
 
 <script src="/static/js/session.js"></script>
+<script src="/static/js/state.js"></script>
 <script src="/static/js/utils.js"></script>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/dom.js"></script>

@@ -7,7 +7,7 @@ import os
 import pwd
 import yaml
 
-APP_VERSION = "1.2"
+APP_VERSION = "1.3"
 
 
 def load_config():

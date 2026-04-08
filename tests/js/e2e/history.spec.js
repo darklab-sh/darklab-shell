@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory } from './helpers.js'
+import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory, makeTestIp } from './helpers.js'
 
 // Use allowed commands that complete quickly and exit 0.
 // curl against the local test server is ideal — always available and fast.
@@ -8,14 +8,14 @@ const CMD_B = 'curl http://localhost:5001/config'
 
 test.describe('history drawer', () => {
   test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': '203.0.113.62' })
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(62) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
     // Clear any localStorage state left over from a previous test run
     await page.evaluate(() => localStorage.clear())
   })
 
-  test('loading a run from history populates the command input', async ({ page }) => {
+  test('loading a run from history opens output in a tab without repopulating command input', async ({ page }) => {
     await runCommand(page, CMD_A)
 
     // Navigate away by opening a new tab (clears the input)
@@ -26,8 +26,9 @@ test.describe('history drawer', () => {
     await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
-    // The input bar should now contain the command that was loaded
-    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
+    // Command input remains neutral; loaded output appears in the active tab.
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await expect(page.locator('.tab-panel.active .output')).toContainText(CMD_A)
   })
 
   test('clicking a history entry that is already open switches to that tab', async ({ page }) => {
@@ -40,8 +41,8 @@ test.describe('history drawer', () => {
 
     // No new tab should have been created
     await expect(page.locator('.tab')).toHaveCount(initialTabCount)
-    // The existing tab should be active and show the command in the input
-    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
+    // The existing tab should be active without repopulating the command input
+    await expect(page.locator('#cmd')).toHaveValue('')
   })
 
   test('deleting a starred entry removes it from the chip bar', async ({ page }) => {
@@ -73,8 +74,10 @@ test.describe('history drawer', () => {
 
     // Star both runs
     await openHistoryWithEntries(page)
-    const entries = page.locator('.history-entry')
+    let entries = page.locator('.history-entry')
     await entries.nth(0).locator('[data-action="star"]').click()
+    await openHistory(page)
+    entries = page.locator('.history-entry')
     await entries.nth(1).locator('[data-action="star"]').click()
     await closeHistory(page)
 
@@ -83,10 +86,35 @@ test.describe('history drawer', () => {
     // Open the history panel to access the clear-all button (it lives inside the panel)
     await openHistory(page)
     await page.locator('#hist-clear-all-btn').click()
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#hist-del-overlay')).toBeHidden()
+    await page.locator('#hist-clear-all-btn').click()
     await page.locator('#hist-del-confirm').click()
 
     // All chips should be gone
     await expect(page.locator('.hist-chip')).toHaveCount(0)
+  })
+
+  test('clicking outside the drawer closes the history panel', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    await openHistory(page)
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+
+    await page.locator('.terminal-wrap').click({ position: { x: 12, y: 12 } })
+
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+  })
+
+  test('pressing Escape closes the history panel', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    await openHistory(page)
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+
+    await page.keyboard.press('Escape')
+
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   })
 
   test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
@@ -109,5 +137,4 @@ test.describe('history drawer', () => {
     await expect(page.locator('.history-entry')).toHaveCount(1)
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
   })
-
 })

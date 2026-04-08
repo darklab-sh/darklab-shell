@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from collections import deque
 import gzip
+import json
 import os
 
 
@@ -26,7 +27,7 @@ class RunOutputCapture:
         self.preview_limit = max(0, int(preview_limit or 0))
         self.persist_full_output = bool(persist_full_output)
         self.full_output_max_bytes = max(0, int(full_output_max_bytes or 0))
-        self.preview_lines: deque[str] = deque()
+        self.preview_lines: deque[dict[str, str]] = deque()
         self.preview_truncated = False
         self.output_line_count = 0
         self.full_output_available = False
@@ -41,28 +42,35 @@ class RunOutputCapture:
             artifact_path = get_artifact_path(self.artifact_rel_path)
             self._artifact_file = gzip.open(artifact_path, "wt", encoding="utf-8")
 
-    def add_line(self, text: str):
+    def add_line(self, text: str, cls: str = "", ts_clock: str = "", ts_elapsed: str = ""):
         line = str(text).rstrip("\n")
+        entry = {
+            "text": line,
+            "cls": str(cls or ""),
+            "tsC": str(ts_clock or ""),
+            "tsE": str(ts_elapsed or ""),
+        }
         self.output_line_count += 1
 
         if self.preview_limit == 0:
-            self.preview_lines.append(line)
+            self.preview_lines.append(entry)
         else:
             if len(self.preview_lines) >= self.preview_limit:
                 self.preview_lines.popleft()
                 self.preview_truncated = True
-            self.preview_lines.append(line)
+            self.preview_lines.append(entry)
 
         if not self._artifact_file:
             return
 
-        encoded = (line + "\n").encode("utf-8")
+        serialized = json.dumps(entry, separators=(",", ":"))
+        encoded = (serialized + "\n").encode("utf-8")
         if self.full_output_max_bytes and self.full_output_bytes + len(encoded) > self.full_output_max_bytes:
             self.full_output_truncated = True
             self.close()
             return
 
-        self._artifact_file.write(line + "\n")
+        self._artifact_file.write(serialized + "\n")
         self.full_output_bytes += len(encoded)
         self.full_output_available = True
 
@@ -92,5 +100,25 @@ def delete_artifact_file(rel_path: str | None):
 
 
 def load_full_output_lines(rel_path: str) -> list[str]:
+    return [entry["text"] for entry in load_full_output_entries(rel_path)]
+
+
+def load_full_output_entries(rel_path: str) -> list[dict[str, str]]:
     with gzip.open(get_artifact_path(rel_path), "rt", encoding="utf-8") as f:
-        return f.read().splitlines()
+        rows = f.read().splitlines()
+
+    parsed: list[dict[str, str]] = []
+    for row in rows:
+        try:
+            item = json.loads(row)
+        except json.JSONDecodeError:
+            return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in rows]
+        if not isinstance(item, dict) or not isinstance(item.get("text"), str):
+            return [{"text": line, "cls": "", "tsC": "", "tsE": ""} for line in rows]
+        parsed.append({
+            "text": item["text"],
+            "cls": str(item.get("cls", "")),
+            "tsC": str(item.get("tsC", "")),
+            "tsE": str(item.get("tsE", "")),
+        })
+    return parsed

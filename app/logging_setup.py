@@ -18,6 +18,8 @@ import json
 import logging
 import socket
 
+from config import APP_VERSION
+
 # ---------------------------------------------------------------------------
 # Shared constants
 # ---------------------------------------------------------------------------
@@ -67,9 +69,10 @@ class GELFFormatter(logging.Formatter):
     parsing the message string.
     """
 
-    def __init__(self, app_name: str = "shell.darklab.sh") -> None:
+    def __init__(self, app_name: str = "shell.darklab.sh", app_version: str = APP_VERSION) -> None:
         super().__init__()
         self._app_name = app_name
+        self._app_version = app_version
 
     def format(self, record: logging.LogRecord) -> str:
         record.message = record.getMessage()
@@ -80,6 +83,7 @@ class GELFFormatter(logging.Formatter):
             "timestamp":     record.created,
             "level":         _GELF_LEVEL.get(record.levelno, 7),
             "_app":          self._app_name,
+            "_app_version":  self._app_version,
             "_logger":       record.name,
         }
         if record.exc_info:
@@ -148,7 +152,7 @@ def configure_logging(cfg: dict) -> None:
     app_name   = str(cfg.get("app_name", "shell.darklab.sh"))
 
     formatter: logging.Formatter = (
-        GELFFormatter(app_name) if fmt_name == "gelf" else _TextFormatter()
+        GELFFormatter(app_name, APP_VERSION) if fmt_name == "gelf" else _TextFormatter()
     )
 
     handler = logging.StreamHandler()
@@ -165,4 +169,4 @@ def configure_logging(cfg: dict) -> None:
     # via before_request / after_request hooks in app.py instead.
     logging.getLogger("werkzeug").setLevel(logging.ERROR)
 
-    logger.info("LOGGING_CONFIGURED", extra={"level": level_name, "format": fmt_name})
+    logger.info("LOGGING_CONFIGURED", extra={"level": level_name, "format": fmt_name, "app_version": APP_VERSION})

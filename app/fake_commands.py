@@ -30,6 +30,65 @@ from database import db_connect
 
 README_URL = "https://gitlab.com/darklab.sh/shell.darklab.sh"
 _STARTED_AT = datetime.now(timezone.utc)
+_CURRENT_SHORTCUTS = [
+    ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
+    ("Enter on blank prompt", "append a new empty prompt line"),
+    ("Up / Down on blank prompt", "cycle recent command history"),
+    ("Autocomplete: Up / Down", "move through suggestions"),
+    ("Autocomplete: Tab", "accept the highlighted suggestion"),
+    ("Autocomplete: Enter", "accept highlighted suggestion or run command"),
+    ("Autocomplete: Escape", "dismiss suggestions"),
+    ("Welcome: type / Enter / Escape", "settle the welcome animation immediately"),
+    ("Option+T / Alt+T", "open a new tab"),
+    ("Option+W / Alt+W", "close the current tab"),
+    ("Option+Left/Right", "switch to previous / next tab"),
+    ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
+    ("Option+P / Alt+P", "create a permalink for the active tab"),
+    ("Option+Shift+C", "copy active-tab output"),
+    ("Ctrl+L", "clear the active tab"),
+    ("Kill dialog: Enter / Escape", "confirm / cancel kill"),
+    ("Ctrl+W", "delete one word to the left"),
+    ("Ctrl+U", "delete to the beginning of the line"),
+    ("Ctrl+A", "move to the beginning of the line"),
+    ("Ctrl+K", "delete to the end of the line"),
+    ("Ctrl+E", "move to the end of the line"),
+    ("Option+B/F or Alt+B/F", "move backward / forward by word"),
+]
+_SNARKY_SUDO_RESPONSES = [
+    "sudo: confidence noted. Privilege escalation is still not happening.",
+    "sudo: that's a local habit, not a capability.",
+    "sudo: request denied by the web shell's sense of self-preservation.",
+    "sudo: the operator badge is decorative here.",
+    "sudo: this browser tab does not recognize your authority.",
+    "sudo: close, but still no root access.",
+]
+_SNARKY_SUDO_TARGET_RESPONSES = [
+    "sudo: '{target}' is not happening today.",
+    "sudo: '{target}' is still not a privilege escalation strategy.",
+    "sudo: '{target}' has been denied by the browser court.",
+    "sudo: '{target}' will remain a non-event.",
+    "sudo: nice try with '{target}', but no.",
+    "sudo: '{target}' is still just a wish with shell syntax.",
+    "sudo: the answer to '{target}' is firmly no.",
+    "sudo: '{target}' will remain below the line.",
+    "sudo: '{target}' was rejected before it could become a plan.",
+]
+_SNARKY_REBOOT_RESPONSES = [
+    "reboot: bold choice.",
+    "reboot: not with this browser tab.",
+    "reboot: the server is not taking user suggestions for downtime.",
+    "reboot: let's not turn a diagnostic console into a blackout.",
+    "reboot: all I can offer is a dramatic sigh.",
+    "reboot: have you tried turning your expectations off and on again?",
+]
+_SNARKY_RM_ROOT_RESPONSES = [
+    "rm: nice try.",
+    "rm: the web shell prefers not to become a cautionary tale.",
+    "rm: not even for dramatic effect.",
+    "rm: that's a hard no from the entire stack.",
+    "rm: the filesystem would like to keep existing, thanks.",
+    "rm: asking for `/` is a little too committed.",
+]
 _SPECIAL_FAKE_COMMANDS = {
     "rm -fr /": "rm_root",
     "rm -rf /": "rm_root",
@@ -37,8 +96,8 @@ _SPECIAL_FAKE_COMMANDS = {
 _FAKE_COMMANDS = {
     "banner", "clear", "date", "env", "help", "history", "hostname",
     "id", "last", "limits", "ls", "man", "ps", "pwd", "retention",
-    "status", "sudo", "type", "uname", "uptime", "which", "who", "whoami",
-    "groups", "tty", "version", "faq",
+    "shortcuts", "status", "sudo", "type", "uname", "uptime", "which",
+    "who", "whoami", "groups", "tty", "version", "faq",
     "fortune", "reboot",
 }
 _BACKSPACE_RE = re.compile(r".\x08")
@@ -61,6 +120,7 @@ _FAKE_COMMAND_HELP = [
     ("ps", "Show the current ps helper plus recent session commands."),
     ("pwd", "Show the web shell workspace path."),
     ("retention", "Show retention and full-output persistence settings."),
+    ("shortcuts", "Show current keyboard shortcuts."),
     ("status", "Summarize the current session and instance settings."),
     ("tty", "Show the web terminal device path."),
     ("type <cmd>", "Describe whether a command is a helper command, real command, or missing."),
@@ -112,6 +172,8 @@ def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, 
         return _run_fake_hostname(), 0
     if root == "id":
         return _run_fake_id(), 0
+    if root == "shortcuts":
+        return _run_fake_shortcuts(), 0
     if root == "last":
         return _run_fake_last(session_id), 0
     if root == "limits":
@@ -229,6 +291,15 @@ def _run_fake_help() -> list[dict[str, str]]:
     return _text_lines(lines)
 
 
+def _run_fake_shortcuts() -> list[dict[str, str]]:
+    lines = ["Current shortcuts:"]
+    for name, description in _CURRENT_SHORTCUTS:
+        lines.append(f"  {name:<26} {description}")
+    lines.append("")
+    lines.append("Note: on macOS, use Option for app-safe tab shortcuts; browser Command shortcuts remain environment-dependent.")
+    return _text_lines(lines)
+
+
 def _run_fake_man_for_synthetic_topic(topic: str) -> list[dict[str, str]]:
     topic_help = {
         "man": "Show the real man page for an allowed command, or web helper help for a fake command.",
@@ -266,7 +337,7 @@ def _run_fake_env(session_id: str) -> list[dict[str, str]]:
     lines = [
         f"APP_NAME={CFG['app_name']}",
         f"SESSION_ID={session_id or 'anonymous'}",
-        "SHELL=/shell.darklab.sh",
+        "SHELL=/app/shell.darklab.sh/bin/bash",
         "TERM=xterm-256color",
     ]
     return _text_lines(lines)
@@ -537,17 +608,11 @@ def _run_fake_pwd() -> list[dict[str, str]]:
 
 
 def _run_fake_reboot() -> list[dict[str, str]]:
-    return _text_lines([
-        "reboot: bold choice.",
-        "If this web shell could reboot the host, we would both have bigger problems.",
-    ])
+    return [{"type": "output", "text": random.choice(_SNARKY_REBOOT_RESPONSES)}]
 
 
 def _run_fake_rm_root() -> list[dict[str, str]]:
-    return _text_lines([
-        "rm: nice try.",
-        "Even this web shell has standards.",
-    ])
+    return [{"type": "output", "text": random.choice(_SNARKY_RM_ROOT_RESPONSES)}]
 
 
 def _run_fake_status(session_id: str) -> list[dict[str, str]]:
@@ -568,8 +633,10 @@ def _run_fake_tty() -> list[dict[str, str]]:
 def _run_fake_sudo(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) == 1:
-        return [{"type": "output", "text": "sudo: confidence noted. Privilege escalation is still not happening."}]
-    return [{"type": "output", "text": f"sudo: '{' '.join(parts[1:])}' is not happening today."}]
+        return [{"type": "output", "text": random.choice(_SNARKY_SUDO_RESPONSES)}]
+    target = " ".join(parts[1:])
+    template = random.choice(_SNARKY_SUDO_TARGET_RESPONSES)
+    return [{"type": "output", "text": template.format(target=target)}]
 
 
 def _run_fake_type(command: str) -> list[dict[str, str]]:

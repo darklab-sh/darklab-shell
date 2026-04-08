@@ -177,6 +177,73 @@ class TestConfigRoute:
         assert data["command_timeout_seconds"] == 0
 
 
+# ── /vendor assets ───────────────────────────────────────────────────────────
+
+class TestVendorAssets:
+    def test_ansi_up_prefers_build_time_asset(self, tmp_path, monkeypatch):
+        client = get_client()
+        build_asset = tmp_path / "build" / "ansi_up.js"
+        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
+        build_asset.parent.mkdir(parents=True)
+        fallback_asset.parent.mkdir(parents=True)
+        build_asset.write_text("build ansi_up")
+        fallback_asset.write_text("fallback ansi_up")
+
+        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", build_asset)
+        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+
+        resp = client.get("/vendor/ansi_up.js")
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True) == "build ansi_up"
+
+    def test_ansi_up_falls_back_to_repo_copy_when_build_asset_missing(self, tmp_path, monkeypatch):
+        client = get_client()
+        missing_build_asset = tmp_path / "missing" / "ansi_up.js"
+        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
+        fallback_asset.parent.mkdir(parents=True)
+        fallback_asset.write_text("fallback ansi_up")
+
+        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", missing_build_asset)
+        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+
+        resp = client.get("/vendor/ansi_up.js")
+        assert resp.status_code == 200
+        assert resp.get_data(as_text=True) == "fallback ansi_up"
+
+    def test_font_route_prefers_build_time_asset_and_falls_back(self, tmp_path, monkeypatch):
+        client = get_client()
+        build_dir = tmp_path / "build-fonts"
+        fallback_dir = tmp_path / "fallback-fonts"
+        build_dir.mkdir()
+        fallback_dir.mkdir()
+
+        build_font = build_dir / "JetBrainsMono-400.ttf"
+        fallback_font = fallback_dir / "JetBrainsMono-400.ttf"
+        build_font.write_bytes(b"build font bytes")
+        fallback_font.write_bytes(b"fallback font bytes")
+
+        monkeypatch.setattr(shell_app, "_FONT_DIR", build_dir)
+        monkeypatch.setattr(shell_app, "_FONT_FALLBACK_DIR", fallback_dir)
+
+        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
+        assert resp.status_code == 200
+        assert resp.data == b"build font bytes"
+
+        monkeypatch.setattr(shell_app, "_FONT_DIR", tmp_path / "missing-fonts")
+        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
+        assert resp.status_code == 200
+        assert resp.data == b"fallback font bytes"
+
+    def test_font_route_rejects_unknown_or_traversal_paths(self):
+        client = get_client()
+
+        resp = client.get("/vendor/fonts/UnknownFont.ttf")
+        assert resp.status_code == 404
+
+        resp = client.get("/vendor/fonts/../../app.py")
+        assert resp.status_code == 404
+
+
 # ── /allowed-commands ─────────────────────────────────────────────────────────
 
 class TestAllowedCommandsRoute:
@@ -229,6 +296,13 @@ class TestFaqRoute:
         assert "items" in data
         assert isinstance(data["items"], list)
 
+    def test_includes_builtin_faq_entries(self):
+        client = get_client()
+        data = json.loads(client.get("/faq").data)
+        questions = [item.get("question") for item in data["items"]]
+        assert "What is this?" in questions
+        assert "What commands are allowed?" in questions
+
 
 # ── /welcome/ascii ───────────────────────────────────────────────────────────
 
@@ -244,6 +318,19 @@ class TestWelcomeAsciiRoute:
         assert b"/$$" in resp.data
 
 
+class TestWelcomeAsciiMobileRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii-mobile")
+        assert resp.status_code == 200
+
+    def test_returns_plain_text_banner(self):
+        client = get_client()
+        resp = client.get("/welcome/ascii-mobile")
+        assert resp.mimetype == "text/plain"
+        assert resp.data
+
+
 # ── /welcome/hints ───────────────────────────────────────────────────────────
 
 class TestWelcomeHintsRoute:
@@ -255,6 +342,19 @@ class TestWelcomeHintsRoute:
     def test_items_key_present(self):
         client = get_client()
         data = json.loads(client.get("/welcome/hints").data)
+        assert "items" in data
+        assert isinstance(data["items"], list)
+
+
+class TestMobileWelcomeHintsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/welcome/hints-mobile")
+        assert resp.status_code == 200
+
+    def test_items_key_present(self):
+        client = get_client()
+        data = json.loads(client.get("/welcome/hints-mobile").data)
         assert "items" in data
         assert isinstance(data["items"], list)
 
@@ -301,10 +401,10 @@ class TestRunRoute:
     def test_missing_allowlisted_command_returns_synthetic_run(self):
         client = get_client()
         with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV example.com", None)), \
+             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
              mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
              mock.patch("app.subprocess.Popen") as popen:
-            resp = client.post("/run", json={"command": "nmap -sV example.com"})
+            resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
         assert '"type": "started"' in body
@@ -529,6 +629,20 @@ class TestShareRoute:
         assert resp.status_code == 200
         assert b"<html" in resp.data.lower()
 
+    def test_get_share_html_honors_light_theme_cookie(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "light theme test", "content": ["line"]},
+            headers={"X-Session-ID": "test-session"}
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        client.set_cookie("pref_theme", "light")
+        resp = client.get(f"/share/{share_id}")
+        body = resp.get_data(as_text=True)
+        assert 'class="permalink-page light"' in body
+        assert '/static/css/styles.css' in body
+
     def test_get_share_html_contains_label(self):
         client = get_client()
         create_resp = client.post(
@@ -540,6 +654,51 @@ class TestShareRoute:
         resp = client.get(f"/share/{share_id}")
         assert b"unique-label-xyz" in resp.data
 
+    def test_get_share_html_does_not_prepend_label_for_structured_snapshot_content(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={
+                "label": "curl http://localhost:5001/config",
+                "content": [
+                    {"text": "$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
+                    {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
+                    {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+
+        resp = client.get(f"/share/{share_id}")
+
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "$ ping -c 4 darklab.sh" in body
+        assert "$ curl http://localhost:5001/config" not in body
+
+    def test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={
+                "label": "prompt-style-test",
+                "content": [
+                    {"text": "anon@shell.darklab.sh:~$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
+                    {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+
+        resp = client.get(f"/share/{share_id}")
+
+        assert resp.status_code == 200
+        body = resp.get_data(as_text=True)
+        assert "renderPromptEcho" in body
+        assert "prompt-prefix" in body
+
     def test_get_share_html_content_type(self):
         client = get_client()
         create_resp = client.post(
@@ -550,6 +709,25 @@ class TestShareRoute:
         share_id = json.loads(create_resp.data)["id"]
         resp = client.get(f"/share/{share_id}")
         assert "text/html" in resp.content_type
+
+    def test_get_share_html_includes_permalink_display_toggles(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={
+                "label": "toggle-test",
+                "content": [
+                    {"text": "line 1", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
+                ],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        resp = client.get(f"/share/{share_id}")
+        body = resp.get_data(as_text=True)
+        assert 'id="toggle-ln"' in body
+        assert 'id="toggle-ts"' in body
+        assert 'timestamps unavailable' not in body
 
 
 # ── /welcome ──────────────────────────────────────────────────────────────────
@@ -796,7 +974,11 @@ class TestRunPermalinkRoute:
             data = json.loads(get_client().get(f"/history/{run_id}?json&preview=1").data)
             assert data["command"] == "man curl"
             assert data["output"] == ["preview line"]
-            assert "permalink button below or in the history panel" in data["preview_notice"]
+            assert (
+                "To view the full output, use either permalink button now; "
+                "after another command, use this command's history permalink"
+                in data["preview_notice"]
+            )
         finally:
             self._delete_run(run_id)
 
@@ -831,6 +1013,33 @@ class TestRunPermalinkRoute:
         try:
             resp = get_client().get(f"/history/{run_id}")
             assert b"preview truncated" in resp.data
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_includes_line_number_toggle_and_disables_timestamps_without_metadata(self):
+        run_id = "permalink-toggle-test-run"
+        self._insert_run(run_id, "ping google.com", ["64 bytes"])
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            body = resp.get_data(as_text=True)
+            assert 'id="toggle-ln"' in body
+            assert 'id="toggle-ts" disabled' in body
+            assert 'timestamps unavailable for this permalink' in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_includes_prompt_echo_and_enabled_timestamps_for_structured_run_output(self):
+        run_id = "permalink-structured-toggle-test-run"
+        structured_preview = [
+            {"text": "64 bytes from 8.8.8.8", "cls": "", "tsC": "12:00:00", "tsE": "+0.1s"},
+        ]
+        self._insert_run(run_id, "ping google.com", structured_preview)
+        try:
+            resp = get_client().get(f"/history/{run_id}")
+            body = resp.get_data(as_text=True)
+            assert "$ ping google.com" in body
+            assert 'id="toggle-ts"' in body
+            assert 'timestamps unavailable for this permalink' not in body
         finally:
             self._delete_run(run_id)
 

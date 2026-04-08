@@ -2,6 +2,17 @@
  * Shared helpers for Playwright e2e tests.
  */
 
+const TEST_IP_SEED = ((Date.now() ^ process.pid) % 200) + 1
+
+/**
+ * Return a per-test-run RFC 5737 address so repeated suite runs do not reuse
+ * the same rate-limit bucket.
+ */
+export function makeTestIp(offset = 0) {
+  const host = ((TEST_IP_SEED + offset - 1) % 254) + 1
+  return `203.0.113.${host}`
+}
+
 /**
  * Type a command into the input bar and press Enter, then wait for the
  * tab to show an exit status (exit-ok or exit-fail class on the status pill).
