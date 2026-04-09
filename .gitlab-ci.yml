@@ -98,7 +98,9 @@ audit:
 
 dependency-version-check:
   stage: audit
-  before_script: []
+  before_script:
+    - apt-get update -q
+    - apt-get install -y -q nodejs npm
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual

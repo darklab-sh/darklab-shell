@@ -1,4 +1,4 @@
-FROM python:3.12-slim
+FROM python:3.14.4-slim
 
 # Remove dpkg config that prevents man pages from being installed
 RUN rm -f /etc/dpkg/dpkg.cfg.d/docker
@@ -31,7 +31,7 @@ RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@v1.9.0 && \
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@v1.2.3
 
 # Install amass, assetfinder, gobuster and ffuf via Go
-RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@v5.0.1
+RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1
 RUN go install github.com/tomnomnom/assetfinder@v0.1.1
 RUN go install github.com/OJ/gobuster/v3@v3.8.2
 RUN go install github.com/ffuf/ffuf/v2@v2.1.0
