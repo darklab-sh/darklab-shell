@@ -563,6 +563,11 @@ function handleTabShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.key === 'Tab') {
+    activateRelativeTab(e.shiftKey ? -1 : 1);
+    e.preventDefault();
+    return true;
+  }
   const matchedDigit = [1, 2, 3, 4, 5, 6, 7, 8, 9].find(digit => eventMatchesDigit(e, digit));
   if (matchedDigit) {
     const tabIndex = matchedDigit - 1;
@@ -1506,7 +1511,8 @@ _uiOverlayRefs.killOverlay.addEventListener('click', e => {
 //
 // App-safe key bindings stay narrow:
 // - Alt+T / Alt+W for new/close tab
-// - Alt+ArrowLeft / Alt+ArrowRight for tab cycling
+// - Alt+Tab / Alt+Shift+Tab for tab cycling (forward/backward)
+// - Alt+ArrowLeft / Alt+ArrowRight for tab cycling (same as Tab)
 // - Alt+P for permalink, Alt+Shift+C for copy
 // - Enter / Escape for kill-confirm accept / cancel
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.

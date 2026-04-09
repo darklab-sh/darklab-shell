@@ -103,7 +103,6 @@ class TestKillRoute:
         client = get_client()
 
         with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", return_value=5678), \
              mock.patch("app.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
              mock.patch("app.subprocess.run") as run_cmd, \
              mock.patch("app.os.killpg") as killpg:
@@ -112,8 +111,9 @@ class TestKillRoute:
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["killed"] is True
+        # pgid == pid because setsid guarantees PGID == PID at spawn time
         run_cmd.assert_called_once_with(
-            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-5678"],
+            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-1234"],
             timeout=5,
         )
         killpg.assert_not_called()

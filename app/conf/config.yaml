@@ -82,6 +82,11 @@
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
+# Whether the /run rate limiter is active at all. Set to false for test-only or
+# maintenance overlays where you want the app to accept runs without throttling.
+# Server default if unset: true
+# rate_limit_enabled: true
+
 # Maximum number of /run requests per minute per IP
 # Server default if unset: 30
 # rate_limit_per_minute: 30
@@ -109,11 +114,12 @@
 # Server default if unset: true
 # persist_full_run_output: true
 
-# Hard byte cap for persisted full-output artifacts.
-# Set to 0 for unlimited. If the artifact reaches this limit, the full-output page
-# remains available but includes a truncation notice.
-# Server default if unset: 5242880
-# full_output_max_bytes: 5242880
+# Hard cap for persisted full-output artifacts, expressed in megabytes.
+# The app multiplies this value by 1024*1024 internally. Set to 0 for unlimited.
+# If the artifact reaches this limit, the full-output page remains available but
+# includes a truncation notice.
+# Server default if unset: 5 MB
+# full_output_max_mb: 5MB
 
 # Automatically kill a running command after this many seconds.
 # Set to 0 to disable (commands run until they finish or are killed manually).
@@ -189,7 +195,9 @@
 # Server default if unset: 4200
 # welcome_hint_interval_ms: 4200
 
-# Maximum number of footer-hint rotations after the initial hint is shown.
-# Set to 0 to keep only the first hint visible with no rotation.
-# Server default if unset: 2
-# welcome_hint_rotations: 2
+# Maximum number of hint states shown while the welcome tab remains idle.
+# Set to 0 to keep rotating until interrupted.
+# Set to 1 to keep only the first hint visible with no rotation.
+# Higher values allow that many total hint states, counting the first hint.
+# Server default if unset: 0
+# welcome_hint_rotations: 0

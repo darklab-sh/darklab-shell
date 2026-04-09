@@ -8,7 +8,9 @@
 # while "nmap" would allow any nmap invocation.
 #
 # Lines starting with ! are deny prefixes and take priority over allow prefixes.
-# Use them to block specific flags on an otherwise-allowed command. For example:
+# Use them to block specific flags on an otherwise-allowed command. Tool and
+# subcommand names are matched case-insensitively, but flags are matched exactly
+# as written. For example:
 #   nmap
 #   !nmap -sU
 #   !nmap --script
@@ -33,10 +35,6 @@ fping
 # Deny range generation (flood potential against large subnets)
 !fping -g
 !fping --generate
-hping3
-# Deny flood modes
-!hping3 --flood
-!hping3 -f
 traceroute
 tcptraceroute
 # Only allow netcat to do scanning/port checking
@@ -91,14 +89,6 @@ amass
 assetfinder
 fierce
 dnsenum
-masscan
-# Deny file output flags
-!masscan -oX
-!masscan -oJ
-!masscan -oG
-!masscan -oL
-!masscan -oB
-!masscan --output-filename
 gobuster
 # Deny file output flags
 !gobuster dir -o
@@ -137,10 +127,6 @@ nikto
 !nikto -o
 !nikto --output
 !nikto -Save
-wapiti
-# Deny file output flags
-!wapiti -o
-!wapiti --output
 wpscan
 # Deny file output flags
 !wpscan -o

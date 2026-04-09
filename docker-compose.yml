@@ -16,6 +16,7 @@ services:
   shell.darklab.sh:
     build: .
     container_name: shell.darklab.sh
+    init: true
     read_only: true
     restart: always
     expose:

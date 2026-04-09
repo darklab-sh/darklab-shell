@@ -18,6 +18,7 @@ services:
       dockerfile: Dockerfile
     image: shell-darklab
     container_name: shell-darklab
+    init: true
     ports:
       - "8888:8888"
     volumes:

@@ -212,6 +212,8 @@ function submitCommand(rawCmd) {
       requestWelcomeSettle(activeTabId);
       return 'settle';
     }
+    const _activeTab = getActiveTab();
+    if (_activeTab && _activeTab.st === 'running') return true;
     appendPromptNewline(activeTabId);
     setStatus('idle');
     return true;

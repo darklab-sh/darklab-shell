@@ -96,6 +96,47 @@ audit:
     - pip install -q pip-audit
     - pip-audit -r app/requirements.txt
 
+dependency-version-check:
+  stage: audit
+  before_script: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+    - when: never
+  script:
+    - ./scripts/check_versions.sh | tee version-check.txt
+  artifacts:
+    when: always
+    paths:
+      - version-check.txt
+    expire_in: 1 week
+
+autocomplete-image-smoke:
+  stage: build
+  image: docker:27
+  services:
+    - docker:27-dind
+  variables:
+    DOCKER_TLS_CERTDIR: "/certs"
+  before_script:
+    - apk add --no-cache python3 py3-pytest
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+    - if: $CI_PIPELINE_SOURCE == "web"
+      when: manual
+      allow_failure: true
+    - changes:
+        - Dockerfile
+        - app/conf/auto_complete.txt
+        - app/conf/allowed_commands.txt
+        - app/requirements.txt
+        - requirements-dev.txt
+    - when: never
+  script:
+    - RUN_CONTAINER_AUTOCOMPLETE=1 pytest tests/py/test_autocomplete_container.py -q
+
 docker-build:
   stage: build
   image: docker:27

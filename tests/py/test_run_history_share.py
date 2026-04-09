@@ -433,7 +433,7 @@ class TestRunStreaming:
             **shell_app.CFG,
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
-            "full_output_max_bytes": 5242880,
+            "full_output_max_mb": 5,
         }):
             resp = client.post("/run", json={"command": "retention"})
             body = resp.get_data(as_text=True)
@@ -442,7 +442,7 @@ class TestRunStreaming:
         assert "Retention policy:\\n" in body
         assert "run preview retention  365 days\\n" in body
         assert "full output save       yes\\n" in body
-        assert "full output max        5242880 bytes\\n" in body
+        assert "full output max        5 MB\\n" in body
 
     def test_fake_fortune_returns_configured_line(self):
         client = get_client()

@@ -15,4 +15,4 @@ mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
 chown -R scanner:scanner /tmp/.config /tmp/.cache
 chmod -R 755 /tmp/.config /tmp/.cache
 
-exec gosu appuser gunicorn --bind 0.0.0.0:8888 --workers 4 --threads 4 --timeout 3600 --control-socket /tmp/.gunicorn app:app
+exec gosu appuser gunicorn --bind 0.0.0.0:8888 --workers "${WEB_CONCURRENCY:-4}" --threads "${WEB_THREADS:-4}" --timeout 3600 --control-socket /tmp/.gunicorn app:app

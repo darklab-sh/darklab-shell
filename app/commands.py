@@ -108,8 +108,12 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "<li><code>Enter</code> on a blank prompt — create a new empty prompt line.</li>"
                 "<li><code>Option+T</code> / <code>Alt+T</code> and <code>Option+W</code> / "
                 "<code>Alt+W</code> — open or close the current tab.</li>"
-                "<li><code>Option+←/→</code> and <code>Option+1...9</code> (<code>Alt+←/→</code>, "
-                "<code>Alt+1...9</code>) — switch tabs.</li>"
+                "<li><code>Option+←</code> / <code>Option+→</code> "
+                "(<code>Alt+←</code> / <code>Alt+→</code>) — switch to the previous or next tab.</li>"
+                "<li><code>Option+Tab</code> (<code>Alt+Tab</code>) — cycle to the next tab; "
+                "add <code>Shift</code> to go backwards.</li>"
+                "<li><code>Option+1</code> through <code>Option+9</code> "
+                "(<code>Alt+1</code> … <code>Alt+9</code>) — jump directly to a tab by number.</li>"
                 "<li><code>Option+P</code> (<code>Alt+P</code>) — create a permalink for the active "
                 "tab.</li>"
                 "<li><code>Option+Shift+C</code> (<code>Alt+Shift+C</code>) — copy the active tab "
@@ -342,7 +346,9 @@ def load_allowed_commands():
     """Read allowed_commands.txt and return (allow_prefixes, deny_prefixes).
     allow_prefixes is None if the file doesn't exist or has no allow entries (= unrestricted).
     deny_prefixes is always a list. Lines starting with ! are deny prefixes and take
-    priority over allow prefixes — use them to block specific flags on an allowed command."""
+    priority over allow prefixes — use them to block specific flags on an allowed command.
+    Allow prefixes are normalized to lowercase for case-insensitive matching; deny prefixes
+    preserve their original flag casing so entries like !curl -K do not block curl -k."""
     if not os.path.exists(ALLOWED_COMMANDS_FILE):
         return None, []
     prefixes = []
@@ -352,7 +358,7 @@ def load_allowed_commands():
         if not line or line.startswith("#"):
             continue
         if line.startswith("!"):
-            denied.append(line[1:].strip().lower())
+            denied.append(line[1:].strip())
         else:
             prefixes.append(line.lower())
     prefixes = _dedupe_preserve_order(prefixes)
@@ -532,12 +538,29 @@ def split_chained_commands(command: str) -> list[str]:
     return [p.strip() for p in parts if p.strip()]
 
 
-def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
-    """Return True if cmd_lower matches any deny entry.
-    A deny entry like 'curl -o' is matched if:
+def _tokens_start_with(command_tokens: list[str], prefix_tokens: list[str]) -> bool:
+    if len(command_tokens) < len(prefix_tokens):
+        return False
+    return all(cmd.lower() == prefix.lower() for cmd, prefix in zip(command_tokens, prefix_tokens))
+
+
+def _flag_matches_token(flag: str, token: str) -> bool:
+    if not flag:
+        return False
+    if flag.startswith("--"):
+        return token == flag
+    if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
+        return token.startswith('-') and not token.startswith('--') and flag[1] in token[1:]
+    return token == flag
+
+
+def _is_denied(command: str, deny_entries: list[str]) -> bool:
+    """Return True if command matches any deny entry.
+    Deny entries match tool/subcommand prefixes case-insensitively, but flags are
+    matched exactly as written. A deny entry like 'curl -o' is matched if:
       - the command starts with the deny prefix, OR
-      - the tool prefix matches AND the flag appears anywhere as a space-separated
-        token in the command, so 'curl -s -o file' is caught as well as 'curl -o file'.
+      - the tool prefix matches AND the flag appears anywhere after it in the command,
+        so 'curl -s -o file' is caught as well as 'curl -o file'.
     For single-character flags (e.g. -e, -c), the flag is also matched when combined
     with other single-char flags in a group: 'nc -ve' is caught by '!nc -e', and
     'nc -vc' is caught by '!nc -c'. Multi-char flags (--script, -oN) use exact-token
@@ -545,33 +568,31 @@ def _is_denied(cmd_lower: str, deny_entries: list[str]) -> bool:
     Exception: a denied output flag is allowed when its argument is /dev/null,
     permitting common patterns like 'curl -o /dev/null -w "%{http_code}" <url>'.
     """
+    command_tokens = split_command_argv(command)
+    if not command_tokens:
+        return False
+
     for d in deny_entries:
-        if cmd_lower == d or cmd_lower.startswith(d + " "):
-            # Exception: flag argument is /dev/null (discard output, not writing to filesystem)
-            if cmd_lower.startswith(d + " /dev/null"):
-                continue
-            return True
-        # Split deny entry at first flag (" -") to allow flag-anywhere matching.
-        # e.g. "curl -o" → tool="curl", flag="-o"
-        #      "gobuster dir -o" → tool="gobuster dir", flag="-o"
-        space_flag = d.find(" -")
-        if space_flag == -1:
+        deny_tokens = split_command_argv(d)
+        if not deny_tokens:
             continue
-        tool_prefix = d[:space_flag]
-        flag = d[space_flag + 1:]
-        if not (cmd_lower == tool_prefix or cmd_lower.startswith(tool_prefix + " ")):
+
+        if len(deny_tokens) == 1:
+            if command_tokens[0].lower() == deny_tokens[0].lower():
+                return True
             continue
-        # Single-char flag (e.g. -e): also match when combined with other flags
-        # in a group, such as -ve or -zve. Multi-char flags use exact-token match only.
-        if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
-            char = re.escape(flag[1])
-            pattern = r'(?<= )-[a-z]*' + char + r'[a-z]*(?= |$)'
-        else:
-            pattern = r'(?<= )' + re.escape(flag) + r'(?= |$)'
-        if re.search(pattern, cmd_lower):
-            # Exception: flag argument is /dev/null
-            if re.search(r'(?<= )' + re.escape(flag) + r' /dev/null\b', cmd_lower):
+
+        tool_prefix = deny_tokens[:-1]
+        flag = deny_tokens[-1]
+        if not _tokens_start_with(command_tokens, tool_prefix):
+            continue
+
+        tail = command_tokens[len(tool_prefix):]
+        for idx, token in enumerate(tail):
+            if not _flag_matches_token(flag, token):
                 continue
+            if idx + 1 < len(tail) and tail[idx + 1] == "/dev/null":
+                break
             return True
     return False
 
@@ -597,7 +618,7 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
     cmd_lower = command.strip().lower()
 
     # Deny prefixes take priority — checked before allow list
-    if denied and _is_denied(cmd_lower, denied):
+    if denied and _is_denied(command.strip(), denied):
         return False, f"Command not allowed: '{command.strip()}'"
 
     if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")

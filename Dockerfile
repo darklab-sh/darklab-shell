@@ -8,9 +8,9 @@ RUN apt-get update
 RUN apt-get upgrade -y
 
 RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
-                        mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl golang-go \
-                        libxml-writer-perl libjson-perl rubygems ruby-dev build-essential fping hping3 \
-                        masscan python3-requests fierce dnsenum libcap2-bin sudo gosu groff-base bsdextrautils
+                        mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl golang-go rubygems \
+                        libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
+                        dnsenum libcap2-bin sudo gosu groff-base bsdextrautils
 
 # Update the man page database
 RUN mandb -c 
@@ -52,10 +52,6 @@ RUN ln -s /opt/Nikto/program/nikto.pl /usr/local/bin/nikto
 
 # Upgrade pip to ensure latest versions of dependencies can be installed
 RUN pip install --upgrade pip
-
-# Install wapiti3, dirsearch, and wafw00f via pip
-RUN pip install wapiti3==3.2.2
-RUN pip install wafw00f==2.4.2
 
 # Install wpscan via ruby gems
 RUN gem install wpscan -v 3.8.28

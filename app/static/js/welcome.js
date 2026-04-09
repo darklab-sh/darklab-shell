@@ -502,6 +502,19 @@ function _pickRandomHint(hints, used) {
   return pool[Math.floor(Math.random() * pool.length)] || '';
 }
 
+function _coerceWelcomeHintRotationLimit(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 0;
+  return Math.max(0, Math.floor(parsed));
+}
+
+function _welcomeHintRotationBudget(value) {
+  const limit = _coerceWelcomeHintRotationLimit(value);
+  if (limit === 0) return Infinity;
+  if (limit === 1) return 0;
+  return Math.max(0, limit - 1);
+}
+
 function _pickRandomEntry(items) {
   if (!items.length) return null;
   return items[Math.floor(Math.random() * items.length)] || null;
@@ -612,6 +625,14 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
     return;
   }
 
+  const rotationsRemainingStart = _welcomeHintRotationBudget(APP_CONFIG.welcome_hint_rotations);
+  if (rotationsRemainingStart === 0) {
+    _welcomeActive = false;
+    if (tabId === activeTabId) mountShellPrompt(tabId);
+    return;
+  }
+  let rotationsRemaining = rotationsRemainingStart;
+
   while (_shouldRotateWelcomeHints(tabId)) {
     await _sleep(intervalMs);
     if (_welcomeSettleRequested) {
@@ -619,6 +640,11 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
       return;
     }
     if (!_shouldRotateWelcomeHints(tabId)) break;
+
+    if (rotationsRemaining !== Infinity) {
+      if (rotationsRemaining <= 0) break;
+      rotationsRemaining--;
+    }
 
     current = _pickRandomHint(hints, used);
     if (!current) return;

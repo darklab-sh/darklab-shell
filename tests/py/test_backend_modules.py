@@ -102,6 +102,7 @@ class TestLoadConfig:
                     project_readme: https://example.invalid/base.md
                     prompt_prefix: base@local:~$
                     default_theme: base-theme.yaml
+                    full_output_max_mb: 7MB
                     rate_limit_per_minute: 30
                     """
                 ))
@@ -120,6 +121,8 @@ class TestLoadConfig:
         assert cfg["prompt_prefix"] == "local@local:~$"
         assert cfg["project_readme"] == "https://example.invalid/local.md"
         assert cfg["default_theme"] == "base-theme.yaml"
+        assert cfg["full_output_max_mb"] == 7
+        assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
 
@@ -150,14 +153,14 @@ class TestLoadAllowedCommands:
         assert allow == ["ping", "nmap", "dig"]
         assert deny == []
 
-    def test_deny_entries_stripped_of_bang_and_lowercased(self):
+    def test_deny_entries_stripped_of_bang_and_preserve_case(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write("ping\n!NMAP -SU\n!curl -o\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 allow, deny = load_allowed_commands()
         assert allow is not None
         assert "ping" in allow
-        assert "nmap -su" in deny
+        assert "NMAP -SU" in deny
         assert "curl -o" in deny
 
     def test_comments_and_blank_lines_ignored(self):
@@ -201,6 +204,15 @@ class TestLoadAllowedCommands:
                 allow, deny = load_allowed_commands()
         assert allow == ["ping", "nmap", "curl"]
         assert deny == ["curl -o"]
+
+    def test_local_overlay_preserves_case_in_denies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = self._write("ping\n!curl -K\n", tmp)
+            self._write_local("!curl -k\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
+                allow, deny = load_allowed_commands()
+        assert allow == ["ping"]
+        assert deny == ["curl -K", "curl -k"]
 
     def test_local_overlay_merges_group_headers(self):
         with tempfile.TemporaryDirectory() as tmp:

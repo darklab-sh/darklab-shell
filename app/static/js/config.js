@@ -22,5 +22,5 @@ let APP_CONFIG = {
   welcome_sample_count: 5,
   welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
   welcome_hint_interval_ms: 4200,
-  welcome_hint_rotations: 2,
+  welcome_hint_rotations: 0,
 };

@@ -41,6 +41,7 @@ _CURRENT_SHORTCUTS = [
     ("Option+T / Alt+T", "open a new tab"),
     ("Option+W / Alt+W", "close the current tab"),
     ("Option+Left/Right", "switch to previous / next tab"),
+    ("Option+Tab / Alt+Tab", "cycle to next tab (add Shift to reverse)"),
     ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
     ("Option+P / Alt+P", "create a permalink for the active tab"),
     ("Option+Shift+C", "copy active-tab output"),
@@ -567,7 +568,7 @@ def _run_fake_limits() -> list[dict[str, str]]:
         f"  command timeout      {CFG['command_timeout_seconds'] or 0}s (0 = unlimited)",
         f"  live preview lines   {CFG['max_output_lines']}",
         f"  full output save     {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"  full output max      {CFG.get('full_output_max_bytes', 0)} bytes (0 = unlimited)",
+        f"  full output max      {CFG.get('full_output_max_mb', 0)} MB (0 = unlimited)",
         f"  history panel limit  {CFG['history_panel_limit']}",
         f"  recent commands      {CFG['recent_commands_limit']}",
         f"  tab limit            {CFG['max_tabs'] or 0} (0 = unlimited)",
@@ -581,7 +582,7 @@ def _run_fake_retention() -> list[dict[str, str]]:
         "Retention policy:",
         f"  run preview retention  {_format_limit_value(CFG['permalink_retention_days'])} days",
         f"  full output save       {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"  full output max        {_format_limit_value(CFG.get('full_output_max_bytes'))} bytes",
+        f"  full output max        {_format_limit_value(CFG.get('full_output_max_mb'))} MB",
     ])
 
 

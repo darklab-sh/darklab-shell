@@ -1472,6 +1472,20 @@ describe('app helpers', () => {
     expect(acShow).toHaveBeenCalledWith(['man curl'])
   })
 
+  it('hides autocomplete when the typed command exactly matches a suggestion', async () => {
+    const acHide = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      acSuggestions: ['man curl', 'curl http://localhost:5001/health'],
+      acHide,
+    })
+
+    cmdInput.value = 'man curl'
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(acHide).toHaveBeenCalled()
+    expect(document.getElementById('ac-dropdown').style.display).toBe('none')
+  })
+
   it('renders cursor and selection state from the hidden input', async () => {
     const { cmdInput } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')

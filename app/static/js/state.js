@@ -268,6 +268,10 @@
     acFiltered = (typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
       .filter(s => s.toLowerCase().startsWith(q))
       .slice(0, 12);
+    if (acFiltered.some(s => s.toLowerCase() === q)) {
+      if (typeof acHide === 'function') acHide();
+      return;
+    }
     if (typeof acShow === 'function') acShow(acFiltered);
   };
   global.showPanelOverlay = (el) => {

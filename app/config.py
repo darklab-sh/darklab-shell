@@ -8,7 +8,7 @@ import pwd
 from pathlib import Path
 import yaml
 
-APP_VERSION = "1.3"
+APP_VERSION = "1.4"
 
 
 def _load_yaml_config(path):
@@ -24,6 +24,29 @@ def _load_yaml_config_optional(path):
         return _load_yaml_config(path)
     except yaml.YAMLError:
         return {}
+
+
+def _coerce_mb_value(value):
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return max(0, int(value))
+    if isinstance(value, str):
+        token = value.strip().lower().replace(" ", "")
+        if token.endswith("mb"):
+            token = token[:-2]
+        elif token.endswith("m"):
+            token = token[:-1]
+        if not token:
+            return None
+        try:
+            return max(0, int(token))
+        except ValueError:
+            try:
+                return max(0, int(float(token)))
+            except ValueError:
+                return None
+    return None
 
 
 def load_config(conf_dir=None):
@@ -44,11 +67,12 @@ def load_config(conf_dir=None):
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
+        "rate_limit_enabled":         True,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
         "max_output_lines":           5000,
         "persist_full_run_output":    True,
-        "full_output_max_bytes":      5 * 1024 * 1024,
+        "full_output_max_mb":         5,
         "max_tabs":                   8,
         "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,
@@ -61,11 +85,25 @@ def load_config(conf_dir=None):
         "welcome_sample_count":       5,
         "welcome_status_labels":      ["CONFIG", "RUNNER", "HISTORY", "LIMITS", "AUTOCOMPLETE"],
         "welcome_hint_interval_ms":   4200,
-        "welcome_hint_rotations":     2,
+        "welcome_hint_rotations":     0,
     }
     conf_path = Path(conf_dir) if conf_dir is not None else Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
     defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
+    legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
+    full_output_max_mb = _coerce_mb_value(defaults.get("full_output_max_mb"))
+    if full_output_max_mb is None and legacy_full_output_max_bytes is not None:
+        try:
+            legacy_bytes = max(0, int(legacy_full_output_max_bytes))
+        except (TypeError, ValueError):
+            legacy_bytes = 0
+        defaults["full_output_max_mb"] = max(0, (legacy_bytes + (1024 * 1024) - 1) // (1024 * 1024))
+        defaults["full_output_max_bytes"] = legacy_bytes
+        return defaults
+    if full_output_max_mb is None:
+        full_output_max_mb = 5
+    defaults["full_output_max_mb"] = full_output_max_mb
+    defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
     return defaults
 
 

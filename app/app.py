@@ -57,6 +57,7 @@ SUDO_BIN = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN = shutil.which("kill") or "/bin/kill"
 
 app = Flask(__name__, template_folder="templates")
+app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
 
 _ANSI_UP_PATH = Path("/usr/local/share/shell-assets/js/vendor/ansi_up.js")
 _ANSI_UP_FALLBACK = Path(__file__).resolve().parent / "static" / "js" / "vendor" / "ansi_up.js"
@@ -545,11 +546,12 @@ def get_run(run_id):
         run["output_entries"] = load_full_output_entries(run["rel_path"])
         run["output"] = [entry["text"] for entry in run["output_entries"]]
         if run["full_output_truncated"]:
+            truncated_mb = CFG.get('full_output_max_mb', 0)
             run["output"].append(
-                f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]"
+                f"[full output truncated after {truncated_mb} MB]"
             )
             run["output_entries"].append({
-                "text": f"[full output truncated after {CFG.get('full_output_max_bytes', 0)} bytes]",
+                "text": f"[full output truncated after {truncated_mb} MB]",
                 "cls": "notice",
                 "tsC": "",
                 "tsE": "",
@@ -870,7 +872,16 @@ def kill_command():
         log.debug("KILL_MISS", extra={"ip": client_ip, "run_id": run_id})
         return jsonify({"error": "No such process"}), 404
     try:
-        pgid = os.getpgid(pid)
+        # Subprocesses are spawned with preexec_fn=os.setsid, which makes
+        # PGID == PID at creation time. Use the stored PID directly as the
+        # PGID rather than calling os.getpgid() — if the subprocess has
+        # already exited and its PID was reused (e.g. by a new Gunicorn
+        # worker), os.getpgid() would return the wrong PGID and we would
+        # accidentally send SIGTERM to a gunicorn worker process group.
+        # Using the original PID as the PGID is safe: if the process group
+        # no longer exists the signal fails with ESRCH instead of hitting
+        # an unrelated process.
+        pgid = pid
         if SCANNER_PREFIX:
             # Processes run as scanner — appuser can't signal them directly.
             # Use sudo kill to send SIGTERM to the entire process group.

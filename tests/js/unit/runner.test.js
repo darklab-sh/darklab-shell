@@ -262,6 +262,22 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill idle')
   })
 
+  it('runCommand on blank input while a command is running does not append a prompt line', () => {
+    const apiFetch = vi.fn(() => Promise.resolve())
+    const appendLine = vi.fn()
+    const { runCommand, cmdInput, status } = loadRunnerFns({
+      cmdValue: '',
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'r1', killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalled()
+  })
+
   it('runCommand blocks direct /tmp and /data paths client-side before calling the API', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
     const appendLine = vi.fn()

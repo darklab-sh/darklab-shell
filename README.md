@@ -306,7 +306,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
 | `max_output_lines` | `5000` | Max lines retained in the live tab and in the SQLite run preview. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persist full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
-| `full_output_max_bytes` | `5242880` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` = unlimited |
+| `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. The app multiplies this value by `1024 * 1024` internally. `0` = unlimited |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
@@ -318,7 +318,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `welcome_sample_count` | `5` | Number of sampled command examples shown after the ASCII/status intro. `0` disables sampled commands |
 | `welcome_status_labels` | `["CONFIG","RUNNER","HISTORY","LIMITS","AUTOCOMPLETE"]` | Labels shown in the fake startup-status block during the welcome animation. Best with 4-6 short labels |
 | `welcome_hint_interval_ms` | `4200` | Delay between footer-hint rotations while the welcome tab remains idle (ms) |
-| `welcome_hint_rotations` | `2` | Number of footer-hint rotations after the first hint is shown. `0` keeps the first hint static |
+| `welcome_hint_rotations` | `0` | Maximum number of hint states shown while the welcome tab remains idle. `0` keeps rotating until interrupted; `1` keeps only the first hint visible |
 | `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG`. See [Logging](#logging) |
 | `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog). See [Logging](#logging) |
 
@@ -328,6 +328,24 @@ Theme configuration is documented in [THEME.md](THEME.md). The theme externaliza
 
 - `app/conf/themes/` contains the selectable theme variants; the root `theme_dark.yaml.example` / `theme_light.yaml.example` files are copyable templates only and are not used by the runtime selector; `default_theme` in `config.yaml` points at a full filename from that directory
 - `app/conf/themes/` holds the runtime theme variants; the loader scans that directory and exposes the results to the browser
+
+### Dependency Version Tracking
+
+This repo includes a lightweight maintenance setup for checking whether core dependencies are behind:
+
+- [scripts/check_versions.sh](scripts/check_versions.sh) prints pinned Python requirements, Node devDependencies from `package.json` / `package-lock.json`, the Docker base image line directly from `Dockerfile`, and pinned Go/pip/gem tool versions from `Dockerfile` while ignoring prerelease tags like alpha and rc builds
+- Docker image freshness is still best checked after a build with `docker scout quickview <image>` or `docker scout recommendations <image>`
+
+The shell script is for a quick local “what looks stale right now?” check; Docker Scout is for the container image itself. The script also checks the pinned tool versions embedded in `Dockerfile` against the Go module proxy, PyPI, and RubyGems so you can see which build-time tools are behind without guessing. For Go tools installed via `go install .../cmd/...`, the checker resolves the module root from the Dockerfile line before querying the proxy.
+
+After identifying and applying upgrades, use the two autocomplete scripts to verify nothing broke:
+
+- [scripts/capture_autocomplete_outputs.sh](scripts/capture_autocomplete_outputs.sh) — drives a live browser session against a running container and records the visible output of every command in `app/conf/auto_complete.txt` into `tests/py/fixtures/autocomplete_expectations.json`. Run this against a known-good container to update the baseline when a tool's help text or output format changes intentionally.
+- [scripts/test_autocomplete_container.sh](scripts/test_autocomplete_container.sh) — builds a fresh image via `docker compose`, starts the container, and runs every autocomplete command through `/run`, checking each one against the stored expectations. Run this after every Dockerfile or package upgrade to confirm that all commands are still present and producing the expected output before merging.
+
+When you want to isolate a single area, the script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, and `--debug` for Go proxy diagnostics.
+
+If you run this repo in GitLab CI, the `dependency-version-check` job in `.gitlab-ci.yml` runs the same script on a schedule and publishes the output as an artifact, so you can review drift without opening a PR first.
 - each theme YAML may include an optional `label:` field; the selector uses that friendly name when present and falls back to a humanized filename stem otherwise
 - theme resolution order is: `localStorage.theme`, then `default_theme` from `config.yaml` (full filename, normalized to the registry entry), then the baked-in dark fallback palette
 - `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables and a theme registry
@@ -457,6 +475,8 @@ nmap
 
 This allows all `nmap` invocations except those containing `-sU` or `--script` as a flag. Unlike allow entries, deny matching is not purely prefix-based — the flag is matched anywhere in the command as a space-separated token, so `nmap -sT -sU 10.0.0.1` is caught as well as `nmap -sU 10.0.0.1`. The tool prefix must still match (`!nmap -sU` only applies to `nmap` commands).
 
+Tool names and subcommand prefixes are matched **case-insensitively**. Flag names are matched **with exact case**, so `!curl -K` blocks `curl -K` (insecure TLS) without also blocking `curl -k` (insecure, lowercase). Use the exact flag casing you want to deny.
+
 **`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
 
 ```
@@ -538,7 +558,7 @@ Notes:
 - Leading whitespace in `out` is preserved; trailing whitespace is stripped
 - Sampled welcome commands are clickable and load directly into the prompt without running
 - The `TRY THIS FIRST` badge is clickable and has the same behavior as clicking the featured command text
-- App hints rotate only briefly; they are not an endless carousel
+- App hints rotate until interrupted unless `welcome_hint_rotations` is set to `1`
 - If the user runs a command before the welcome sequence completes, it stops immediately and clears the partial output in that same tab only
 
 The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, `conf/ascii_mobile.txt`, `conf/app_hints.txt`, or `conf/app_hints_mobile.txt` and reload the page to see changes without restarting the server.
@@ -584,6 +604,7 @@ Current keyboard behavior:
 - `Option+T` (`Alt+T`) opens a new tab
 - `Option+W` (`Alt+W`) closes the current tab
 - `Option+Left` / `Option+Right` (`Alt+Left` / `Alt+Right`) cycle between tabs
+- `Option+Tab` (`Alt+Tab`) cycles to the next tab; add `Shift` to reverse direction
 - `Option+1` through `Option+9` (`Alt+1` ... `Alt+9`) jump directly to tabs 1 through 9
 - `Option+P` (`Alt+P`) creates a permalink for the active tab
 - `Option+Shift+C` (`Alt+Shift+C`) copies active-tab output
@@ -606,6 +627,7 @@ Shipped app-safe shortcuts:
 | `Option+W` (`Alt+W`) | Close current tab | Avoids fighting browser `Ctrl/Cmd+W` |
 | `Option+ArrowRight` (`Alt+ArrowRight`) | Next tab | |
 | `Option+ArrowLeft` (`Alt+ArrowLeft`) | Previous tab | |
+| `Option+Tab` (`Alt+Tab`) | Next tab (Shift reverses) | Arrow and Tab are interchangeable |
 | `Option+1` ... `Option+9` (`Alt+1` ... `Alt+9`) | Jump to tab 1 ... 9 | |
 | `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
 | `Option+P` (`Alt+P`) | Create permalink for active tab | |
@@ -759,7 +781,7 @@ Run history, preview metadata, full-output artifact metadata, and tab snapshots 
 | `preview_truncated` | INTEGER | `1` when the stored preview hit `max_output_lines` and older lines were dropped from the top |
 | `output_line_count` | INTEGER | Total number of output lines seen for the run |
 | `full_output_available` | INTEGER | `1` when a persisted full-output artifact exists for this run |
-| `full_output_truncated` | INTEGER | `1` when the full-output artifact hit `full_output_max_bytes` and was cut off |
+| `full_output_truncated` | INTEGER | `1` when the full-output artifact hit the configured full-output cap and was cut off |
 
 **`run_output_artifacts` table** — one row per persisted full-output artifact:
 
@@ -770,7 +792,7 @@ Run history, preview metadata, full-output artifact metadata, and tab snapshots 
 | `compression` | TEXT | Artifact encoding (`gzip`) |
 | `byte_size` | INTEGER | Number of uncompressed UTF-8 bytes accepted into the artifact before gzip compression |
 | `line_count` | INTEGER | Number of output lines written to the full artifact |
-| `truncated` | INTEGER | `1` when the artifact hit `full_output_max_bytes` |
+| `truncated` | INTEGER | `1` when the artifact hit the configured full-output cap |
 | `created` | TEXT | ISO 8601 timestamp when the artifact metadata row was created |
 
 **`snapshots` table** — one row per tab permalink:
@@ -894,12 +916,14 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **492 pytest + 246 Vitest + 128 Playwright = 866 tests**.
+Current totals in this branch: **728 pytest + 247 Vitest + 128 Playwright = 1,103 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
 - `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
 - `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, and history-panel action-button close behavior
+
+After a Dockerfile or package upgrade, `scripts/test_autocomplete_container.sh` is the primary verification step: it builds a fresh image via `docker compose` (using `examples/docker-compose.standalone.yml` as the base with a unique tag and free port) and runs every command from `app/conf/auto_complete.txt` through `/run`, checking each against the expected output in `tests/py/fixtures/autocomplete_expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the new image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_autocomplete_outputs.sh` against a known-good running container. Using the compose file ensures the test environment matches the real deployment including tmpfs, Redis, and `init: true` — running bare `docker run` lacks those. The test also writes `test-results/autocomplete-container.xml`. GitLab CI has an `autocomplete-image-smoke` job that runs the same check on schedule or manually.
 
 Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
 

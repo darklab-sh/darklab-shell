@@ -127,16 +127,15 @@ class TestAllowlist:
 
 class TestDenyPrefix:
     def test_deny_takes_priority(self):
-        # load_allowed_commands lowercases entries; pass pre-lowercased values in mock
-        ok, _ = _check("nmap -sU 10.0.0.1", allow=["nmap"], deny=["nmap -su"])
+        ok, _ = _check("nmap -sU 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert not ok
 
     def test_allow_still_works_without_denied_flag(self):
-        ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -su"])
+        ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert ok
 
     def test_deny_exact_match(self):
-        ok, _ = _check("nmap -sU", allow=["nmap"], deny=["nmap -su"])
+        ok, _ = _check("nmap -sU", allow=["nmap"], deny=["nmap -sU"])
         assert not ok
 
     def test_deny_prefix_with_more_args(self):
@@ -155,6 +154,18 @@ class TestDenyPrefix:
 
     def test_deny_flag_at_end(self):
         ok, _ = _check("nmap -sT 10.0.0.1 --script", allow=["nmap"], deny=["nmap --script"])
+        assert not ok
+
+    def test_deny_flag_matches_exact_case(self):
+        ok, _ = _check("curl -K config.txt", allow=["curl"], deny=["curl -K"])
+        assert not ok
+
+    def test_deny_flag_does_not_cross_case_boundary(self):
+        ok, _ = _check("curl -k https://darklab.sh", allow=["curl"], deny=["curl -K"])
+        assert ok
+
+    def test_deny_tool_prefix_still_case_insensitive(self):
+        ok, _ = _check("CURL -K config.txt", allow=["curl"], deny=["curl -K"])
         assert not ok
 
     def test_deny_single_char_matches_combined_group(self):

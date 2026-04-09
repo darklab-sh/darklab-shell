@@ -68,7 +68,7 @@ function loadWelcomeFns({
         welcome_inter_block_ms: 0,
         welcome_sample_count: 5,
         welcome_hint_interval_ms: 0,
-        welcome_hint_rotations: 2,
+        welcome_hint_rotations: 0,
         welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
         ...config,
       },
@@ -93,6 +93,8 @@ function loadWelcomeFns({
       runWelcome,
       settleWelcome,
       welcomeOwnsTab,
+      _coerceWelcomeHintRotationLimit,
+      _welcomeHintRotationBudget,
       _isWelcomeActive: () => _welcomeActive,
       _isWelcomeDone: () => _welcomeDone,
       _sampleWelcomeBlocks,
@@ -181,17 +183,28 @@ describe('welcome helpers', () => {
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Use the history panel')
   })
 
-  it('runWelcome respects welcome_hint_rotations of 0', async () => {
-    const { runWelcome, out } = loadWelcomeFns({
+  it('runWelcome treats welcome_hint_rotations of 0 as infinite and 1 as static', async () => {
+    const { _welcomeHintRotationBudget } = loadWelcomeFns()
+
+    expect(_welcomeHintRotationBudget(0)).toBe(Infinity)
+    expect(_welcomeHintRotationBudget(1)).toBe(0)
+    expect(_welcomeHintRotationBudget(2)).toBe(1)
+
+    const staticScenario = loadWelcomeFns({
       welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
       hintItems: ['Hint one', 'Hint two'],
-      config: { welcome_hint_rotations: 0, welcome_hint_interval_ms: 0 },
+      config: {
+        welcome_hint_rotations: 1,
+        welcome_hint_interval_ms: 1,
+        welcome_sample_count: 0,
+        welcome_status_labels: ['READY'],
+      },
     })
 
-    await runWelcome()
+    await staticScenario.runWelcome()
 
-    expect(out.querySelectorAll('.welcome-hint')).toHaveLength(1)
-    expect(out.querySelector('.welcome-hint')?.textContent).toBeTruthy()
+    expect(staticScenario.out.querySelectorAll('.welcome-hint')).toHaveLength(1)
+    expect(staticScenario.out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
   })
 
   it('settleWelcome renders the remaining intro immediately', async () => {
