@@ -6,9 +6,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
-const ROOT = path.resolve(__dirname, '..')
+const ROOT = path.resolve(__dirname, '..', '..')
 const AUTOCOMPLETE_FILE = path.join(ROOT, 'app', 'conf', 'auto_complete.txt')
-const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab-shell-autocomplete-corpus')
+const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab-shell-container-smoke-test-corpus')
 
 function parseArgs(argv) {
   const args = {
@@ -77,7 +77,7 @@ function parseArgs(argv) {
       continue
     }
     if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: node scripts/capture_autocomplete_outputs.mjs [options]
+      console.log(`Usage: node scripts/node/capture_output_for_smoke_test.mjs [options]
 
 Options:
   --base-url <url>            App URL to connect to (default: ${args.baseUrl})

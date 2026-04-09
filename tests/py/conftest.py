@@ -13,9 +13,9 @@ sys.path.insert(0, APP_DIR)
 def pytest_configure(config):
     if getattr(config.option, "xmlpath", None):
         return
-    if not any("test_autocomplete_container.py" in str(arg) for arg in getattr(config, "args", [])):
+    if not any("test_container_smoke_test.py" in str(arg) for arg in getattr(config, "args", [])):
         return
 
     test_results_dir = ROOT_DIR / "test-results"
     test_results_dir.mkdir(exist_ok=True)
-    config.option.xmlpath = str(test_results_dir / "autocomplete-container.xml")
+    config.option.xmlpath = str(test_results_dir / "container_smoke_test.xml")

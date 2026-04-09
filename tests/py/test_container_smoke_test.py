@@ -8,7 +8,7 @@ broken fake-command wiring, or changed command output surface before an image
 or dependency update lands.
 
 Run with:
-  RUN_CONTAINER_AUTOCOMPLETE=1 pytest tests/py/test_autocomplete_container.py -q
+  RUN_CONTAINER_SMOKE_TEST=1 pytest tests/py/test_container_smoke_test.py -q
 """
 
 from __future__ import annotations
@@ -31,10 +31,14 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-AUTOCOMPLETE_FILE = ROOT / "app" / "conf" / "auto_complete.txt"
-EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "autocomplete_expectations.json"
-DEFAULT_BUILD_TIMEOUT = int(os.environ.get("RUN_CONTAINER_AUTOCOMPLETE_BUILD_TIMEOUT", "3600"))
-DEFAULT_RUN_TIMEOUT = int(os.environ.get("RUN_CONTAINER_AUTOCOMPLETE_RUN_TIMEOUT", "300"))
+COMMANDS_FILE = ROOT / "app" / "conf" / "auto_complete.txt"
+EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
+DEFAULT_BUILD_TIMEOUT = int(
+    os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
+)
+DEFAULT_RUN_TIMEOUT = int(
+    os.environ.get("RUN_CONTAINER_SMOKE_TEST_RUN_TIMEOUT", "300")
+)
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
 TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
@@ -42,7 +46,7 @@ TIME_RE = re.compile(r"\b\d{2}:\d{2}:\d{2}\b")
 
 def _require_docker() -> None:
     if shutil.which("docker") is None:
-        pytest.skip("docker CLI is required for the container autocomplete smoke test")
+        pytest.skip("docker CLI is required for the container smoke test")
 
 
 def _run(cmd: list[str], *, timeout: int, check: bool = True, **kwargs):
@@ -110,7 +114,7 @@ def _free_port() -> int:
 
 def _load_autocomplete_commands() -> list[str]:
     commands: list[str] = []
-    for raw_line in AUTOCOMPLETE_FILE.read_text().splitlines():
+    for raw_line in COMMANDS_FILE.read_text().splitlines():
         line = raw_line.strip()
         if line and not line.startswith("#"):
             commands.append(line)
@@ -302,9 +306,9 @@ def _wait_for_health(base_url: str, timeout: int = 180) -> None:
 
 
 @pytest.fixture(scope="module")
-def autocomplete_container():
-    if os.environ.get("RUN_CONTAINER_AUTOCOMPLETE") != "1":
-        pytest.skip("set RUN_CONTAINER_AUTOCOMPLETE=1 to run the container smoke suite")
+def container_smoke_test():
+    if os.environ.get("RUN_CONTAINER_SMOKE_TEST") != "1":
+        pytest.skip("set RUN_CONTAINER_SMOKE_TEST=1 to run the container smoke suite")
     _require_docker()
 
     image_tag = f"shell-darklab-test:{uuid.uuid4().hex[:12]}"
@@ -352,43 +356,43 @@ def autocomplete_container():
         compose = ["docker", "compose", "-p", project, "-f", str(compose_file)]
 
         try:
-            print(f"[autocomplete] building image: {image_tag}", flush=True)
+            print(f"[container-smoke-test] building image: {image_tag}", flush=True)
             _run_streaming(compose + ["build", "--pull"], timeout=DEFAULT_BUILD_TIMEOUT)
-            print(f"[autocomplete] starting services: {project}", flush=True)
+            print(f"[container-smoke-test] starting services: {project}", flush=True)
             _run(compose + ["up", "-d"], timeout=120)
 
             base_url = f"http://127.0.0.1:{host_port}"
-            print(f"[autocomplete] waiting for health check: {base_url}", flush=True)
+            print(f"[container-smoke-test] waiting for health check: {base_url}", flush=True)
             _wait_for_health(base_url)
-            print(f"[autocomplete] container ready: {base_url}", flush=True)
+            print(f"[container-smoke-test] container ready: {base_url}", flush=True)
             yield base_url
         finally:
-            print(f"[autocomplete] stopping services: {project}", flush=True)
+            print(f"[container-smoke-test] stopping services: {project}", flush=True)
             subprocess.run(compose + ["down", "--rmi", "local", "--volumes"], cwd=ROOT, capture_output=True, text=True)
 
 
 @pytest.fixture(scope="module")
-def autocomplete_session_id() -> str:
-    return f"autocomplete-{uuid.uuid4().hex}"
+def container_smoke_test_session_id() -> str:
+    return f"container-smoke-test-{uuid.uuid4().hex}"
 
 
-AUTOCOMPLETE_CASES = _load_cases()
+SMOKE_TEST_CASES = _load_cases()
 
 
-@pytest.mark.parametrize("case", AUTOCOMPLETE_CASES, ids=lambda case: str(case["command"]))
-def test_autocomplete_command_matches_expected_output(autocomplete_container, autocomplete_session_id, case):
+@pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))
+def test_container_smoke_test_command_matches_expected_output(container_smoke_test, container_smoke_test_session_id, case):
     command = str(case["command"])
     expected_exit_code = int(case.get("exit_code", 0))
 
-    print(f"[autocomplete] running {command}", flush=True)
+    print(f"[container-smoke-test] running {command}", flush=True)
 
     expected_text = list(case.get("expected_text", []))
     expected_patterns = list(case.get("expected_patterns", []))
 
     events, killed_early = _post_run(
-        autocomplete_container,
+        container_smoke_test,
         command,
-        autocomplete_session_id,
+        container_smoke_test_session_id,
         timeout=DEFAULT_RUN_TIMEOUT,
         stop_text=expected_text or None,
         stop_patterns=expected_patterns or None,

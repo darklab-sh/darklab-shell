@@ -115,7 +115,7 @@ dependency-version-check:
       - version-check.txt
     expire_in: 1 week
 
-autocomplete-image-smoke:
+container-smoke-test:
   stage: build
   image: docker:27
   services:
@@ -131,7 +131,7 @@ autocomplete-image-smoke:
     - when: manual
       allow_failure: true
   script:
-    - RUN_CONTAINER_AUTOCOMPLETE=1 pytest tests/py/test_autocomplete_container.py -q
+    - ./scripts/container_smoke_test.sh
 
 docker-build:
   stage: build
