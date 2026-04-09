@@ -154,7 +154,7 @@ def _expiry_note(created: str) -> str:
 
 
 def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None):
-    app_name = CFG.get("app_name", "shell.darklab.sh")
+    app_name = CFG.get("app_name", "darklab shell")
     theme_entry = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
@@ -197,7 +197,7 @@ def _permalink_error_page(noun: str) -> Response:
             f"automatically deleted after exceeding the configured retention "
             f"period ({retention_str})."
         )
-    app_name = CFG.get("app_name", "shell.darklab.sh")
+    app_name = CFG.get("app_name", "darklab shell")
     current_theme = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     html = render_template(
         "permalink_error.html",

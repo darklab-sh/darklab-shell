@@ -19,6 +19,13 @@ def _load_yaml_config(path):
     return loaded if isinstance(loaded, dict) else {}
 
 
+def _load_yaml_config_optional(path):
+    try:
+        return _load_yaml_config(path)
+    except yaml.YAMLError:
+        return {}
+
+
 def load_config(conf_dir=None):
     """Load config.yaml plus optional config.local.yaml overlays.
 
@@ -26,7 +33,9 @@ def load_config(conf_dir=None):
     keys while leaving the checked-in defaults in place.
     """
     defaults = {
-        "app_name":                   "shell.darklab.sh",
+        "app_name":                   "darklab shell",
+        "project_readme":             "https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell",
+        "prompt_prefix":              "anon@darklab:~$",
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,
@@ -37,11 +46,11 @@ def load_config(conf_dir=None):
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
-        "max_output_lines":           2000,
+        "max_output_lines":           5000,
         "persist_full_run_output":    True,
         "full_output_max_bytes":      5 * 1024 * 1024,
         "max_tabs":                   8,
-        "command_timeout_seconds":    0,
+        "command_timeout_seconds":    3600,
         "heartbeat_interval_seconds": 20,
         "welcome_char_ms":            18,
         "welcome_jitter_ms":          12,
@@ -56,7 +65,7 @@ def load_config(conf_dir=None):
     }
     conf_path = Path(conf_dir) if conf_dir is not None else Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
-    defaults.update(_load_yaml_config(conf_path / "config.local.yaml"))
+    defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
     return defaults
 
 
@@ -466,13 +475,27 @@ def _theme_file_candidates(name):
 
 
 def _load_theme_yaml(name):
+    theme_data = {}
     for theme_path in _theme_file_candidates(name):
-        if os.path.exists(theme_path):
+        if not os.path.exists(theme_path):
+            continue
+        try:
+            with open(theme_path) as f:
+                loaded = yaml.safe_load(f) or {}
+        except yaml.YAMLError:
+            loaded = {}
+        if isinstance(loaded, dict):
+            theme_data.update(loaded)
+        local_overlay = theme_path.with_name(f"{theme_path.stem}.local{theme_path.suffix}")
+        if local_overlay.exists():
             try:
-                with open(theme_path) as f:
-                    return yaml.safe_load(f) or {}
+                with open(local_overlay) as f:
+                    local_loaded = yaml.safe_load(f) or {}
             except yaml.YAMLError:
-                return {}
+                local_loaded = {}
+            if isinstance(local_loaded, dict):
+                theme_data.update(local_loaded)
+        return theme_data
     return {}
 
 
@@ -525,6 +548,8 @@ def load_theme_registry():
     seen = set()
     if _THEME_VARIANT_DIR.exists():
         for theme_path in sorted(_THEME_VARIANT_DIR.glob("*.yaml")):
+            if theme_path.name.endswith(".local.yaml"):
+                continue
             name = theme_path.stem
             if name in seen:
                 continue

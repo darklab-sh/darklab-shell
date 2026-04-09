@@ -7,7 +7,7 @@
 // animation immediately; runner.js also calls clearTab to wipe partial output.
 
 const _welcomeWaiters = new Set();
-const _welcomePrompt = 'anon@shell.darklab.sh:~$';
+const _welcomePrompt = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
 const _welcomeStatusFrames = ['loading /', 'loading -', 'loading \\', 'loading |'];
 
@@ -326,7 +326,7 @@ function _renderWelcomeAsciiStream(tabId, asciiArt) {
   const out = getOutput(tabId);
   if (!out) return;
 
-  const artLines = (asciiArt || 'shell.darklab.sh')
+  const artLines = (asciiArt || (APP_CONFIG.app_name || 'darklab shell'))
     .split('\n')
     .map(line => line.replace(/\s+$/g, ''))
     .filter(line => line.length > 0);

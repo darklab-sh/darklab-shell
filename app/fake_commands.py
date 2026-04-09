@@ -28,7 +28,6 @@ from config import APP_VERSION, CFG
 from database import db_connect
 
 
-README_URL = "https://gitlab.com/darklab.sh/shell.darklab.sh"
 _STARTED_AT = datetime.now(timezone.utc)
 _CURRENT_SHORTCUTS = [
     ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
@@ -337,18 +336,18 @@ def _run_fake_env(session_id: str) -> list[dict[str, str]]:
     lines = [
         f"APP_NAME={CFG['app_name']}",
         f"SESSION_ID={session_id or 'anonymous'}",
-        "SHELL=/app/shell.darklab.sh/bin/bash",
+        "SHELL=/bin/bash",
         "TERM=xterm-256color",
     ]
     return _text_lines(lines)
 
 
 def _run_fake_faq() -> list[dict[str, str]]:
-    entries = load_all_faq()
+    entries = load_all_faq(CFG["app_name"], CFG["project_readme"])
     if not entries:
         return _text_lines([
             "No configured FAQ entries are available in the web shell.",
-            f"README: {README_URL}",
+            f"README: see the project README at {CFG['project_readme']}",
         ])
 
     lines = ["Configured FAQ entries:"]
@@ -442,7 +441,7 @@ def _run_fake_ls(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     lines: list[str] = []
     if len(parts) > 1:
-        lines.append("ls in shell.darklab.sh shows the allowed command catalog; flags and paths are ignored here.")
+        lines.append(f"ls in {CFG['app_name']} shows the allowed command catalog; flags and paths are ignored here.")
 
     grouped = load_allowed_commands_grouped()
     if grouped:
@@ -523,7 +522,7 @@ def _run_fake_whoami() -> list[dict[str, str]]:
     return _text_lines([
         CFG["app_name"],
         "A web terminal for remote diagnostics and security tooling against allowed commands.",
-        f"README: {README_URL}",
+        f"README: see the project README at {CFG['project_readme']}",
     ])
 
 
@@ -658,7 +657,7 @@ def _run_fake_type(command: str) -> list[dict[str, str]]:
 def _run_fake_uname(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if "-a" in parts[1:]:
-        return [{"type": "output", "text": "shell.darklab.sh Linux web-terminal x86_64 app-runtime"}]
+        return [{"type": "output", "text": f"{CFG['app_name']} Linux web-terminal x86_64 app-runtime"}]
     return [{"type": "output", "text": "Linux"}]
 
 

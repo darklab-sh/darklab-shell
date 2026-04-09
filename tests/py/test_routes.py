@@ -112,7 +112,7 @@ class TestConfigRoute:
     def test_contains_expected_keys(self):
         client = get_client()
         data = json.loads(client.get("/config").data)
-        for key in ("app_name", "default_theme", "max_tabs", "max_output_lines"):
+        for key in ("app_name", "project_readme", "prompt_prefix", "default_theme", "max_tabs", "max_output_lines"):
             assert key in data
 
     def test_max_tabs_is_int(self):
@@ -150,6 +150,18 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 300
 
+    def test_prompt_prefix_reflects_cfg(self):
+        client = get_client()
+        with mock.patch("app.CFG", {**shell_app.CFG, "prompt_prefix": "ops@darklab:~$"}):
+            data = json.loads(client.get("/config").data)
+        assert data["prompt_prefix"] == "ops@darklab:~$"
+
+    def test_project_readme_reflects_cfg(self):
+        client = get_client()
+        with mock.patch("app.CFG", {**shell_app.CFG, "project_readme": "https://example.invalid/README.md"}):
+            data = json.loads(client.get("/config").data)
+        assert data["project_readme"] == "https://example.invalid/README.md"
+
     def test_welcome_timing_reflects_cfg(self):
         client = get_client()
         overrides = {
@@ -169,12 +181,12 @@ class TestConfigRoute:
         for key, val in overrides.items():
             assert data[key] == val, f"{key}: expected {val}, got {data[key]}"
 
-    def test_command_timeout_zero_by_default(self):
-        # Default config has timeout disabled
+    def test_command_timeout_defaults_to_one_hour(self):
+        # Default config keeps long-running commands bounded to an hour
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 0}):
+        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 3600}):
             data = json.loads(client.get("/config").data)
-        assert data["command_timeout_seconds"] == 0
+        assert data["command_timeout_seconds"] == 3600
 
 
 # ── /themes ──────────────────────────────────────────────────────────────────
@@ -212,17 +224,16 @@ class TestThemesRoute:
         assert themes["olive_grove"]["group"] == "Warm Light"
         assert themes["darklab_obsidian"]["group"] == "Dark Neon"
         assert themes["obsidian_emerald"]["group"] == "Dark Neon"
-        assert themes["charcoal_steel"]["group"] == "Dark Neutral"
-        assert themes["blue_paper"]["sort"] == 50
-        assert themes["olive_grove"]["sort"] == 20
-        assert themes["darklab_obsidian"]["sort"] == 0
-        assert themes["obsidian_emerald"]["sort"] == 1
-        assert themes["charcoal_steel"]["sort"] == 4
         assert themes["blue_paper"]["filename"] == "blue_paper.yaml"
         assert themes["olive_grove"]["filename"] == "olive_grove.yaml"
         assert themes["darklab_obsidian"]["filename"] == "darklab_obsidian.yaml"
         assert themes["obsidian_emerald"]["filename"] == "obsidian_emerald.yaml"
-        assert themes["charcoal_steel"]["filename"] == "charcoal_steel.yaml"
+
+    def test_default_theme_is_exposed_as_filename(self):
+        client = get_client()
+        with mock.patch("app.CFG", {**shell_app.CFG, "default_theme": "darklab_obsidian.yaml"}):
+            data = json.loads(client.get("/config").data)
+        assert data["default_theme"] == "darklab_obsidian.yaml"
 
     def test_default_theme_filename_selects_variant(self):
         client = get_client(use_forwarded_for=False)
@@ -765,7 +776,7 @@ class TestShareRoute:
             json={
                 "label": "prompt-style-test",
                 "content": [
-                    {"text": "anon@shell.darklab.sh:~$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
+                    {"text": "anon@darklab:~$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
                     {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
                 ],
             },

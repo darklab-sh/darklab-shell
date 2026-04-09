@@ -40,14 +40,14 @@ test.describe('welcome animation', () => {
         status: 200,
         contentType: 'text/plain',
         body: [
-          '.----[ shell.darklab.sh :: mobile console ]----.',
+          '.----[ darklab shell :: mobile console ]----.',
           '|                                              |',
           '|   __  __   ___   ___   ___   ___   ___       |',
           "|  |  \\/  | / _ \\ / _ \\ / _ \\ / _ \\ / _ \\      |",
           '|  | |\\/| || (_) | (_) | (_) | (_) | (_) |     |',
           '|  |_|  |_| \\___/ \\___/ \\___/ \\___/ \\___/      |',
           '|                                              |',
-          "'----[ status: ready ]----[ prompt: anon@shell.darklab.sh:~$ ]----'",
+          "'----[ status: ready ]----[ prompt: anon@darklab:~$ ]----'",
         ].join('\n'),
       })
     })

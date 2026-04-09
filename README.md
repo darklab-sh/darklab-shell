@@ -1,4 +1,4 @@
-# shell.darklab.sh
+# darklab shell
 
 A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history, run previews, and permalinks. Completed runs can also persist full output as compressed artifacts for later inspection. The project is built to run in Docker by default, but also supports local development without containers.
 
@@ -107,7 +107,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── favicon.ico             # Site favicon
     ├── conf/                   # Operator-configurable files — edit these to customise the instance
     │   ├── config.yaml             # Application configuration (see Configuration section)
-    │   ├── config.local.yaml       # Optional untracked per-server overrides loaded after config.yaml
+    │   ├── config.local.yaml       # Optional untracked per-server overrides loaded after config.yaml; sibling *.local.* overlays are also supported
     │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
     │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
@@ -171,6 +171,15 @@ All app files live in the `./app/` subdirectory and are mounted as a read-only v
 | `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
 | `conf/auto_complete.txt` | On next page load — fetched once by the browser |
 | `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
+
+Most files under `app/conf/` and `app/conf/themes/` support an optional sibling
+overlay named `*.local.*` alongside the checked-in base file. `config.local.yaml`
+works as the main server override file, `allowed_commands.local.txt` and
+`auto_complete.local.txt` append local entries, `faq.local.yaml` and
+`welcome.local.yaml` append local list items, `ascii.local.txt` and
+`ascii_mobile.local.txt` replace the banner art, and `app_hints.local.txt` /
+`app_hints_mobile.local.txt` append local hints. Theme files can also use
+`<name>.local.yaml` overlays under `app/conf/themes/`.
 
 ```bash
 docker compose restart
@@ -279,11 +288,13 @@ npm install
 
 ## Configuration
 
-All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the instance-specific differences stay active. If you want a private server-specific layer, add `app/conf/config.local.yaml`; it is loaded after `config.yaml` and can override any subset of keys without affecting the checked-in file.
+All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the instance-specific differences stay active. If you want a private server-specific layer, add `app/conf/config.local.yaml`; it is loaded after `config.yaml` and can override any subset of keys without affecting the checked-in file. The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
-| `app_name` | `shell.darklab.sh` | Name shown in the browser tab, header, and permalink pages |
+| `app_name` | `darklab shell` | Name shown in the browser tab, header, and permalink pages |
+| `project_readme` | `https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell` | URL used by the built-in FAQ and synthetic README links |
+| `prompt_prefix` | `anon@darklab:~$` | Prompt text shown in the shell input and welcome samples. Can be customized independently of `app_name` |
 | `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
@@ -296,7 +307,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `max_output_lines` | `5000` | Max lines retained in the live tab and in the SQLite run preview. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
 | `persist_full_run_output` | `true` | Server-side only. Persist full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
 | `full_output_max_bytes` | `5242880` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. `0` = unlimited |
-| `command_timeout_seconds` | `0` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
+| `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
 | `welcome_char_ms` | `18` | Base delay between each typed character in the welcome animation (ms). Lower = faster typing |
 | `welcome_jitter_ms` | `12` | Random extra delay added per character (ms). `0` for perfectly even typing; higher for a more organic feel |
@@ -325,6 +336,7 @@ Theme configuration is documented in [THEME.md](THEME.md). The theme externaliza
 - `app/static/js/app.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
 - `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
 - `app/app.py` also exposes `/themes` for clients that want to inspect the available registry
+- `app/app.py` also exposes `project_readme` through `/config` so the FAQ and synthetic README links can point at a project-specific URL
 
 See [THEME.md](THEME.md) for the full architecture walkthrough and a complete appendix of every supported theme option and default.
 
@@ -356,7 +368,7 @@ Log level and format are configured in `config.yaml` and take effect after `dock
 **`gelf`** — newline-delimited GELF 1.1 JSON. `short_message` is the bare event name; all context is in `_`-prefixed additional fields for direct Graylog indexing:
 
 ```json
-{"version":"1.1","host":"shell.darklab.sh","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"shell.darklab.sh","_app_version":"1.3","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
+{"version":"1.1","host":"example-host","short_message":"RUN_START","timestamp":1743588000.0,"level":6,"_app":"darklab shell","_app_version":"1.3","_logger":"shell","_cmd":"nmap -sV 1.2.3.4","_ip":"5.6.7.8","_pid":12345,"_run_id":"abc123","_session":"xyz"}
 ```
 
 ### GELF back-end integration
@@ -366,7 +378,7 @@ The `docker-compose.yml` already ships container logs to Graylog via the Docker 
 The repository's checked-in `config.yaml` currently overrides two server defaults:
 
 - `log_format: gelf`
-- `command_timeout_seconds: 7200`
+- `command_timeout_seconds: 3600`
 
 ---
 
@@ -882,7 +894,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **478 pytest + 246 Vitest + 128 Playwright = 852 tests**.
+Current totals in this branch: **492 pytest + 246 Vitest + 128 Playwright = 866 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

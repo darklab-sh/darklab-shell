@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to shell.darklab.sh are documented here.
+All notable changes to darklab shell are documented here.
 Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 
 ---
@@ -8,7 +8,9 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 ## [1.4] — unreleased
 
 ### Added
-- **Optional local config overlay** — `app/conf/config.local.yaml` is now loaded after the checked-in `config.yaml`, so operators can keep private per-server overrides out of git while leaving the base config portable for other deployments
+- **Optional local config overlays** — sibling `*.local.*` files are now supported across the checked-in config assets, so operators can keep private per-server overrides out of git while leaving the base config and asset files portable for other deployments
+- **One-hour command timeout default** — the checked-in config and built-in runtime default now set `command_timeout_seconds` to `3600`, so long-running commands are bounded by default instead of starting out disabled
+- **Configurable prompt prefix** — `prompt_prefix` is now a first-class config setting, so operators can customize the terminal prompt text and welcome samples independently of the app name
 - **Theme externalization** — the theme palette and component chrome values are now documented in the named YAML files under `app/conf/themes/`, injected into the live pages as shared CSS/JS theme variables, and reused by the permalink/export helpers so exported HTML stays in sync with the selected theme variant. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only.
 - **Runtime theme selector** — the completed dedicated theme selector modal now exposes a grouped preview grid fed by the theme registry, with `label:`, `group:`, and `sort:` metadata controlling the visible names and section layout, so the live shell can choose among the named YAML variants under `app/conf/themes/` without a page reload while keeping permalinks and exports aligned with the selected theme
 - **Mobile theme selector layout** — the theme picker now opens as a full-screen chooser on mobile with a two-column preview layout on wider phones, so the preview cards stay readable and the grouped sections keep a uniform width instead of collapsing unevenly on small screens
@@ -169,6 +171,7 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.0.0/).
 - **`HISTORY_DELETED` info** — deleting a single history entry logs at INFO with IP, run ID, and session (only emitted when a row is actually deleted)
 - **`HISTORY_CLEARED` info** — clearing all history for a session logs at INFO with IP, session, and count of deleted runs
 - **Smart client IP detection** — `get_client_ip()` now validates the `X-Forwarded-For` value against a regex before trusting it; invalid or absent values fall back to the direct connection IP, making the app work correctly with or without a reverse proxy and without any config setting
+- **Configurable project README link** — `project_readme` in `config.yaml` now controls the README URL used by the built-in FAQ and synthetic README-style helper output, so operators can point the UI at their own documentation without changing code
 
 ### Fixed
 - **Friendlier client fetch failures** — dead-server or rejected `/run` requests now render a clear offline message instead of surfacing the browser’s raw `NetworkError` text

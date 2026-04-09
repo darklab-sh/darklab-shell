@@ -131,9 +131,9 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|shell\.darklab\.sh/)
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
-    expect(out.querySelector('.welcome-command')?.textContent).toContain('anon@shell.darklab.sh:~$')
+    expect(out.querySelector('.welcome-command')?.textContent).toContain('anon@darklab:~$')
     expect(out.querySelectorAll('.welcome-command')[0]?.textContent).toContain('ping darklab.sh')
     expect(out.querySelector('.welcome-command-badge')?.textContent).toContain('try this first')
     expect(out.querySelectorAll('.welcome-hint')).toHaveLength(1)
@@ -142,7 +142,7 @@ describe('welcome helpers', () => {
     expect(_isWelcomeDone()).toBe(true)
   })
 
-  it('runWelcome falls back to shell.darklab.sh banner text when /welcome/ascii fails', async () => {
+  it('runWelcome falls back to darklab shell banner text when /welcome/ascii fails', async () => {
     const { runWelcome, out } = loadWelcomeFns({
       welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
       failAscii: true,
@@ -150,7 +150,7 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toContain('shell.darklab.sh')
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toContain('darklab shell')
   })
 
   it('runWelcome falls back to the static hint when /welcome/hints fails', async () => {
@@ -176,7 +176,7 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|shell\.darklab\.sh/)
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
     expect(out.querySelectorAll('.welcome-command')).toHaveLength(0)
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Use the history panel')
   })
@@ -216,7 +216,7 @@ describe('welcome helpers', () => {
     await pending
 
     expect(out.querySelectorAll('.wlc-cursor')).toHaveLength(0)
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|shell\.darklab\.sh/)
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
     expect(out.querySelector('.welcome-hint')?.textContent).toBeTruthy()
   })

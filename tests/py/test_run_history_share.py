@@ -258,9 +258,9 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "APP_NAME=shell.darklab.sh\\n" in body
+        assert f"APP_NAME={shell_app.CFG['app_name']}\\n" in body
         assert "SESSION_ID=sess-env\\n" in body
-        assert "SHELL=/app/shell.darklab.sh/bin/bash\\n" in body
+        assert "SHELL=/bin/bash\\n" in body
         assert "TERM=xterm-256color\\n" in body
         assert '"type": "exit"' in body
 
@@ -395,13 +395,13 @@ class TestRunStreaming:
         version_body = version_resp.get_data(as_text=True)
 
         assert who_resp.status_code == 200
-        assert "shell.darklab.sh  pts/web  sess-who\\n" in who_body
+        assert f"{shell_app.CFG['app_name']}  pts/web  sess-who\\n" in who_body
         assert tty_resp.status_code == 200
         assert "/dev/pts/web\\n" in tty_body
         assert groups_resp.status_code == 200
-        assert "shell.darklab.sh operators\\n" in groups_body
+        assert f"{shell_app.CFG['app_name']} operators\\n" in groups_body
         assert version_resp.status_code == 200
-        assert "shell.darklab.sh web shell\\n" in version_body
+        assert f"{shell_app.CFG['app_name']} web shell\\n" in version_body
         assert f"App {shell_app.APP_VERSION}\\n" in version_body
         assert "Flask " in version_body
         assert "Python " in version_body
@@ -534,7 +534,7 @@ class TestRunStreaming:
         assert date_resp.status_code == 200
         assert '"type": "output"' in date_body
         assert host_resp.status_code == 200
-        assert "shell.darklab.sh\\n" in host_body
+        assert f"{shell_app.CFG['app_name']}\\n" in host_body
         assert uptime_resp.status_code == 200
         assert "up " in uptime_body
 
@@ -655,7 +655,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "/app/shell.darklab.sh/bin\\n" in body
+        assert f"/app/{shell_app.CFG['app_name']}/bin\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_uname_a_returns_web_shell_environment(self):
@@ -665,7 +665,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "shell.darklab.sh Linux web-terminal x86_64 app-runtime\\n" in body
+        assert f"{shell_app.CFG['app_name']} Linux web-terminal x86_64 app-runtime\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_id_returns_synthetic_identity(self):
@@ -675,7 +675,10 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "uid=1000(shell.darklab.sh) gid=1000(shell.darklab.sh) groups=1000(shell.darklab.sh)\\n" in body
+        assert (
+            f"uid=1000({shell_app.CFG['app_name']}) gid=1000({shell_app.CFG['app_name']}) "
+            f"groups=1000({shell_app.CFG['app_name']})\\n"
+        ) in body
         assert '"type": "exit"' in body
 
     def test_fake_whoami_streams_project_description(self):
@@ -685,8 +688,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "shell.darklab.sh\\n" in body
-        assert "README: https://gitlab.com/darklab.sh/shell.darklab.sh\\n" in body
+        assert f"{shell_app.CFG['app_name']}\\n" in body
+        assert f"README: see the project README at {shell_app.CFG['project_readme']}\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_ps_lists_recent_session_commands(self):

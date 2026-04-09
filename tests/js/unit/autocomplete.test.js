@@ -152,7 +152,7 @@ describe('autocomplete helpers', () => {
 
     const prefix = document.createElement('span')
     prefix.className = 'prompt-prefix'
-    prefix.textContent = 'anon@shell.darklab.sh:~$'
+    prefix.textContent = 'anon@darklab:~$'
     wrap.insertBefore(prefix, document.getElementById('ac'))
 
     vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
@@ -188,7 +188,7 @@ describe('autocomplete helpers', () => {
 
     const prefix = document.createElement('span')
     prefix.className = 'prompt-prefix'
-    prefix.textContent = 'anon@shell.darklab.sh:~$'
+    prefix.textContent = 'anon@darklab:~$'
     wrap.insertBefore(prefix, document.getElementById('ac'))
 
     vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
@@ -225,7 +225,7 @@ describe('autocomplete helpers', () => {
 
     const prefix = document.createElement('span')
     prefix.className = 'prompt-prefix'
-    prefix.textContent = 'anon@shell.darklab.sh:~$'
+    prefix.textContent = 'anon@darklab:~$'
     wrap.insertBefore(prefix, document.getElementById('ac'))
 
     vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
@@ -303,7 +303,7 @@ describe('autocomplete helpers', () => {
 
     const prefix = document.createElement('span')
     prefix.className = 'prompt-prefix'
-    prefix.textContent = 'anon@shell.darklab.sh:~$'
+    prefix.textContent = 'anon@darklab:~$'
     wrap.insertBefore(prefix, document.getElementById('ac'))
 
     vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
@@ -338,7 +338,7 @@ describe('autocomplete helpers', () => {
 
     const prefix = document.createElement('span')
     prefix.className = 'prompt-prefix'
-    prefix.textContent = 'anon@shell.darklab.sh:~$'
+    prefix.textContent = 'anon@darklab:~$'
     wrap.insertBefore(prefix, document.getElementById('ac'))
 
     vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })

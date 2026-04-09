@@ -220,13 +220,13 @@ test.describe('permalink / share', () => {
       page.waitForEvent('download'),
       page.locator('button:has-text("save .txt")').click(),
     ])
-    expect(txtDownload.suggestedFilename()).toMatch(/^shell\.darklab\.sh-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
+    expect(txtDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
 
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
       page.locator('button:has-text("save .html")').click(),
     ])
-    expect(htmlDownload.suggestedFilename()).toMatch(/^shell\.darklab\.sh-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
+    expect(htmlDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
   })
 
   test('permalink exports include prompt echo and current prefix display state', async ({ page }) => {
@@ -251,8 +251,8 @@ test.describe('permalink / share', () => {
     for await (const chunk of txtStream) txtChunks.push(chunk)
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
-    expect(txt).toContain('anon@shell.darklab.sh:~$ curl http://localhost:5001/health')
-    expect(txt).toMatch(/1\s+anon@shell\.darklab\.sh:~\$ curl http:\/\/localhost:5001\/health/)
+    expect(txt).toContain('anon@darklab:~$ curl http://localhost:5001/health')
+    expect(txt).toMatch(/1\s+anon@darklab:~\$ curl http:\/\/localhost:5001\/health/)
     expect(txt).toContain('+')
 
     const [htmlDownload] = await Promise.all([

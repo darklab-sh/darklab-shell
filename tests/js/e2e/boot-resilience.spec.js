@@ -11,7 +11,7 @@ test.describe('boot resilience', () => {
   })
 
   test('the app still boots and core controls still work when startup fetches fail', async ({ page }) => {
-    await expect(page.locator('header h1')).toHaveText(/shell\.darklab\.sh/)
+    await expect(page.locator('header h1')).toHaveText(/darklab shell/)
 
     await page.locator('#theme-btn').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)

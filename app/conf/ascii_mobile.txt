@@ -1,4 +1,4 @@
-.------[ shell.darklab.sh :: interactive diagnostics console ]-------.
+.-------[ darklab shell :: interactive diagnostics console ]---------.
 |                                                                    |
 |         /$$                     /$$       /$$           /$$        |
 |        | $$                    | $$      | $$          | $$        |

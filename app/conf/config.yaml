@@ -1,16 +1,29 @@
-# shell.darklab.sh — Configuration
+# darklab shell — Configuration
 # ----------------------------------
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
-# Optional: add app/conf/config.local.yaml for untracked server-specific overrides.
-# If present, it is loaded after this file and only needs to define the keys you
-# want to change locally.
+# Optional: add sibling *.local.* files for untracked server-specific overrides.
+# Examples: app/conf/config.local.yaml, app/conf/allowed_commands.local.txt,
+# app/conf/ascii.local.txt, app/conf/auto_complete.local.txt,
+# app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
+# app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
+# If present, each local overlay is applied after its checked-in base file.
+# Text/config lists append local entries; ASCII art files use the local file if
+# present; YAML config dictionaries merge key-by-key.
 
 # ── Branding ──────────────────────────────────────────────────────────────────
 
 # Name displayed in the browser tab, header, and permalink pages
-# Server default if unset: "shell.darklab.sh"
-# app_name: "shell.darklab.sh"
+# Server default if unset: "darklab shell"
+# app_name: "darklab shell"
+
+# URL to the project README shown in the built-in FAQ and synthetic README links.
+# Server default if unset: https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell
+# project_readme: "https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell"
+
+# Prompt prefix shown at the start of the terminal prompt and welcome samples.
+# Server default if unset: "anon@darklab:~$"
+# prompt_prefix: "anon@darklab:~$"
 
 # Optional message shown at the top of the terminal on page load.
 # Leave empty to disable.
@@ -21,7 +34,7 @@
 
 # Default color theme filename. Should match a file under app/conf/themes/.
 # If unset or invalid, the built-in fallback palette is used.
-default_theme: darklab_obsidian.yaml
+# default_theme: darklab_obsidian.yaml
 
 # ── History & Retention ───────────────────────────────────────────────────────
 
@@ -41,7 +54,7 @@ default_theme: darklab_obsidian.yaml
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
-# Log verbosity level. Options: ERROR, WARN, INFO, DEBUG
+# Log verbosity level . Options: ERROR, WARN, INFO, DEBUG
 # ERROR — application errors only (spawn failures, health check failures, stream errors)
 # WARN  — errors plus warnings: denied commands, rate limit hits, command timeouts
 # INFO  — warnings plus operational events: run start/end/kill with client IP (default)
@@ -54,7 +67,7 @@ default_theme: darklab_obsidian.yaml
 # gelf — newline-delimited GELF 1.1 JSON for Graylog / GELF-compatible back-ends
 #         short_message contains the event name; all context is in _-prefixed fields
 # Server default if unset: text
-log_format: gelf
+# log_format: text
 
 # ── Trusted Proxies ──────────────────────────────────────────────────────────
 
@@ -104,8 +117,8 @@ log_format: gelf
 
 # Automatically kill a running command after this many seconds.
 # Set to 0 to disable (commands run until they finish or are killed manually).
-# Server default if unset: 0
-command_timeout_seconds: 7200
+# Server default if unset: 3600
+# command_timeout_seconds: 3600
 
 # How often (in seconds) to send a heartbeat comment on idle SSE connections
 # to prevent nginx and the browser from dropping the connection.

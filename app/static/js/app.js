@@ -978,7 +978,7 @@ function _buildThemePreviewCard(theme) {
   prompt.className = 'theme-card-preview-prompt';
   const prefix = document.createElement('span');
   prefix.className = 'theme-card-preview-prefix';
-  prefix.textContent = 'anon@shell.darklab.sh:~$';
+  prefix.textContent = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
   prompt.appendChild(prefix);
 
   const line1 = document.createElement('span');

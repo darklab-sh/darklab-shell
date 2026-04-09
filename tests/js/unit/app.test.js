@@ -101,7 +101,7 @@ async function loadAppFns({
         <span id="run-timer"></span>
       </div>
       <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
-        <span class="prompt-prefix" data-mobile-label="$">anon@shell.darklab.sh:~$</span>
+        <span class="prompt-prefix" data-mobile-label="$">anon@darklab:~$</span>
         <div id="shell-prompt-line">
           <span id="shell-prompt-text" class="shell-prompt-text"></span>
           <span id="shell-prompt-caret"></span>
@@ -163,7 +163,8 @@ async function loadAppFns({
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
-          app_name: 'shell.darklab.sh',
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
           default_theme: 'darklab_obsidian.yaml',
           motd: '',
@@ -776,7 +777,8 @@ describe('app helpers', () => {
         if (url === '/config') {
           return Promise.resolve({
             json: () => Promise.resolve({
-              app_name: 'shell.darklab.sh',
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
               default_theme: 'theme_missing.yaml',
               motd: '',
@@ -1435,7 +1437,8 @@ describe('app helpers', () => {
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
-          app_name: 'shell.darklab.sh',
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
           default_theme: 'darklab_obsidian.yaml',
           motd: '',
@@ -2159,7 +2162,8 @@ describe('app helpers', () => {
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
-          app_name: 'shell.darklab.sh',
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
           default_theme: 'darklab_obsidian.yaml',
           motd: '',
@@ -2207,9 +2211,10 @@ describe('app helpers', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            app_name: 'shell.darklab.sh',
-            version: '9.9',
+        json: () => Promise.resolve({
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
+          version: '9.9',
             default_theme: 'darklab_obsidian.yaml',
             motd: '',
             command_timeout_seconds: 120,
@@ -2260,7 +2265,8 @@ describe('app helpers', () => {
       if (url === '/config') {
         return Promise.resolve({
           json: () => Promise.resolve({
-            app_name: 'shell.darklab.sh',
+            app_name: 'darklab shell',
+            prompt_prefix: 'anon@darklab:~$',
             version: '9.9',
             default_theme: 'darklab_obsidian.yaml',
             motd: '',

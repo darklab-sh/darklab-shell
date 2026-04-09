@@ -99,6 +99,8 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: base-shell
+                    project_readme: https://example.invalid/base.md
+                    prompt_prefix: base@local:~$
                     default_theme: base-theme.yaml
                     rate_limit_per_minute: 30
                     """
@@ -107,12 +109,16 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: local-shell
+                    prompt_prefix: local@local:~$
+                    project_readme: https://example.invalid/local.md
                     rate_limit_per_minute: 99
                     """
                 ))
             cfg = app_config.load_config(tmp)
 
         assert cfg["app_name"] == "local-shell"
+        assert cfg["prompt_prefix"] == "local@local:~$"
+        assert cfg["project_readme"] == "https://example.invalid/local.md"
         assert cfg["default_theme"] == "base-theme.yaml"
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
@@ -120,6 +126,12 @@ class TestLoadConfig:
 class TestLoadAllowedCommands:
     def _write(self, content, tmp_dir):
         path = os.path.join(tmp_dir, "allowed_commands.txt")
+        with open(path, "w") as f:
+            f.write(textwrap.dedent(content))
+        return path
+
+    def _write_local(self, content, tmp_dir):
+        path = os.path.join(tmp_dir, "allowed_commands.local.txt")
         with open(path, "w") as f:
             f.write(textwrap.dedent(content))
         return path
@@ -180,6 +192,26 @@ class TestLoadAllowedCommands:
                 allow, deny = load_allowed_commands()
         assert allow is None
         assert deny == []
+
+    def test_local_overlay_appends_and_dedupes_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = self._write("ping\nnmap\n!curl -o\n", tmp)
+            self._write_local("nmap\ncurl\n!curl -o\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
+                allow, deny = load_allowed_commands()
+        assert allow == ["ping", "nmap", "curl"]
+        assert deny == ["curl -o"]
+
+    def test_local_overlay_merges_group_headers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = self._write("## Network\nping\n", tmp)
+            self._write_local("## Network\ncurl\n## Scanning\nnmap\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
+                groups = load_allowed_commands_grouped()
+        assert groups is not None
+        assert [group["name"] for group in groups] == ["Network", "Scanning"]
+        assert groups[0]["commands"] == ["ping", "curl"]
+        assert groups[1]["commands"] == ["nmap"]
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
@@ -244,6 +276,18 @@ class TestLoadFaq:
             os.unlink(path)
         assert len(result) == 1
         assert result[0]["question"] == "Has both."
+
+    def test_local_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "faq.yaml")
+            local_path = os.path.join(tmp, "faq.local.yaml")
+            with open(base_path, "w") as f:
+                f.write("- question: Base?\n  answer: Base answer.\n")
+            with open(local_path, "w") as f:
+                f.write("- question: Local?\n  answer: Local answer.\n")
+            with mock.patch("commands.FAQ_FILE", base_path):
+                result = load_faq()
+        assert [item["question"] for item in result] == ["Base?", "Local?"]
 
 
 # ── load_theme_registry / load_theme ─────────────────────────────────────────
@@ -324,6 +368,30 @@ class TestThemeRegistry:
         assert themes[0]["label"] == "Only Theme"
         assert app_config.load_theme("only_theme")["bg"] == "#101010"
 
+    def test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "base_theme",
+            """
+            label: "Base Theme"
+            bg: "#101010"
+            surface: "#1a1a1a"
+            """,
+        )
+        (theme_dir / "base_theme.local.yaml").write_text(textwrap.dedent(
+            """
+            label: "Base Theme Local"
+            bg: "#202020"
+            """
+        ))
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        assert [theme["name"] for theme in themes] == ["base_theme"]
+        assert themes[0]["label"] == "Base Theme Local"
+        assert app_config.load_theme("base_theme")["bg"] == "#202020"
+        assert app_config.load_theme("base_theme")["surface"] == "#1a1a1a"
+
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -367,12 +435,23 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq()
+                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         assert result[0]["question"] == "What is this?"
         assert result[-1]["question"] == "Custom question?"
         assert result[-1]["answer"] == "Custom answer."
+
+    def test_load_all_faq_uses_project_readme_in_builtin_answer(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        assert "https://example.invalid/README.md" in result[0]["answer_html"]
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
@@ -613,6 +692,18 @@ class TestWelcomeLoading:
             os.unlink(path)
         assert result == []
 
+    def test_local_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "welcome.yaml")
+            local_path = os.path.join(tmp, "welcome.local.yaml")
+            with open(base_path, "w") as f:
+                f.write("- cmd: ping\n  out: base\n")
+            with open(local_path, "w") as f:
+                f.write("- cmd: curl\n  out: local\n")
+            with mock.patch("commands.WELCOME_FILE", base_path):
+                result = load_welcome()
+        assert [item["cmd"] for item in result] == ["ping", "curl"]
+
 
 # ── load_ascii_art / load_ascii_mobile_art / load_welcome_hints ──────────────
 
@@ -644,6 +735,50 @@ class TestWelcomeAssetLoading:
                 assert load_ascii_mobile_art() == "  mobile banner"
         finally:
             os.unlink(path)
+
+    def test_ascii_art_local_overlay_replaces_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "ascii.txt")
+            local_path = os.path.join(tmp, "ascii.local.txt")
+            with open(base_path, "w") as f:
+                f.write("base art")
+            with open(local_path, "w") as f:
+                f.write("local art")
+            with mock.patch("commands.ASCII_FILE", base_path):
+                assert load_ascii_art() == "local art"
+
+    def test_mobile_ascii_art_local_overlay_replaces_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "ascii_mobile.txt")
+            local_path = os.path.join(tmp, "ascii_mobile.local.txt")
+            with open(base_path, "w") as f:
+                f.write("base mobile art")
+            with open(local_path, "w") as f:
+                f.write("local mobile art")
+            with mock.patch("commands.ASCII_MOBILE_FILE", base_path):
+                assert load_ascii_mobile_art() == "local mobile art"
+
+    def test_local_hints_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "app_hints.txt")
+            local_path = os.path.join(tmp, "app_hints.local.txt")
+            with open(base_path, "w") as f:
+                f.write("Use the history panel.\n")
+            with open(local_path, "w") as f:
+                f.write("Press Enter to run.\n")
+            with mock.patch("commands.APP_HINTS_FILE", base_path):
+                assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
+
+    def test_mobile_hints_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "app_hints_mobile.txt")
+            local_path = os.path.join(tmp, "app_hints_mobile.local.txt")
+            with open(base_path, "w") as f:
+                f.write("Tap the prompt.\n")
+            with open(local_path, "w") as f:
+                f.write("Use the mobile menu.\n")
+            with mock.patch("commands.APP_HINTS_MOBILE_FILE", base_path):
+                assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
 
 
 # ── run_output_store ──────────────────────────────────────────────────────────
@@ -779,6 +914,18 @@ class TestAutocompleteLoading:
         finally:
             os.unlink(path)
         assert result == ["ping -c 4", "dig google.com"]
+
+    def test_local_overlay_appends_unique_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "auto_complete.txt")
+            local_path = os.path.join(tmp, "auto_complete.local.txt")
+            with open(base_path, "w") as f:
+                f.write("nmap -sV\nping -c 4\n")
+            with open(local_path, "w") as f:
+                f.write("ping -c 4\ncurl http://localhost:5001/health\n")
+            with mock.patch("commands.AUTOCOMPLETE_FILE", base_path):
+                result = load_autocomplete()
+        assert result == ["nmap -sV", "ping -c 4", "curl http://localhost:5001/health"]
 
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────

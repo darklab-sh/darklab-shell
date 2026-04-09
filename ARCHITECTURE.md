@@ -1,6 +1,6 @@
 # Architecture & Decision Log
 
-This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of shell.darklab.sh. It is intended as a durable decision log for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
+This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of darklab shell. It is intended as a durable decision log for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
 
 ---
 
@@ -343,7 +343,7 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 ### Config Loading
 
-The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins.
+The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `project_readme`, `prompt_prefix`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins. `project_readme` is used by the built-in FAQ and synthetic README-style helper output so those links can be branded per deployment without changing code.
 
 Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. On mobile the selector opens as a full-screen chooser with a two-column preview layout on wider phones so the preview cards stay readable while keeping each grouped section the same width. Each YAML variant may provide an optional `label:` field; that label is what the selector preview card shows, `group:` controls the modal section header, and `sort:` controls the order inside the preview grid while the filename stem remains the persisted theme name. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only; they are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in dark fallback palette in `app/config.py`. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots. This completed theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
 
@@ -404,10 +404,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 478
+- `pytest`: 489
 - `vitest`: 246
 - `playwright`: 128
-- total: 852
+- total: 866
 
 ### Testing Architecture
 
@@ -426,7 +426,7 @@ Current totals on this branch:
 
 - The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 
-- Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does. The configuration loader also supports an optional `config.local.yaml` overlay in `app/conf/` so operators can keep private overrides out of git while leaving the checked-in config as the portable base layer.
+- Backend tests deliberately keep the same relative-path assumptions as production. `tests/py/conftest.py` changes into `app/` before imports so routes and loaders resolve `templates/`, `conf/`, and related assets exactly the way the running app does. The configuration loader now supports sibling `*.local.*` overlays across the checked-in config assets in `app/conf/` and `app/conf/themes/` so operators can keep private overrides out of git while leaving the checked-in files as the portable base layer.
 
 - Suite-specific coverage inventories, focused run commands, and maintenance notes are intentionally centralized in [tests/README.md](tests/README.md) rather than duplicated here.
 

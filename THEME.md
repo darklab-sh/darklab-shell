@@ -6,7 +6,7 @@ This document is the full reference for the completed shell theme system. It exp
 
 Theme support is split into a small pipeline:
 
-1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes.
+1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes. Each base theme can also have a sibling `<name>.local.yaml` overlay that merges into that theme without becoming a selectable card on its own.
 2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are copyable template files only; they are not loaded into the runtime selector.
 3. `app/config.py` loads the YAML files under `app/conf/themes/`, merges them with the built-in fallback defaults, filters out unknown keys, and builds the selectable theme registry. If a YAML file includes `label:`, that value becomes the friendly preview-card label; if it includes `group:`, that value becomes the preview-section header; if it includes `sort:`, that numeric value controls the modal ordering. `default_theme` in `app/conf/config.yaml` uses the full filename, while the registry still persists the stem for theme selection and localStorage.
 4. `theme_css_vars()` converts the component-chrome keys into CSS custom properties such as `--theme-panel-bg`, while `theme_runtime_css_vars()` exposes the full live CSS var map used by the runtime selector.
@@ -36,7 +36,7 @@ The fallback palette includes the full set of supported keys: base colors, typog
 
 ## Editing Rules
 
-- The example template files use commented-out defaults. Uncomment only the keys you want to override, then copy the file into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up.
+- The example template files use commented-out defaults. Uncomment only the keys you want to override, then copy the file into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up. If you want a private overlay for an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges that overlay after the checked-in base file.
 - Unknown keys are ignored by `app/config.py`; only keys that exist in `_THEME_DEFAULTS` are accepted.
 - Values may be any valid CSS color, length, gradient, or shadow string, depending on the key. You can also reference other resolved theme variables with CSS `var(--name)` syntax; the browser resolves those references after the vars are injected.
 - If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing the app. That means a bad edit will not take down the runtime selector, but the file should still be fixed before it is considered usable.
@@ -53,7 +53,7 @@ The fallback palette includes the full set of supported keys: base colors, typog
 |------|------|
 | `app/conf/theme_dark.yaml.example` | Dark theme template/reference file with every supported key plus metadata comments |
 | `app/conf/theme_light.yaml.example` | Light theme template/reference file with every supported key plus metadata comments |
-| `app/conf/themes/` | Additional named theme variants loaded into the runtime selector |
+| `app/conf/themes/` | Additional named theme variants loaded into the runtime selector; sibling `.local.yaml` overlays merge into the matching base theme but are not listed separately |
 | `app/config.py` | Loads, validates, and resolves theme values |
 | `app/app.py` | Exposes `/themes` and injects the current theme into the main shell |
 | `app/templates/theme_vars_style.html` | Injects resolved CSS variables into the page |
@@ -66,7 +66,7 @@ The fallback palette includes the full set of supported keys: base colors, typog
 
 ### 1. Load and merge
 
-`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml` and merges any values from that file with the built-in defaults. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. If a key is missing, the built-in default remains in effect.
+`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, merges any values from that file with the built-in defaults, and then applies an optional sibling `app/conf/themes/<name>.local.yaml` overlay if one exists. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. If a key is missing, the built-in default remains in effect.
 
 ### 2. Export as CSS vars
 

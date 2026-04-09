@@ -24,196 +24,197 @@ ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 
-BUILTIN_FAQ = [
-    {
-        "question": "What is this?",
-        "answer": (
-            "shell.darklab.sh is a lightweight web interface for running network diagnostic "
-            "and vulnerability scanning commands against remote endpoints, with output streamed "
-            "in real time. It's designed for testing and troubleshooting remote hosts."
-        ),
-        "answer_html": (
-            "shell.darklab.sh is a lightweight web interface for running network diagnostic "
-            "and vulnerability scanning commands against remote endpoints, with output streamed "
-            "in real time. It's designed for testing and troubleshooting remote hosts — things "
-            "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
-            "scans — without needing SSH access to a server. For more detailed information, see "
-            "the <a href=\"https://gitlab.com/darklab.sh/shell.darklab.sh\" target=\"_blank\" "
-            "rel=\"noopener\" style=\"color:var(--green)\">README on GitLab</a>."
-        ),
-    },
-    {
-        "question": "What commands are allowed?",
-        "answer": "Use the grouped allowlist shown in the FAQ modal or run ls in the web shell.",
-        "ui_kind": "allowed_commands",
-    },
-    {
-        "question": "How do I save or share my results?",
-        "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
-        "answer_html": (
-            "There are several options below each tab's output:<br><br>"
-            "<code>permalink</code> — saves a snapshot of everything visible in the tab and "
-            "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
-            "inspect the raw data.<br>"
-            "<code>copy</code> — copies the full plain-text output to your clipboard.<br>"
-            "<code>save .html</code> — downloads a themed HTML file with ANSI colors "
-            "preserved. It uses app-hosted vendor fonts when viewed alongside this shell and "
-            "falls back to browser monospace fonts offline.<br>"
-            "<code>save .txt</code> — downloads a plain-text version of the output.<br><br>"
-            "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
-        ),
-    },
-    {
-        "question": "How do tabs and permalinks work?",
-        "answer": (
-            "Each command runs in the active tab. Use additional tabs to keep results visible "
-            "side by side."
-        ),
-        "answer_html": (
-            "Each command runs in the currently active tab. Open additional tabs with the "
-            "<strong>+</strong> button to keep results from different sessions visible at the "
-            "same time. Each tab tracks its own status independently. Double-click a tab label to "
-            "rename it.<br><br>"
-            "The <strong>permalink</strong> button captures everything currently visible in that "
-            "tab and saves it as a shareable page. If a full saved artifact exists, the permalink "
-            "uses that full output. The link opens a styled HTML view with ANSI color rendering "
-            "and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. "
-            "Permalinks survive container restarts.<br><br>"
-            "The <strong>⧖ history</strong> panel shows your recent runs. You can load any past "
-            "result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> "
-            "a command to pin it to the top of the list."
-        ),
-    },
-    {
-        "question": "How do I stop a running command?",
-        "answer": "Use the Kill button shown while a command is running.",
-        "answer_html": (
-            "Click the <strong style=\"color:var(--red)\">■ Kill</strong> button that appears "
-            "while a command is running. This sends SIGTERM to the entire process group on the "
-            "server, stopping it immediately."
-        ),
-    },
-    {
-        "question": "Are there keyboard shortcuts?",
-        "answer": (
-            "Yes. Run shortcuts in the web shell for the current shortcut list, including tab, output, "
-            "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
-        ),
-        "answer_html": (
-            "Yes. Current shell-style shortcuts include:<br><br>"
-            "<ul style=\"margin:0 0 0 18px;padding:0;line-height:1.6\">"
-            "<li><code>Ctrl+C</code> — open kill confirmation while a command is running, or "
-            "drop to a fresh prompt line when idle.</li>"
-            "<li><code>Enter</code> on a blank prompt — create a new empty prompt line.</li>"
-            "<li><code>Option+T</code> / <code>Alt+T</code> and <code>Option+W</code> / "
-            "<code>Alt+W</code> — open or close the current tab.</li>"
-            "<li><code>Option+←/→</code> and <code>Option+1...9</code> (<code>Alt+←/→</code>, "
-            "<code>Alt+1...9</code>) — switch tabs.</li>"
-            "<li><code>Option+P</code> (<code>Alt+P</code>) — create a permalink for the active "
-            "tab.</li>"
-            "<li><code>Option+Shift+C</code> (<code>Alt+Shift+C</code>) — copy the active tab "
-            "output.</li>"
-            "<li><code>Ctrl+L</code> — clear the active tab.</li>"
-            "<li><strong>Kill dialog:</strong> <code>Enter</code> confirms and "
-            "<code>Escape</code> cancels.</li>"
-            "<li><code>Ctrl+A</code>, <code>Ctrl+E</code>, <code>Ctrl+W</code>, "
-            "<code>Ctrl+U</code>, <code>Ctrl+K</code>, <code>Option+B</code>, and "
-            "<code>Option+F</code> (<code>Alt+B</code>, <code>Alt+F</code>) provide "
-            "readline-style prompt editing.</li>"
-            "<li><strong>Welcome screen:</strong> printable typing, <code>Enter</code>, and "
-            "<code>Escape</code> all settle the welcome animation immediately.</li>"
-            "<li><strong>Autocomplete:</strong> <code>↑↓</code> navigate, <code>Tab</code> "
-            "accepts, <code>Enter</code> accepts or runs, and <code>Escape</code> dismisses.</li>"
-            "</ul>"
-            "<br>On macOS, the app-safe tab/action shortcuts use the <strong>Option</strong> "
-            "key. The <strong>Ctrl+...</strong> bindings are intentional shell-style controls, "
-            "not replacements for browser <strong>Command</strong> shortcuts.<br><br>You can "
-            "also run <code>shortcuts</code> in the terminal for the current shortcut reference."
-        ),
-    },
-    {
-        "question": "How do I access search, history and theme on mobile?",
-        "answer": "Use the mobile menu in the top-right corner.",
-        "answer_html": (
-            "On small screens the header buttons are replaced by a <strong>☰</strong> menu in the "
-            "top-right corner. Tap it to access search, run history, line numbers, timestamps, "
-            "theme, and this FAQ."
-        ),
-    },
-    {
-        "question": "How do I rename a tab?",
-        "answer": "Double-click the tab label, then press Enter or click away to confirm.",
-        "answer_html": (
-            "Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click "
-            "anywhere outside to confirm, or <strong>Escape</strong> to cancel. Once renamed, "
-            "running a command won't overwrite the label — the tab keeps your chosen name."
-        ),
-    },
-    {
-        "question": "What do the timestamp options do?",
-        "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
-        "answer_html": (
-            "The <strong>timestamps</strong> button in the terminal bar cycles through three modes:"
-            "<br><br><strong>off</strong> — no timestamps shown (default).<br>"
-            "<strong>elapsed</strong> — shows how many seconds after the command started each line "
-            "appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different "
-            "stages of a scan take.<br><strong>clock</strong> — shows the wall-clock time each "
-            "line was received (e.g. <code>14:32:01</code>). Useful for correlating output with "
-            "events elsewhere."
-        ),
-    },
-    {
-        "question": "What do the line number options do?",
-        "answer": "They toggle numbered output lines on and off for easier line-by-line reference.",
-        "answer_html": (
-            "The <strong>line numbers</strong> button in the terminal bar toggles numbered output "
-            "lines on and off.<br><br><strong>off</strong> — no line numbers are shown (default)."
-            "<br><strong>on</strong> — every output line is prefixed with a sequence number so "
-            "you can reference specific rows while reading long scans or copied output."
-        ),
-    },
-    {
-        "question": "Are my commands visible to other users?",
-        "answer": "No. History and saved data are scoped to your anonymous browser session.",
-        "answer_html": (
-            "No. Each browser session is assigned an anonymous ID stored in your browser's local "
-            "storage. Your run history, starred commands, and saved snapshots are only visible to "
-            "sessions sharing that ID — in practice, just your own browser tabs. Commands are not "
-            "broadcast or shared between users."
-        ),
-    },
-    {
-        "question": "What are the retention and limit settings for this instance?",
-        "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
-        "ui_kind": "limits",
-    },
-    {
-        "question": "What wordlists are available?",
-        "answer": "The SecLists collection is installed at /usr/share/wordlists/seclists/.",
-        "answer_html": (
-            "The full <a href=\"https://github.com/danielmiessler/SecLists\" target=\"_blank\" "
-            "rel=\"noopener\" style=\"color:var(--green)\">SecLists</a> collection is installed at "
-            "<code>/usr/share/wordlists/seclists/</code>. Commonly used lists:<ul>"
-            "<li><code>Discovery/Web-Content/common.txt</code> — fast directory scan</li>"
-            "<li><code>Discovery/Web-Content/big.txt</code> — broader directory scan</li>"
-            "<li><code>Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt</code> — "
-            "thorough directory scan</li></ul>"
-        ),
-    },
-    {
-        "question": "Why does mtr look different here?",
-        "answer": (
-            "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
-            "available in a web shell. It runs in --report-wide mode instead."
-        ),
-        "answer_html": (
-            "<code>mtr</code> needs a real terminal (TTY) for its interactive display, which "
-            "isn't available in a web shell. It automatically runs in <code>--report-wide</code> "
-            "mode here, printing 10 probe cycles and a summary table. You can change the cycle "
-            "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>"
-        ),
-    },
-]
+def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell"):
+    return [
+        {
+            "question": "What is this?",
+            "answer": (
+                f"{app_name} is a lightweight web interface for running network diagnostic "
+                "and vulnerability scanning commands against remote endpoints, with output streamed "
+                "in real time. It's designed for testing and troubleshooting remote hosts."
+            ),
+            "answer_html": (
+                f"{app_name} is a lightweight web interface for running network diagnostic "
+                "and vulnerability scanning commands against remote endpoints, with output streamed "
+                "in real time. It's designed for testing and troubleshooting remote hosts — things "
+                "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
+                "scans — without needing SSH access to a server. For more detailed information, see "
+                f"the project README at <a href=\"{html.escape(project_readme, quote=True)}\" "
+                "target=\"_blank\" rel=\"noopener\" style=\"color:var(--green)\">README</a>."
+            ),
+        },
+        {
+            "question": "What commands are allowed?",
+            "answer": "Use the grouped allowlist shown in the FAQ modal or run ls in the web shell.",
+            "ui_kind": "allowed_commands",
+        },
+        {
+            "question": "How do I save or share my results?",
+            "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
+            "answer_html": (
+                "There are several options below each tab's output:<br><br>"
+                "<code>permalink</code> — saves a snapshot of everything visible in the tab and "
+                "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
+                "inspect the raw data.<br>"
+                "<code>copy</code> — copies the full plain-text output to your clipboard.<br>"
+                "<code>save .html</code> — downloads a themed HTML file with ANSI colors "
+                "preserved. It uses app-hosted vendor fonts when viewed alongside this shell and "
+                "falls back to browser monospace fonts offline.<br>"
+                "<code>save .txt</code> — downloads a plain-text version of the output.<br><br>"
+                "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
+            ),
+        },
+        {
+            "question": "How do tabs and permalinks work?",
+            "answer": (
+                "Each command runs in the active tab. Use additional tabs to keep results visible "
+                "side by side."
+            ),
+            "answer_html": (
+                "Each command runs in the currently active tab. Open additional tabs with the "
+                "<strong>+</strong> button to keep results from different sessions visible at the "
+                "same time. Each tab tracks its own status independently. Double-click a tab label to "
+                "rename it.<br><br>"
+                "The <strong>permalink</strong> button captures everything currently visible in that "
+                "tab and saves it as a shareable page. If a full saved artifact exists, the permalink "
+                "uses that full output. The link opens a styled HTML view with ANSI color rendering "
+                "and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. "
+                "Permalinks survive container restarts.<br><br>"
+                "The <strong>⧖ history</strong> panel shows your recent runs. You can load any past "
+                "result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> "
+                "a command to pin it to the top of the list."
+            ),
+        },
+        {
+            "question": "How do I stop a running command?",
+            "answer": "Use the Kill button shown while a command is running.",
+            "answer_html": (
+                "Click the <strong style=\"color:var(--red)\">■ Kill</strong> button that appears "
+                "while a command is running. This sends SIGTERM to the entire process group on the "
+                "server, stopping it immediately."
+            ),
+        },
+        {
+            "question": "Are there keyboard shortcuts?",
+            "answer": (
+                "Yes. Run shortcuts in the web shell for the current shortcut list, including tab, output, "
+                "kill-dialog, welcome, autocomplete, and readline-style editing bindings."
+            ),
+            "answer_html": (
+                "Yes. Current shell-style shortcuts include:<br><br>"
+                "<ul style=\"margin:0 0 0 18px;padding:0;line-height:1.6\">"
+                "<li><code>Ctrl+C</code> — open kill confirmation while a command is running, or "
+                "drop to a fresh prompt line when idle.</li>"
+                "<li><code>Enter</code> on a blank prompt — create a new empty prompt line.</li>"
+                "<li><code>Option+T</code> / <code>Alt+T</code> and <code>Option+W</code> / "
+                "<code>Alt+W</code> — open or close the current tab.</li>"
+                "<li><code>Option+←/→</code> and <code>Option+1...9</code> (<code>Alt+←/→</code>, "
+                "<code>Alt+1...9</code>) — switch tabs.</li>"
+                "<li><code>Option+P</code> (<code>Alt+P</code>) — create a permalink for the active "
+                "tab.</li>"
+                "<li><code>Option+Shift+C</code> (<code>Alt+Shift+C</code>) — copy the active tab "
+                "output.</li>"
+                "<li><code>Ctrl+L</code> — clear the active tab.</li>"
+                "<li><strong>Kill dialog:</strong> <code>Enter</code> confirms and "
+                "<code>Escape</code> cancels.</li>"
+                "<li><code>Ctrl+A</code>, <code>Ctrl+E</code>, <code>Ctrl+W</code>, "
+                "<code>Ctrl+U</code>, <code>Ctrl+K</code>, <code>Option+B</code>, and "
+                "<code>Option+F</code> (<code>Alt+B</code>, <code>Alt+F</code>) provide "
+                "readline-style prompt editing.</li>"
+                "<li><strong>Welcome screen:</strong> printable typing, <code>Enter</code>, and "
+                "<code>Escape</code> all settle the welcome animation immediately.</li>"
+                "<li><strong>Autocomplete:</strong> <code>↑↓</code> navigate, <code>Tab</code> "
+                "accepts, <code>Enter</code> accepts or runs, and <code>Escape</code> dismisses.</li>"
+                "</ul>"
+                "<br>On macOS, the app-safe tab/action shortcuts use the <strong>Option</strong> "
+                "key. The <strong>Ctrl+...</strong> bindings are intentional shell-style controls, "
+                "not replacements for browser <strong>Command</strong> shortcuts.<br><br>You can "
+                "also run <code>shortcuts</code> in the terminal for the current shortcut reference."
+            ),
+        },
+        {
+            "question": "How do I access search, history and theme on mobile?",
+            "answer": "Use the mobile menu in the top-right corner.",
+            "answer_html": (
+                "On small screens the header buttons are replaced by a <strong>☰</strong> menu in the "
+                "top-right corner. Tap it to access search, run history, line numbers, timestamps, "
+                "theme, and this FAQ."
+            ),
+        },
+        {
+            "question": "How do I rename a tab?",
+            "answer": "Double-click the tab label, then press Enter or click away to confirm.",
+            "answer_html": (
+                "Double-click the tab label to edit it inline. Press <strong>Enter</strong> or click "
+                "anywhere outside to confirm, or <strong>Escape</strong> to cancel. Once renamed, "
+                "running a command won't overwrite the label — the tab keeps your chosen name."
+            ),
+        },
+        {
+            "question": "What do the timestamp options do?",
+            "answer": "They toggle off, elapsed, and clock timestamp display modes for output lines.",
+            "answer_html": (
+                "The <strong>timestamps</strong> button in the terminal bar cycles through three modes:"
+                "<br><br><strong>off</strong> — no timestamps shown (default).<br>"
+                "<strong>elapsed</strong> — shows how many seconds after the command started each line "
+                "appeared (e.g. <code>+4.2s</code>). Useful for understanding how long different "
+                "stages of a scan take.<br><strong>clock</strong> — shows the wall-clock time each "
+                "line was received (e.g. <code>14:32:01</code>). Useful for correlating output with "
+                "events elsewhere."
+            ),
+        },
+        {
+            "question": "What do the line number options do?",
+            "answer": "They toggle numbered output lines on and off for easier line-by-line reference.",
+            "answer_html": (
+                "The <strong>line numbers</strong> button in the terminal bar toggles numbered output "
+                "lines on and off.<br><br><strong>off</strong> — no line numbers are shown (default)."
+                "<br><strong>on</strong> — every output line is prefixed with a sequence number so "
+                "you can reference specific rows while reading long scans or copied output."
+            ),
+        },
+        {
+            "question": "Are my commands visible to other users?",
+            "answer": "No. History and saved data are scoped to your anonymous browser session.",
+            "answer_html": (
+                "No. Each browser session is assigned an anonymous ID stored in your browser's local "
+                "storage. Your run history, starred commands, and saved snapshots are only visible to "
+                "sessions sharing that ID — in practice, just your own browser tabs. Commands are not "
+                "broadcast or shared between users."
+            ),
+        },
+        {
+            "question": "What are the retention and limit settings for this instance?",
+            "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
+            "ui_kind": "limits",
+        },
+        {
+            "question": "What wordlists are available?",
+            "answer": "The SecLists collection is installed at /usr/share/wordlists/seclists/.",
+            "answer_html": (
+                "The full <a href=\"https://github.com/danielmiessler/SecLists\" target=\"_blank\" "
+                "rel=\"noopener\" style=\"color:var(--green)\">SecLists</a> collection is installed at "
+                "<code>/usr/share/wordlists/seclists/</code>. Commonly used lists:<ul>"
+                "<li><code>Discovery/Web-Content/common.txt</code> — fast directory scan</li>"
+                "<li><code>Discovery/Web-Content/big.txt</code> — broader directory scan</li>"
+                "<li><code>Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt</code> — "
+                "thorough directory scan</li></ul>"
+            ),
+        },
+        {
+            "question": "Why does mtr look different here?",
+            "answer": (
+                "mtr requires a real terminal (TTY) for its live interactive display, which isn't "
+                "available in a web shell. It runs in --report-wide mode instead."
+            ),
+            "answer_html": (
+                "<code>mtr</code> needs a real terminal (TTY) for its interactive display, which "
+                "isn't available in a web shell. It automatically runs in <code>--report-wide</code> "
+                "mode here, printing 10 probe cycles and a summary table. You can change the cycle "
+                "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>"
+            ),
+        },
+    ]
 
 _FAQ_CHIP_RE = re.compile(r'\[\[(?:cmd|chip):(.+?)\]\]')
 _FAQ_BOLD_RE = re.compile(r'\*\*(.+?)\*\*')
@@ -288,6 +289,44 @@ def render_faq_markup(text):
 
     return "<br><br>".join(blocks)
 
+
+def _local_overlay_path(path):
+    root, ext = os.path.splitext(path)
+    return f"{root}.local{ext}"
+
+
+def _load_text_lines(path):
+    lines = []
+    for candidate in (path, _local_overlay_path(path)):
+        if not os.path.exists(candidate):
+            continue
+        with open(candidate) as f:
+            lines.extend(f.readlines())
+    return lines
+
+
+def _load_yaml_list(path):
+    if not os.path.exists(path):
+        return []
+    with open(path) as f:
+        data = yaml.safe_load(f) or []
+    return data if isinstance(data, list) else []
+
+
+def _load_yaml_list_with_local(path):
+    items = _load_yaml_list(path)
+    local_path = _local_overlay_path(path)
+    if os.path.exists(local_path):
+        try:
+            items.extend(_load_yaml_list(local_path))
+        except yaml.YAMLError:
+            pass
+    return items
+
+
+def _dedupe_preserve_order(values):
+    return list(dict.fromkeys(values))
+
 # Shell metacharacters that can chain or redirect commands.
 # Used for detection (SHELL_CHAIN_RE.search) and splitting (split_chained_commands).
 # Both use >>? so > and >> are matched without allowing whitespace between them.
@@ -308,15 +347,16 @@ def load_allowed_commands():
         return None, []
     prefixes = []
     denied = []
-    with open(ALLOWED_COMMANDS_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if not line or line.startswith("#"):
-                continue
-            if line.startswith("!"):
-                denied.append(line[1:].strip().lower())
-            else:
-                prefixes.append(line.lower())
+    for raw_line in _load_text_lines(ALLOWED_COMMANDS_FILE):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("!"):
+            denied.append(line[1:].strip().lower())
+        else:
+            prefixes.append(line.lower())
+    prefixes = _dedupe_preserve_order(prefixes)
+    denied = _dedupe_preserve_order(denied)
     return (prefixes if prefixes else None), denied
 
 
@@ -327,18 +367,27 @@ def load_allowed_commands_grouped():
     if not os.path.exists(ALLOWED_COMMANDS_FILE):
         return None
     groups = []
+    group_map = {}
     current = None
-    with open(ALLOWED_COMMANDS_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if line.startswith("## "):
-                current = {"name": line[3:].strip(), "commands": []}
+    for raw_line in _load_text_lines(ALLOWED_COMMANDS_FILE):
+        line = raw_line.strip()
+        if line.startswith("## "):
+            name = line[3:].strip()
+            current = group_map.get(name)
+            if current is None:
+                current = {"name": name, "commands": []}
                 groups.append(current)
-            elif line and not line.startswith("#") and not line.startswith("!"):
+                group_map[name] = current
+        elif line and not line.startswith("#") and not line.startswith("!"):
+            if current is None:
+                current = group_map.get("")
                 if current is None:
                     current = {"name": "", "commands": []}
                     groups.append(current)
-                current["commands"].append(line.lower())
+                    group_map[""] = current
+            current["commands"].append(line.lower())
+    for group in groups:
+        group["commands"] = _dedupe_preserve_order(group["commands"])
     groups = [g for g in groups if g["commands"]]
     return groups if groups else None
 
@@ -346,12 +395,7 @@ def load_allowed_commands_grouped():
 def load_faq():
     """Read faq.yaml and return a list of {question, answer} dicts.
     Returns an empty list if the file doesn't exist or contains no valid entries."""
-    if not os.path.exists(FAQ_FILE):
-        return []
-    with open(FAQ_FILE) as f:
-        data = yaml.safe_load(f) or []
-    if not isinstance(data, list):
-        return []
+    data = _load_yaml_list_with_local(FAQ_FILE)
     result = []
     for item in data:
         if not isinstance(item, dict) or not item.get("question") or not item.get("answer"):
@@ -365,20 +409,15 @@ def load_faq():
     return result
 
 
-def load_all_faq():
+def load_all_faq(app_name="darklab shell", project_readme="https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell"):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
-    return [*(deepcopy(BUILTIN_FAQ)), *load_faq()]
+    return [*(deepcopy(_builtin_faq(app_name, project_readme))), *load_faq()]
 
 
 def load_welcome():
     """Read welcome.yaml and return startup blocks for the welcome typeout.
     Returns an empty list if the file is missing or empty, disabling the welcome animation."""
-    if not os.path.exists(WELCOME_FILE):
-        return []
-    with open(WELCOME_FILE) as f:
-        data = yaml.safe_load(f) or []
-    if not isinstance(data, list):
-        return []
+    data = _load_yaml_list_with_local(WELCOME_FILE)
     return [
         {
             "cmd": str(item.get("cmd", "")).strip(),
@@ -394,6 +433,10 @@ def load_welcome():
 def load_ascii_art():
     """Read ascii.txt and return the welcome banner art as plain text.
     Returns an empty string if the file is missing or empty."""
+    local_path = _local_overlay_path(ASCII_FILE)
+    if os.path.exists(local_path):
+        with open(local_path) as f:
+            return f.read().rstrip()
     if not os.path.exists(ASCII_FILE):
         return ""
     with open(ASCII_FILE) as f:
@@ -402,6 +445,10 @@ def load_ascii_art():
 
 def load_ascii_mobile_art():
     """Read ascii_mobile.txt and return the compact mobile banner art."""
+    local_path = _local_overlay_path(ASCII_MOBILE_FILE)
+    if os.path.exists(local_path):
+        with open(local_path) as f:
+            return f.read().rstrip()
     if not os.path.exists(ASCII_MOBILE_FILE):
         return ""
     with open(ASCII_MOBILE_FILE) as f:
@@ -410,40 +457,37 @@ def load_ascii_mobile_art():
 
 def load_welcome_hints():
     """Read app_hints.txt and return a list of app-usage hints."""
-    if not os.path.exists(APP_HINTS_FILE):
-        return []
     hints = []
-    with open(APP_HINTS_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                hints.append(line)
+    seen = set()
+    for raw_line in _load_text_lines(APP_HINTS_FILE):
+        line = raw_line.strip()
+        if line and not line.startswith("#") and line not in seen:
+            hints.append(line)
+            seen.add(line)
     return hints
 
 
 def load_mobile_welcome_hints():
     """Read app_hints_mobile.txt and return a list of mobile-specific hints."""
-    if not os.path.exists(APP_HINTS_MOBILE_FILE):
-        return []
     hints = []
-    with open(APP_HINTS_MOBILE_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                hints.append(line)
+    seen = set()
+    for raw_line in _load_text_lines(APP_HINTS_MOBILE_FILE):
+        line = raw_line.strip()
+        if line and not line.startswith("#") and line not in seen:
+            hints.append(line)
+            seen.add(line)
     return hints
 
 
 def load_autocomplete():
     """Read auto_complete.txt and return a list of suggestion strings."""
-    if not os.path.exists(AUTOCOMPLETE_FILE):
-        return []
     suggestions = []
-    with open(AUTOCOMPLETE_FILE) as f:
-        for line in f:
-            line = line.strip()
-            if line and not line.startswith("#"):
-                suggestions.append(line)
+    seen = set()
+    for raw_line in _load_text_lines(AUTOCOMPLETE_FILE):
+        line = raw_line.strip()
+        if line and not line.startswith("#") and line not in seen:
+            suggestions.append(line)
+            seen.add(line)
     return suggestions
 
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-shell.darklab.sh - Real-time bash command execution web app
+darklab shell - Real-time bash command execution web app
 Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
@@ -402,6 +402,8 @@ def index():
     current_theme = _current_theme_entry()
     return render_template(
         "index.html",
+        app_name=CFG["app_name"],
+        prompt_prefix=CFG["prompt_prefix"],
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
         theme_registry={"current": current_theme, "themes": THEME_REGISTRY},
@@ -415,6 +417,8 @@ def get_config():
     return jsonify({
         "version":               APP_VERSION,
         "app_name":              CFG["app_name"],
+        "prompt_prefix":         CFG["prompt_prefix"],
+        "project_readme":        CFG["project_readme"],
         "default_theme":         CFG["default_theme"],
         "motd":                  CFG["motd"],
         "recent_commands_limit": CFG["recent_commands_limit"],
@@ -458,7 +462,7 @@ def allowed_commands():
 @app.route("/faq")
 def faq():
     """Return built-in FAQ entries plus any custom faq.yaml entries."""
-    return jsonify({"items": load_all_faq()})
+    return jsonify({"items": load_all_faq(CFG["app_name"], CFG["project_readme"])})
 
 
 @app.route("/autocomplete")
@@ -921,5 +925,5 @@ def health():
 if __name__ == "__main__":
     # For local development only. In production, Gunicorn is used as the WSGI server
     # via the Dockerfile CMD. Run locally with: python3 app.py
-    print("shell.darklab.sh running at http://localhost:8888")
+    print("darklab shell running at http://localhost:8888")
     app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec B104

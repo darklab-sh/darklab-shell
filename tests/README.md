@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 478
+- `pytest`: 489
 - `vitest`: 246
 - `playwright`: 128
-- total: 852
+- total: 866
 
 ## Running The Suites
 
@@ -48,10 +48,10 @@ npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 Pytest lives in `tests/py/` and is organized by backend concern:
 
 - `test_validation.py` - command validation, shell operator blocking, path blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
-- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, template-backed permalink behavior for `/history/<run_id>` and `/share/<id>` when full-output artifacts exist, permalink line-number/timestamp toggle behavior, the theme registry route and current-theme selection including YAML-provided friendly labels, `group`/`sort` metadata, filename-based `default_theme` selection, the empty-registry baked-in-dark fallback, the fallback behavior when a configured or persisted theme name does not exist, and the trusted-proxy client-IP resolver / warning path; the vendor asset routes for fonts and `ansi_up` including copied-in/repo fallback serving and unknown-path rejection, and the backward-compatible `/history/<run_id>/full` alias
+- `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, template-backed permalink behavior for `/history/<run_id>` and `/share/<id>` when full-output artifacts exist, permalink line-number/timestamp toggle behavior, the theme registry route and current-theme selection including YAML-provided friendly labels, `group`/`sort` metadata, filename-based `default_theme` selection, the empty-registry baked-in-dark fallback, the fallback behavior when a configured or persisted theme name does not exist, `project_readme` exposure through `/config`, and the trusted-proxy client-IP resolver / warning path; the vendor asset routes for fonts and `ansi_up` including copied-in/repo fallback serving and unknown-path rejection, and the backward-compatible `/history/<run_id>/full` alias
 - `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
 - `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
-- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` built-ins-first ordering with appended custom FAQ entries and FAQ markup rendering, `load_config()` overlay handling for `config.local.yaml`, `load_ascii_art()`, `load_ascii_mobile_art()`, FAQ schema handling, theme-registry label fallback, `group`/`sort` metadata, unknown-key preservation/ignoring, malformed-YAML fallback, one-theme registry behavior, and module-level utility coverage
+- `test_backend_modules.py` - database initialization, legacy schema migration, run-output artifact capture helpers, loader/helpers including `load_all_faq()` built-ins-first ordering with appended custom FAQ entries, configurable README-link support, and FAQ markup rendering, `load_config()` overlay handling for `config.local.yaml`, sibling overlay handling for `allowed_commands.local.txt`, `auto_complete.local.txt`, `app_hints.local.txt`, `app_hints_mobile.local.txt`, `ascii.local.txt`, `ascii_mobile.local.txt`, `faq.local.yaml`, `welcome.local.yaml`, and theme overlays in `app/conf/themes/`, plus FAQ schema handling, theme-registry label fallback, `group`/`sort` metadata, unknown-key preservation/ignoring, malformed-YAML fallback, one-theme registry behavior, and module-level utility coverage
 - `test_logging.py` - structured logging, formatter output, and log-event assertions
 
 Notes:

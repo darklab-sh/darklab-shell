@@ -686,7 +686,7 @@ async function exportTabHtml(id) {
   }
 
   try {
-    const appName = APP_CONFIG.app_name || 'shell.darklab.sh';
+    const appName = APP_CONFIG.app_name || 'darklab shell';
     const exportedAt = new Date().toLocaleString();
 
     const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {

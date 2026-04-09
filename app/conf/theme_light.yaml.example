@@ -1,4 +1,4 @@
-# shell.darklab.sh — Theme Reference Template
+# darklab shell — Theme Reference Template
 # -------------------------------------------
 # Copy this file to app/conf/themes/<filename>.yaml to create a selectable
 # theme variant. The runtime selector ignores *.yaml.example files and only

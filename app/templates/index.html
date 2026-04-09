@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>shell.darklab.sh</title>
+<title>{{ app_name }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
@@ -15,7 +15,7 @@
 <body data-theme="{{ current_theme.name }}">
 
 <header>
-  <h1>shell.darklab.sh</h1>
+  <h1>{{ app_name }}</h1>
   <span class="version" id="version-label">real-time</span>
   <div class="header-btns" id="header-btns">
     <button id="hist-btn" title="Run history">⧖ history</button>
@@ -106,7 +106,7 @@
     <!-- panels injected here -->
   </div>
   <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
-    <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
+    <span class="prompt-prefix">{{ prompt_prefix }}</span>
     <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
       <span class="shell-prompt-text" id="shell-prompt-text"></span>
       <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
