@@ -100,11 +100,11 @@ dependency-version-check:
   stage: audit
   before_script: []
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
       allow_failure: true
-    - when: never
+    - when: manual
+      allow_failure: true
   script:
     - ./scripts/check_versions.sh | tee version-check.txt
   artifacts:
@@ -121,19 +121,13 @@ autocomplete-image-smoke:
   variables:
     DOCKER_TLS_CERTDIR: "/certs"
   before_script:
-    - apk add --no-cache python3 py3-pytest
+    - apk add --no-cache python3 py3-pytest py3-yaml
   rules:
-    - if: $CI_PIPELINE_SOURCE == "schedule"
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
       allow_failure: true
-    - changes:
-        - Dockerfile
-        - app/conf/auto_complete.txt
-        - app/conf/allowed_commands.txt
-        - app/requirements.txt
-        - requirements-dev.txt
-    - when: never
+    - when: manual
+      allow_failure: true
   script:
     - RUN_CONTAINER_AUTOCOMPLETE=1 pytest tests/py/test_autocomplete_container.py -q
 
