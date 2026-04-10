@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals on this branch:
 
-- `pytest`: 752
+- `pytest`: 760
 - `vitest`: 273
 - `playwright`: 135
-- total: 1,160
+- total: 1,168
 
 ## Running The Suites
 
@@ -47,7 +47,7 @@ npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 
 Pytest lives in `tests/py/` and is organized by backend concern:
 
-- `test_validation.py` - command validation, shell operator blocking, path blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
+- `test_validation.py` - command validation, shell operator blocking, path blocking, loopback address blocking, deny prefixes, command rewrites, and shared runtime-command availability helpers
 - `test_routes.py` - Flask integration coverage for all HTTP endpoints, session isolation, malformed requests, welcome/content loaders, canonical FAQ route behavior, shared missing-binary handling, template-backed permalink behavior for `/history/<run_id>` and `/share/<id>` when full-output artifacts exist, permalink line-number/timestamp toggle behavior, the theme registry route and current-theme selection including YAML-provided friendly labels, `group`/`sort` metadata, filename-based `default_theme` selection, the empty-registry baked-in-dark fallback, the fallback behavior when a configured or persisted theme name does not exist, `project_readme` exposure through `/config`, and the trusted-proxy client-IP resolver / warning path; the vendor asset routes for fonts and `ansi_up` including copied-in/repo fallback serving and unknown-path rejection, and the backward-compatible `/history/<run_id>/full` alias; the `/diag` IP-gated diagnostics route including 404 on empty/missing CIDRs, 404 when peer IP is not in range, 200 when allowed, response structure and all data sections, tool-availability verified via `shutil.which()`, `DIAG_VIEWED` info log and `DIAG_DENIED` warning log with `allowed_cidrs` field, HTML page content and `?format=json` content-type, and the explicit assertion that `X-Forwarded-For` cannot bypass the gate; the `diag_enabled` field in the `/config` response including `false` when CIDRs are empty, `true` when the peer IP is in range, `false` when not in range, and verification that `X-Forwarded-For` does not influence the result
 - `test_run_history_share.py` - run/history/share flows with SQLite persistence, including web-shell helper `/run` paths, constrained `man` rendering, shell-style helper output for `banner` / `date` / `hostname` / `uptime` / `limits` / `retention` / `status` / `which` / `type` / `who` / `tty` / `groups` / `last` / `version` / `faq` / `fortune` / `sudo` / `reboot` / exact `rm -fr /`, shared missing-binary handling, rewrite-order checks, run-output artifact cleanup on delete/clear, and their SSE/event behavior
 - `test_request_kill_and_commands.py` - kill handling, request helper edges, autocomplete/welcome loader edges, and backend command parsing/fake-command resolution for the expanded web-shell helper set including the newer shell-identity and session helpers
@@ -113,6 +113,8 @@ Spec files:
 Notes:
 
 - Playwright runs with `workers: 1` because `/run` is rate-limited per session and multiple workers can interfere with each other.
+- E2e specs use fake shell commands (`hostname`, `date`, `uptime`, etc.) rather than `curl http://localhost/...` because loopback addresses are blocked by `_LOOPBACK_RE` in `commands.py`. Fake commands bypass both the allowlist and the loopback block because `/run` resolves them before calling `is_command_allowed()`.
+- Tests that run two consecutive commands back-to-back include a `page.waitForTimeout(1200)` between them. Fake commands complete in ~5ms, so without the gap both runs land in the same 1-second rate-limit window. The 1.2-second pause ensures the second command opens a fresh window.
 - `runCommand()` in `tests/js/e2e/helpers.js` waits for the status pill to leave `RUNNING`. Reuse it for commands that should complete normally.
 - `openHistoryWithEntries()` retries the history drawer fetch because the database write can race the first fetch after an SSE exit event.
 - Clipboard tests override `navigator.clipboard.writeText()` in the page context. Use that approach when you need deterministic copy-failure or copy-success behavior.
@@ -125,7 +127,7 @@ Notes:
 - Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
 - When a branch depends on a browser API or network error, make the failure deterministic in the harness instead of relying on the environment.
 - For browser tests that interact with history, remember that the server is eventually consistent around run persistence. Retry or re-open the drawer when needed.
-- For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a per-run RFC 5737 test-net address in `X-Forwarded-For`.
+- For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a per-run RFC 5737 test-net address in `X-Forwarded-For`. Note: `X-Forwarded-For` is only honored by the rate limiter when the request's direct TCP peer is in `trusted_proxy_cidrs`; in the local Playwright test environment (no proxy configured) all requests bucket under `127.0.0.1` regardless of the header. Use `waitForTimeout(1200)` to separate consecutive commands in Playwright tests instead.
 - For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
 - When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
 

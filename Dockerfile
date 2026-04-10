@@ -10,7 +10,7 @@ RUN apt-get upgrade -y
 RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
                         mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl golang-go rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
-                        dnsenum libcap2-bin sudo gosu groff-base bsdextrautils
+                        dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables
 
 # Update the man page database
 RUN mandb -c
@@ -105,6 +105,8 @@ RUN mkdir -p /data && chown appuser:appuser /data && chmod 700 /data
 COPY entrypoint.sh /entrypoint.sh
 RUN chmod +x /entrypoint.sh
 
-EXPOSE 8888
+# Fallback if built directly with `docker build` outside of Compose (which reads .env).
+ARG APP_PORT=8888
+EXPOSE ${APP_PORT}
 
 ENTRYPOINT ["/entrypoint.sh"]

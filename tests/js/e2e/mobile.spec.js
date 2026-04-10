@@ -109,7 +109,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#mobile-edit-bar')).toBeVisible()
 
     const startScrollY = await page.evaluate(() => window.scrollY)
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=actions')
+    await runCommandMobile(page, 'hostname')
     await page.locator('.tab-panel.active [data-action="permalink"]').click()
     await expect(page.locator('.tab-panel.active [data-action="permalink"]')).not.toBeFocused()
     await page.locator('.tab-panel.active [data-action="copy"]').click()
@@ -132,9 +132,9 @@ test.describe('mobile menu', () => {
   })
 
   test('closing a mobile tab after output returns to the active tab without jumping the page', async ({ page }) => {
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=close-scroll')
+    await runCommandMobile(page, 'hostname')
     await page.locator('#new-tab-btn').click()
-    await page.locator('#mobile-cmd').fill('curl http://localhost:5001/health?mobile=close-scroll-2')
+    await page.locator('#mobile-cmd').fill('date')
     await page.locator('#mobile-run-btn').click()
     await page.locator('.tab').nth(1).locator('.tab-close').click()
 
@@ -145,7 +145,7 @@ test.describe('mobile menu', () => {
 
   test('closing a mobile tab does not leave the close button focused', async ({ page }) => {
     await page.locator('#new-tab-btn').click()
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=tab-close-focus')
+    await runCommandMobile(page, 'hostname')
 
     const closeBtn = page.locator('.tab').nth(1).locator('.tab-close')
     await closeBtn.click()
@@ -155,7 +155,7 @@ test.describe('mobile menu', () => {
   })
 
   test('closing the only mobile tab does not leave the reset close button focused', async ({ page }) => {
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=single-close-focus')
+    await runCommandMobile(page, 'hostname')
 
     const closeBtn = page.locator('.tab').first().locator('.tab-close')
     await closeBtn.click()
@@ -165,9 +165,10 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile tabs bar can overflow and scroll horizontally', async ({ page }) => {
+    const overflowCmds = ['hostname', 'date', 'uptime', 'whoami', 'version', 'fortune']
     for (let i = 0; i < 6; i++) {
       await page.locator('#new-tab-btn').click()
-      await runCommandMobile(page, `curl http://localhost:5001/health?mobile=overflow-${i}-${'x'.repeat(22)}`)
+      await runCommandMobile(page, overflowCmds[i])
     }
 
     const tabsBar = page.locator('.terminal-bar .tabs-bar')
@@ -244,10 +245,10 @@ test.describe('mobile menu', () => {
 
   test('mobile recent chips collapse to one row and overflow opens history', async ({ page }) => {
     const commands = [
-      'curl http://localhost:5001/health?mobile=1',
-      'curl http://localhost:5001/health?mobile=2',
-      'curl http://localhost:5001/health?mobile=3',
-      'curl http://localhost:5001/health?mobile=4',
+      'banner chip-overflow-test-1',
+      'banner chip-overflow-test-2',
+      'banner chip-overflow-test-3',
+      'banner chip-overflow-test-4',
     ]
 
     for (const [index, command] of commands.entries()) {
@@ -258,9 +259,9 @@ test.describe('mobile menu', () => {
     const chips = page.locator('#history-row .hist-chip')
     await expect(chips).toHaveCount(4)
     await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+1 more')
-    await expect(chips.nth(0)).toContainText('mobile=4')
-    await expect(chips.nth(1)).toContainText('mobile=3')
-    await expect(chips.nth(2)).toContainText('mobile=2')
+    await expect(chips.nth(0)).toContainText('test-4')
+    await expect(chips.nth(1)).toContainText('test-3')
+    await expect(chips.nth(2)).toContainText('test-2')
 
     await page.locator('#history-row .hist-chip-overflow').click()
     await expect(page.locator('#history-panel')).toHaveClass(/open/)
@@ -268,9 +269,9 @@ test.describe('mobile menu', () => {
 
   test('mobile recent chips can load a visible command back into the prompt', async ({ page }) => {
     const commands = [
-      'curl http://localhost:5001/health?mobile=1',
-      'curl http://localhost:5001/health?mobile=2',
-      'curl http://localhost:5001/health?mobile=3',
+      'hostname',
+      'date',
+      'uptime',
     ]
 
     for (const [index, command] of commands.entries()) {
@@ -288,8 +289,8 @@ test.describe('mobile menu', () => {
 
   test('mobile history restore works from a newly created session via the mobile menu', async ({ page }) => {
     const commands = [
-      'curl http://localhost:5001/health?mobile=history-1',
-      'curl http://localhost:5001/health?mobile=history-2',
+      'hostname',
+      'date',
     ]
 
     for (const command of commands) {
@@ -304,7 +305,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#history-panel')).toHaveClass(/open/)
 
     await page.locator('.history-entry').first().click()
-    await expect(page.locator('.tab-panel.active .output')).toContainText('mobile=history-2')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('date')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
@@ -320,7 +321,7 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile permalink copies via the fallback path when clipboard writeText is unavailable', async ({ page }) => {
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=share')
+    await runCommandMobile(page, 'hostname')
 
     await page.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {
@@ -395,7 +396,7 @@ test.describe('mobile menu', () => {
       document.body.classList.add('mobile-keyboard-open')
     })
 
-    const longCommand = `curl http://localhost:5001/health?${'x'.repeat(120)}`
+    const longCommand = `curl https://example.com/health?${'x'.repeat(120)}`
     await page.locator('#mobile-cmd').fill(longCommand)
 
     await expect(page.locator('#mobile-cmd')).toHaveValue(longCommand)

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
 
 test.describe('permalink / share', () => {
@@ -52,7 +52,7 @@ test.describe('permalink / share', () => {
     await page.goto(data.url)
 
     // The permalink page should display the command that was run
-    await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
+    await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
   })
 
   test('permalink page honors the theme cookie for the live view and export', async ({ page }) => {
@@ -70,7 +70,7 @@ test.describe('permalink / share', () => {
     await page.goto(data.url)
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
-    await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
+    await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
 
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
@@ -128,7 +128,7 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toContainText(CMD, { timeout: 10_000 })
 
     await page.goto(`${copied}?json`)
-    await expect(page.locator('body')).toContainText('"command":"curl http://localhost:5001/health"')
+    await expect(page.locator('body')).toContainText('"command":"hostname"')
     await expect(page.locator('body')).toContainText('"exit_code":0')
   })
 
@@ -251,8 +251,8 @@ test.describe('permalink / share', () => {
     for await (const chunk of txtStream) txtChunks.push(chunk)
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
-    expect(txt).toContain('anon@darklab:~$ curl http://localhost:5001/health')
-    expect(txt).toMatch(/1\s+anon@darklab:~\$ curl http:\/\/localhost:5001\/health/)
+    expect(txt).toContain('anon@darklab:~$ hostname')
+    expect(txt).toMatch(/1\s+anon@darklab:~\$ hostname/)
     expect(txt).toContain('+')
 
     const [htmlDownload] = await Promise.all([
@@ -265,7 +265,7 @@ test.describe('permalink / share', () => {
     const html = Buffer.concat(htmlChunks).toString('utf8')
 
     expect(html).toContain('prompt-prefix')
-    expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain('hostname')
     expect(html).toContain('perm-prefix')
     expect(html).toContain('+')
     expect(html).toContain('data:font/ttf;base64,')

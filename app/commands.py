@@ -344,6 +344,12 @@ SHELL_CHAIN_RE = re.compile(r'&&|\|\|?|;;?|`|\$\(|>>?|<')
 _PATH_DATA_RE = re.compile(r'(?<![\w:/])/data\b')
 _PATH_TMP_RE  = re.compile(r'(?<![\w:/])/tmp\b')
 
+# Loopback address detection — catches bare hostnames and addresses embedded in
+# URLs (e.g. "curl http://localhost:8888/diag" or "curl 127.0.0.1:8888/faq").
+# Word-boundary anchors prevent false positives on hostnames that contain these
+# strings as a substring.
+_LOOPBACK_RE = re.compile(r'\blocalhost\b|127\.0\.0\.1|\b0\.0\.0\.0\b|\[::1\]', re.IGNORECASE)
+
 
 def load_allowed_commands():
     """Read allowed_commands.txt and return (allow_prefixes, deny_prefixes).
@@ -617,6 +623,8 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
         return False, "Access to /data is not permitted."
     if _PATH_TMP_RE.search(command):
         return False, "Access to /tmp is not permitted."
+    if _LOOPBACK_RE.search(command):
+        return False, "Connections to the local host are not permitted."
 
     cmd_lower = command.strip().lower()
 

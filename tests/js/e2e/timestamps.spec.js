@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, makeTestIp } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 const TEST_IP = makeTestIp(67)
 
 test.describe('timestamp toggle', () => {

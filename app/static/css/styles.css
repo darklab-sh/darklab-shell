@@ -1740,12 +1740,12 @@ body.permalink-page .permalink-header-copy {
   min-width: 0;
 }
 body.permalink-page .permalink-title {
-  font-family: var(--font-display);
+  font-family: var(--font-mono);
   font-size: 20px;
   font-weight: 300;
   letter-spacing: 4px;
   color: var(--green);
-  text-shadow: 0 0 16px var(--green-glow);
+  text-shadow: 0 0 20px var(--green-glow);
 }
 body.permalink-page .permalink-meta,
 body.permalink-page .permalink-expiry {
@@ -1763,6 +1763,10 @@ body.permalink-page .permalink-actions {
   gap: 8px;
   flex-wrap: wrap;
   align-items: flex-start;
+}
+body.permalink-page .permalink-actions .term-action-btn:hover {
+  border-color: var(--green-dim);
+  color: var(--green);
 }
 body.permalink-page .permalink-output {
   flex: 1;

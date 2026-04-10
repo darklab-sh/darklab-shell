@@ -7,6 +7,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
 - [Configuration](#configuration)
+- [Operator Diagnostics](#operator-diagnostics)
 - [Development & Testing](#development--testing)
 - [Architecture & Docs](#architecture--decision-log)
 
@@ -47,6 +48,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Anonymous session tracking** — the client generates a UUID session ID once (`session.js`) and sends it on every API call via `X-Session-ID`; this keeps history/test data scoped to each browser/tab and allows the server tests to isolate rate-limit buckets
 - **Structured logging** — four log levels (ERROR / WARN / INFO / DEBUG) with structured key=value context on every event. Two output formats: human-readable `text` (default) and GELF 1.1 JSON for Graylog / GELF-compatible back-ends. Level and format are set in `config.yaml`
 - **FAQ modal** — the modal is now rendered from the backend FAQ dataset returned by `/faq`, so built-in help and custom `faq.yaml` entries share one source of truth. Allowed commands still appear grouped by category with clickable chips, and the retention/limits entry still shows live operator-configured values
+- **Operator diagnostics page** — an IP-gated `/diag` page gives operators a live summary of app health and usage without opening a shell session. See [Operator Diagnostics](#operator-diagnostics) for details
 
 ---
 
@@ -54,6 +56,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 
 ```
 .
+├── .env                        # Port and other environment defaults (edit here to change APP_PORT)
 ├── docker-compose.yml
 ├── Dockerfile
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
@@ -178,6 +181,14 @@ docker compose up --build
 
 Open [http://localhost:8888](http://localhost:8888).
 
+To run on a different port, set `APP_PORT` before building:
+
+```bash
+APP_PORT=9000 docker compose up --build
+```
+
+A `.env` file is included in the repo with the default `APP_PORT=8888`. To use a different port, edit that file — it takes precedence over the fallback defaults in `docker-compose.yml` and `Dockerfile`. The variable propagates to the Dockerfile `EXPOSE`, the gunicorn bind, the iptables rule, and the healthcheck automatically.
+
 All app files live in the `./app/` subdirectory and are mounted as a read-only volume. Different files have different reload behaviour:
 
 | File | When changes take effect |
@@ -205,7 +216,11 @@ works as the main server override file, `allowed_commands.local.txt` and
 docker compose restart
 ```
 
-A minimal standalone `docker-compose.yml` with no infrastructure-specific configuration is available in the `examples/` folder.
+A minimal standalone `docker-compose.yml` with no infrastructure-specific configuration is available in the `examples/` folder. Because Compose looks for `.env` in the same directory as the compose file, pass `--env-file` explicitly to pick up the root `.env`:
+
+```bash
+docker compose -f examples/docker-compose.standalone.yml --env-file .env up --build
+```
 
 #### Read-only filesystem
 
@@ -318,7 +333,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the direct TCP peer IP (`request.remote_addr`), not `X-Forwarded-For`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the direct TCP peer IP (`request.remote_addr`), not `X-Forwarded-For`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
@@ -504,6 +519,12 @@ Tool names and subcommand prefixes are matched **case-insensitively**. Flag name
 curl -o /dev/null -s -w "%{http_code}" https://darklab.sh
 wget -q -O /dev/null --server-response https://darklab.sh
 ```
+
+### Loopback Address Blocking
+
+Commands containing `localhost`, `127.0.0.1`, `0.0.0.0`, or `[::1]` anywhere in the command string are blocked at both the client and server, regardless of which tool is used or how the address appears in the URL. This prevents web shell users from reaching internal Flask endpoints directly (e.g. `curl http://localhost:8888/diag`). Word-boundary anchors mean external hostnames like `notlocalhost.com` are not affected.
+
+An additional OS-level guard is applied at startup: `entrypoint.sh` adds an iptables rule blocking the `scanner` user from making outbound TCP connections to the app port. This covers tools that might bypass command validation, such as scripting languages invoked through the shell.
 
 ### Shell Operator Blocking
 
@@ -902,6 +923,47 @@ docker compose logs -f
 
 ---
 
+## Operator Diagnostics
+
+The `/diag` endpoint provides a live operator view of the running instance without requiring a shell session. It is disabled by default and restricted to specific IP ranges so it is never exposed to end users.
+
+### Enabling access
+
+Add the IP addresses or CIDR ranges that should be allowed to reach the page to `config.yaml`:
+
+```yaml
+diagnostics_allowed_cidrs:
+  - "127.0.0.1/32"    # localhost curl
+  - "172.16.0.0/12"   # Docker bridge networks
+```
+
+Access is checked against the direct TCP peer IP (`request.remote_addr`) — `X-Forwarded-For` headers are ignored regardless of `trusted_proxy_cidrs`, so the gate cannot be bypassed by spoofing forwarded headers. The page returns 404 for all other requests. Denied access is logged as `DIAG_DENIED` with the peer IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
+
+When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop header and the mobile menu alongside the other toolbar buttons. It is hidden for all other visitors.
+
+### What the page shows
+
+| Section | Content |
+|---------|---------|
+| **App** | App version and configured name |
+| **Database** | Connection status (`online` / `error`), total run and snapshot counts |
+| **Redis** | Whether Redis is configured, and connection status when it is |
+| **Vendor Assets** | Whether `ansi_up.js` and the font files are served from the built-time vendor path or the repo fallback |
+| **Config** | All operational config values: rate limits, timeouts, output caps, retention, proxy CIDRs, log settings |
+| **Activity** | Run counts for today, last 7 days, this month, this year, and all-time, plus outcome breakdown (success / failed / incomplete by exit code) |
+| **Top Commands** | Top 10 commands by run frequency and top 5 longest individual runs |
+| **Tools** | Per-tool availability derived from the allowlist — which command roots are present on `$PATH` and which are missing |
+
+### JSON output
+
+Append `?format=json` to get the same data as a JSON object, suitable for scripting or monitoring integrations:
+
+```bash
+curl http://localhost:8888/diag?format=json
+```
+
+---
+
 ## API Endpoints
 
 | Method | Endpoint | Description |
@@ -924,6 +986,7 @@ docker compose logs -f
 | `POST` | `/kill` | Kills a running process by `run_id` |
 | `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
 | `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}` — 200 if healthy, 503 if degraded. `redis` is `null` when Redis is not configured |
+| `GET` | `/diag` | IP-gated operator diagnostics page — themed HTML summary of app health and usage stats. Returns 404 unless the direct TCP peer IP is in `diagnostics_allowed_cidrs`. Add `?format=json` for a JSON response |
 
 ---
 
@@ -939,7 +1002,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **752 pytest + 273 Vitest + 135 Playwright = 1,160 tests**.
+Current totals in this branch: **760 pytest + 273 Vitest + 135 Playwright = 1,168 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

@@ -306,6 +306,9 @@ document.addEventListener('keydown', e => {
       return;
     }
   }
+  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+    if (e.key !== 'Escape') return;
+  }
   if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
     const isCtrlC = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C');
     const isSpace = e.key === ' ' || e.code === 'Space';
@@ -456,6 +459,7 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
 });
 
 cmdInput.addEventListener('input', () => {
+  if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchInput === 'function') handleHistSearchInput(cmdInput.value);
     return;
@@ -467,6 +471,14 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
+  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+    if (e.key === 'Escape') {
+      closeFaq(); closeOptions(); closeThemeSelector();
+      refocusTerminalInput();
+      e.preventDefault();
+    }
+    return;
+  }
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
   }

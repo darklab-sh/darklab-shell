@@ -93,6 +93,43 @@ class TestPathBlocking:
         assert ok
 
 
+# ── Loopback address blocking ─────────────────────────────────────────────────
+
+class TestLoopbackBlocking:
+    def test_localhost_bare(self):
+        ok, _ = _check("curl localhost:8888/diag")
+        assert not ok
+
+    def test_localhost_url(self):
+        ok, _ = _check("curl http://localhost:8888/faq")
+        assert not ok
+
+    def test_loopback_ip_with_port(self):
+        ok, _ = _check("curl 127.0.0.1:8888/health")
+        assert not ok
+
+    def test_loopback_ip_url(self):
+        ok, _ = _check("curl http://127.0.0.1:8888/health")
+        assert not ok
+
+    def test_zero_addr(self):
+        ok, _ = _check("curl 0.0.0.0")
+        assert not ok
+
+    def test_ipv6_loopback(self):
+        ok, _ = _check("curl http://[::1]:8888/diag")
+        assert not ok
+
+    def test_nc_localhost(self):
+        ok, _ = _check("nc localhost 8888", allow=["nc"])
+        assert not ok
+
+    def test_no_false_positive_on_hostname(self):
+        # "notlocalhost.com" must not be caught by the \blocalhost\b boundary
+        ok, _ = _check("curl https://notlocalhost.com/page")
+        assert ok
+
+
 # ── Allowlist prefix matching ─────────────────────────────────────────────────
 
 class TestAllowlist:
@@ -218,7 +255,7 @@ class TestDenyPrefix:
 
     def test_deny_single_char_flag_unrelated_combined_allowed(self):
         # -zv does not contain -e or -c, should be allowed
-        ok, _ = _check("nc -zv 127.0.0.1 80", allow=["nc"], deny=["nc -e", "nc -c"])
+        ok, _ = _check("nc -zv example.com 80", allow=["nc"], deny=["nc -e", "nc -c"])
         assert ok
 
     def test_deny_single_char_does_not_affect_multi_char_matching(self):

@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 const TEST_IP = makeTestIp(42)
 
 test.describe('failure paths', () => {
@@ -108,7 +108,8 @@ test.describe('failure paths', () => {
     })
 
     await runCommand(page, CMD)
-    await runCommand(page, 'curl http://localhost:5001/config')
+    await page.waitForTimeout(1200)
+    await runCommand(page, 'date')
     await page.locator('#hist-btn').click()
     await page.locator('#history-list > *').first().waitFor({ state: 'visible' })
     await page.locator('#hist-clear-all-btn').click()

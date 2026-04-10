@@ -59,6 +59,12 @@ curl
 # Deny reading config/input from filesystem
 !curl -K
 !curl --config
+# Deny connections to the local app. URL patterns containing localhost/127.0.0.1
+# are blocked server-side in is_command_allowed() regardless of these entries;
+# these catch the same patterns client-side for immediate feedback.
+!curl localhost
+!curl 127.0.0.1
+!curl 0.0.0.0
 wget
 # Deny file write flags
 !wget -O
@@ -66,6 +72,10 @@ wget
 # Deny reading URL lists from filesystem
 !wget --input-file
 !wget -i
+# Deny connections to the local app (server-side blocked in commands.py; these catch it client-side)
+!wget localhost
+!wget 127.0.0.1
+!wget 0.0.0.0
 
 ## Network Reconnaissance
 dnsrecon

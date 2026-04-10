@@ -14,13 +14,16 @@ services:
       start_period: 5s
 
   shell.darklab.sh:
-    build: .
+    build:
+      context: .
+      args:
+        APP_PORT: ${APP_PORT:-8888}  # Fallback if .env is absent; .env takes precedence
     container_name: shell.darklab.sh
     init: true
     read_only: true
     restart: always
     expose:
-      - "8888"
+      - "${APP_PORT:-8888}"
     volumes:
       - ./app:/app:ro # Mount the app directory as read-only
       - ./data:/data  # Writable volume for persistent SQLite run history
@@ -31,6 +34,7 @@ services:
       - NET_ADMIN
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - APP_PORT=${APP_PORT:-8888}
       - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
       - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
       # Keep SSE connections alive through nginx-proxy for long-running commands
@@ -38,7 +42,7 @@ services:
       - PROXY_SEND_TIMEOUT=3600
       - PROXY_CONNECT_TIMEOUT=3600
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s
       timeout: 5s
       retries: 3

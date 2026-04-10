@@ -19,6 +19,17 @@ log = logging.getLogger("shell")
 
 assets_bp = Blueprint("assets", __name__)
 
+
+def _fmt_elapsed(seconds):
+    s = int(seconds or 0)
+    if s >= 3600:
+        h, m = s // 3600, (s % 3600) // 60
+        return f"{h}h {m}m" if m else f"{h}h"
+    if s >= 60:
+        m, r = s // 60, s % 60
+        return f"{m}m {r}s" if r else f"{m}m"
+    return f"{s}s"
+
 _ANSI_UP_PATH = Path("/usr/local/share/shell-assets/js/vendor/ansi_up.js")
 _ANSI_UP_FALLBACK = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
 _FONT_DIR = Path("/usr/local/share/shell-assets/fonts")
@@ -165,6 +176,67 @@ def diag():
         "ansi_up": "vendor" if _ANSI_UP_PATH.exists() else "fallback",
         "fonts":   "vendor" if _FONT_DIR.exists() and any(_FONT_DIR.iterdir()) else "fallback",
     }
+
+    # ── Usage stats ──────────────────────────────────────────────────────────
+    stats: dict = {"ok": False}
+    if db_info.get("ok"):
+        try:
+            with db_connect() as conn:
+                # Runs in each calendar/rolling window
+                windows = [
+                    ("today",      "start of day"),
+                    ("this week",  "-7 days"),
+                    ("this month", "start of month"),
+                    ("this year",  "start of year"),
+                ]
+                activity = []
+                for label, modifier in windows:
+                    n = conn.execute(
+                        "SELECT COUNT(*) FROM runs WHERE started >= datetime('now', ?)",
+                        (modifier,),
+                    ).fetchone()[0]
+                    activity.append({"label": label, "count": n})
+                stats["activity"] = activity
+
+                # Exit-code outcome breakdown
+                row = conn.execute(
+                    """SELECT
+                         SUM(CASE WHEN exit_code = 0                             THEN 1 ELSE 0 END),
+                         SUM(CASE WHEN exit_code IS NOT NULL AND exit_code != 0  THEN 1 ELSE 0 END),
+                         SUM(CASE WHEN exit_code IS NULL                         THEN 1 ELSE 0 END)
+                       FROM runs"""
+                ).fetchone()
+                stats["outcomes"] = {
+                    "success":    row[0] or 0,
+                    "failed":     row[1] or 0,
+                    "incomplete": row[2] or 0,
+                }
+
+                # Top 10 commands by run count
+                rows = conn.execute(
+                    "SELECT command, COUNT(*) AS n FROM runs"
+                    " GROUP BY command ORDER BY n DESC LIMIT 10"
+                ).fetchall()
+                stats["top_by_freq"] = [{"command": r[0], "count": r[1]} for r in rows]
+
+                # Top 5 longest individual runs
+                rows = conn.execute(
+                    """SELECT command,
+                              ROUND((julianday(finished) - julianday(started)) * 86400) AS elapsed_s
+                         FROM runs
+                        WHERE finished IS NOT NULL AND started IS NOT NULL
+                        ORDER BY elapsed_s DESC
+                        LIMIT 5"""
+                ).fetchall()
+                stats["top_by_duration"] = [
+                    {"command": r[0], "elapsed": _fmt_elapsed(r[1])}
+                    for r in rows
+                ]
+
+            stats["ok"] = True
+        except Exception as exc:
+            stats["error"] = str(exc)
+    result["stats"] = stats
 
     # ── Tools ─────────────────────────────────────────────────────────────────
     # Collect unique command roots from the allow list and probe each with which().

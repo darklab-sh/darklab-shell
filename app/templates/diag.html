@@ -22,13 +22,14 @@ body.diag-page::before { display: none; }
 
 .diag-main {
   display: grid;
-  /* 4 equal columns for the top cards; Config and Tools break out full-width */
+  /* 4 equal columns for the top cards; Stats/Config/Tools break out full-width */
   grid-template-columns: repeat(4, 1fr);
   grid-template-areas:
-    "app   db    db    redis"
-    "assets db   db    redis"
-    "cfg   cfg   cfg   cfg"
-    "tools tools tools tools";
+    "app   db    redis  assets"
+    "cfg   cfg   cfg    cfg"
+    "usage usage usage  usage"
+    "cmds  cmds  cmds   cmds"
+    "tools tools tools  tools";
   gap: 16px;
   padding: 24px 24px 40px;
   max-width: 1200px;
@@ -49,6 +50,8 @@ body.diag-page::before { display: none; }
 .diag-section.s-redis  { grid-area: redis; }
 .diag-section.s-assets { grid-area: assets; }
 .diag-section.s-config { grid-area: cfg; }
+.diag-section.s-usage  { grid-area: usage; }
+.diag-section.s-cmds   { grid-area: cmds; }
 .diag-section.s-tools  { grid-area: tools; }
 
 .diag-section-title {
@@ -168,19 +171,54 @@ body.diag-page::before { display: none; }
   padding: 12px 14px;
 }
 
+/* ── Commands split: two labelled columns ───────────────────────────────────── */
+.diag-cmd-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.diag-cmd-cols > * + * { border-left: 1px solid var(--border); }
+.diag-cmd-col-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--border);
+}
+.diag-cmd-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text) !important;
+  padding-right: 12px !important;
+}
+.diag-stat-val {
+  white-space: nowrap;
+  color: var(--muted) !important;
+  font-size: 12px !important;
+  width: 1% !important;
+  padding-left: 0 !important;
+}
+
 /* ── Responsive collapse ────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
   .diag-main {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      "app   redis"
-      "db    db"
-      "assets assets"
-      "cfg   cfg"
-      "tools tools";
+      "app    db"
+      "redis  assets"
+      "cfg    cfg"
+      "usage  usage"
+      "cmds   cmds"
+      "tools  tools";
   }
   .diag-config-grid { grid-template-columns: 1fr; }
   .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+  .diag-cmd-cols { grid-template-columns: 1fr; }
+  .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--border); }
 }
 </style>
 </head>
@@ -192,7 +230,7 @@ body.diag-page::before { display: none; }
     <span class="permalink-meta">OPERATOR DIAGNOSTICS</span>
   </div>
   <div class="permalink-actions">
-    <a href="/" class="action-btn">← shell</a>
+    <a href="/" class="term-action-btn">← shell</a>
   </div>
 </header>
 
@@ -215,7 +253,7 @@ body.diag-page::before { display: none; }
         <td>status</td>
         <td>
           <span class="diag-dot {{ 'ok' if data.db.ok else 'fail' }}"></span>
-          <span class="{{ 'diag-ok' if data.db.ok else 'diag-fail' }}">{{ 'ok' if data.db.ok else 'error' }}</span>
+          <span class="{{ 'diag-ok' if data.db.ok else 'diag-fail' }}">{{ 'online' if data.db.ok else 'error' }}</span>
         </td>
       </tr>
       {% if data.db.ok %}
@@ -246,7 +284,7 @@ body.diag-page::before { display: none; }
         <td>status</td>
         <td>
           <span class="diag-dot {{ 'ok' if data.redis.ok else 'fail' }}"></span>
-          <span class="{{ 'diag-ok' if data.redis.ok else 'diag-fail' }}">{{ 'ok' if data.redis.ok else 'error' }}</span>
+          <span class="{{ 'diag-ok' if data.redis.ok else 'diag-fail' }}">{{ 'online' if data.redis.ok else 'error' }}</span>
         </td>
       </tr>
       {% if not data.redis.ok and data.redis.error %}
@@ -313,6 +351,72 @@ body.diag-page::before { display: none; }
       </table>
     </div>
   </section>
+
+  {# ── Activity ──────────────────────────────────────────────────────────── #}
+  {% if data.stats.ok %}
+  <section class="diag-section s-usage">
+    <div class="diag-section-title">Activity</div>
+    <div class="diag-config-grid">
+      <table class="diag-table">
+        {% for item in data.stats.activity %}
+        <tr><td>{{ item.label }}</td><td>{{ item.count }}</td></tr>
+        {% endfor %}
+        <tr><td>all-time</td><td>{{ data.db.runs }}</td></tr>
+      </table>
+      <table class="diag-table">
+        <tr>
+          <td>success</td>
+          <td class="{{ 'diag-ok' if data.stats.outcomes.success else '' }}">{{ data.stats.outcomes.success }}</td>
+        </tr>
+        <tr>
+          <td>failed</td>
+          <td class="{{ 'diag-warn' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
+        </tr>
+        <tr>
+          <td>incomplete</td>
+          <td>{{ data.stats.outcomes.incomplete }}</td>
+        </tr>
+      </table>
+    </div>
+  </section>
+
+  {# ── Top Commands ──────────────────────────────────────────────────────── #}
+  <section class="diag-section s-cmds">
+    <div class="diag-section-title">Top Commands</div>
+    <div class="diag-cmd-cols">
+      <div>
+        <div class="diag-cmd-col-label">by frequency</div>
+        {% if data.stats.top_by_freq %}
+        <table class="diag-table">
+          {% for row in data.stats.top_by_freq %}
+          <tr>
+            <td class="diag-cmd-cell" title="{{ row.command | e }}">{{ row.command | truncate(48, killwords=True, end='…') }}</td>
+            <td class="diag-stat-val">× {{ row.count }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div class="diag-empty">No runs recorded.</div>
+        {% endif %}
+      </div>
+      <div>
+        <div class="diag-cmd-col-label">longest runs</div>
+        {% if data.stats.top_by_duration %}
+        <table class="diag-table">
+          {% for row in data.stats.top_by_duration %}
+          <tr>
+            <td class="diag-cmd-cell" title="{{ row.command | e }}">{{ row.command | truncate(48, killwords=True, end='…') }}</td>
+            <td class="diag-stat-val">{{ row.elapsed }}</td>
+          </tr>
+          {% endfor %}
+        </table>
+        {% else %}
+        <div class="diag-empty">No completed runs.</div>
+        {% endif %}
+      </div>
+    </div>
+  </section>
+  {% endif %}
 
   {# ── Tools ─────────────────────────────────────────────────────────────── #}
   <section class="diag-section s-tools">
