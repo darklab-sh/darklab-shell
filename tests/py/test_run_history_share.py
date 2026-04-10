@@ -85,12 +85,12 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", "world\n", ""])
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("echo hello", "rewritten for safety")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("echo hello", "rewritten for safety")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
@@ -109,8 +109,8 @@ class TestRunStreaming:
     def test_run_returns_500_when_spawn_fails(self):
         client = get_client()
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", side_effect=OSError("boom")):
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("boom")):
             resp = client.post("/run", json={"command": "echo hi"})
 
         assert resp.status_code == 500
@@ -123,15 +123,15 @@ class TestRunStreaming:
         fake_proc = _FakeProc(lines=[""])
 
         # First select() timeout => heartbeat, second => EOF break
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([], [], []),                  # heartbeat branch
                  ([fake_proc.stdout], [], []),  # then EOF
              ]), \
-             mock.patch("app.CFG", {**shell_app.CFG, "heartbeat_interval_seconds": 0}):
+             mock.patch.dict("config.CFG", {"heartbeat_interval_seconds": 0}):
             resp = client.post("/run", json={"command": "sleep 1"})
             body = resp.get_data(as_text=True)
 
@@ -144,11 +144,11 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]):
@@ -177,14 +177,14 @@ class TestRunStreaming:
             def fromisoformat(value):
                 return datetime.fromisoformat(value)
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.datetime", _FakeDateTime), \
-             mock.patch("app.os.getpgid", return_value=4321), \
-             mock.patch("app.os.killpg") as killpg, \
-             mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 1}):
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.datetime", _FakeDateTime), \
+             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
+             mock.patch("blueprints.run.os.killpg") as killpg, \
+             mock.patch.dict("config.CFG", {"command_timeout_seconds": 1}):
             resp = client.post("/run", json={"command": "sleep forever"})
             body = resp.get_data(as_text=True)
 
@@ -198,15 +198,15 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]), \
-             mock.patch("app.db_connect", side_effect=Exception("db write failed")):
+             mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
             resp = client.post("/run", json={"command": "echo saved"})
             body = resp.get_data(as_text=True)
 
@@ -726,10 +726,10 @@ class TestRunStreaming:
     def test_run_reports_missing_allowlisted_command_without_spawning(self):
         client = get_client()
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("app.subprocess.Popen") as popen:
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
             body = resp.get_data(as_text=True)
 
@@ -747,10 +747,10 @@ class TestRunStreaming:
         client = get_client()
         client.environ_base["HTTP_X_FORWARDED_FOR"] = "2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa"
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
-             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("app.subprocess.Popen") as popen:
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
 

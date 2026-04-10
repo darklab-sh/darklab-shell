@@ -139,7 +139,8 @@ A web-based shell for running network diagnostics and vulnerability scans agains
             ├── history.js      # Command history chips and drawer (with starring)
             ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
             ├── runner.js       # Command execution, SSE stream, kill, stall detection
-            ├── app.js          # Initialization and event wiring (loads last)
+            ├── app.js          # Shared UI helpers, overlays, and mobile-layout glue
+            ├── controller.js   # Initialization and event wiring (loads after app.js)
             └── vendor/
                 └── ansi_up.js  # ANSI-to-HTML library — committed browser-global build copied into
                                 #   /usr/local/share/shell-assets for the image; repo copy remains the
@@ -351,7 +352,7 @@ If you run this repo in GitLab CI, the `dependency-version-check` job in `.gitla
 - `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables and a theme registry
 - `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell and permalink pages share one theme source of truth
 - `app/templates/theme_vars_script.html` exposes the same resolved values plus the full theme registry to the browser-side runtime selector and export helpers
-- `app/static/js/app.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
+- `app/static/js/app.js` exposes the theme helpers, and `app/static/js/controller.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
 - `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
 - `app/app.py` also exposes `/themes` for clients that want to inspect the available registry
 - `app/app.py` also exposes `project_readme` through `/config` so the FAQ and synthetic README links can point at a project-specific URL
@@ -916,7 +917,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **728 pytest + 247 Vitest + 128 Playwright = 1,103 tests**.
+Current totals in this branch: **716 pytest + 248 Vitest + 128 Playwright = 1,092 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

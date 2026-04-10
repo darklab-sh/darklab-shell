@@ -329,6 +329,7 @@ async function loadAppFns({
   const fns = fromDomScripts([
     'app/static/js/output.js',
     'app/static/js/app.js',
+    'app/static/js/controller.js',
   ], {
     document,
     localStorage: storage,

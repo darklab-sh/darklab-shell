@@ -24,7 +24,7 @@ import unittest.mock as mock
 
 import app as shell_app
 import database as db_module
-from database import DB_PATH, db_init
+from database import DB_PATH, db_connect, db_init
 from logging_setup import GELFFormatter, _TextFormatter, _extra_fields, configure_logging
 
 
@@ -500,7 +500,7 @@ class TestHealthFailEvents:
     def test_db_fail_emits_error(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_err:
-            with mock.patch("app.db_connect", side_effect=Exception("db down")):
+            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
                 client.get("/health")
         db_fail = [c for c in mock_err.call_args_list if c[0][0] == "HEALTH_DB_FAIL"]
         assert len(db_fail) == 1
@@ -510,7 +510,7 @@ class TestHealthFailEvents:
         fake_redis = mock.MagicMock()
         fake_redis.ping.side_effect = Exception("redis down")
         with mock.patch.object(shell_app.log, "error") as mock_err:
-            with mock.patch("app.redis_client", fake_redis):
+            with mock.patch("blueprints.assets.redis_client", fake_redis):
                 client.get("/health")
         redis_fail = [c for c in mock_err.call_args_list if c[0][0] == "HEALTH_REDIS_FAIL"]
         assert len(redis_fail) == 1
@@ -617,11 +617,11 @@ class TestRunLifecycleEvents:
         fake_proc = _FakeProc(lines=["hello\n", ""])
 
         with mock.patch.object(shell_app.log, "info") as mock_info, \
-             mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]):
@@ -636,11 +636,11 @@ class TestRunLifecycleEvents:
         fake_proc = _FakeProc(lines=["hello\n", ""], returncode=7)
 
         with mock.patch.object(shell_app.log, "info") as mock_info, \
-             mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]):
@@ -654,9 +654,9 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "info") as mock_info, \
-             mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", return_value=4321), \
-             mock.patch("app.os.killpg"):
+             mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
+             mock.patch("blueprints.run.os.killpg"):
             resp = client.post("/kill", json={"run_id": "run-123"})
 
         assert resp.status_code == 200
@@ -667,7 +667,7 @@ class TestRunLifecycleEvents:
         client = get_client()
 
         with mock.patch.object(shell_app.log, "debug") as mock_debug, \
-             mock.patch("app.pid_pop", return_value=None):
+             mock.patch("blueprints.run.pid_pop", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -681,13 +681,13 @@ class TestRunFailureEvents:
         fake_proc = _FakeProc(lines=["still running\n"], returncode=-15)
 
         with mock.patch.object(shell_app.log, "warning") as mock_warn, \
-             mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.os.getpgid", return_value=4321), \
-             mock.patch("app.os.killpg"), \
-             mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": -1}):
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
+             mock.patch("blueprints.run.os.killpg"), \
+             mock.patch.dict("config.CFG", {"command_timeout_seconds": -1}):
             resp = client.post("/run", json={"command": "sleep forever"})
             _ = resp.get_data(as_text=True)
 
@@ -699,15 +699,15 @@ class TestRunFailureEvents:
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
         with mock.patch.object(shell_app.log, "error") as mock_error, \
-             mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]), \
-             mock.patch("app.db_connect", side_effect=Exception("db write failed")):
+             mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
             resp = client.post("/run", json={"command": "echo saved"})
             _ = resp.get_data(as_text=True)
 
@@ -719,11 +719,11 @@ class TestRunFailureEvents:
         fake_proc = _FakeProc(lines=["hello\n"])
 
         with mock.patch.object(shell_app.log, "error") as mock_error, \
-             mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=RuntimeError("stream exploded")):
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=RuntimeError("stream exploded")):
             resp = client.post("/run", json={"command": "echo boom"})
             _ = resp.get_data(as_text=True)
 
@@ -945,7 +945,7 @@ class TestHealthStatusEvents:
     def test_health_ok_not_emitted_when_db_fails(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "debug") as mock_debug:
-            with mock.patch("app.db_connect", side_effect=Exception("db down")):
+            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
                 client.get("/health")
         ok_calls = [c for c in mock_debug.call_args_list if c[0][0] == "HEALTH_OK"]
         assert len(ok_calls) == 0
@@ -953,7 +953,7 @@ class TestHealthStatusEvents:
     def test_health_degraded_emits_warning_when_db_fails(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("app.db_connect", side_effect=Exception("db down")):
+            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
                 client.get("/health")
         degraded = [c for c in mock_warn.call_args_list if c[0][0] == "HEALTH_DEGRADED"]
         assert len(degraded) == 1
@@ -961,7 +961,7 @@ class TestHealthStatusEvents:
     def test_health_degraded_extra_has_db_false(self):
         client = get_client()
         with mock.patch.object(shell_app.log, "warning") as mock_warn:
-            with mock.patch("app.db_connect", side_effect=Exception("db down")):
+            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
                 client.get("/health")
         call = next(c for c in mock_warn.call_args_list if c[0][0] == "HEALTH_DEGRADED")
         assert call.kwargs["extra"]["db"] is False
@@ -974,7 +974,7 @@ class TestKillFailedEvent:
 
     def test_kill_failed_emits_warning_on_os_error(self):
         client = get_client()
-        with mock.patch("app.pid_pop", return_value=99999):
+        with mock.patch("blueprints.run.pid_pop", return_value=99999):
             with mock.patch("os.getpgid", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "fake-run-id"})
@@ -983,7 +983,7 @@ class TestKillFailedEvent:
 
     def test_kill_failed_extra_has_run_id(self):
         client = get_client()
-        with mock.patch("app.pid_pop", return_value=99999):
+        with mock.patch("blueprints.run.pid_pop", return_value=99999):
             with mock.patch("os.getpgid", side_effect=ProcessLookupError("no such process")):
                 with mock.patch.object(shell_app.log, "warning") as mock_warn:
                     client.post("/kill", json={"run_id": "test-run-xyz"})
@@ -1042,7 +1042,7 @@ class TestRunViewedEvent:
     """RUN_VIEWED is emitted at INFO when a run permalink is retrieved."""
 
     def _insert_run(self, run_id, command):
-        with shell_app.db_connect() as conn:
+        with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1051,7 +1051,7 @@ class TestRunViewedEvent:
             conn.commit()
 
     def _delete_run(self, run_id):
-        with shell_app.db_connect() as conn:
+        with db_connect() as conn:
             conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
             conn.commit()
 
@@ -1101,7 +1101,7 @@ class TestHistoryDeletedEvent:
     """HISTORY_DELETED is emitted at INFO when a run is deleted from history."""
 
     def _insert_run(self, run_id, session_id="hd-session"):
-        with shell_app.db_connect() as conn:
+        with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1133,7 +1133,7 @@ class TestHistoryDeletedEvent:
         deleted = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_DELETED"]
         assert len(deleted) == 0
         # clean up
-        with shell_app.db_connect() as conn:
+        with db_connect() as conn:
             conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
             conn.commit()
 
@@ -1152,7 +1152,7 @@ class TestHistoryClearedEvent:
     def test_history_cleared_extra_has_count(self):
         # Insert two runs for this session then clear
         session = "hc-count-session"
-        with shell_app.db_connect() as conn:
+        with db_connect() as conn:
             for i in range(2):
                 conn.execute(
                     "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
@@ -1211,7 +1211,7 @@ class TestNotFoundEvents:
 
     def test_run_not_found_not_emitted_when_run_exists(self):
         run_id = "pnf-test-run"
-        with shell_app.db_connect() as conn:
+        with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -1225,7 +1225,7 @@ class TestNotFoundEvents:
             calls = [c for c in mock_warn.call_args_list if c[0][0] == "RUN_NOT_FOUND"]
             assert len(calls) == 0
         finally:
-            with shell_app.db_connect() as conn:
+            with db_connect() as conn:
                 conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
                 conn.commit()
 
@@ -1273,8 +1273,8 @@ class TestRunSpawnErrorEvent:
     def test_spawn_error_returns_500(self):
         client = get_client()
         with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-            with mock.patch("app.runtime_missing_command_name", return_value=None):
-                with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+            with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
+                with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                     resp = self._post_run(client, "ping 8.8.8.8")
         assert resp.status_code == 500
 
@@ -1282,8 +1282,8 @@ class TestRunSpawnErrorEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("app.runtime_missing_command_name", return_value=None):
-                    with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
+                    with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                         self._post_run(client, "ping 8.8.8.8")
         calls = [c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR"]
         assert len(calls) == 1
@@ -1292,8 +1292,8 @@ class TestRunSpawnErrorEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("app.runtime_missing_command_name", return_value=None):
-                    with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
+                    with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                         self._post_run(client, "ping 8.8.8.8")
         call = next(c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR")
         assert "ip" in call.kwargs["extra"]
@@ -1302,8 +1302,8 @@ class TestRunSpawnErrorEvent:
         client = get_client()
         with mock.patch.object(shell_app.log, "error") as mock_error:
             with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
-                with mock.patch("app.runtime_missing_command_name", return_value=None):
-                    with mock.patch("app.subprocess.Popen", side_effect=OSError("spawn failed")):
+                with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None):
+                    with mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("spawn failed")):
                         self._post_run(client, "ping 8.8.8.8")
         call = next(c for c in mock_error.call_args_list if c[0][0] == "RUN_SPAWN_ERROR")
         assert call.kwargs["extra"]["cmd"] == "ping 8.8.8.8"

@@ -68,7 +68,7 @@ class TestKillRoute:
     def test_kill_returns_404_when_run_missing(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=None):
+        with mock.patch("blueprints.run.pid_pop", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -78,9 +78,9 @@ class TestKillRoute:
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", return_value=1234), \
-             mock.patch("app.os.killpg") as killpg:
+        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.os.getpgid", return_value=1234), \
+             mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-123"})
 
         assert resp.status_code == 200
@@ -91,8 +91,8 @@ class TestKillRoute:
     def test_kill_still_returns_true_when_process_lookup_fails(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", side_effect=ProcessLookupError):
+        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.os.getpgid", side_effect=ProcessLookupError):
             resp = client.post("/kill", json={"run_id": "run-404"})
 
         assert resp.status_code == 200
@@ -102,10 +102,10 @@ class TestKillRoute:
     def test_kill_uses_scanner_sudo_path_when_configured(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
-             mock.patch("app.subprocess.run") as run_cmd, \
-             mock.patch("app.os.killpg") as killpg:
+        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.subprocess.run") as run_cmd, \
+             mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-scan"})
 
         assert resp.status_code == 200

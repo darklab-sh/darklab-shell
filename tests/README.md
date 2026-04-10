@@ -58,7 +58,7 @@ Pytest lives in `tests/py/` and is organized by backend concern:
 Notes:
 
 - The pytest helpers isolate `X-Session-ID` and `X-Forwarded-For` where needed so rate limiting and history data do not bleed across tests.
-- Some tests patch `commands.load_allowed_commands`, while route tests patch the `app` namespace. Patch the name where the code resolves it, not necessarily where the function was defined.
+- Route test patches now target blueprint modules: use `"blueprints.run.X"` for execution-route helpers, `"blueprints.content.X"` for content-route helpers, and `"blueprints.assets.X"` for asset/health-route helpers. `mock.patch("app.CFG", ...)` has been replaced with `mock.patch.dict("config.CFG", {...})` throughout — this mutates the shared dict in place so all blueprint modules that reference `config.CFG` see the change.
 - The backend tests are designed to run without Docker. Redis is mocked or intentionally absent where appropriate.
 
 ### Vitest
@@ -75,7 +75,7 @@ Files and focus:
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, currentRunStartIndex alignment when old raw lines are pruned from the front, refocus behavior after copy/save/html export actions, clearing un-ran composer input, and the export helper’s injected theme-vars plumbing
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, featured-sample interaction behavior, and mobile banner loading
-- `app.test.js` - bootstrap wiring, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, theme selector modal preview-card population and switching, group-section rendering, filename-based startup resolution plus fallback handling when a saved theme or configured default theme is missing, single-theme registry rendering, modal Escape-close behavior for the theme picker, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, and the shared mobile focus/blur helpers
+- `app.test.js` - bootstrap wiring across `app.js` and `controller.js`, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, theme selector modal preview-card population and switching, group-section rendering, filename-based startup resolution plus fallback handling when a saved theme or configured default theme is missing, single-theme registry rendering, modal Escape-close behavior for the theme picker, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, and the shared mobile focus/blur helpers
 - `search.test.js` - search helper boundaries and no-op behavior
 - `output.test.js` - output rendering, batched live flushing, shared timestamp/line-number prefix support, welcome-prefix exclusion, no-output edge cases, and self-contained HTML export font embedding
 

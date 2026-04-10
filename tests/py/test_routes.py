@@ -12,6 +12,8 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
+import blueprints.assets as shell_assets
+import config
 from database import DB_PATH
 
 
@@ -71,7 +73,7 @@ class TestHealthRoute:
 
     def test_status_degraded_when_db_fails(self):
         client = get_client()
-        with mock.patch("app.db_connect", side_effect=Exception("db error")):
+        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
             resp = client.get("/health")
         assert resp.status_code == 503
         data = json.loads(resp.data)
@@ -82,7 +84,7 @@ class TestHealthRoute:
         client = get_client()
         fake_redis = mock.MagicMock()
         fake_redis.ping.return_value = True
-        with mock.patch("app.redis_client", fake_redis):
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
             resp = client.get("/health")
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -93,7 +95,7 @@ class TestHealthRoute:
         client = get_client()
         fake_redis = mock.MagicMock()
         fake_redis.ping.side_effect = Exception("redis down")
-        with mock.patch("app.redis_client", fake_redis):
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
             resp = client.get("/health")
         assert resp.status_code == 503
         data = json.loads(resp.data)
@@ -146,19 +148,19 @@ class TestConfigRoute:
 
     def test_command_timeout_reflects_cfg(self):
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 300}):
+        with mock.patch.dict("config.CFG", {"command_timeout_seconds": 300}):
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 300
 
     def test_prompt_prefix_reflects_cfg(self):
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "prompt_prefix": "ops@darklab:~$"}):
+        with mock.patch.dict("config.CFG", {"prompt_prefix": "ops@darklab:~$"}):
             data = json.loads(client.get("/config").data)
         assert data["prompt_prefix"] == "ops@darklab:~$"
 
     def test_project_readme_reflects_cfg(self):
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "project_readme": "https://example.invalid/README.md"}):
+        with mock.patch.dict("config.CFG", {"project_readme": "https://example.invalid/README.md"}):
             data = json.loads(client.get("/config").data)
         assert data["project_readme"] == "https://example.invalid/README.md"
 
@@ -176,7 +178,7 @@ class TestConfigRoute:
             "welcome_hint_interval_ms": 3000,
             "welcome_hint_rotations": 1,
         }
-        with mock.patch("app.CFG", {**shell_app.CFG, **overrides}):
+        with mock.patch.dict("config.CFG", overrides):
             data = json.loads(client.get("/config").data)
         for key, val in overrides.items():
             assert data[key] == val, f"{key}: expected {val}, got {data[key]}"
@@ -184,7 +186,7 @@ class TestConfigRoute:
     def test_command_timeout_defaults_to_one_hour(self):
         # Default config keeps long-running commands bounded to an hour
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 3600}):
+        with mock.patch.dict("config.CFG", {"command_timeout_seconds": 3600}):
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 3600
 
@@ -231,7 +233,7 @@ class TestThemesRoute:
 
     def test_default_theme_is_exposed_as_filename(self):
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "default_theme": "darklab_obsidian.yaml"}):
+        with mock.patch.dict("config.CFG", {"default_theme": "darklab_obsidian.yaml"}):
             data = json.loads(client.get("/config").data)
         assert data["default_theme"] == "darklab_obsidian.yaml"
 
@@ -254,9 +256,7 @@ class TestThemesRoute:
 
     def test_empty_registry_falls_back_to_built_in_dark_theme(self, monkeypatch):
         client = get_client(use_forwarded_for=False)
-        monkeypatch.setattr(shell_app, "CFG", {**shell_app.CFG, "default_theme": "theme_missing.yaml"})
-        monkeypatch.setattr(shell_app, "THEME_REGISTRY", [])
-        monkeypatch.setattr(shell_app, "THEME_REGISTRY_MAP", {})
+        monkeypatch.setitem(config.CFG, "default_theme", "theme_missing.yaml")
         monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY_MAP", {})
         monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY", [])
 
@@ -280,8 +280,8 @@ class TestVendorAssets:
         build_asset.write_text("build ansi_up")
         fallback_asset.write_text("fallback ansi_up")
 
-        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", build_asset)
-        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", build_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
 
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
@@ -294,8 +294,8 @@ class TestVendorAssets:
         fallback_asset.parent.mkdir(parents=True)
         fallback_asset.write_text("fallback ansi_up")
 
-        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", missing_build_asset)
-        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", missing_build_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
 
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
@@ -313,14 +313,14 @@ class TestVendorAssets:
         build_font.write_bytes(b"build font bytes")
         fallback_font.write_bytes(b"fallback font bytes")
 
-        monkeypatch.setattr(shell_app, "_FONT_DIR", build_dir)
-        monkeypatch.setattr(shell_app, "_FONT_FALLBACK_DIR", fallback_dir)
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", build_dir)
+        monkeypatch.setattr(shell_assets, "_FONT_FALLBACK_DIR", fallback_dir)
 
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
         assert resp.data == b"build font bytes"
 
-        monkeypatch.setattr(shell_app, "_FONT_DIR", tmp_path / "missing-fonts")
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing-fonts")
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
         assert resp.data == b"fallback font bytes"
@@ -351,14 +351,14 @@ class TestAllowedCommandsRoute:
     def test_unrestricted_when_no_file(self):
         client = get_client()
         # Patch in app's namespace — the route calls load_allowed_commands() directly
-        with mock.patch("app.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("blueprints.content.load_allowed_commands", return_value=(None, [])):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is False
 
     def test_restricted_when_file_present(self):
         client = get_client()
-        with mock.patch("app.load_allowed_commands", return_value=(["ping", "nmap"], [])):
-            with mock.patch("app.load_allowed_commands_grouped", return_value=[]):
+        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "nmap"], [])):
+            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=[]):
                 data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert "ping" in data["commands"]
@@ -366,8 +366,8 @@ class TestAllowedCommandsRoute:
     def test_returns_grouped_commands_when_restricted(self):
         client = get_client()
         groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
-        with mock.patch("app.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
-            with mock.patch("app.load_allowed_commands_grouped", return_value=groups):
+        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
+            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=groups):
                 data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert data["groups"] == groups
@@ -491,10 +491,10 @@ class TestRunRoute:
 
     def test_missing_allowlisted_command_returns_synthetic_run(self):
         client = get_client()
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("app.subprocess.Popen") as popen:
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -571,7 +571,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            with mock.patch("app.CFG", {**shell_app.CFG, "history_panel_limit": 2}):
+            with mock.patch.dict("config.CFG", {"history_panel_limit": 2}):
                 resp = client.get("/history", headers={"X-Session-ID": session})
             data = json.loads(resp.data)
             commands = [r["command"] for r in data["runs"]]
@@ -838,7 +838,7 @@ class TestWelcomeRoute:
     def test_returns_cmd_and_out_fields_when_configured(self):
         client = get_client()
         mock_blocks = [{"cmd": "ping google.com", "out": "64 bytes"}]
-        with mock.patch("app.load_welcome", return_value=mock_blocks):
+        with mock.patch("blueprints.content.load_welcome", return_value=mock_blocks):
             data = json.loads(client.get("/welcome").data)
         assert len(data) == 1
         assert data[0]["cmd"] == "ping google.com"
@@ -846,7 +846,7 @@ class TestWelcomeRoute:
 
     def test_returns_empty_list_when_no_welcome_file(self):
         client = get_client()
-        with mock.patch("app.load_welcome", return_value=[]):
+        with mock.patch("blueprints.content.load_welcome", return_value=[]):
             data = json.loads(client.get("/welcome").data)
         assert data == []
 
@@ -867,7 +867,7 @@ class TestAutocompleteRoute:
 
     def test_returns_configured_suggestions(self):
         client = get_client()
-        with mock.patch("app.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
+        with mock.patch("blueprints.content.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
             data = json.loads(client.get("/autocomplete").data)
         assert "nmap -sV" in data["suggestions"]
         assert "ping -c 4" in data["suggestions"]

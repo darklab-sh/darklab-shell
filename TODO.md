@@ -2,75 +2,6 @@
 
 ## Open TODOs
 
-### Phase 1: Trust Boundary And Request Identity
-
-Implement an explicit trusted-proxy client IP resolver and use it everywhere the app currently derives request identity.
-
-1. Add a trusted-proxy config surface in [app/conf/config.yaml](/Users/nona/repos/shell.darklab.sh/app/conf/config.yaml)
-   - define one setting for trusted proxy CIDRs or IPs
-   - keep the default safe by not trusting forwarded headers unless the request comes from a configured proxy
-   - document the operator expectation for reverse-proxy deployments
-2. Add a single resolver helper in [app/app.py](/Users/nona/repos/shell.darklab.sh/app/app.py)
-   - if `remote_addr` is not in a trusted proxy range, ignore `X-Forwarded-For`
-   - if it is trusted, parse the forwarded chain and choose the real client IP
-   - if the header is malformed or empty, fall back to `remote_addr`
-3. Replace all direct request-identity lookups with the shared resolver
-   - rate limiting keys
-   - request logging fields
-   - any helper that scopes history or limiter buckets
-4. Keep local development and tests practical
-   - allow direct local requests to work without a proxy
-   - keep the existing test helpers able to isolate limiter buckets when needed
-   - avoid special-casing browser tests outside the backend resolver
-5. Add regression coverage for the trust boundary
-   - direct client requests cannot spoof `X-Forwarded-For`
-   - trusted proxy requests still honor valid forwarded chains
-   - malformed forwarded chains fall back safely
-   - existing rate-limit and request-log paths still see the resolved client IP
-6. Update docs after the implementation lands
-   - explain when forwarded headers are honored
-   - explain the trusted-proxy deployment assumption
-   - note the fallback behavior for local dev and tests
-
-### Phase 2: Backend Route Decomposition
-
-- Break [app/app.py](/Users/nona/repos/shell.darklab.sh/app/app.py) into smaller backend modules or Blueprints:
-  - content/config routes: `/config`, `/allowed-commands`, `/faq`, `/autocomplete`, `/welcome*`
-  - run/execution routes: `/run`, `/kill`
-  - history/share routes: `/history*`, `/share*`
-  - asset/ops routes: `/vendor/*`, `/health`, `/favicon.ico`
-- Move route-adjacent helpers out of `app.py` where it makes the boundaries clearer:
-  - preview/full-output shaping
-  - synthetic run response helpers
-  - shared history/permalink fetch helpers
-- Keep the Flask app factory/bootstrap path simple:
-  - logging setup
-  - limiter initialization
-  - blueprint registration
-- Preserve current route behavior exactly while refactoring:
-  - response formats
-  - status codes
-  - rate limits
-  - SSE streaming behavior
-- Add or keep focused tests around any moved route logic so the split is structural, not behavioral
-
-### Phase 3: Frontend Controller Split
-
-- Decompose [app/static/js/app.js](/Users/nona/repos/shell.darklab.sh/app/static/js/app.js) into feature-oriented modules:
-  - bootstrap/config loading
-  - keyboard shortcuts and prompt interactions
-  - overlays/modals
-  - FAQ rendering
-  - mobile viewport/composer wiring
-  - search-bar and terminal-bar controls
-- Identify the current composition root responsibilities in `app.js` and leave only orchestration there
-- Keep browser behavior stable during the split:
-  - welcome flow
-  - mobile keyboard handling
-  - overlay open/close and refocus behavior
-  - FAQ loading and command-chip behavior
-- Add or update unit tests around the extracted modules before removing the original code paths
-
 ### Phase 4: Reduce Global-State And Script-Order Coupling
 
 - Refactor [app/static/js/state.js](/Users/nona/repos/shell.darklab.sh/app/static/js/state.js) toward a smaller store boundary:
@@ -277,6 +208,24 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Completed
+
+### Backend Route Decomposition
+
+`app/app.py` has been split into Flask Blueprints under `app/blueprints/`: `assets.py` (vendor assets, favicon, health check), `content.py` (index, config, themes, FAQ, autocomplete, welcome), `run.py` (execution and kill with run-output helpers), and `history.py` (history and share with preview-output helpers). Shared per-request utilities live in `app/helpers.py` (trusted-proxy IP resolution, session-ID extraction) and the Flask-Limiter singleton in `app/extensions.py`. `app/app.py` is now a thin factory. All route behavior, response formats, status codes, rate limits, and SSE streaming are unchanged. Route test patches were updated to target blueprint namespaces.
+
+### Frontend Controller Split
+
+`app/static/js/app.js` now keeps the shared UI helpers, while the page bootstrap, config loading, top-level button wiring, search/history/FAQ orchestration, and mobile composer setup live in `app/static/js/controller.js`. The browser template and JS unit loader both load the controller after `app.js` so the classic-script globals stay intact. The controller split keeps the welcome flow, mobile keyboard handling, overlay open/close behavior, FAQ loading, and command-chip behavior stable.
+
+Validation:
+- `python3 -m pytest tests/py/test_routes.py -q`
+- `npx vitest run tests/js/unit/app.test.js`
+- `npx vitest run tests/js/unit/runner.test.js`
+- `npx vitest run tests/js/unit/*.test.js`
+
+### Trust Boundary And Request Identity
+
+`trusted_proxy_cidrs` is now a config key in `app/conf/config.yaml`. The `get_client_ip()` helper in `app/helpers.py` only honors `X-Forwarded-For` when the direct peer IP falls within those CIDRs; all other requests use `remote_addr` directly. Rate-limiting and all request-log fields use this resolver. Regression coverage lives in `test_routes.py`. Docs updated in `README.md` and `ARCHITECTURE.md`.
 
 ### Runtime Theme Selector
 

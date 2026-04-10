@@ -23,6 +23,7 @@ config.py        — CFG defaults, SCANNER_PREFIX (no app dependencies)
     ↑
 logging_setup.py — GELFFormatter, _TextFormatter, configure_logging(cfg)
     ↑
+helpers.py     — trusted-proxy IP resolver, session-ID extractor
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
 permalinks.py  — Flask context/render helpers for permalink pages
@@ -30,13 +31,22 @@ templates/     — Jinja templates for the main shell and permalink pages
 run_output_store.py — preview/full-output capture and artifact helpers
 export_html.js — shared browser-side HTML export helpers for tab downloads and permalink save HTML
     ↑
-app.py         — Flask app, rate limiter, all route handlers
+extensions.py  — Flask-Limiter singleton (limiter.init_app deferred to app.py)
+    ↑
+blueprints/
+  assets.py    — /vendor/*, /favicon.ico, /health
+  content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*
+  run.py       — /run (rate-limited SSE), /kill; run-output capture helpers
+  history.py   — /history*, /share*; preview-output shaping helpers
+    ↑
+app.py         — Flask factory: logging setup, limiter.init_app(app),
+                 blueprint registration, before/after-request hooks, 429 handler
 
 commands.py    — Command validation and rewrites (no CFG dependency, standalone)
 fake_commands.py — Synthetic shell helpers for /run
 ```
 
-`commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. `app.py` imports by name from each module (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
+`commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. Each blueprint imports by name from the modules it depends on (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
 
 `fake_commands.py` sits alongside that path and provides a small web-shell helper layer for shell-like commands that should be useful in the UI without spawning a real process. `/run` checks that layer before allowlist validation and process launch. Today it handles `banner`, `clear`, `date`, `env`, `faq`, `fortune`, `groups`, `help`, `history`, `hostname`, `id`, `last`, `limits`, `ls`, `man`, `ps`, `pwd`, `reboot`, `retention`, `status`, `sudo`, `tty`, `type`, `uname -a`, `uptime`, `version`, `which`, `who`, and `whoami`, plus exact-match guardrail easter eggs for `rm -fr /` and `rm -rf /`. Most of the commands are intentionally synthetic in implementation but presented as web-shell helpers: they surface app-specific state like the allowlist, runtime limits, configured FAQ entries, and session history, return stable environment strings, or trigger UI-native behavior like clearing the current tab. `faq` now merges the built-in FAQ set first and appends any `faq.yaml` entries after it, and custom entries can use the same lightweight markup supported by the modal renderer: bold, italics, underline, inline code, bullet lists, and clickable command chips that load into the prompt. `ps` is intentionally half-synthetic: it shows the current `ps` invocation with a fake PID, then recent completed session commands with separate exit/start/end columns but no PID so they read as completed work, not active processes. `man <topic>` is the other exception: for allowlisted real commands it renders the real system man page, while `man <fake-command>` reuses the helper descriptions instead of rejecting the topic. Runtime command availability is now checked in the shared command layer, so fake commands and normal allowlisted `/run` commands both return the same clean instance-level message when a required binary is missing.
 
@@ -206,11 +216,11 @@ These happen in `rewrite_command()` silently (no user-visible notice unless spec
 
 ## Frontend Architecture
 
-Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: each module file defines functions and state only; `app.js` loads last and performs all initialization and event wiring. No bundler, no transpilation.
+Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: each module file defines functions and state only; `app.js` provides shared helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
 
 External dependencies: local vendor routes backed by build-time font downloads and a copied-in `ansi_up` browser build for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the checked-in browser-global file at `static/js/vendor/ansi_up.js` serves as the fallback for local dev and docker-compose runs. The Dockerfile copies that same file into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
 
-**JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js`. All cross-module calls flow through `app.js`; earlier files never call functions defined in later ones. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
+**JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `controller.js`. The shared helpers stay in `app.js`; `controller.js` owns the composition root and must load last so it can wire the DOM after all helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 ### Shared Frontend State Layer
 
@@ -361,7 +371,7 @@ The theme implementation is intentionally split so the operator-facing config, l
 4. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so `styles.css` can use `var(--name)` everywhere.
 5. `app/templates/theme_vars_script.html` publishes the same resolved values plus the registry as `window.ThemeRegistry` and `window.ThemeCssVars` so browser-side theme selection and export helpers can build downloadable HTML without a duplicate hardcoded palette.
 6. `app/app.py` exposes `/themes` so the frontend and tests can inspect the available registry.
-7. `app/static/js/app.js` applies the selected theme on the fly via the dedicated theme selector modal preview cards, updates cookies/localStorage, and keeps the shell chrome consistent while switching.
+7. `app/static/js/app.js` exposes the theme helpers and `app/static/js/controller.js` applies the selected theme on the fly via the dedicated theme selector modal preview cards, updates cookies/localStorage, and keeps the shell chrome consistent while switching.
 8. `app/static/js/export_html.js` consumes the injected values and embeds them into saved HTML exports, keeping the downloaded file portable and theme-consistent.
 
 ### Dependency Version Tracking
@@ -428,10 +438,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 492
-- `vitest`: 247
+- `pytest`: 716
+- `vitest`: 248
 - `playwright`: 128
-- total: 867
+- total: 1,092
 
 ### Testing Architecture
 
@@ -442,7 +452,7 @@ Current totals on this branch:
 
 - That split is deliberate. Backend coverage stays fast and deterministic, browser-module logic gets isolated without bundling the app, and only browser-specific integration risks are left to Playwright.
 
-- The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage.
+- The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage. The page bootstrap moved into `app/static/js/controller.js`, but it still depends on the globals defined by the earlier scripts.
 
 - The jsdom harness mirrors production load order by prepending `app/static/js/state.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
 
