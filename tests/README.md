@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals on this branch:
 
 - `pytest`: 720
-- `vitest`: 248
+- `vitest`: 249
 - `playwright`: 128
-- total: 1,096
+- total: 1,097
 
 ## Running The Suites
 
@@ -69,14 +69,14 @@ Files and focus:
 
 - `config.test.js` - frontend fallback config coverage for keys mirrored from `/config`
 - `utils.test.js` - escaping and MOTD rendering
-- `runner.test.js` - elapsed formatting, kill flow, friendly network/server error handling, rate-limit handling, fake-command SSE handling including web-shell `clear`, prompt blank-line behavior, run-button disable/enable guarding, and stall recovery
+- `runner.test.js` - elapsed formatting, kill flow, late kill / exit prompt-remount recovery, friendly network/server error handling, rate-limit handling, fake-command SSE handling including web-shell `clear`, prompt blank-line behavior, run-button disable/enable guarding, and stall recovery
 - `history.test.js` - starred state helpers, startup hydration for blank-input command recall, clipboard fallback handling, history-panel action-button close behavior, history action failures, and the restore-loading overlay for history-to-tab preview fetches
 - `session.test.js` - session ID persistence and `apiFetch()` header injection
 - `autocomplete.test.js` - terminal-style dropdown filtering, above/below placement behavior, viewport clamping, and active-item scrolling
 - `tabs.test.js` - tab lifecycle, running-prompt mount guards, rename/overflow scroll-button behavior, export guards, permalink copy failure, no-output toast behavior, currentRunStartIndex alignment when old raw lines are pruned from the front, refocus behavior after copy/save/html export actions, clearing un-ran composer input, and the export helper’s injected theme-vars plumbing
 - `welcome.test.js` - welcome animation cancellation, config-driven timing/sample/hint behavior, settle/fast-forward behavior, fallback handling, featured-sample interaction behavior, and mobile banner loading
 - `app.test.js` - bootstrap wiring across `app.js` and `controller.js`, backend-driven FAQ rendering, options-modal preference persistence, modal controls, search controls, startup fallbacks, startup fetch logging, theme selector modal preview-card population and switching, group-section rendering, filename-based startup resolution plus fallback handling when a saved theme or configured default theme is missing, single-theme registry rendering, modal Escape-close behavior for the theme picker, mobile keyboard-state heuristics including the resize-before-focus helper-row regression and the lower-composer hit-target regression, mobile Run-button sync, autocomplete keyboard ordering, prompt-refocus behavior for display toggles, search-bar close behavior, the shared mobile focus/blur helpers, and the DOM-builder-backed FAQ limit / allowed-command sections
-- `search.test.js` - search helper boundaries and no-op behavior
+- `search.test.js` - search helper boundaries, no-op behavior, regex/case invalid-pattern handling, and the mixed-content line regression that keeps helper markup intact while highlighting across text-node boundaries
 - `output.test.js` - output rendering, batched live flushing, shared timestamp/line-number prefix support, welcome-prefix exclusion, no-output edge cases, and self-contained HTML export font embedding
 
 Notes:

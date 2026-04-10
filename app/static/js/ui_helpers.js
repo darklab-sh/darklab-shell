@@ -252,6 +252,10 @@
     const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
     if (btn && btn.style) btn.style.display = 'none';
   };
+  // Initialise inline display so the inline style takes precedence over the
+  // conflicting .search-bar { display: flex } class rule (same specificity,
+  // later in the sheet) when .u-hidden is also present on the element.
+  if (typeof searchBar !== 'undefined' && searchBar && searchBar.style) searchBar.style.display = 'none';
   global.showSearchBar = () => {
     if (searchBar && searchBar.style) searchBar.style.display = 'flex';
   };
@@ -265,7 +269,7 @@
       cmdInput.focus();
     }
   };
-  global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display !== 'none');
+  global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display === 'flex');
   global.showHistoryRow = () => {
     if (histRow && histRow.style) histRow.style.display = 'flex';
   };

@@ -2,23 +2,6 @@
 
 ## Open TODOs
 
-### Phase 6: Search Highlighting Hardening
-
-- Rework [app/static/js/search.js](/Users/nona/repos/shell.darklab.sh/app/static/js/search.js) so it no longer rewrites serialized `innerHTML`
-- Make search highlighting operate on safer primitives:
-  - text nodes, or
-  - raw output entries before DOM rendering, or
-  - a dedicated highlight layer
-- Preserve the current feature set:
-  - plain-text and regex search
-  - case-sensitive toggle
-  - current-match navigation and scroll-into-view
-- Add regression coverage for mixed-content lines:
-  - prompt lines
-  - ANSI-rendered spans
-  - line numbers / timestamp prefixes
-  - lines containing markup-bearing helper elements
-
 ### Phase 7: Content/Presentation Separation
 
 - Simplify the built-in FAQ data in [app/commands.py](/Users/nona/repos/shell.darklab.sh/app/commands.py):
@@ -201,6 +184,14 @@ The repeated `innerHTML` fragments in `app/static/js/history.js`, `app/static/js
 
 Validation:
 - `npx vitest run tests/js/unit/app.test.js tests/js/unit/history.test.js tests/js/unit/tabs.test.js`
+- `npx vitest run tests/js/unit/*.test.js`
+
+### Search Highlighting Hardening
+
+`app/static/js/search.js` now highlights matches by walking text nodes and cloning the line structure instead of rewriting serialized `innerHTML`. That keeps mixed-content lines intact, preserves prompt/helper markup, and still supports plain-text search, regex mode, case sensitivity, current-match navigation, and scroll-into-view.
+
+Validation:
+- `npx vitest run tests/js/unit/search.test.js`
 - `npx vitest run tests/js/unit/*.test.js`
 
 ### Trust Boundary And Request Identity

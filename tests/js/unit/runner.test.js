@@ -51,6 +51,7 @@ function loadRunnerFns({
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
   dismissMobileKeyboardAfterSubmit = () => {},
+  maybeMountDeferredPrompt = vi.fn(),
 } = {}) {
   const normalizedTabs = tabs.map(tab => ({
     rawLines: [],
@@ -143,6 +144,7 @@ function loadRunnerFns({
     refreshHistoryPanel: () => {},
     showToast,
     dismissMobileKeyboardAfterSubmit,
+    _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
     ...(getComposerValueOverride ? { getComposerValue: getComposerValueOverride } : {}),
     ...(getVisibleComposerInputOverride ? { getVisibleComposerInput: getVisibleComposerInputOverride } : {}),
     describeFetchError: (err, context = 'server') => {
@@ -178,6 +180,7 @@ function loadRunnerFns({
     cancelWelcome,
     showToast,
     interruptPromptLine: fns.interruptPromptLine,
+    maybeMountDeferredPrompt,
   }
 }
 
@@ -193,9 +196,11 @@ describe('runner helpers', () => {
 
   it('doKill sends /kill immediately when runId is already known', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
+    const maybeMountDeferredPrompt = vi.fn()
     const { doKill, tabs, runBtn, status } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
       apiFetch,
+      maybeMountDeferredPrompt,
     })
 
     doKill('tab-1')
@@ -210,6 +215,7 @@ describe('runner helpers', () => {
     expect(document.querySelector('.tab-kill-btn').style.display).toBe('none')
     expect(status.className).toBe('status-pill killed')
     expect(runBtn.disabled).toBe(false)
+    expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
   })
 
   it('doKill marks pendingKill when runId is not yet available', () => {

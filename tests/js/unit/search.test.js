@@ -141,4 +141,23 @@ describe('search helpers', () => {
 
     expect(() => clearHighlights()).not.toThrow()
   })
+
+  it('highlights mixed-content lines without flattening helper markup', () => {
+    const { runSearch, clearHighlights } = loadSearchFns()
+    document.getElementById('searchInput').value = 'curl localhost'
+    document.getElementById('out').innerHTML = '<span class="line"><span class="line-prefix">$</span>curl <span class="line-host">localhost</span></span>'
+
+    runSearch()
+
+    const line = document.querySelector('.line')
+    expect(document.querySelectorAll('mark.search-hl').length).toBe(2)
+    expect(line?.querySelector('.line-prefix')).not.toBeNull()
+    expect(line?.querySelector('.line-host')).not.toBeNull()
+
+    clearHighlights()
+
+    expect(document.querySelectorAll('mark.search-hl').length).toBe(0)
+    expect(document.querySelector('.line')?.querySelector('.line-prefix')).not.toBeNull()
+    expect(document.querySelector('.line')?.querySelector('.line-host')).not.toBeNull()
+  })
 })

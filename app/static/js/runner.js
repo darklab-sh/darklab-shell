@@ -194,6 +194,9 @@ function doKill(tabId) {
     setStatus('killed');
     _setRunButtonDisabled(false);
   }
+  if (typeof _maybeMountDeferredPrompt === 'function') {
+    _maybeMountDeferredPrompt(tabId);
+  }
 }
 
 // ── Run command ──
@@ -378,6 +381,9 @@ function submitCommand(rawCmd) {
                     if (isHistoryPanelOpen()) refreshHistoryPanel();
                   }
                   if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  if (!(t && t.closing) && typeof _maybeMountDeferredPrompt === 'function') {
+                    _maybeMountDeferredPrompt(tabId);
+                  }
                   return;
                 }
                 const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
