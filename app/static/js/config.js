@@ -23,4 +23,5 @@ let APP_CONFIG = {
   welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
   welcome_hint_interval_ms: 4200,
   welcome_hint_rotations: 0,
+  diag_enabled: false,
 };

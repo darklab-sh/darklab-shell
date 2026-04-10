@@ -28,7 +28,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `shortcuts` shows current keyboard shortcuts, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
 - **Shell injection protection** — blocks `&&`, `||`, `|`, `;`, backticks, `$()`, redirects (`>`, `<`), and direct references to `/data` or `/tmp` as filesystem paths, both client-side and server-side
-- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` render as a terminal-style list aligned to the command start (not a textbox dropdown), with smart above/below placement to avoid pushing the prompt when space is tight. Use **↑↓** to navigate, **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
+- **Autocomplete with tab completion** — suggestions loaded from `auto_complete.txt` render as a terminal-style list aligned to the command start (not a textbox dropdown), with smart above/below placement to avoid pushing the prompt when space is tight. Use **↑↓** to navigate (wraps around — pressing **↑** with nothing selected jumps to the last item; pressing **↓** at the last item returns to the first), **Tab** or **Enter** to accept, **Escape** to dismiss. When the input is blank, **↑↓** cycles through recent commands immediately, including history hydrated from the server on first load
 - **Tabs / multiple runs** — open multiple tabs to run commands in parallel or keep previous results visible; each tab tracks its own status
 - **Tab strip controls** — tabs can be reordered via drag-and-drop, and left/right tab-scroll buttons are shown for overflowed tab bars
 - **Run history drawer** — slide-out panel showing completed runs with timestamps and exit codes; click any entry to load its output into a new tab (with the command shown at the top), copy the command to clipboard, or copy a permalink. Persists across container restarts via SQLite. Star any entry to pin it to the top of the list
@@ -73,15 +73,24 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
 │   │   ├── test_run_history_share.py # Higher-value /run, history, share, fake-command, and persistence flows
 │   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and fake-command resolution
+│   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
+│   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
 │   │   └── test_logging.py     # Structured logging: formatters, configure_logging, all log events
 │   └── js/
 │       ├── unit/               # Vitest unit tests for pure JS functions
 │       │   ├── helpers/
 │       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│       │   ├── app.test.js     # bootstrap wiring, modal controls, search controls
-│       │   ├── runner.test.js  # _formatElapsed, run/kill edge cases, stall recovery
-│       │   ├── history.test.js # starred state, clipboard, delete/clear failures
-│       │   └── output.test.js  # ANSI rendering, timestamp/line-number mode, and output edge cases
+│       │   ├── app.test.js         # bootstrap wiring, modal controls, FAQ/theme/search orchestration
+│       │   ├── runner.test.js      # _formatElapsed, run/kill edge cases, stall recovery
+│       │   ├── history.test.js     # starred state, clipboard, delete/clear failures
+│       │   ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
+│       │   ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
+│       │   ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
+│       │   ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
+│       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll
+│       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
+│       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
+│       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── helpers.js      # runCommand/openHistory helpers
 │           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
@@ -96,9 +105,16 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 ├── data/                       # Writable volume — SQLite database (auto-created)
 │   └── history.db              #   stores run history and tab snapshots
 └── app/
-    ├── app.py                  # Flask app, rate limiting, and all route handlers
+    ├── app.py                  # Flask factory — logging setup, blueprint registration, before/after-request hooks
+    ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
+    ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
+    ├── blueprints/
+    │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
+    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
+    │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
+    │   └── history.py          # /history*, /share*; preview-output shaping helpers
     ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
-    ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection
+    ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
     ├── database.py             # SQLite connection, schema init, retention pruning
     ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
@@ -118,6 +134,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
     ├── templates/
     │   ├── index.html          # Frontend HTML shell rendered by Flask
+    │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
     │   ├── permalink_base.html # Shared shell for permalink pages
     │   ├── permalink.html      # Live permalink page template
     │   └── permalink_error.html # Missing/expired permalink template
@@ -301,6 +318,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the direct TCP peer IP (`request.remote_addr`), not `X-Forwarded-For`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
@@ -619,6 +637,7 @@ Current keyboard behavior:
 - `Ctrl+U` deletes from the cursor to the start of the line
 - `Ctrl+K` deletes from the cursor to the end of the line
 - `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) move backward / forward by word
+- `Ctrl+R` opens reverse-history search — type to filter past commands; `↑↓` or `Ctrl+R` navigates matches; `Enter` accepts and runs; `Tab` accepts without running; `Escape` restores the draft that was in the prompt before search started; `Ctrl+C` leaves the typed query in the input
 
 On macOS, `Option` is the key used for the app-safe `Alt` shortcuts above. The `Ctrl+...` bindings are intentional shell-style controls and are separate from browser `Command` shortcuts.
 
@@ -641,6 +660,7 @@ Shipped app-safe shortcuts:
 | `Ctrl+U` | Delete from cursor to start of line | Readline-style editing |
 | `Ctrl+K` | Delete from cursor to end of line | Readline-style editing |
 | `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Readline-style editing |
+| `Ctrl+R` | Reverse-history search | Type to filter; Enter runs; Tab accepts without running; Escape restores draft |
 
 Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
 
@@ -919,7 +939,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **720 pytest + 249 Vitest + 128 Playwright = 1,097 tests**.
+Current totals in this branch: **752 pytest + 273 Vitest + 135 Playwright = 1,160 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

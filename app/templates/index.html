@@ -22,6 +22,7 @@
     <button id="options-btn" title="Display and preference options">≡ options</button>
     <button id="theme-btn" title="Theme selector">◑ theme</button>
     <button id="faq-btn">? FAQ</button>
+    <a id="diag-btn" href="/diag" title="Operator diagnostics" class="u-hidden">⊕ diag</a>
   </div>
   <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
 </header>
@@ -59,6 +60,7 @@
       <button data-action="ts">timestamps: off</button>
       <button data-action="theme">◑ theme</button>
       <button data-action="faq">? FAQ</button>
+      <button data-action="diag" class="u-hidden">⊕ diag</button>
     </div>
   </div>
 </div>
@@ -113,6 +115,7 @@
     </div>
   </div>
   <div id="ac-dropdown" class="ac-dropdown u-hidden"></div>
+  <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
   <div class="shell-input-row" aria-hidden="true">
     <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" aria-label="Command">
     <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>

@@ -67,6 +67,11 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   syncThemeSelectionControls();
   updateNewTabBtn();
   renderFaqLimits(cfg);
+  if (cfg.diag_enabled) {
+    if (diagBtn) diagBtn.classList.remove('u-hidden');
+    const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-action="diag"]');
+    if (mobileDiagBtn) mobileDiagBtn.classList.remove('u-hidden');
+  }
 }).catch(err => {
   logClientError('failed to load /config', err);
 });
@@ -112,6 +117,7 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn =
     if (action === 'options') openOptions();
     if (action === 'theme') openThemeSelector();
     if (action === 'faq') openFaq();
+    if (action === 'diag') window.location.href = '/diag';
   });
 });
 
@@ -450,10 +456,27 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
 });
 
 cmdInput.addEventListener('input', () => {
+  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
+    if (typeof handleHistSearchInput === 'function') handleHistSearchInput(cmdInput.value);
+    return;
+  }
   handleComposerInputChange(cmdInput);
+  // Keep the active tab's draft current so activateTab can read it directly
+  const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  if (_activeTab && _activeTab.st !== 'running') _activeTab.draftInput = cmdInput.value;
 });
 
 cmdInput.addEventListener('keydown', e => {
+  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
+    if (typeof handleHistSearchKey === 'function' && handleHistSearchKey(e)) return;
+  }
+
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
+    e.preventDefault();
+    if (typeof enterHistSearch === 'function') enterHistSearch();
+    return;
+  }
+
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     e.preventDefault();
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
@@ -571,7 +594,7 @@ cmdInput.addEventListener('keydown', e => {
     }
     return;
   }
-  if (e.key === 'Tab') {
+  if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
     else if (acIndex >= 0 && acFiltered[acIndex]) { acAccept(acFiltered[acIndex]); }
@@ -582,10 +605,7 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     const acOpen = isAcDropdownOpen();
     if (acOpen && acFiltered.length) {
-      const acAbove = acDropdown.classList.contains('ac-up');
-      acIndex = acAbove
-        ? Math.max(acIndex - 1, 0)
-        : Math.min(acIndex + 1, acFiltered.length - 1);
+      acIndex = (acIndex + 1) % acFiltered.length;
       acShow(acFiltered);
       return;
     }
@@ -596,10 +616,7 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     const acOpen = isAcDropdownOpen();
     if (acOpen && acFiltered.length) {
-      const acAbove = acDropdown.classList.contains('ac-up');
-      acIndex = acAbove
-        ? Math.min(acIndex + 1, acFiltered.length - 1)
-        : Math.max(acIndex - 1, -1);
+      acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
       acShow(acFiltered);
       return;
     }

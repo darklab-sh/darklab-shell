@@ -1,0 +1,347 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ app_name }} — diagnostics</title>
+<link rel="icon" type="image/x-icon" href="/favicon.ico">
+<link rel="stylesheet" href="/static/css/fonts.css">
+<link rel="stylesheet" href="/static/css/styles.css">
+{% include "theme_vars_style.html" %}
+<style>
+/* ── Diag page layout ──────────────────────────────────────────────────────── */
+body.diag-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0;
+  gap: 0;
+  overflow: auto;
+}
+body.diag-page::before { display: none; }
+
+.diag-main {
+  display: grid;
+  /* 4 equal columns for the top cards; Config and Tools break out full-width */
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-areas:
+    "app   db    db    redis"
+    "assets db   db    redis"
+    "cfg   cfg   cfg   cfg"
+    "tools tools tools tools";
+  gap: 16px;
+  padding: 24px 24px 40px;
+  max-width: 1200px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── Section card ──────────────────────────────────────────────────────────── */
+.diag-section {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 0;
+}
+.diag-section.s-app    { grid-area: app; }
+.diag-section.s-db     { grid-area: db; }
+.diag-section.s-redis  { grid-area: redis; }
+.diag-section.s-assets { grid-area: assets; }
+.diag-section.s-config { grid-area: cfg; }
+.diag-section.s-tools  { grid-area: tools; }
+
+.diag-section-title {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.diag-section-title-count {
+  color: var(--muted);
+  opacity: 0.6;
+  font-size: 9px;
+}
+
+/* ── Key-value tables ──────────────────────────────────────────────────────── */
+.diag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.diag-table tr + tr td { border-top: 1px solid var(--border); }
+.diag-table td {
+  padding: 8px 14px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.diag-table td:first-child {
+  color: var(--muted);
+  white-space: nowrap;
+  width: 1%;
+  padding-right: 20px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.diag-table td:last-child {
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* Status values */
+.diag-ok   { color: var(--green); }
+.diag-warn { color: var(--amber); }
+.diag-fail { color: var(--red); }
+
+/* Dot indicator beside status text */
+.diag-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.diag-dot.ok   { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+.diag-dot.warn { background: var(--amber); }
+.diag-dot.fail { background: var(--red); }
+
+/* ── Config: two-column internal layout ────────────────────────────────────── */
+.diag-config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.diag-config-grid .diag-table:first-child {
+  border-right: 1px solid var(--border);
+}
+
+/* ── Tools chip grid ────────────────────────────────────────────────────────── */
+.diag-tools-block {
+  padding: 14px 14px 10px;
+}
+.diag-tools-block + .diag-tools-block {
+  border-top: 1px solid var(--border);
+  padding-top: 12px;
+}
+.diag-tools-sublabel {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.diag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.diag-chip {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid;
+  letter-spacing: 0.2px;
+}
+.diag-chip.present {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+.diag-chip.missing {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+}
+.diag-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 14px;
+}
+
+/* ── Responsive collapse ────────────────────────────────────────────────────── */
+@media (max-width: 760px) {
+  .diag-main {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "app   redis"
+      "db    db"
+      "assets assets"
+      "cfg   cfg"
+      "tools tools";
+  }
+  .diag-config-grid { grid-template-columns: 1fr; }
+  .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+}
+</style>
+</head>
+<body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
+
+<header class="permalink-header">
+  <div class="permalink-header-copy">
+    <h1 class="permalink-title">{{ app_name }}</h1>
+    <span class="permalink-meta">OPERATOR DIAGNOSTICS</span>
+  </div>
+  <div class="permalink-actions">
+    <a href="/" class="action-btn">← shell</a>
+  </div>
+</header>
+
+<main class="diag-main">
+
+  {# ── App ───────────────────────────────────────────────────────────────── #}
+  <section class="diag-section s-app">
+    <div class="diag-section-title">App</div>
+    <table class="diag-table">
+      <tr><td>version</td><td>{{ data.app.version }}</td></tr>
+      <tr><td>name</td><td>{{ data.app.name }}</td></tr>
+    </table>
+  </section>
+
+  {# ── Database ──────────────────────────────────────────────────────────── #}
+  <section class="diag-section s-db">
+    <div class="diag-section-title">Database</div>
+    <table class="diag-table">
+      <tr>
+        <td>status</td>
+        <td>
+          <span class="diag-dot {{ 'ok' if data.db.ok else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.db.ok else 'diag-fail' }}">{{ 'ok' if data.db.ok else 'error' }}</span>
+        </td>
+      </tr>
+      {% if data.db.ok %}
+      <tr><td>runs</td><td>{{ data.db.runs }}</td></tr>
+      <tr><td>snapshots</td><td>{{ data.db.snapshots }}</td></tr>
+      {% else %}
+      <tr><td>error</td><td class="diag-fail">{{ data.db.error }}</td></tr>
+      {% endif %}
+    </table>
+  </section>
+
+  {# ── Redis ─────────────────────────────────────────────────────────────── #}
+  <section class="diag-section s-redis">
+    <div class="diag-section-title">Redis</div>
+    <table class="diag-table">
+      <tr>
+        <td>configured</td>
+        <td>
+          {% if data.redis.configured %}
+            <span class="diag-dot ok"></span><span class="diag-ok">yes</span>
+          {% else %}
+            <span class="diag-dot warn"></span><span class="diag-warn">no — in-process fallback</span>
+          {% endif %}
+        </td>
+      </tr>
+      {% if data.redis.configured %}
+      <tr>
+        <td>status</td>
+        <td>
+          <span class="diag-dot {{ 'ok' if data.redis.ok else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.redis.ok else 'diag-fail' }}">{{ 'ok' if data.redis.ok else 'error' }}</span>
+        </td>
+      </tr>
+      {% if not data.redis.ok and data.redis.error %}
+      <tr><td>error</td><td class="diag-fail">{{ data.redis.error }}</td></tr>
+      {% endif %}
+      {% endif %}
+    </table>
+  </section>
+
+  {# ── Vendor Assets ─────────────────────────────────────────────────────── #}
+  <section class="diag-section s-assets">
+    <div class="diag-section-title">Vendor Assets</div>
+    <table class="diag-table">
+      <tr>
+        <td>ansi_up</td>
+        <td>
+          <span class="diag-dot {{ 'ok' if data.assets.ansi_up == 'vendor' else 'warn' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.ansi_up == 'vendor' else 'diag-warn' }}">{{ data.assets.ansi_up }}</span>
+        </td>
+      </tr>
+      <tr>
+        <td>fonts</td>
+        <td>
+          <span class="diag-dot {{ 'ok' if data.assets.fonts == 'vendor' else 'warn' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.fonts == 'vendor' else 'diag-warn' }}">{{ data.assets.fonts }}</span>
+        </td>
+      </tr>
+    </table>
+  </section>
+
+  {# ── Config ────────────────────────────────────────────────────────────── #}
+  {% set cfg_items = data.config.items() | list %}
+  {% set mid = ((cfg_items | length) + 1) // 2 %}
+  <section class="diag-section s-config">
+    <div class="diag-section-title">Config</div>
+    <div class="diag-config-grid">
+      <table class="diag-table">
+        {% for key, value in cfg_items[:mid] %}
+        <tr>
+          <td>{{ key }}</td>
+          <td>
+            {% if value is none %}<span class="diag-warn">—</span>
+            {% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
+            {% elif value == true %}<span class="diag-ok">true</span>
+            {% elif value == false %}<span class="diag-warn">false</span>
+            {% else %}{{ value }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+      <table class="diag-table">
+        {% for key, value in cfg_items[mid:] %}
+        <tr>
+          <td>{{ key }}</td>
+          <td>
+            {% if value is none %}<span class="diag-warn">—</span>
+            {% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
+            {% elif value == true %}<span class="diag-ok">true</span>
+            {% elif value == false %}<span class="diag-warn">false</span>
+            {% else %}{{ value }}{% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </table>
+    </div>
+  </section>
+
+  {# ── Tools ─────────────────────────────────────────────────────────────── #}
+  <section class="diag-section s-tools">
+    <div class="diag-section-title">
+      Tools
+      <span class="diag-section-title-count">{{ data.tools.present | length }} present · {{ data.tools.missing | length }} missing</span>
+    </div>
+    {% if not data.tools.present and not data.tools.missing %}
+      <div class="diag-empty">No allowlist configured — all commands permitted.</div>
+    {% else %}
+      {% if data.tools.present %}
+      <div class="diag-tools-block">
+        <div class="diag-tools-sublabel">present</div>
+        <div class="diag-chips">
+          {% for tool in data.tools.present %}<span class="diag-chip present">{{ tool }}</span>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+      {% if data.tools.missing %}
+      <div class="diag-tools-block">
+        <div class="diag-tools-sublabel">missing</div>
+        <div class="diag-chips">
+          {% for tool in data.tools.missing %}<span class="diag-chip missing">{{ tool }}</span>{% endfor %}
+        </div>
+      </div>
+      {% endif %}
+    {% endif %}
+  </section>
+
+</main>
+</body>
+</html>

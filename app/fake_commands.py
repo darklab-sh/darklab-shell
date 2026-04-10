@@ -30,14 +30,16 @@ from database import db_connect
 
 _STARTED_AT = datetime.now(timezone.utc)
 _CURRENT_SHORTCUTS = [
+    ("Welcome:", "type / Enter / Escape to settle the welcome animation immediately"),
+    ("Kill dialog:", "Enter to confirm / Escape to cancel"),
     ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
     ("Enter on blank prompt", "append a new empty prompt line"),
     ("Up / Down on blank prompt", "cycle recent command history"),
-    ("Autocomplete: Up / Down", "move through suggestions"),
+    ("Autocomplete: Up / Down", "move through suggestions (wraps around)"),
     ("Autocomplete: Tab", "accept the highlighted suggestion"),
     ("Autocomplete: Enter", "accept highlighted suggestion or run command"),
     ("Autocomplete: Escape", "dismiss suggestions"),
-    ("Welcome: type / Enter / Escape", "settle the welcome animation immediately"),
+    ("Ctrl+R", "reverse-i-search history; Up/Down/Ctrl+R cycle; Enter runs; Tab accepts; Escape restores draft"),
     ("Option+T / Alt+T", "open a new tab"),
     ("Option+W / Alt+W", "close the current tab"),
     ("Option+Left/Right", "switch to previous / next tab"),
@@ -46,7 +48,6 @@ _CURRENT_SHORTCUTS = [
     ("Option+P / Alt+P", "create a permalink for the active tab"),
     ("Option+Shift+C", "copy active-tab output"),
     ("Ctrl+L", "clear the active tab"),
-    ("Kill dialog: Enter / Escape", "confirm / cancel kill"),
     ("Ctrl+W", "delete one word to the left"),
     ("Ctrl+U", "delete to the beginning of the line"),
     ("Ctrl+A", "move to the beginning of the line"),
@@ -185,7 +186,7 @@ _FAKE_COMMAND_DISPATCH = {
 
 def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
     root = resolve_fake_command(command)
-    handler = _FAKE_COMMAND_DISPATCH.get(root)
+    handler = _FAKE_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
         return [{"type": "output", "text": f"Unsupported fake command: {command.strip()}"}], 1
     return handler(command, session_id), 0

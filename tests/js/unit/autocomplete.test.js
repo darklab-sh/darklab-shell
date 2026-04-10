@@ -141,7 +141,7 @@ describe('autocomplete helpers', () => {
     expect(focusSpy).toHaveBeenCalled()
   })
 
-  it('positions dropdown above and renders reverse order when space below is tight', () => {
+  it('positions dropdown above when space below is tight and preserves item order', () => {
     const { acShow } = loadAutocompleteFns()
     const input = document.getElementById('cmd')
     input.value = 'n'
@@ -173,8 +173,8 @@ describe('autocomplete helpers', () => {
 
     expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
     const items = [...document.querySelectorAll('.ac-item')].map(el => el.textContent.trim())
-    expect(items[0]).toBe('nslookup darklab.sh')
-    expect(items[1]).toBe('nmap -sV')
+    expect(items[0]).toBe('nmap -sV')
+    expect(items[1]).toBe('nslookup darklab.sh')
   })
 
   it('clamps the below-mode dropdown height so it does not extend past the viewport edge', () => {
@@ -214,7 +214,7 @@ describe('autocomplete helpers', () => {
     expect(Number.parseInt(dropdown.style.maxHeight, 10)).toBeLessThanOrEqual(120)
   })
 
-  it('defaults the highlighted item to the bottom-most option when the menu opens above', () => {
+  it('does not auto-highlight any item when the menu opens above (same as below)', () => {
     const { acShow } = loadAutocompleteFns()
     const input = document.getElementById('cmd')
     input.value = 'n'
@@ -244,10 +244,12 @@ describe('autocomplete helpers', () => {
 
     acShow(['nmap -sV', 'nslookup darklab.sh', 'netstat -an'])
 
-    const items = [...document.querySelectorAll('.ac-item')]
     expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
-    expect(items[items.length - 1].className).toBe('ac-item ac-active')
-    expect(items[items.length - 1].textContent.trim()).toBe('nmap -sV')
+    // No item should be highlighted on open — same behavior as below-the-prompt mode
+    expect(document.querySelectorAll('.ac-item.ac-active')).toHaveLength(0)
+    // First item in the original list is at the top
+    const items = [...document.querySelectorAll('.ac-item')]
+    expect(items[0].textContent.trim()).toBe('nmap -sV')
   })
 
   it('forces the dropdown above the detached mobile composer and aligns it to the composer width', () => {
@@ -292,41 +294,6 @@ describe('autocomplete helpers', () => {
     expect(dropdown.style.bottom).toBe('calc(100% + 4px)')
   })
 
-  it('scrolls to the bottom when the menu opens above so the active item stays visible', () => {
-    const { acShow } = loadAutocompleteFns()
-    const input = document.getElementById('cmd')
-    input.value = 'n'
-    const wrap = document.createElement('div')
-    wrap.className = 'shell-prompt-wrap'
-    wrap.appendChild(document.getElementById('ac'))
-    document.body.appendChild(wrap)
-
-    const prefix = document.createElement('span')
-    prefix.className = 'prompt-prefix'
-    prefix.textContent = 'anon@darklab:~$'
-    wrap.insertBefore(prefix, document.getElementById('ac'))
-
-    vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
-    vi.spyOn(wrap, 'getBoundingClientRect').mockReturnValue({
-      top: 220,
-      bottom: 270,
-      left: 0,
-      right: 0,
-      width: 0,
-      height: 0,
-      x: 0,
-      y: 0,
-      toJSON: () => ({}),
-    })
-    Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
-
-    acShow(['nmap -sV', 'nslookup darklab.sh', 'netstat -an', 'nc -lvnp 4444'])
-
-    const dropdown = document.getElementById('ac')
-    expect(dropdown.classList.contains('ac-up')).toBe(true)
-    expect(dropdown.scrollTop).toBe(dropdown.scrollHeight)
-  })
-
   it('keeps the active autocomplete item in view as the highlighted option moves', () => {
     const { acShow, _setAcIndex } = loadAutocompleteFns()
     const input = document.getElementById('cmd')
@@ -360,10 +327,10 @@ describe('autocomplete helpers', () => {
     Object.defineProperty(dropdown, 'scrollHeight', { configurable: true, get: () => 88 })
 
     const offsetMap = new Map([
-      ['cat /etc/hosts', 0],
-      ['curl http://localhost:5001/config', 22],
-      ['curl http://localhost:5001/health', 44],
-      ['clear', 66],
+      ['clear', 0],
+      ['curl http://localhost:5001/health', 22],
+      ['curl http://localhost:5001/config', 44],
+      ['cat /etc/hosts', 66],
     ])
     const originalOffsetTop = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetTop')
     const originalOffsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')
@@ -381,14 +348,16 @@ describe('autocomplete helpers', () => {
     })
 
     try {
+      // No active item on first open — no scroll
       acShow(['clear', 'curl http://localhost:5001/health', 'curl http://localhost:5001/config', 'cat /etc/hosts'])
-      expect(dropdown.scrollTop).toBe(44)
-      expect(document.querySelector('.ac-item.ac-active')?.textContent.trim()).toBe('clear')
+      expect(dropdown.scrollTop).toBe(0)
+      expect(document.querySelector('.ac-item.ac-active')).toBeNull()
 
+      // After selecting index 2 ('curl config' at offsetTop 44), scroll brings it into view
       _setAcIndex(2)
       acShow(['clear', 'curl http://localhost:5001/health', 'curl http://localhost:5001/config', 'cat /etc/hosts'])
       expect(document.querySelector('.ac-item.ac-active')?.textContent.trim()).toBe('curl http://localhost:5001/config')
-      expect(dropdown.scrollTop).toBe(18)
+      expect(dropdown.scrollTop).toBe(26)
     } finally {
       if (originalOffsetTop) Object.defineProperty(HTMLElement.prototype, 'offsetTop', originalOffsetTop)
       if (originalOffsetHeight) Object.defineProperty(HTMLElement.prototype, 'offsetHeight', originalOffsetHeight)

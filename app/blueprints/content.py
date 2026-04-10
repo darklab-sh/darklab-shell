@@ -18,7 +18,7 @@ from commands import (
     load_welcome,
     load_welcome_hints,
 )
-from helpers import get_client_ip
+from helpers import get_client_ip, ip_is_in_cidrs
 
 log = logging.getLogger("shell")
 
@@ -87,6 +87,10 @@ def get_config():
         "welcome_status_labels":  cfg["welcome_status_labels"],
         "welcome_hint_interval_ms": cfg["welcome_hint_interval_ms"],
         "welcome_hint_rotations": cfg["welcome_hint_rotations"],
+        "diag_enabled": ip_is_in_cidrs(
+            request.remote_addr or "",
+            cfg.get("diagnostics_allowed_cidrs") or [],
+        ),
     })
 
 

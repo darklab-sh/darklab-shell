@@ -67,6 +67,7 @@ def load_config(conf_dir=None):
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
+        "diagnostics_allowed_cidrs":  [],
         "rate_limit_enabled":         True,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,

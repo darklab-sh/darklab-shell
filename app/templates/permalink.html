@@ -2,6 +2,14 @@
 
 {% block header_meta %}
   <div class="permalink-meta">{{ label }} &nbsp;·&nbsp; {{ created_fmt }}</div>
+  {% if meta %}
+  <div class="permalink-run-meta">
+    {% if meta.exit_code is not none %}<span class="meta-badge {% if meta.exit_code == 0 %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">exit {{ meta.exit_code }}</span>{% endif %}
+    {% if meta.duration %}<span class="meta-item">{{ meta.duration }}</span>{% endif %}
+    {% if meta.lines %}<span class="meta-item">{{ meta.lines }}</span>{% endif %}
+    {% if meta.version %}<span class="meta-item">v{{ meta.version }}</span>{% endif %}
+  </div>
+  {% endif %}
   {% if expiry_html %}
     <div class="permalink-expiry">{{ expiry_html | safe }}</div>
   {% endif %}
@@ -203,6 +211,7 @@
     const label   = {{ label_json | safe }};
     const created = {{ created_json | safe }};
     const fontFacesCss = {{ font_faces_css | tojson }};
+    const permalinkMeta = {{ meta_json | safe }};
 
     const prefixWidth = Math.max(0, ...lines.map((entry, index) => formatPrefix(index + 1, entry).length));
     const linesHtml = lines.map((entry, index) => {
@@ -219,10 +228,24 @@
       return '<span class="line' + (cls ? ' ' + cls : '') + '">' + prefixSpan
         + '<span class="perm-content">' + content + '</span></span>';
     }).join('\n');
+
+    let metaHtml = escHtml(created);
+    if (permalinkMeta) {
+      const parts = [];
+      if (permalinkMeta.exit_code !== null && permalinkMeta.exit_code !== undefined) {
+        const color = permalinkMeta.exit_code === 0 ? 'var(--green)' : 'var(--red)';
+        parts.push(`<span style="color:${color};font-weight:700">exit ${permalinkMeta.exit_code}</span>`);
+      }
+      if (permalinkMeta.duration) parts.push(escHtml(permalinkMeta.duration));
+      if (permalinkMeta.lines)    parts.push(escHtml(permalinkMeta.lines));
+      if (permalinkMeta.version)  parts.push('v' + escHtml(permalinkMeta.version));
+      if (parts.length) metaHtml = parts.join(' &nbsp;·&nbsp; ');
+    }
+
     const html = ExportHtmlUtils.buildTerminalExportHtml({
       appName,
       title: label,
-      metaHtml: `exported ${escHtml(created)}`,
+      metaHtml,
       linesHtml,
       fontFacesCss,
     });

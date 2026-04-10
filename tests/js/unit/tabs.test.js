@@ -14,6 +14,8 @@ function loadTabsFns({
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
   doKill = vi.fn(),
+  acFiltered: acFilteredOverride = [],
+  acHide: acHideOverride = () => {},
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -74,6 +76,15 @@ function loadTabsFns({
     Blob,
     ansi_up: { ansi_to_html: (s) => `<em>${s}</em>` },
     shellPromptWrap,
+    setComposerValue: (val, start = null, end = null, opts = {}) => {
+      cmdInput.value = String(val ?? '')
+      if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
+    },
+    getComposerValue: () => cmdInput.value,
+    isHistSearchMode: () => false,
+    exitHistSearch: () => {},
+    acHide: acHideOverride,
+    acFiltered: acFilteredOverride,
   }, `{
     updateNewTabBtn,
     updateTabScrollButtons,
@@ -91,6 +102,7 @@ function loadTabsFns({
     permalinkTab,
     _getTabs: () => getTabs(),
     _getActiveTabId: () => getActiveTabId(),
+    _getAcFiltered: () => acFiltered,
   }`)
 
   return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap, doKill }
@@ -228,6 +240,69 @@ describe('tabs helpers', () => {
     activateTab(id)
 
     expect(input.value).toBe('')
+  })
+
+  it('draftInput is initialized to empty string on new tab', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    createTab('tab 1')
+    expect(_getTabs()[0].draftInput).toBe('')
+  })
+
+  it('activateTab saves the draft of the previous tab when switching', () => {
+    const { createTab, activateTab, _getTabs } = loadTabsFns()
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+    const input = document.getElementById('cmd')
+
+    activateTab(id1)
+    input.value = 'nmap -sV darklab.sh'
+    activateTab(id2)
+
+    expect(_getTabs().find(t => t.id === id1).draftInput).toBe('nmap -sV darklab.sh')
+  })
+
+  it('activateTab restores the draft of the new tab when switching back', () => {
+    const { createTab, activateTab, _getTabs } = loadTabsFns()
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+    const input = document.getElementById('cmd')
+
+    activateTab(id1)
+    input.value = 'dig darklab.sh A'
+    activateTab(id2)
+    input.value = 'curl -I https://darklab.sh'
+    activateTab(id1)
+
+    expect(input.value).toBe('dig darklab.sh A')
+  })
+
+  it('activateTab does not save draft for a running tab', () => {
+    const { createTab, activateTab, _getTabs } = loadTabsFns()
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+    const input = document.getElementById('cmd')
+
+    _getTabs().find(t => t.id === id1).st = 'running'
+    activateTab(id1)
+    input.value = 'should-not-be-saved'
+    activateTab(id2)
+
+    expect(_getTabs().find(t => t.id === id1).draftInput).toBe('')
+  })
+
+  it('activateTab clears acFiltered so stale suggestions from a previous tab do not persist', () => {
+    const acHide = vi.fn()
+    const { createTab, activateTab, _getAcFiltered } = loadTabsFns({
+      acFiltered: ['whoami', 'whoami --help'],
+      acHide,
+    })
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+
+    activateTab(id1)
+
+    expect(_getAcFiltered()).toEqual([])
+    expect(acHide).toHaveBeenCalled()
   })
 
   it('closeTab resets the last remaining tab instead of removing it', () => {

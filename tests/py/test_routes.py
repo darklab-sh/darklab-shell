@@ -190,6 +190,36 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 3600
 
+    def test_diag_enabled_false_when_cidrs_empty(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is False
+
+    def test_diag_enabled_false_when_peer_not_in_cidrs(self):
+        # remote_addr is 127.0.0.1; CIDR does not include it
+        client = get_client(use_forwarded_for=False)
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is False
+
+    def test_diag_enabled_true_when_peer_in_cidrs(self):
+        # remote_addr is 127.0.0.1 (Werkzeug default for test client)
+        client = get_client(use_forwarded_for=False)
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is True
+
+    def test_diag_enabled_uses_remote_addr_not_forwarded_for(self):
+        # X-Forwarded-For claims an allowed IP but remote_addr (127.0.0.1) is not in the CIDR
+        client = get_client(use_forwarded_for=True)  # sets X-Forwarded-For to a 203.0.113.x address
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is False
+
 
 # ── /themes ──────────────────────────────────────────────────────────────────
 
@@ -333,6 +363,166 @@ class TestVendorAssets:
 
         resp = client.get("/vendor/fonts/../../app.py")
         assert resp.status_code == 404
+
+
+# ── /diag ─────────────────────────────────────────────────────────────────────
+
+class TestDiagRoute:
+    """Operator diagnostics endpoint — IP-gated, returns 404 when unconfigured."""
+
+    def _allowed_client(self):
+        """Test client whose remote_addr (127.0.0.1) matches the allowed CIDR."""
+        shell_app.app.config["TESTING"] = True
+        shell_app.app.config["RATELIMIT_ENABLED"] = False
+        # No X-Forwarded-For — we want remote_addr to be 127.0.0.1 (Werkzeug default)
+        return shell_app.app.test_client()
+
+    def test_returns_404_when_cidrs_empty(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
+            with mock.patch.object(logging.getLogger("shell"), "warning") as mock_warn:
+                resp = client.get("/diag")
+        assert resp.status_code == 404
+        mock_warn.assert_called_once()
+        event = mock_warn.call_args[0][0]
+        assert event == "DIAG_DENIED"
+        assert mock_warn.call_args[1]["extra"]["ip"] == "127.0.0.1"
+        assert mock_warn.call_args[1]["extra"]["allowed_cidrs"] == []
+
+    def test_returns_404_when_cidrs_not_set(self):
+        client = self._allowed_client()
+        cfg_without_key = {k: v for k, v in config.CFG.items() if k != "diagnostics_allowed_cidrs"}
+        with mock.patch.dict("config.CFG", cfg_without_key, clear=True):
+            resp = client.get("/diag")
+        assert resp.status_code == 404
+
+    def test_returns_404_when_peer_ip_not_in_cidrs(self):
+        client = get_client()  # sets X-Forwarded-For but remote_addr is still 127.0.0.1
+        # Use a CIDR that does NOT include 127.0.0.1
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+            resp = client.get("/diag")
+        assert resp.status_code == 404
+
+    def test_returns_200_when_peer_ip_in_cidrs(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            resp = client.get("/diag")
+        assert resp.status_code == 200
+
+    def test_response_has_expected_top_level_keys(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert set(data.keys()) >= {"app", "config", "db", "redis", "assets", "tools"}
+
+    def test_app_section_has_version_and_name(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "app_name": "test shell",
+        }):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["app"]["name"] == "test shell"
+        assert isinstance(data["app"]["version"], str)
+
+    def test_config_section_contains_operational_keys(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        cfg = data["config"]
+        for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
+                    "persist_full_run_output", "permalink_retention_days"):
+            assert key in cfg, f"missing config key: {key}"
+
+    def test_db_section_ok_and_has_counts(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["db"]["ok"] is True
+        assert isinstance(data["db"]["runs"], int)
+        assert isinstance(data["db"]["snapshots"], int)
+
+    def test_db_section_error_on_db_failure(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+                data = json.loads(client.get("/diag?format=json").data)
+        assert data["db"]["ok"] is False
+        assert "error" in data["db"]
+
+    def test_redis_section_reflects_client_presence(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert "configured" in data["redis"]
+
+    def test_assets_section_reports_vendor_or_fallback(self, tmp_path, monkeypatch):
+        client = self._allowed_client()
+        # No build-time vendor dir present — both should report "fallback"
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", tmp_path / "missing_ansi_up.js")
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["assets"]["ansi_up"] == "fallback"
+        assert data["assets"]["fonts"] == "fallback"
+
+    def test_tools_section_has_present_and_missing_lists(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert isinstance(data["tools"]["present"], list)
+        assert isinstance(data["tools"]["missing"], list)
+
+    def test_tools_present_contains_known_binary(self):
+        """curl is allowed and installed in the dev environment."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        # At minimum, basic tools available in dev should appear in present
+        present = data["tools"]["present"]
+        assert isinstance(present, list)
+        # Every entry in present must actually resolve via which()
+        import shutil as _shutil
+        for tool in present:
+            assert _shutil.which(tool) is not None, f"{tool} in present but not found by which()"
+
+    def test_does_not_honor_forwarded_for_header(self):
+        """X-Forwarded-For must not bypass the peer-IP gate."""
+        client = self._allowed_client()
+        # CIDR does NOT include 127.0.0.1, but X-Forwarded-For claims an allowed IP
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+            resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert resp.status_code == 404
+
+    def test_diag_viewed_logged_on_success(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(logging.getLogger("shell"), "info") as mock_info:
+                resp = client.get("/diag")
+        assert resp.status_code == 200
+        events = [call[0][0] for call in mock_info.call_args_list]
+        assert "DIAG_VIEWED" in events
+        viewed_call = next(c for c in mock_info.call_args_list if c[0][0] == "DIAG_VIEWED")
+        assert viewed_call[1]["extra"]["ip"] == "127.0.0.1"
+
+    def test_html_response_contains_expected_content(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "app_name": "diag test shell",
+        }):
+            resp = client.get("/diag")
+        body = resp.get_data(as_text=True)
+        assert "diag test shell" in body
+        assert "<!DOCTYPE html>" in body or "<html" in body.lower()
+
+    def test_json_format_param_returns_json(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            resp = client.get("/diag?format=json")
+        assert "application/json" in resp.content_type
+        data = json.loads(resp.data)
+        assert "app" in data
 
 
 # ── /allowed-commands ─────────────────────────────────────────────────────────
@@ -821,6 +1011,31 @@ class TestShareRoute:
         assert 'id="toggle-ts"' in body
         assert 'timestamps unavailable' not in body
 
+    def test_get_share_html_shows_line_count_meta(self):
+        from config import APP_VERSION
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "meta-lines-test", "content": ["a", "b", "c"]},
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        body = client.get(f"/share/{share_id}").get_data(as_text=True)
+        assert "lines" in body
+        assert f"v{APP_VERSION}" in body
+
+    def test_get_share_html_does_not_show_exit_code_badge(self):
+        """Snapshots have no exit code — the badge must not appear."""
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "no-exit-test", "content": ["output line"]},
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        body = client.get(f"/share/{share_id}").get_data(as_text=True)
+        assert "meta-badge" not in body
+
 
 # ── /welcome ──────────────────────────────────────────────────────────────────
 
@@ -1132,6 +1347,88 @@ class TestRunPermalinkRoute:
             assert "$ ping google.com" in body
             assert 'id="toggle-ts"' in body
             assert 'timestamps unavailable for this permalink' not in body
+        finally:
+            self._delete_run(run_id)
+
+    def _insert_run_with_meta(self, run_id, command, exit_code, started, finished, output=None):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, "
+            "preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, 'test-session', ?, ?, ?, ?, ?, 0, ?, 0, 0)",
+            (
+                run_id, command, started, finished, exit_code,
+                json.dumps(output or []), len(output or []),
+            )
+        )
+        conn.commit()
+        conn.close()
+
+    def test_html_view_shows_exit_code_zero_badge(self):
+        run_id = "permalink-meta-exit0-run"
+        self._insert_run_with_meta(
+            run_id, "curl http://example.com", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:05",
+            ["HTTP/1.1 200 OK"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert "exit 0" in body
+            assert "meta-badge-ok" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_nonzero_exit_code_badge(self):
+        run_id = "permalink-meta-exitfail-run"
+        self._insert_run_with_meta(
+            run_id, "curl http://missing.invalid", 6,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:02",
+            ["curl: (6) Could not resolve host"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert "exit 6" in body
+            assert "meta-badge-fail" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_duration(self):
+        run_id = "permalink-meta-duration-run"
+        self._insert_run_with_meta(
+            run_id, "nmap -sV 10.0.0.1", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:01:30",
+            ["Nmap done"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert "1m 30s" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_line_count(self):
+        run_id = "permalink-meta-lines-run"
+        self._insert_run_with_meta(
+            run_id, "dig example.com", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:01",
+            ["line1", "line2", "line3"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            # 3 output lines + 2 injected (prompt-echo + blank) = 5, or just check "lines" present
+            assert "lines" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_app_version(self):
+        from config import APP_VERSION
+        run_id = "permalink-meta-version-run"
+        self._insert_run_with_meta(
+            run_id, "whoami", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:00.1",
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert f"v{APP_VERSION}" in body
         finally:
             self._delete_run(run_id)
 

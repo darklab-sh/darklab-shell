@@ -1904,21 +1904,58 @@ describe('app helpers', () => {
     expect(clearTab).not.toHaveBeenCalled()
   })
 
-  it('moves autocomplete selection in visual screen order when the list is above the prompt', async () => {
+  it('ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt', async () => {
     const acFiltered = ['alpha', 'bravo', 'charlie']
     const { cmdInput, _getAcIndex, acDropdown } = await loadAppFns({
       acFiltered,
-      acIndex: 2,
+      acIndex: -1,
     })
 
     acDropdown.style.display = 'block'
     acDropdown.classList.add('ac-up')
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
-    expect(_getAcIndex()).toBe(1)
-
+    // ArrowUp from no selection (-1) wraps to the last item
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
     expect(_getAcIndex()).toBe(2)
+
+    // ArrowUp from last wraps to first... actually moves up
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(_getAcIndex()).toBe(1)
+
+    // ArrowDown always moves toward higher index (toward 'charlie'), regardless of ac-up
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(_getAcIndex()).toBe(2)
+
+    // ArrowDown at the last item wraps to the first
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(_getAcIndex()).toBe(0)
+
+    // ArrowUp at the first item wraps to the last
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(_getAcIndex()).toBe(2)
+  })
+
+  it('Tab key with a modifier does not trigger autocomplete accept or selection', async () => {
+    const { cmdInput, _getAcIndex } = await loadAppFns({
+      acFiltered: ['alpha', 'bravo'],
+      acIndex: -1,
+    })
+
+    // Alt+Tab (the app tab-cycle shortcut) must not trigger autocomplete
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', altKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(-1)
+
+    // Ctrl+Tab must not trigger autocomplete
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(-1)
+
+    // Meta+Tab must not trigger autocomplete
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', metaKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(-1)
+
+    // Plain Tab (no modifier) still triggers autocomplete selection
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    expect(_getAcIndex()).toBe(0)
   })
 
   it('wires the history delete modal buttons and backdrop correctly', async () => {

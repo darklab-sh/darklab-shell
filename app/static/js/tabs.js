@@ -4,6 +4,7 @@ let _draggedTabId = null;
 let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
+let _tabSeq = 0;
 
 function _getTabEl(id) {
   return tabsBar ? tabsBar.querySelector(`.tab[data-id="${id}"]`) : null;
@@ -380,7 +381,7 @@ function createTab(label) {
     showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
     return null;
   }
-  const id = 'tab-' + Date.now();
+  const id = 'tab-' + (++_tabSeq);
 
   const { tab, labelEl } = _createTabHeader(id, label);
   tab.addEventListener('click', e => {
@@ -466,6 +467,7 @@ function createTab(label) {
     pendingKill: false,
     st: 'idle',
     renamed: false,
+    draftInput: '',
   });
   activateTab(id);
   updateNewTabBtn();
@@ -474,6 +476,24 @@ function createTab(label) {
 }
 
 function activateTab(id, { focusComposer = true } = {}) {
+  // Exit hist-search mode cleanly before switching tabs
+  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
+    if (typeof exitHistSearch === 'function') exitHistSearch(false);
+  }
+  // Flush the current composer value into the leaving tab's draftInput before switching.
+  // Read cmdInput.value directly (not via getComposerValue) to avoid the mobile/desktop
+  // selector race that can occur when the body class hasn't fully settled yet.
+  const prevId = activeTabId;
+  if (prevId && prevId !== id) {
+    const prevTab = getTab(prevId);
+    if (prevTab && prevTab.st === 'running') {
+      prevTab.draftInput = '';
+    } else if (prevTab) {
+      if (typeof cmdInput !== 'undefined' && cmdInput) {
+        prevTab.draftInput = cmdInput.value;
+      }
+    }
+  }
   setActiveTabId(id);
   tabsBar?.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
   tabPanels?.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.id === id));
@@ -483,11 +503,15 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
+  // Hide the autocomplete dropdown and clear the filtered list so stale
+  // suggestions from the previous tab's typing session don't persist.
+  if (typeof acHide === 'function') acHide();
+  if (typeof acFiltered !== 'undefined') acFiltered = [];
+  const draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
   if (typeof setComposerValue === 'function') {
-    setComposerValue('', 0, 0);
+    setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   } else if (cmdInput) {
-    cmdInput.value = '';
-    cmdInput.dispatchEvent(new Event('input'));
+    cmdInput.value = draft;
   }
   resetCmdHistoryNav();
   if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });

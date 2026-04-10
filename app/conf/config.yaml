@@ -80,6 +80,27 @@
 #   - 127.0.0.1/32
 #   - ::1/128
 
+# ── Operator Diagnostics ─────────────────────────────────────────────────────
+#
+# GET /diag returns a JSON summary of app version, operational config, SQLite
+# health and row counts, Redis connectivity, vendor-asset source (built-in vs
+# fallback), and per-tool availability derived from the allowlist.
+#
+# The endpoint returns 404 to all callers unless their direct TCP connection IP
+# falls within one of the CIDRs listed here. It uses request.remote_addr — not
+# the resolved X-Forwarded-For client IP — so X-Forwarded-For headers cannot
+# bypass the gate. Leave the list empty (the default) to keep the endpoint
+# fully hidden.
+#
+# Typical values:
+#   127.0.0.1/32   — loopback only (reachable via docker exec ... curl localhost:8888/diag)
+#   172.16.0.0/12  — Docker bridge / overlay networks
+#   10.0.0.0/8     — private LAN / VPN range
+#
+# Server default if unset: [] (disabled)
+# diagnostics_allowed_cidrs:
+#   - 127.0.0.1/32
+
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
 
 # Whether the /run rate limiter is active at all. Set to false for test-only or

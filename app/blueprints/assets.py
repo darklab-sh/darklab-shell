@@ -4,11 +4,15 @@ Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 
 import logging
 import os
+import shutil
 from pathlib import Path
 
-from flask import Blueprint, abort, jsonify, send_file
+from flask import Blueprint, abort, jsonify, render_template, request, send_file
 
+from commands import command_root, load_allowed_commands
+from config import APP_VERSION, CFG, THEME_REGISTRY_MAP, get_theme_entry
 from database import db_connect
+from helpers import ip_is_in_cidrs
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -86,3 +90,108 @@ def health():
     else:
         log.warning("HEALTH_DEGRADED", extra={"db": result["db"], "redis": result["redis"]})
     return jsonify(result), http_status
+
+
+@assets_bp.route("/diag")
+def diag():
+    """Operator diagnostics endpoint.
+
+    Returns 404 unless the direct peer IP falls within diagnostics_allowed_cidrs.
+    Uses request.remote_addr (not the resolved X-Forwarded-For client IP) so
+    access is limited to requests whose TCP connection originates from an
+    allowed address — e.g. inside the Docker network or via docker exec.
+
+    Enable in config.local.yaml:
+        diagnostics_allowed_cidrs:
+          - "127.0.0.1/32"
+          - "172.16.0.0/12"
+    """
+    allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
+    peer_ip = request.remote_addr or ""
+    if not ip_is_in_cidrs(peer_ip, allowed_cidrs):
+        log.warning("DIAG_DENIED", extra={"ip": peer_ip, "allowed_cidrs": allowed_cidrs})
+        abort(404)
+
+    result: dict = {}
+
+    # ── App ──────────────────────────────────────────────────────────────────
+    result["app"] = {
+        "version": APP_VERSION,
+        "name": CFG.get("app_name", ""),
+    }
+
+    # ── Operational config ───────────────────────────────────────────────────
+    result["config"] = {
+        "rate_limit_enabled":         CFG.get("rate_limit_enabled"),
+        "rate_limit_per_minute":      CFG.get("rate_limit_per_minute"),
+        "rate_limit_per_second":      CFG.get("rate_limit_per_second"),
+        "command_timeout_seconds":    CFG.get("command_timeout_seconds"),
+        "heartbeat_interval_seconds": CFG.get("heartbeat_interval_seconds"),
+        "max_output_lines":           CFG.get("max_output_lines"),
+        "max_tabs":                   CFG.get("max_tabs"),
+        "persist_full_run_output":    CFG.get("persist_full_run_output"),
+        "full_output_max_mb":         CFG.get("full_output_max_mb"),
+        "history_panel_limit":        CFG.get("history_panel_limit"),
+        "permalink_retention_days":   CFG.get("permalink_retention_days"),
+        "trusted_proxy_cidrs":        CFG.get("trusted_proxy_cidrs", []),
+        "log_level":                  CFG.get("log_level"),
+        "log_format":                 CFG.get("log_format"),
+    }
+
+    # ── Database ─────────────────────────────────────────────────────────────
+    db_info: dict = {"ok": False}
+    try:
+        with db_connect() as conn:
+            db_info["runs"] = conn.execute("SELECT COUNT(*) FROM runs").fetchone()[0]
+            db_info["snapshots"] = conn.execute("SELECT COUNT(*) FROM snapshots").fetchone()[0]
+        db_info["ok"] = True
+    except Exception as exc:
+        db_info["error"] = str(exc)
+    result["db"] = db_info
+
+    # ── Redis ─────────────────────────────────────────────────────────────────
+    redis_info: dict = {"configured": bool(redis_client)}
+    if redis_client:
+        try:
+            redis_client.ping()
+            redis_info["ok"] = True
+        except Exception as exc:
+            redis_info["ok"] = False
+            redis_info["error"] = str(exc)
+    result["redis"] = redis_info
+
+    # ── Vendor assets ─────────────────────────────────────────────────────────
+    result["assets"] = {
+        "ansi_up": "vendor" if _ANSI_UP_PATH.exists() else "fallback",
+        "fonts":   "vendor" if _FONT_DIR.exists() and any(_FONT_DIR.iterdir()) else "fallback",
+    }
+
+    # ── Tools ─────────────────────────────────────────────────────────────────
+    # Collect unique command roots from the allow list and probe each with which().
+    allow_prefixes, _ = load_allowed_commands()
+    roots: set[str] = set()
+    if allow_prefixes is not None:
+        for prefix in allow_prefixes:
+            root = command_root(prefix)
+            if root:
+                roots.add(root)
+    present = sorted(r for r in roots if shutil.which(r))
+    missing = sorted(r for r in roots if not shutil.which(r))
+    result["tools"] = {"present": present, "missing": missing}
+
+    log.info("DIAG_VIEWED", extra={"ip": peer_ip})
+
+    if request.args.get("format") == "json":
+        return jsonify(result)
+
+    theme_name = request.cookies.get("pref_theme_name", "").strip()
+    if not theme_name or theme_name not in THEME_REGISTRY_MAP:
+        theme_name = CFG.get("default_theme", "darklab_obsidian.yaml")
+    current_theme = get_theme_entry(theme_name, fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    return render_template(
+        "diag.html",
+        app_name=CFG.get("app_name", ""),
+        data=result,
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+    )

@@ -9,10 +9,10 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
-from config import CFG
+from config import APP_VERSION, CFG
 from database import db_connect, delete_run_artifacts
 from helpers import get_client_ip, get_session_id
-from permalinks import _permalink_error_page, _permalink_page
+from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from run_output_store import load_full_output_entries
 
 log = logging.getLogger("shell")
@@ -140,12 +140,31 @@ def get_run(run_id):
     if preview_notice:
         content_lines.append({"text": preview_notice, "cls": "notice", "tsC": "", "tsE": ""})
 
+    line_count = len(content_lines)
+    if is_full_view:
+        lines_label = f"{line_count:,} lines · full output"
+        if run.get("full_output_truncated"):
+            lines_label += " (truncated)"
+    elif run.get("preview_truncated"):
+        total = run.get("output_line_count") or line_count
+        lines_label = f"preview · {line_count:,} of {total:,} lines"
+    else:
+        lines_label = f"{line_count:,} lines"
+
+    meta = {
+        "exit_code": run.get("exit_code"),
+        "duration": _format_duration(run["started"], run["finished"]) if run.get("finished") else None,
+        "lines": lines_label,
+        "version": APP_VERSION,
+    }
+
     return _permalink_page(
         title=f"$ {run['command']}" + (" (full output)" if is_full_view else ""),
         label=run["command"],
         created=run["started"],
         content_lines=content_lines,
         json_url=f"/history/{run_id}?json",
+        meta=meta,
     )
 
 
@@ -252,10 +271,18 @@ def get_share(share_id):
         snap["content"] = content_lines
         return jsonify(snap)
 
+    meta = {
+        "exit_code": None,
+        "duration": None,
+        "lines": f"{len(content_lines):,} lines",
+        "version": APP_VERSION,
+    }
+
     return _permalink_page(
         title=snap["label"],
         label=snap["label"],
         created=snap["created"],
         content_lines=content_lines,
         json_url=f"/share/{share_id}?json",
+        meta=meta,
     )

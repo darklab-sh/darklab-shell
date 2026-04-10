@@ -128,6 +128,23 @@ def _normalize_permalink_lines(content_lines, label: str):
     return normalized_lines
 
 
+def _format_duration(started: str, finished: str) -> str | None:
+    """Return a human-readable elapsed duration string, or None on any error."""
+    try:
+        t0 = datetime.fromisoformat(started.replace("Z", "+00:00"))
+        t1 = datetime.fromisoformat(finished.replace("Z", "+00:00"))
+        s = max(0.0, (t1 - t0).total_seconds())
+        if s < 60:
+            return f"{s:.1f}s"
+        minutes, secs = divmod(int(s), 60)
+        if minutes < 60:
+            return f"{minutes}m {secs:02d}s"
+        hours, mins = divmod(minutes, 60)
+        return f"{hours}h {mins:02d}m {secs:02d}s"
+    except Exception:
+        return None
+
+
 def _expiry_note(created: str) -> str:
     """Return an HTML snippet showing how long until this permalink expires."""
     retention = CFG.get("permalink_retention_days", 0)
@@ -153,7 +170,7 @@ def _expiry_note(created: str) -> str:
         return ""
 
 
-def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None):
+def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None, meta=None):
     app_name = CFG.get("app_name", "darklab shell")
     theme_entry = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
@@ -179,6 +196,8 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
         "label_json": json.dumps(label),
         "font_faces_css": _font_face_css(embed=True),
         "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
+        "meta": meta,
+        "meta_json": json.dumps(meta),
     }
 
 
@@ -213,7 +232,7 @@ def _permalink_error_page(noun: str) -> Response:
     return Response(html, status=404, mimetype="text/html")
 
 
-def _permalink_page(title, label, created, content_lines, json_url, extra_actions=None) -> Response:
+def _permalink_page(title, label, created, content_lines, json_url, extra_actions=None, meta=None) -> Response:
     """Render a themed HTML page for a permalink."""
     html = render_template(
         "permalink.html",
@@ -224,6 +243,7 @@ def _permalink_page(title, label, created, content_lines, json_url, extra_action
             content_lines=content_lines,
             json_url=json_url,
             extra_actions=extra_actions,
+            meta=meta,
         ),
     )
     return Response(html, mimetype="text/html")

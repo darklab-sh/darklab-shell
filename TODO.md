@@ -2,21 +2,6 @@
 
 ## Open TODOs
 
-
-### Phase 9: Documentation And Test Follow-Through
-
-- After each cleanup phase, update:
-  - [README.md](/Users/nona/repos/shell.darklab.sh/README.md)
-  - [ARCHITECTURE.md](/Users/nona/repos/shell.darklab.sh/ARCHITECTURE.md)
-  - [tests/README.md](/Users/nona/repos/shell.darklab.sh/tests/README.md)
-  - release-note drafts under `/tmp/` when the work is user-visible
-- Keep the architecture docs honest about:
-  - trusted proxy assumptions
-  - module boundaries
-  - asset loading behavior
-  - export/permalink rendering paths
-- Recheck suite counts and appendix entries only when tests are actually added or removed
-
 ---
 
 ## Ideas
@@ -37,13 +22,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Add filtering by command root, exit code, starred status, date, and full-output availability.
   - Current history is useful, but it will become harder to navigate as usage grows.
 
-- **Operator diagnostics page/helper**
-  - Show installed binaries, missing tools, wordlist paths, Redis/SQLite health, asset source status, and retention settings.
-  - Useful for deployment debugging and instance validation.
-
-- **Per-tab draft input persistence**
-  - Keep unrun composer text separate per tab.
-  - Makes tabs feel more like real working contexts.
+- **Per-tab draft input persistence** *(shipped — see Completed)*
 
 - **Context-aware autocomplete**
   - Move beyond a flat suggestion list and tailor completions by command root and prior tokens.
@@ -67,11 +46,11 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - **Additional export formats**
   - Add Markdown and JSONL export in addition to `.txt` and themed `.html`.
 
-- **Snapshot metadata block**
-  - Include command, exit code, duration, timestamp mode, line-number mode, truncation state, and app version in shared/exported artifacts.
+- **Snapshot metadata block** *(shipped — see Completed)*
 
-- **Command recall improvements**
-  - Add reverse-history search or a shell-style history search flow inside the prompt.
+- **Command recall improvements** *(shipped — see Completed)*
+
+- **Per-tab draft input persistence** *(shipped — see Completed)*
 
 - **Better output navigation**
   - Jump to top/bottom, jump between warnings/errors, sticky command header for long runs, and optional output collapsing.
@@ -126,6 +105,48 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Completed
+
+### Command Recall (Ctrl+R) and Per-Tab Draft Persistence
+
+**Command recall (Ctrl+R reverse-history search):**
+- `Ctrl+R` in the prompt enters reverse-i-search mode. A dropdown appears above the prompt showing up to 20 history matches with the query highlighted in the matching substring.
+- Typing narrows the results in real time and auto-fills the top match. `Ctrl+R` again cycles to the next match. `Enter` accepts; `Escape` or `Ctrl+G` cancels and restores the pre-search draft.
+- Implemented as a new section in `history.js` (`enterHistSearch`, `exitHistSearch`, `handleHistSearchInput`, `handleHistSearchKey`, `_renderHistSearch`). The dropdown `#hist-search-dropdown` is anchored above the shell prompt via fixed positioning mirroring the autocomplete dropdown. CSS classes added to `styles.css`. DOM ref added to `dom.js`. `controller.js` routes keydown events through `handleHistSearchKey` first when in search mode and intercepts `Ctrl+R` to call `enterHistSearch`.
+- 10 new Vitest tests in `history.test.js`.
+
+**Per-tab draft input persistence:**
+- Unrun composer text is now saved per tab when switching away and restored when switching back.
+- If the tab was running when you left it, the draft is discarded rather than restored (the command was submitted).
+- Implemented via a `draftInput: ''` field added to each tab object in `tabs.js` and a save/restore path in `activateTab`: draft is read via `getComposerValue()` before changing tabs and written back via `setComposerValue(..., { dispatch: false })` on arrival.
+- 4 new Vitest tests in `tabs.test.js`.
+
+### Snapshot Metadata Block
+
+Every permalink page (`/history/<run_id>` and `/share/<id>`) and downloaded HTML export now shows a metadata strip in the header:
+- **Run permalinks**: exit code badge (green for 0, red for non-zero), duration (`1m 30s`), line count with full/preview/truncated scope, app version.
+- **Snapshot permalinks**: line count and app version (no exit code or duration — snapshots are tab captures with no single exit state).
+- **Downloaded HTML exports**: same metadata rendered in the header using inline styles so the self-contained file stays portable.
+- `_format_duration()` helper added to `permalinks.py`. `_permalink_context()` and `_permalink_page()` accept a new `meta` keyword argument (dict or None). Both `get_run()` and `get_share()` in `blueprints/history.py` build and pass the metadata. CSS classes `.permalink-run-meta`, `.meta-badge`, `.meta-badge-ok`, `.meta-badge-fail`, `.meta-item` added to `styles.css`.
+- 7 new pytest tests in `TestRunPermalinkRoute` (exit 0 badge, non-zero badge, duration, line count, app version) and 2 in `TestShareRoute` (line count + version present, exit code badge absent).
+
+### Operator Diagnostics Page (`/diag`)
+
+- New IP-gated `/diag` route in `blueprints/assets.py` returns a themed HTML page (or `?format=json` for scripting) covering app version/name, operational config values, SQLite run/snapshot counts, Redis connectivity, vendor-asset source, and per-tool availability from the allowlist.
+- Returns 404 unless the direct TCP peer IP (`request.remote_addr`) falls within `diagnostics_allowed_cidrs` in `config.yaml`. X-Forwarded-For spoofing cannot bypass the gate.
+- Denied access logged as `DIAG_DENIED` with peer IP and configured CIDRs; allowed access logged as `DIAG_VIEWED`.
+- `ip_is_in_cidrs()` helper added to `helpers.py`, reusing the existing `_trusted_proxy_networks` CIDR cache.
+- `diagnostics_allowed_cidrs` added to `config.yaml` (commented out with full description) and to `config.py` defaults.
+- Desktop header shows `⊕ diag` button alongside history/options/theme/FAQ when `diag_enabled: true` in `/config` response. Mobile hamburger menu shows matching entry. Both hidden by default and revealed after config fetch.
+- `diag_enabled` field added to `/config` response, computed per-request from `request.remote_addr`.
+- CSS theme-override block updated so `#diag-btn` follows `--theme-toolbar-button-*` variables like all other header buttons.
+- 7 new pytest tests: 4 in `TestConfigRoute` (diag_enabled true/false/X-Forwarded-For isolation), 3 in `TestDiagRoute` (DIAG_VIEWED log, HTML content, `?format=json` content-type); existing denied-log test extended to assert `allowed_cidrs` field.
+
+### Phase 9: Documentation And Test Follow-Through
+
+- Updated `README.md` project structure tree: `app.py` corrected to thin-factory description, `blueprints/` subtree added with all four blueprint files, `helpers.py` and `extensions.py` added, `config.py` notes theme registry.
+- Updated `README.md` test tree: added `test_backend_modules.py` and `test_container_smoke_test.py` to the pytest section; expanded Vitest section from 4 to 11 test files (`tabs`, `search`, `welcome`, `autocomplete`, `session`, `config`, `utils`).
+- `ARCHITECTURE.md` verified up-to-date: blueprint diagram, helpers.py/extensions.py, state.js/ui_helpers.js split, controller.js load order, trusted proxy, theme system, and test strategy sections all accurate.
+- `tests/README.md` suite inventory and counts already updated in earlier session work.
 
 ### Phase 7: Content/Presentation Separation
 

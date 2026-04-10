@@ -80,6 +80,17 @@ def _log_untrusted_proxy(peer_ip, forwarded_for):
     )
 
 
+def ip_is_in_cidrs(ip_str, cidrs):
+    """Return True if ip_str falls within any of the given CIDR strings."""
+    if not ip_str or not cidrs:
+        return False
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return any(ip_obj in network for network in _trusted_proxy_networks(tuple(cidrs)))
+
+
 def get_client_ip():
     """Return the real client IP.
 

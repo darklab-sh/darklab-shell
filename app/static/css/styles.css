@@ -427,6 +427,64 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   font-weight: 700;
 }
 
+/* ── Ctrl+R history search dropdown ── */
+.hist-search-dropdown {
+  position: fixed;
+  z-index: 60;
+  min-width: 200px;
+  max-width: 640px;
+  background: var(--theme-dropdown-up-bg, var(--bg2));
+  border: 1px solid var(--theme-dropdown-up-border, var(--border));
+  border-radius: 3px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  overflow: hidden;
+}
+
+.hist-search-header {
+  padding: 4px 10px;
+  border-bottom: 1px solid var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+
+.hist-search-label { color: var(--muted); }
+.hist-search-query { color: var(--fg); }
+
+.hist-search-item {
+  padding: 3px 10px;
+  cursor: pointer;
+  color: var(--fg);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.hist-search-item:hover,
+.hist-search-item.active {
+  background: var(--theme-dropdown-hover-bg, var(--bg3));
+  color: var(--green);
+}
+
+.hist-search-item.active {
+  border-left: 2px solid var(--green);
+  padding-left: 8px;
+}
+
+.hist-search-match {
+  background: transparent;
+  color: var(--green);
+  font-weight: 700;
+}
+
+.hist-search-empty {
+  padding: 5px 10px;
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+}
+
 .prompt-prefix {
   color: var(--blue);
   margin-right: 8px;
@@ -779,7 +837,8 @@ body.ts-clock .output .shell-prompt-line {
 /* ── Header utility buttons ── */
 #faq-btn,
 #theme-btn,
-#options-btn {
+#options-btn,
+#diag-btn {
   background: transparent;
   border: 1px solid var(--border-bright);
   color: var(--muted);
@@ -790,10 +849,12 @@ body.ts-clock .output .shell-prompt-line {
   border-radius: 3px;
   cursor: pointer;
   transition: border-color 0.2s, color 0.2s;
+  text-decoration: none;
 }
 #faq-btn:hover,
 #theme-btn:hover,
-#options-btn:hover { border-color: var(--green-dim); color: var(--green); }
+#options-btn:hover,
+#diag-btn:hover { border-color: var(--green-dim); color: var(--green); }
 
 /* ── Modals ── */
 .modal-overlay,
@@ -1412,6 +1473,7 @@ body #faq-btn,
 body #theme-btn,
 body #options-btn,
 body #hist-btn,
+body #diag-btn,
 body #search-toggle-btn,
 body #ts-btn,
 body #ln-btn,
@@ -1424,6 +1486,7 @@ body #faq-btn:hover,
 body #theme-btn:hover,
 body #options-btn:hover,
 body #hist-btn:hover,
+body #diag-btn:hover,
 body #search-toggle-btn:hover,
 body #ts-btn:hover,
 body #ln-btn:hover,
@@ -1726,6 +1789,35 @@ body.permalink-page .perm-prefix {
 }
 body.permalink-page .perm-content {
   display: inline;
+}
+body.permalink-page .permalink-run-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 3px;
+}
+body.permalink-page .meta-badge {
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 1px;
+  padding: 1px 7px;
+  border-radius: 2px;
+  border: 1px solid;
+}
+body.permalink-page .meta-badge-ok {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+body.permalink-page .meta-badge-fail {
+  color: var(--red);
+  border-color: var(--red);
+}
+body.permalink-page .meta-item {
+  font-size: 10px;
+  color: var(--muted);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
 body.permalink-page .permalink-error-heading {
   color: var(--amber);

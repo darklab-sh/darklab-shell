@@ -66,15 +66,10 @@ function _positionAutocomplete(itemsCount) {
   return showAbove;
 }
 
-function _scrollAutocompleteActiveItem(forceBottom = false) {
+function _scrollAutocompleteActiveItem() {
   if (!acDropdown) return;
   const activeItem = acDropdown.querySelector('.ac-item.ac-active');
   if (!activeItem) return;
-
-  if (forceBottom) {
-    acDropdown.scrollTop = Math.max(0, acDropdown.scrollHeight - acDropdown.clientHeight);
-    return;
-  }
 
   const viewHeight = acDropdown.clientHeight || 0;
   const itemTop = typeof activeItem.offsetTop === 'number' ? activeItem.offsetTop : null;
@@ -100,19 +95,14 @@ function _scrollAutocompleteActiveItem(forceBottom = false) {
 function acShow(items) {
   acDropdown.innerHTML = '';
   if (!items.length) { hideAcDropdown(); return; }
-  const previousIndex = acIndex;
   const showAbove = _positionAutocomplete(items.length);
-  const pinToBottom = showAbove && previousIndex < 0;
-  if (showAbove && acIndex < 0) acIndex = 0;
   if (acIndex >= items.length) acIndex = items.length - 1;
-  const renderItems = showAbove ? [...items].reverse() : items;
   const currentValue = (typeof getComposerValue === 'function')
     ? getComposerValue()
     : cmdInput.value;
-  renderItems.forEach((s, i) => {
-    const originalIndex = showAbove ? (items.length - 1 - i) : i;
+  items.forEach((s, i) => {
     const div = document.createElement('div');
-    div.className = 'ac-item' + (originalIndex === acIndex ? ' ac-active' : '');
+    div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '');
     const val = currentValue;
     const idx = s.toLowerCase().indexOf(val.toLowerCase());
     if (idx >= 0 && val) {
@@ -128,7 +118,7 @@ function acShow(items) {
   });
   showAcDropdown();
   _positionAutocomplete(items.length);
-  _scrollAutocompleteActiveItem(pinToBottom);
+  _scrollAutocompleteActiveItem();
 }
 
 function acHide() {

@@ -34,7 +34,7 @@ export_html.js — shared browser-side HTML export helpers for tab downloads and
 extensions.py  — Flask-Limiter singleton (limiter.init_app deferred to app.py)
     ↑
 blueprints/
-  assets.py    — /vendor/*, /favicon.ico, /health
+  assets.py    — /vendor/*, /favicon.ico, /health, /diag (IP-gated)
   content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*
   run.py       — /run (rate-limited SSE), /kill; run-output capture helpers
   history.py   — /history*, /share*; preview-output shaping helpers
@@ -115,6 +115,8 @@ Both formatters use a shared `_extra_fields(record)` helper that extracts caller
 | WARN  | `RUN_NOT_FOUND` | get_run | ip, run_id |
 | WARN  | `SHARE_NOT_FOUND` | get_share | ip, share_id |
 | WARN  | `CMD_DENIED` | run_command | ip, session, cmd, reason |
+| INFO  | `DIAG_VIEWED` | diag() | ip |
+| WARN  | `DIAG_DENIED` | diag() | ip, allowed_cidrs |
 | WARN  | `UNTRUSTED_PROXY` | get_client_ip | ip, proxy_ip, forwarded_for, path |
 | WARN  | `RATE_LIMIT` | errorhandler(429) | ip, path, limit |
 | WARN  | `CMD_TIMEOUT` | generate() | ip, run_id, session, timeout, cmd |
@@ -270,7 +272,7 @@ This keeps browser editing semantics and accessibility predictable without relyi
 
 ### Tab State
 
-Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st }`.
+Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st, draftInput }`.
 
 - `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when clicking history entries (if a matching tab already exists, that tab is activated)
 - `runId` — the UUID from the SSE `started` message, used for kill requests
@@ -279,8 +281,9 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 - `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
 - `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
 - `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
+- `draftInput` — unsaved command text that the user was composing in this tab; flushed from `cmdInput.value` on tab switch and restored via `setComposerValue(..., { dispatch: false })` when the tab is reactivated. Not saved for running tabs (the command was already submitted). The `controller.js` input handler also keeps this field live on every keystroke so the flush at switch time is always consistent.
 
-Tab switching is intentionally input-neutral: activating a different tab clears the hidden input and resets history-navigation cursor state instead of restoring prior tab text into the prompt.
+Tab switching is draft-preserving: `activateTab` in `tabs.js` saves the leaving tab's current input as `draftInput`, then restores the arriving tab's saved draft into the prompt without triggering an input event (which would reopen autocomplete). It also calls `acHide()` and resets `acFiltered = []` so stale suggestions from the leaving tab's session cannot bleed into the arriving tab. `resetCmdHistoryNav()` is also called on switch to clear the command-history cursor.
 
 ### Live Output Rendering
 
@@ -348,6 +351,25 @@ Starred commands are stored in `localStorage['starred']` as a JSON array of comm
 When starring a command from the history drawer, if the command is not already in `cmdHistory` (the in-memory chips list), it is prepended and the list is trimmed to `recent_commands_limit`. This means a command that was never run in the current session — e.g. one from a previous container session that only appears in the SQLite history — becomes immediately accessible as a chip after being starred, without requiring the user to run it first.
 
 `cmdHistory` is also hydrated on startup from `/history` via `hydrateCmdHistory()` in `history.js`. That matters for keyboard recall: blank-input `ArrowUp` / `ArrowDown` navigation now works on first load from persisted history, not only after a command has been run in the current browser tab.
+
+### Ctrl+R Reverse-History Search
+
+`Ctrl+R` in the command prompt activates a reverse-i-search mode backed by `history.js`. The implementation is a self-contained section of four functions exported as globals (keeping the classic-script architecture):
+
+- `enterHistSearch()` — saves the current input as `_histSearchPreDraft`, clears the prompt (without dispatching an input event so autocomplete does not reopen), and shows `#hist-search-dropdown`.
+- `exitHistSearch(accept, { keepCurrent })` — if `accept` is true, fills the prompt with the selected match; if `keepCurrent` is true, leaves whatever is in the prompt; otherwise restores `_histSearchPreDraft`. Always calls `acHide()` to ensure autocomplete cannot reopen regardless of the exit path.
+- `handleHistSearchInput(value)` — updates `_histSearchQuery` and re-renders the dropdown. Does **not** call `setComposerValue` during typing — the typed query stays in the prompt, the dropdown shows matching history entries.
+- `handleHistSearchKey(e)` — full key handler: `Escape`/`Ctrl+G` restores the pre-search draft; `Enter` accepts the selected match (or runs the typed query when there are no matches) and calls `submitComposerCommand`; `Tab` accepts without running; `ArrowDown`/`ArrowUp` step through matches and fill the prompt with the highlighted entry; `Ctrl+R` cycles to the next match; `Ctrl+C` exits with `keepCurrent: true` so the typed query remains and the pre-draft is not restored. Returns `true` to signal handled.
+
+`controller.js` routes `Ctrl+R` to `enterHistSearch()` and, while in search mode, sends all `keydown` events through `handleHistSearchKey` first and all `input` events through `handleHistSearchInput` before the normal handlers run.
+
+DOM: `#hist-search-dropdown` in `index.html`; `histSearchDropdown` reference in `dom.js`; CSS in `styles.css`.
+
+### Autocomplete Dropdown Ordering and Navigation
+
+The suggestion list always renders items top-to-bottom in their natural `acFiltered` order regardless of whether the dropdown appears above or below the prompt. Earlier code reversed the list and flipped `ArrowDown`/`ArrowUp` direction when the `ac-up` CSS class was present; that logic was removed so navigation direction is consistent in both positions.
+
+Navigation wraps around: `ArrowDown` at the last item cycles back to the first (`(acIndex + 1) % acFiltered.length`); `ArrowUp` at the first item or with no selection (`acIndex <= 0`) cycles to the last (`acFiltered.length - 1`). The Ctrl+R hist-search dropdown uses identical wrap logic.
 
 ### The KILLED Race Condition
 
@@ -442,10 +464,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 720
-- `vitest`: 249
-- `playwright`: 128
-- total: 1,097
+- `pytest`: 752
+- `vitest`: 273
+- `playwright`: 135
+- total: 1,160
 
 ### Testing Architecture
 

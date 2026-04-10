@@ -21,6 +21,9 @@ function _toggleStar(cmd) {
 function resetCmdHistoryNav() {
   _cmdHistoryNavIndex = -1;
   _cmdHistoryNavDraft = '';
+  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
+    exitHistSearch(false);
+  }
 }
 
 function navigateCmdHistory(delta) {
@@ -381,4 +384,233 @@ function refreshHistoryPanel() {
       historyList.appendChild(entry);
     });
   });
+}
+
+
+// ── Ctrl+R reverse-history search ──
+
+let _histSearchMode = false;
+let _histSearchQuery = '';
+let _histSearchIndex = -1;
+let _histSearchPreDraft = '';
+
+function isHistSearchMode() { return _histSearchMode; }
+
+function _histSearchMatches() {
+  if (!cmdHistory.length) return [];
+  const q = _histSearchQuery.toLowerCase();
+  if (!q) return cmdHistory.slice(0, 20);
+  return cmdHistory.filter(c => c.toLowerCase().includes(q)).slice(0, 20);
+}
+
+function _hideHistSearchDropdown() {
+  if (histSearchDropdown) histSearchDropdown.classList.add('u-hidden');
+}
+
+function _renderHistSearch() {
+  if (!histSearchDropdown) return;
+  const matches = _histSearchMatches();
+  histSearchDropdown.replaceChildren();
+
+  const header = document.createElement('div');
+  header.className = 'hist-search-header';
+  const label = document.createElement('span');
+  label.className = 'hist-search-label';
+  label.textContent = 'reverse-i-search: ';
+  const querySpan = document.createElement('span');
+  querySpan.className = 'hist-search-query';
+  querySpan.textContent = _histSearchQuery || '';
+  header.appendChild(label);
+  header.appendChild(querySpan);
+  histSearchDropdown.appendChild(header);
+
+  if (!matches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'hist-search-empty';
+    empty.textContent = '(no matches)';
+    histSearchDropdown.appendChild(empty);
+  } else {
+    matches.forEach((cmd, i) => {
+      const item = document.createElement('div');
+      item.className = 'hist-search-item' + (i === _histSearchIndex ? ' active' : '');
+      if (_histSearchQuery) {
+        const lower = cmd.toLowerCase();
+        const qi = lower.indexOf(_histSearchQuery.toLowerCase());
+        if (qi >= 0) {
+          item.appendChild(document.createTextNode(cmd.slice(0, qi)));
+          const mark = document.createElement('mark');
+          mark.className = 'hist-search-match';
+          mark.textContent = cmd.slice(qi, qi + _histSearchQuery.length);
+          item.appendChild(mark);
+          item.appendChild(document.createTextNode(cmd.slice(qi + _histSearchQuery.length)));
+        } else {
+          item.textContent = cmd;
+        }
+      } else {
+        item.textContent = cmd;
+      }
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        _histSearchIndex = i;
+        exitHistSearch(true);
+      });
+      histSearchDropdown.appendChild(item);
+    });
+  }
+
+  // Position above the prompt line, like the ac-dropdown does
+  histSearchDropdown.classList.remove('u-hidden');
+  if (shellPromptWrap) {
+    const rect = shellPromptWrap.getBoundingClientRect();
+    histSearchDropdown.style.position = 'fixed';
+    histSearchDropdown.style.left = rect.left + 'px';
+    histSearchDropdown.style.width = rect.width + 'px';
+    const dropH = histSearchDropdown.offsetHeight;
+    histSearchDropdown.style.top = (rect.top - dropH - 4) + 'px';
+  }
+}
+
+function enterHistSearch() {
+  if (_histSearchMode) {
+    // Ctrl+R again: cycle to next match
+    const matches = _histSearchMatches();
+    if (matches.length > 0) {
+      _histSearchIndex = (_histSearchIndex + 1) % matches.length;
+      if (typeof setComposerValue === 'function') {
+        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
+      }
+      _renderHistSearch();
+    }
+    return;
+  }
+  _histSearchMode = true;
+  _histSearchQuery = '';
+  _histSearchIndex = -1;
+  _histSearchPreDraft = (typeof getComposerValue === 'function') ? getComposerValue() : (cmdInput ? cmdInput.value : '');
+  // Clear the input so the user types a fresh query rather than appending to the draft.
+  // The draft is preserved in _histSearchPreDraft and restored on Escape / Ctrl+G.
+  if (typeof setComposerValue === 'function') {
+    setComposerValue('', 0, 0, { dispatch: false });
+  } else if (cmdInput) {
+    cmdInput.value = '';
+  }
+  if (typeof acHide === 'function') acHide();
+  _renderHistSearch();
+}
+
+function exitHistSearch(accept, { keepCurrent = false } = {}) {
+  if (!_histSearchMode) return;
+  _histSearchMode = false;
+  _hideHistSearchDropdown();
+  if (accept) {
+    const matches = _histSearchMatches();
+    const chosen = _histSearchIndex >= 0 ? matches[_histSearchIndex] : (matches[0] || _histSearchPreDraft);
+    if (typeof setComposerValue === 'function') {
+      setComposerValue(chosen, chosen.length, chosen.length);
+    } else if (cmdInput) {
+      cmdInput.value = chosen;
+      cmdInput.dispatchEvent(new Event('input'));
+    }
+  } else if (!keepCurrent) {
+    if (typeof setComposerValue === 'function') {
+      setComposerValue(_histSearchPreDraft, _histSearchPreDraft.length, _histSearchPreDraft.length);
+    } else if (cmdInput) {
+      cmdInput.value = _histSearchPreDraft;
+      cmdInput.dispatchEvent(new Event('input'));
+    }
+  }
+  _histSearchQuery = '';
+  _histSearchIndex = -1;
+  _histSearchPreDraft = '';
+  if (typeof acHide === 'function') acHide();
+}
+
+function handleHistSearchInput(value) {
+  _histSearchQuery = value;
+  _histSearchIndex = -1;
+  const matches = _histSearchMatches();
+  if (matches.length > 0) {
+    _histSearchIndex = 0;
+  }
+  _renderHistSearch();
+}
+
+function handleHistSearchKey(e) {
+  if (!_histSearchMode) return false;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    exitHistSearch(false);
+    return true;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Accept the selected match (if any) then run it. If nothing matched, keep
+    // the typed query in the input and run that instead of restoring the pre-draft.
+    if (_histSearchIndex >= 0) {
+      exitHistSearch(true);
+    } else {
+      exitHistSearch(false, { keepCurrent: true });
+    }
+    if (typeof submitComposerCommand === 'function') {
+      submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
+    } else if (typeof runCommand === 'function') {
+      runCommand();
+    }
+    return true;
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    // Accept the selected match without running; fall back to keeping the query.
+    if (_histSearchIndex >= 0) {
+      exitHistSearch(true);
+    } else {
+      exitHistSearch(false, { keepCurrent: true });
+    }
+    return true;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const matches = _histSearchMatches();
+    if (matches.length > 0) {
+      _histSearchIndex = (_histSearchIndex + 1) % matches.length;
+      if (typeof setComposerValue === 'function') {
+        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
+      } else if (cmdInput) {
+        cmdInput.value = matches[_histSearchIndex];
+      }
+      _renderHistSearch();
+    }
+    return true;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const matches = _histSearchMatches();
+    if (matches.length > 0) {
+      _histSearchIndex = _histSearchIndex <= 0 ? matches.length - 1 : _histSearchIndex - 1;
+      if (typeof setComposerValue === 'function') {
+        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
+      } else if (cmdInput) {
+        cmdInput.value = matches[_histSearchIndex];
+      }
+      _renderHistSearch();
+    }
+    return true;
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
+    e.preventDefault();
+    enterHistSearch(); // cycle
+    return true;
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'g' || e.key === 'G')) {
+    e.preventDefault();
+    exitHistSearch(false);
+    return true;
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    e.preventDefault();
+    exitHistSearch(false, { keepCurrent: true });
+    return true;
+  }
+  // Let printable characters and backspace fall through to the input event
+  return false;
 }

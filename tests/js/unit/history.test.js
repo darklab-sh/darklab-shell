@@ -577,3 +577,384 @@ describe('history panel actions', () => {
   })
 
 })
+
+// ── Ctrl+R reverse-history search ─────────────────────────────────────────────
+
+describe('Ctrl+R reverse-history search', () => {
+  function loadHistSearch({ submitComposerCommand: submitMock } = {}) {
+    document.body.innerHTML = `
+      <div id="history-row"><span class="history-label">Recent:</span></div>
+      <input id="cmd" />
+      <div id="history-panel"></div>
+      <div id="hist-search-dropdown"></div>
+    `
+    const histRow = document.getElementById('history-row')
+    const cmdInput = document.getElementById('cmd')
+    const historyPanel = document.getElementById('history-panel')
+    const histSearchDropdown = document.getElementById('hist-search-dropdown')
+    const submitComposerCommand = submitMock ?? vi.fn()
+
+    return fromDomScripts([
+      'app/static/js/history.js',
+    ], {
+      document,
+      localStorage: new MemoryStorage(),
+      APP_CONFIG: { recent_commands_limit: 20 },
+      histRow,
+      cmdInput,
+      historyPanel,
+      histSearchDropdown,
+      shellPromptWrap: document.createElement('div'),
+      acHide: vi.fn(),
+      refreshHistoryPanel: vi.fn(),
+      useMobileTerminalViewportMode: () => false,
+      setComposerValue: (val, start = null, end = null, opts = {}) => {
+        cmdInput.value = String(val ?? '')
+        if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
+      },
+      getComposerValue: () => cmdInput.value,
+      submitComposerCommand,
+    }, `{
+      hydrateCmdHistory,
+      enterHistSearch,
+      exitHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+      resetCmdHistoryNav,
+      _submitComposerCommand: submitComposerCommand,
+    }`)
+  }
+
+  it('enterHistSearch activates search mode and shows the dropdown', () => {
+    const { hydrateCmdHistory, enterHistSearch, isHistSearchMode } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'nmap -sV darklab.sh' }])
+    const dropdown = document.getElementById('hist-search-dropdown')
+
+    enterHistSearch()
+
+    expect(isHistSearchMode()).toBe(true)
+    expect(dropdown.classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('enterHistSearch saves the current input as the pre-draft', () => {
+    const { hydrateCmdHistory, enterHistSearch, exitHistSearch } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.value = 'partial-cmd'
+
+    enterHistSearch()
+    exitHistSearch(false)
+
+    expect(cmdInput.value).toBe('partial-cmd')
+  })
+
+  it('handleHistSearchInput filters by substring and keeps query in input (match shown in dropdown only)', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'nmap -sV darklab.sh' },
+      { command: 'curl -I https://darklab.sh' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    // Simulate user typing 'nmap': browser sets cmdInput.value before the input event fires
+    cmdInput.value = 'nmap'
+    handleHistSearchInput('nmap')
+
+    // Input should retain the typed query, not be replaced by the full match.
+    // The match is surfaced in the dropdown only; Enter or Ctrl+R accepts it.
+    expect(cmdInput.value).toBe('nmap')
+  })
+
+  it('exitHistSearch(true) accepts the currently selected match', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, exitHistSearch, isHistSearchMode } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'nmap -sV darklab.sh' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    handleHistSearchInput('nmap')
+    exitHistSearch(true)
+
+    expect(isHistSearchMode()).toBe(false)
+    expect(cmdInput.value).toBe('nmap -sV darklab.sh')
+    expect(document.getElementById('hist-search-dropdown').classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('exitHistSearch(false) cancels and restores the pre-draft', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, exitHistSearch } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.value = 'my draft'
+
+    enterHistSearch()
+    handleHistSearchInput('dig')
+    exitHistSearch(false)
+
+    expect(cmdInput.value).toBe('my draft')
+  })
+
+  it('handleHistSearchKey Escape cancels search and returns true', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchKey, isHistSearchMode } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.value = 'pre'
+
+    enterHistSearch()
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(e)
+
+    expect(handled).toBe(true)
+    expect(isHistSearchMode()).toBe(false)
+    expect(cmdInput.value).toBe('pre')
+  })
+
+  it('handleHistSearchKey Enter accepts the match, exits search, and runs the command', () => {
+    const submitComposerCommand = vi.fn()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(e)
+
+    expect(handled).toBe(true)
+    expect(isHistSearchMode()).toBe(false)
+    expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh A', { dismissKeyboard: true })
+  })
+
+  it('handleHistSearchKey Enter with no matches keeps typed query and runs it', () => {
+    const submitComposerCommand = vi.fn()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'xyz'
+    handleHistSearchInput('xyz')
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', ctrlKey: false, metaKey: false, altKey: false })
+    handleHistSearchKey(e)
+
+    expect(isHistSearchMode()).toBe(false)
+    expect(cmdInput.value).toBe('xyz')
+    expect(submitComposerCommand).toHaveBeenCalledWith('xyz', { dismissKeyboard: true })
+  })
+
+  it('handleHistSearchKey Tab accepts the match without running the command', () => {
+    const submitComposerCommand = vi.fn()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Tab', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(e)
+
+    expect(handled).toBe(true)
+    expect(isHistSearchMode()).toBe(false)
+    expect(cmdInput.value).toBe('dig darklab.sh A')
+    expect(submitComposerCommand).not.toHaveBeenCalled()
+  })
+
+  it('handleHistSearchKey ArrowDown navigates to the next match and fills the input', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'dig darklab.sh MX' },
+      { command: 'curl -I https://darklab.sh' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+    // index is now 0, input still shows 'dig'
+    expect(cmdInput.value).toBe('dig')
+
+    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(down)
+
+    expect(handled).toBe(true)
+    // ArrowDown from index 0 moves to index 1
+    expect(cmdInput.value).toBe('dig darklab.sh MX')
+  })
+
+  it('handleHistSearchKey ArrowUp navigates to the previous match', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'dig darklab.sh MX' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+
+    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    handleHistSearchKey(down)
+    expect(cmdInput.value).toBe('dig darklab.sh MX')
+
+    const up = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowUp', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(up)
+
+    expect(handled).toBe(true)
+    expect(cmdInput.value).toBe('dig darklab.sh A')
+  })
+
+  it('handleHistSearchKey Ctrl+R cycles to the next match', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'dig darklab.sh MX' },
+      { command: 'curl -I https://darklab.sh' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    // Simulate user typing 'dig': browser sets cmdInput.value before the input event fires
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+    // Input stays as the typed query until Ctrl+R or Enter accepts a match
+    expect(cmdInput.value).toBe('dig')
+
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'r', ctrlKey: true, metaKey: false, altKey: false })
+    handleHistSearchKey(e)
+
+    expect(cmdInput.value).toBe('dig darklab.sh MX')
+  })
+
+  it('handleHistSearchKey returns false for printable characters to allow input to proceed', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchKey } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+
+    enterHistSearch()
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'a', ctrlKey: false, metaKey: false, altKey: false })
+    expect(handleHistSearchKey(e)).toBe(false)
+  })
+
+  it('handleHistSearchKey Ctrl+C exits search keeping the typed query in input (not restoring pre-draft)', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.value = 'pre-draft'
+
+    enterHistSearch()
+    // Simulate user typing 'di': browser sets cmdInput.value before the input event fires
+    cmdInput.value = 'di'
+    handleHistSearchInput('di')
+
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'c', ctrlKey: true, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(e)
+
+    expect(handled).toBe(true)
+    expect(isHistSearchMode()).toBe(false)
+    // keepCurrent: typed query stays in input, pre-draft is NOT restored
+    expect(cmdInput.value).toBe('di')
+  })
+
+  it('handleHistSearchKey ArrowDown wraps from the last match back to the first', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'dig darklab.sh MX' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+
+    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    handleHistSearchKey(down)
+    expect(cmdInput.value).toBe('dig darklab.sh MX')
+
+    // ArrowDown at the last item wraps back to the first
+    handleHistSearchKey(down)
+    expect(cmdInput.value).toBe('dig darklab.sh A')
+  })
+
+  it('handleHistSearchKey ArrowUp wraps from the first match back to the last', () => {
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'dig darklab.sh MX' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+    // index starts at 0 (first match); ArrowUp wraps to the last match
+    const up = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowUp', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(up)
+
+    expect(handled).toBe(true)
+    expect(cmdInput.value).toBe('dig darklab.sh MX')
+  })
+
+  it('handleHistSearchKey Tab with no matches exits keeping the typed query in input', () => {
+    const submitComposerCommand = vi.fn()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    const cmdInput = document.getElementById('cmd')
+    cmdInput.value = 'xyz-pre'
+
+    enterHistSearch()
+    cmdInput.value = 'xyz'
+    handleHistSearchInput('xyz') // no matches
+
+    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Tab', ctrlKey: false, metaKey: false, altKey: false })
+    const handled = handleHistSearchKey(e)
+
+    expect(handled).toBe(true)
+    expect(isHistSearchMode()).toBe(false)
+    // keepCurrent path: typed query stays, pre-draft is NOT restored
+    expect(cmdInput.value).toBe('xyz')
+    expect(submitComposerCommand).not.toHaveBeenCalled()
+  })
+
+  it('handleHistSearchKey Enter after ArrowDown runs the navigated-to match', () => {
+    const submitComposerCommand = vi.fn()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    hydrateCmdHistory([
+      { command: 'dig darklab.sh A' },
+      { command: 'dig darklab.sh MX' },
+    ])
+    const cmdInput = document.getElementById('cmd')
+
+    enterHistSearch()
+    cmdInput.value = 'dig'
+    handleHistSearchInput('dig')
+
+    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    handleHistSearchKey(down) // moves to index 1 → 'dig darklab.sh MX'
+
+    const enter = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', ctrlKey: false, metaKey: false, altKey: false })
+    handleHistSearchKey(enter)
+
+    expect(isHistSearchMode()).toBe(false)
+    expect(cmdInput.value).toBe('dig darklab.sh MX')
+    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh MX', { dismissKeyboard: true })
+  })
+
+  it('resetCmdHistoryNav exits hist search mode if active', () => {
+    const { hydrateCmdHistory, enterHistSearch, resetCmdHistoryNav, isHistSearchMode } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+
+    enterHistSearch()
+    expect(isHistSearchMode()).toBe(true)
+    resetCmdHistoryNav()
+    expect(isHistSearchMode()).toBe(false)
+  })
+})
