@@ -2,26 +2,6 @@
 
 ## Open TODOs
 
-### Phase 4: Reduce Global-State And Script-Order Coupling
-
-- Refactor [app/static/js/state.js](/Users/nona/repos/shell.darklab.sh/app/static/js/state.js) toward a smaller store boundary:
-  - reduce direct property exposure on `window`
-  - prefer explicit getter/setter APIs over broad writable globals
-  - separate DOM-focused helpers from app-state storage
-- Review which globals are true shared state versus convenience wrappers that can move into feature modules
-- Reduce dependence on classic-script load ordering across:
-  - `state.js`
-  - `tabs.js`
-  - `history.js`
-  - `runner.js`
-  - `app.js`
-- Revisit the unit-test extraction strategy in [tests/js/unit/helpers/extract.js](/Users/nona/repos/shell.darklab.sh/tests/js/unit/helpers/extract.js):
-  - avoid leaning harder on `new Function(...)` and concatenated script execution as modules are split
-  - keep tests focused on public behavior, not on the current script-bundle shape
-- Decide whether the next step is:
-  - incremental ES module adoption, or
-  - a tighter non-module global boundary with fewer exported names
-
 ### Phase 5: DOM Construction And Template Cleanup
 
 - Replace repeated `innerHTML`-built UI fragments with more maintainable structures where the payoff is high:
@@ -222,6 +202,17 @@ Validation:
 - `npx vitest run tests/js/unit/app.test.js`
 - `npx vitest run tests/js/unit/runner.test.js`
 - `npx vitest run tests/js/unit/*.test.js`
+
+### Global-State And Script-Order Coupling
+
+`app/static/js/state.js` now owns the shared store boundary and explicit accessors for tabs and active-tab state, while DOM-facing helpers moved into `app/static/js/ui_helpers.js`. The browser template loads `ui_helpers.js` immediately after `dom.js`, and `tests/js/unit/helpers/extract.js` mirrors that order so the jsdom harness sees the same classic-script globals as production. That keeps the non-module browser architecture intact while reducing the number of implicit dependencies on script order.
+
+Validation:
+- `python3 -m pytest tests/js/unit/app.test.js tests/js/unit/tabs.test.js tests/js/unit/runner.test.js -q`
+- `npx vitest run tests/js/unit/*.test.js`
+- `node --check app/static/js/state.js`
+- `node --check app/static/js/ui_helpers.js`
+- `node --check tests/js/unit/helpers/extract.js`
 
 ### Trust Boundary And Request Identity
 

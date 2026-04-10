@@ -216,17 +216,17 @@ These happen in `rewrite_command()` silently (no user-visible notice unless spec
 
 ## Frontend Architecture
 
-Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: each module file defines functions and state only; `app.js` provides shared helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
+Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
 
 External dependencies: local vendor routes backed by build-time font downloads and a copied-in `ansi_up` browser build for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the checked-in browser-global file at `static/js/vendor/ansi_up.js` serves as the fallback for local dev and docker-compose runs. The Dockerfile copies that same file into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
 
-**JS module load order:** `session.js` → `utils.js` → `config.js` → `dom.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `controller.js`. The shared helpers stay in `app.js`; `controller.js` owns the composition root and must load last so it can wire the DOM after all helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
+**JS module load order:** `session.js` → `state.js` → `utils.js` → `config.js` → `dom.js` → `ui_helpers.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `controller.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, `app.js` still provides reusable browser helpers, and `controller.js` owns the composition root and must load last so it can wire the DOM after all helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 ### Shared Frontend State Layer
 
-The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object.
+The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
 
-That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, which lets `getTab()` and `getActiveTab()` resolve the right objects without rewriting the production call sites.
+That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, then prepend `ui_helpers.js` before DOM-bound modules so the extracted scripts see the same helper globals as production without rewriting the production call sites.
 
 ### Dedicated Mobile Shell
 
@@ -386,7 +386,7 @@ The goal is to keep local inspection easy while still having a container-image-s
 
 In GitLab CI, the `dependency-version-check` job runs the local version-check script on a schedule and stores the output as a short-lived artifact, which makes it easy to spot stale base images or pinned Python packages during routine maintenance.
 
-After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads `examples/docker-compose.standalone.yml`, resolves all relative paths to absolute, injects a unique image tag and a free port, and writes a temporary compose file so the test build never collides with a running dev stack. It builds with `docker compose build --pull`, starts the service with `docker compose up -d`, waits for the `/health` endpoint, and then submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A small unit regression in the same module verifies the Docker host resolution helper so DinD jobs keep probing the daemon host instead of hard-coding `127.0.0.1`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
+After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads `examples/docker-compose.standalone.yml`, resolves all relative paths to absolute, injects a unique image tag and a free port, and writes a temporary compose file so the test build never collides with a running dev stack. It builds with `docker compose build --pull`, starts the service with `docker compose up -d`, waits for the `/health` endpoint, and then submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A small unit regression in the same module verifies `_docker_reach_host()` so DinD jobs keep probing the daemon host instead of hard-coding `127.0.0.1`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
 
 GitLab CI mirrors that same smoke test in the `container-smoke-test` job, which runs on schedules or can be started manually when you want to verify a fresh image before merging dependency or Dockerfile changes.
 
@@ -438,10 +438,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 717
+- `pytest`: 720
 - `vitest`: 248
 - `playwright`: 128
-- total: 1,093
+- total: 1,096
 
 ### Testing Architecture
 
@@ -452,9 +452,9 @@ Current totals on this branch:
 
 - That split is deliberate. Backend coverage stays fast and deterministic, browser-module logic gets isolated without bundling the app, and only browser-specific integration risks are left to Playwright.
 
-- The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage. The page bootstrap moved into `app/static/js/controller.js`, but it still depends on the globals defined by the earlier scripts.
+- The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage. The page bootstrap moved into `app/static/js/controller.js`, while shared state now lives in `app/static/js/state.js` and DOM-facing helpers live in `app/static/js/ui_helpers.js`; the extracted scripts still depend on the globals defined by the earlier scripts.
 
-- The jsdom harness mirrors production load order by prepending `app/static/js/state.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
+- The jsdom harness mirrors production load order by prepending `app/static/js/state.js` and `app/static/js/ui_helpers.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
 
 - Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, the lower-composer tap hit-target fix, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, close-running-tab / clear-preserve behavior, and history-panel action-button close behavior.
 

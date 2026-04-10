@@ -131,6 +131,8 @@ A web-based shell for running network diagnostics and vulnerability scans agains
             ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
             ├── config.js       # APP_CONFIG defaults
             ├── dom.js          # Shared DOM element references
+            ├── state.js        # Shared app-state store/accessors
+            ├── ui_helpers.js   # DOM-facing helpers and visibility setters
             ├── tabs.js         # Tab lifecycle management
             ├── output.js       # ANSI rendering and line management
             ├── search.js       # In-output search (with case-sensitive and regex modes)
@@ -917,14 +919,14 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **717 pytest + 248 Vitest + 128 Playwright = 1,093 tests**.
+Current totals in this branch: **720 pytest + 248 Vitest + 128 Playwright = 1,096 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
 - `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
 - `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, and history-panel action-button close behavior
 
-After a Dockerfile or package upgrade, `scripts/container_smoke_test.sh` is the primary verification step: it builds a fresh image via `docker compose` (using `examples/docker-compose.standalone.yml` as the base with a unique tag and free port) and runs every command from `app/conf/auto_complete.txt` through `/run`, checking each against the expected output in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the new image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container. Using the compose file ensures the test environment matches the real deployment including tmpfs, Redis, and `init: true` — running bare `docker run` lacks those. The smoke-test module now also carries a small regression test for the Docker host resolution helper so DinD jobs keep probing the daemon host instead of hard-coding `127.0.0.1`. The test also writes `test-results/container_smoke_test.xml`. GitLab CI has a `container-smoke-test` job that runs the same check on schedule or manually.
+After a Dockerfile or package upgrade, `scripts/container_smoke_test.sh` is the primary verification step: it builds a fresh image via `docker compose` (using `examples/docker-compose.standalone.yml` as the base with a unique tag and free port) and runs every command from `app/conf/auto_complete.txt` through `/run`, checking each against the expected output in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the new image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container. Using the compose file ensures the test environment matches the real deployment including tmpfs, Redis, and `init: true` — running bare `docker run` lacks those. The smoke-test module now also carries a small `_docker_reach_host()` regression so DinD jobs keep probing the Docker daemon host instead of hard-coding `127.0.0.1`. The test also writes `test-results/container_smoke_test.xml`. GitLab CI has a `container-smoke-test` job that runs the same check on schedule or manually.
 
 Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
 
