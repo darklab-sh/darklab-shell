@@ -120,6 +120,7 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - Implemented via a `draftInput: ''` field added to each tab object in `tabs.js` and a save/restore path in `activateTab`: draft is read via `getComposerValue()` before changing tabs and written back via `setComposerValue(..., { dispatch: false })` on arrival.
 - 4 new Vitest tests in `tabs.test.js`.
 
+
 ### Snapshot Metadata Block
 
 Every permalink page (`/history/<run_id>` and `/share/<id>`) and downloaded HTML export now shows a metadata strip in the header:
