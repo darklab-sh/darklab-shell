@@ -40,7 +40,7 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
                 "scans — without needing SSH access to a server. For more detailed information, see "
                 f"the project README at <a href=\"{html.escape(project_readme, quote=True)}\" "
-                "target=\"_blank\" rel=\"noopener\" style=\"color:var(--green)\">README</a>."
+                "target=\"_blank\" rel=\"noopener\" class=\"faq-link\">README</a>."
             ),
         },
         {
@@ -89,7 +89,7 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             "question": "How do I stop a running command?",
             "answer": "Use the Kill button shown while a command is running.",
             "answer_html": (
-                "Click the <strong style=\"color:var(--red)\">■ Kill</strong> button that appears "
+                "Click the <strong class=\"faq-kill-verb\">■ Kill</strong> button that appears "
                 "while a command is running. This sends SIGTERM to the entire process group on the "
                 "server, stopping it immediately."
             ),
@@ -102,7 +102,7 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             ),
             "answer_html": (
                 "Yes. Current shell-style shortcuts include:<br><br>"
-                "<ul style=\"margin:0 0 0 18px;padding:0;line-height:1.6\">"
+                "<ul>"
                 "<li><code>Ctrl+C</code> — open kill confirmation while a command is running, or "
                 "drop to a fresh prompt line when idle.</li>"
                 "<li><code>Enter</code> on a blank prompt — create a new empty prompt line.</li>"
@@ -197,7 +197,7 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             "answer": "The SecLists collection is installed at /usr/share/wordlists/seclists/.",
             "answer_html": (
                 "The full <a href=\"https://github.com/danielmiessler/SecLists\" target=\"_blank\" "
-                "rel=\"noopener\" style=\"color:var(--green)\">SecLists</a> collection is installed at "
+                "rel=\"noopener\" class=\"faq-link\">SecLists</a> collection is installed at "
                 "<code>/usr/share/wordlists/seclists/</code>. Commonly used lists:<ul>"
                 "<li><code>Discovery/Web-Content/common.txt</code> — fast directory scan</li>"
                 "<li><code>Discovery/Web-Content/big.txt</code> — broader directory scan</li>"

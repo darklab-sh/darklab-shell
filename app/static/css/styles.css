@@ -1,3 +1,4 @@
+/* ── CSS variables & theme tokens ── */
 :root {
   --bg: #0d0d0d;
   --surface: #141414;
@@ -105,8 +106,14 @@
   --theme-welcome-command-hover-shadow: 0 0 0 1px var(--green-glow);
   --theme-welcome-ascii-text-shadow: 0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4);
   --theme-welcome-ascii-filter: saturate(1.12) contrast(1.08) brightness(1.08);
+  --theme-on-accent-text: #000;
+  --theme-selection-text: #f7fff2;
+  --theme-selection-line-text: #eef7ee;
+  --theme-modal-danger-btn-text: #fff;
+  --theme-modal-warning-btn-text: #000;
 }
 
+/* ── Base reset & page layout ── */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
 html, body {
@@ -127,6 +134,7 @@ body {
 }
 
 
+/* ── Header ── */
 header {
   display: flex;
   align-items: baseline;
@@ -158,6 +166,7 @@ header .version {
   text-transform: uppercase;
 }
 
+/* ── Shell input ── */
 .input-row {
   display: flex;
   gap: 10px;
@@ -298,14 +307,14 @@ header .version {
   display: inline-block;
   border-radius: 1px;
   background: var(--green);
-  color: #000;
+  color: var(--theme-on-accent-text);
   box-shadow: 0 0 8px var(--green-glow);
 }
 
 .shell-prompt-selection {
   position: relative;
   background: color-mix(in srgb, var(--green) 34%, transparent);
-  color: #f7fff2;
+  color: var(--theme-selection-text);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 42%, transparent), 0 0 10px color-mix(in srgb, var(--green) 14%, transparent);
   border-radius: 2px;
   text-shadow: none;
@@ -326,7 +335,7 @@ header .version {
 .shell-prompt-selection::after { right: -1px; }
 
 .shell-prompt-has-selection .shell-prompt-line {
-  color: #eef7ee;
+  color: var(--theme-selection-line-text);
   overflow: visible;
   text-overflow: clip;
 }
@@ -336,7 +345,7 @@ header .version {
   text-overflow: clip;
 }
 
-/* Autocomplete dropdown */
+/* ── Autocomplete dropdown ── */
 .ac-dropdown {
   position: fixed;
   top: 0;
@@ -349,7 +358,7 @@ header .version {
   max-height: 220px;
   overflow-y: auto;
   overscroll-behavior: contain;
-  box-shadow: 0 0 0 1px var(--theme-dropdown-shadow), 0 10px 24px var(--theme-dropdown-shadow);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 10px 24px var(--theme-dropdown-shadow);
   padding: 2px 0;
 }
 
@@ -378,7 +387,7 @@ header .version {
 .ac-dropdown.ac-up {
   background: var(--theme-dropdown-up-bg);
   border-color: var(--theme-dropdown-up-border);
-  box-shadow: 0 0 0 1px var(--theme-dropdown-up-shadow), 0 -10px 24px var(--theme-dropdown-up-shadow);
+  box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 -10px 24px var(--theme-dropdown-up-shadow);
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
@@ -449,7 +458,7 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 #run-btn {
   display: none;
   background: var(--green);
-  color: #000;
+  color: var(--theme-on-accent-text);
   border: none;
   border-radius: 4px;
   padding: 0 22px;
@@ -467,7 +476,7 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 #run-btn:active:not(:disabled) { transform: scale(0.97); }
 #run-btn:disabled { opacity: 0.3; cursor: not-allowed; }
 
-/* Terminal */
+/* ── Terminal ── */
 .terminal-wrap {
   flex: 1;
   display: flex;
@@ -521,16 +530,12 @@ body.mobile-terminal-mode #mobile-composer-host {
   display: block;
   position: relative;
   z-index: 40;
-  background: var(--theme-mobile-composer-host-bg);
+  background: var(--theme-mobile-composer-host-light-bg);
   padding: 8px 0 calc(10px + env(safe-area-inset-bottom));
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open #mobile-composer-host {
   border-top: 1px solid var(--border-bright);
-}
-
-body.mobile-terminal-mode #mobile-composer-host {
-  background: var(--theme-mobile-composer-host-light-bg);
 }
 
 body.mobile-terminal-mode {
@@ -579,7 +584,7 @@ body.mobile-terminal-mode {
 
 @keyframes pulse { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
-/* Tab panels container */
+/* ── Tab panels ── */
 #tab-panels {
   flex: 1;
   display: flex;
@@ -727,7 +732,7 @@ body.ts-clock .output .shell-prompt-line {
   min-height: 0;
 }
 
-/* History */
+/* ── History row (inline, within terminal bar) ── */
 .history-row {
   display: flex;
   flex-wrap: wrap;
@@ -771,7 +776,7 @@ body.ts-clock .output .shell-prompt-line {
 .hist-chip:hover { border-color: var(--green-dim); color: var(--text); }
 .hist-chip-overflow { color: var(--green); }
 
-/* Header utility buttons */
+/* ── Header utility buttons ── */
 #faq-btn,
 #theme-btn,
 #options-btn {
@@ -790,7 +795,7 @@ body.ts-clock .output .shell-prompt-line {
 #theme-btn:hover,
 #options-btn:hover { border-color: var(--green-dim); color: var(--green); }
 
-/* Modal overlay */
+/* ── Modals ── */
 .modal-overlay,
 #faq-overlay,
 #theme-overlay,
@@ -873,7 +878,7 @@ body.ts-clock .output .shell-prompt-line {
 
 .modal-primary-danger {
   background: var(--red);
-  color: #fff;
+  color: var(--theme-modal-danger-btn-text);
 }
 
 .modal-secondary-warning {
@@ -884,7 +889,7 @@ body.ts-clock .output .shell-prompt-line {
 
 .modal-primary-warning {
   background: var(--amber);
-  color: #000;
+  color: var(--theme-modal-warning-btn-text);
 }
 
 .faq-header {
@@ -1206,6 +1211,14 @@ body.ts-clock .output .shell-prompt-line {
   margin-top: 6px;
 }
 
+.faq-a .faq-link {
+  color: var(--green);
+}
+
+.faq-a .faq-kill-verb {
+  color: var(--red);
+}
+
 .allowed-group {
   margin-top: 14px;
 }
@@ -1248,18 +1261,11 @@ body.ts-clock .output .shell-prompt-line {
 .line.denied { color: var(--amber); font-weight: 700; margin-top: 4px; }
 .line.notice { color: var(--blue); font-style: italic; margin-bottom: 4px; }
 
+/* ── Theme overrides
+   Body-scoped selectors apply --theme-* variables with higher specificity
+   than the base :root defaults, so selected themes override individual
+   component colours without needing !important on every property. ── */
 body #output { color: var(--text); }
-body .ac-dropdown {
-  background: var(--theme-dropdown-bg);
-  border-color: var(--theme-dropdown-border);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 10px 24px var(--theme-dropdown-shadow);
-}
-body .ac-dropdown.ac-up {
-  background: var(--theme-dropdown-up-bg);
-  border-color: var(--theme-dropdown-up-border);
-  box-shadow: 0 0 0 1px rgba(0,0,0,0.08), 0 -10px 24px var(--theme-dropdown-up-shadow);
-}
-body .ac-item { color: var(--theme-dropdown-item-text); }
 body #faq-modal { background: var(--theme-faq-modal-bg); }
 body #options-modal { background: var(--theme-options-modal-bg); }
 body .faq-a {
@@ -1271,7 +1277,6 @@ body .mobile-prompt-label,
 body #mobile-composer-prefix {
   color: var(--blue);
 }
-body .line.notice { color: var(--blue); }
 body .welcome-command-badge {
   color: var(--blue);
   border-color: color-mix(in srgb, var(--blue) 40%, transparent);
@@ -1311,21 +1316,6 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 .tabs-bar::-webkit-scrollbar-track { background: var(--theme-tabs-bar-scrollbar-track); border-radius: 2px; }
 .tabs-bar::-webkit-scrollbar-thumb { background: var(--theme-tabs-bar-scrollbar-thumb); border-radius: 2px; }
 .tabs-bar::-webkit-scrollbar-thumb:hover { background: var(--theme-tabs-bar-scrollbar-thumb-hover); }
-
-body .tabs-bar { background: var(--theme-tabs-bar-bg); scrollbar-color: var(--theme-tabs-bar-scrollbar-thumb) var(--theme-tabs-bar-scrollbar-track); }
-body .tabs-bar::-webkit-scrollbar-track { background: var(--theme-tabs-bar-scrollbar-track); }
-body .tabs-bar::-webkit-scrollbar-thumb { background: var(--theme-tabs-bar-scrollbar-thumb); }
-body .tabs-bar::-webkit-scrollbar-thumb:hover { background: var(--theme-tabs-bar-scrollbar-thumb-hover); }
-body .tabs-scroll-btn {
-  background: var(--theme-tabs-scroll-btn-bg);
-  border-color: var(--theme-tabs-scroll-btn-border);
-  color: var(--theme-tabs-scroll-btn-text);
-}
-body .tabs-scroll-btn:hover:not(:disabled) {
-  background: var(--theme-tabs-scroll-btn-hover-bg);
-  border-color: var(--theme-tabs-scroll-btn-hover-border);
-  color: var(--theme-tabs-scroll-btn-hover-text);
-}
 
 .tabs-scroll-btn {
   background: var(--theme-tabs-scroll-btn-bg);
@@ -2270,7 +2260,7 @@ body .welcome-status-loaded {
   caret-color: var(--green);
 }
 
-/* Mobile composer base (hidden on desktop) */
+/* ── Mobile composer (hidden on desktop; shown inside @media mobile block) ── */
 #mobile-composer {
   display: none;
   flex-direction: column;

@@ -148,71 +148,47 @@ def resolve_fake_command(command: str) -> str | None:
     return root if root in _FAKE_COMMANDS else None
 
 
+_FAKE_COMMAND_DISPATCH = {
+    "banner":    lambda cmd, sid: _run_fake_banner(),
+    "clear":     lambda cmd, sid: _run_fake_clear(),
+    "date":      lambda cmd, sid: _run_fake_date(),
+    "env":       lambda cmd, sid: _run_fake_env(sid),
+    "faq":       lambda cmd, sid: _run_fake_faq(),
+    "fortune":   lambda cmd, sid: _run_fake_fortune(),
+    "groups":    lambda cmd, sid: _run_fake_groups(),
+    "help":      lambda cmd, sid: _run_fake_help(),
+    "history":   lambda cmd, sid: _run_fake_history(sid),
+    "hostname":  lambda cmd, sid: _run_fake_hostname(),
+    "id":        lambda cmd, sid: _run_fake_id(),
+    "last":      lambda cmd, sid: _run_fake_last(sid),
+    "limits":    lambda cmd, sid: _run_fake_limits(),
+    "ls":        lambda cmd, sid: _run_fake_ls(cmd),
+    "man":       lambda cmd, sid: _run_fake_man(cmd),
+    "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
+    "pwd":       lambda cmd, sid: _run_fake_pwd(),
+    "reboot":    lambda cmd, sid: _run_fake_reboot(),
+    "retention": lambda cmd, sid: _run_fake_retention(),
+    "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
+    "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
+    "status":    lambda cmd, sid: _run_fake_status(sid),
+    "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
+    "tty":       lambda cmd, sid: _run_fake_tty(),
+    "type":      lambda cmd, sid: _run_fake_type(cmd),
+    "uname":     lambda cmd, sid: _run_fake_uname(cmd),
+    "uptime":    lambda cmd, sid: _run_fake_uptime(),
+    "version":   lambda cmd, sid: _run_fake_version(),
+    "which":     lambda cmd, sid: _run_fake_which(cmd),
+    "who":       lambda cmd, sid: _run_fake_who(sid),
+    "whoami":    lambda cmd, sid: _run_fake_whoami(),
+}
+
+
 def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
     root = resolve_fake_command(command)
-    if root == "banner":
-        return _run_fake_banner(), 0
-    if root == "clear":
-        return _run_fake_clear(), 0
-    if root == "date":
-        return _run_fake_date(), 0
-    if root == "env":
-        return _run_fake_env(session_id), 0
-    if root == "faq":
-        return _run_fake_faq(), 0
-    if root == "fortune":
-        return _run_fake_fortune(), 0
-    if root == "groups":
-        return _run_fake_groups(), 0
-    if root == "help":
-        return _run_fake_help(), 0
-    if root == "history":
-        return _run_fake_history(session_id), 0
-    if root == "hostname":
-        return _run_fake_hostname(), 0
-    if root == "id":
-        return _run_fake_id(), 0
-    if root == "shortcuts":
-        return _run_fake_shortcuts(), 0
-    if root == "last":
-        return _run_fake_last(session_id), 0
-    if root == "limits":
-        return _run_fake_limits(), 0
-    if root == "ls":
-        return _run_fake_ls(command), 0
-    if root == "man":
-        return _run_fake_man(command), 0
-    if root == "ps":
-        return _run_fake_ps(session_id, command), 0
-    if root == "pwd":
-        return _run_fake_pwd(), 0
-    if root == "reboot":
-        return _run_fake_reboot(), 0
-    if root == "retention":
-        return _run_fake_retention(), 0
-    if root == "rm_root":
-        return _run_fake_rm_root(), 0
-    if root == "status":
-        return _run_fake_status(session_id), 0
-    if root == "sudo":
-        return _run_fake_sudo(command), 0
-    if root == "tty":
-        return _run_fake_tty(), 0
-    if root == "type":
-        return _run_fake_type(command), 0
-    if root == "uname":
-        return _run_fake_uname(command), 0
-    if root == "uptime":
-        return _run_fake_uptime(), 0
-    if root == "version":
-        return _run_fake_version(), 0
-    if root == "which":
-        return _run_fake_which(command), 0
-    if root == "who":
-        return _run_fake_who(session_id), 0
-    if root == "whoami":
-        return _run_fake_whoami(), 0
-    return [{"type": "output", "text": f"Unsupported fake command: {command.strip()}"}], 1
+    handler = _FAKE_COMMAND_DISPATCH.get(root)
+    if handler is None:
+        return [{"type": "output", "text": f"Unsupported fake command: {command.strip()}"}], 1
+    return handler(command, session_id), 0
 
 
 def _recent_runs(session_id: str, limit: int = 8):

@@ -6,6 +6,9 @@ Database lives in /data (writable volume mount). Falls back to /tmp for local de
 import logging
 import os
 import sqlite3
+from contextlib import contextmanager
+
+import fcntl
 
 from config import CFG
 from run_output_store import delete_artifact_file, ensure_run_output_dir
@@ -15,6 +18,7 @@ log = logging.getLogger("shell")
 # /tmp (tmpfs) is the intended fallback for local dev without the volume mount
 DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
+DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
 
 
 def db_connect():
@@ -23,6 +27,17 @@ def db_connect():
     conn.execute("PRAGMA journal_mode=WAL")
     conn.execute("PRAGMA synchronous=NORMAL")
     return conn
+
+
+@contextmanager
+def _db_init_lock():
+    """Serialize schema/bootstrap work across Gunicorn workers."""
+    with open(DB_INIT_LOCK_PATH, "w", encoding="utf-8") as lock_file:
+        fcntl.flock(lock_file.fileno(), fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            fcntl.flock(lock_file.fileno(), fcntl.LOCK_UN)
 
 
 def _create_schema(conn):
@@ -149,12 +164,13 @@ def _prune_retention(conn):
 def db_init():
     """Create the runs and snapshots tables if they don't exist, and prune old records."""
     ensure_run_output_dir()
-    with db_connect() as conn:
-        _create_schema(conn)
-        _migrate_schema(conn)
-        _create_indexes(conn)
-        _prune_retention(conn)
-        conn.commit()
+    with _db_init_lock():
+        with db_connect() as conn:
+            _create_schema(conn)
+            _migrate_schema(conn)
+            _create_indexes(conn)
+            _prune_retention(conn)
+            conn.commit()
 
 
 db_init()

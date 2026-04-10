@@ -2,32 +2,6 @@
 
 ## Open TODOs
 
-### Phase 7: Content/Presentation Separation
-
-- Simplify the built-in FAQ data in [app/commands.py](/Users/nona/repos/shell.darklab.sh/app/commands.py):
-  - reduce inline style usage inside `answer_html`
-  - keep content data-oriented where possible
-  - reserve richer markup only for cases that actually need it
-- Rework [app/fake_commands.py](/Users/nona/repos/shell.darklab.sh/app/fake_commands.py) synthetic command dispatch from a long `if`/`elif` chain into a handler registry or dispatch map
-- Review other config/content surfaces for similar mixing:
-  - help text
-  - shortcuts output
-  - operator-editable config-driven content
-- Keep terminal output and UI output aligned while reducing duplication or style leakage
-
-### Phase 8: CSS Surface Cleanup
-
-- Split [app/static/css/styles.css](/Users/nona/repos/shell.darklab.sh/app/static/css/styles.css) into clearer sections or files by surface:
-  - shell/transcript
-  - mobile shell
-  - history/search/FAQ/options overlays
-  - permalink/export-specific rules
-- Remove remaining style drift between:
-  - static template markup
-  - JS-generated UI fragments
-  - permalink/export surfaces
-- Keep theme tokens centralized so light/dark fixes do not require scattered selector overrides
-- Add a light pass over selector specificity and duplication once the structural split is in place
 
 ### Phase 9: Documentation And Test Follow-Through
 
@@ -152,6 +126,12 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 ---
 
 ## Completed
+
+### Phase 7: Content/Presentation Separation
+
+- Replaced the three inline `style="color:var(--...)"` attributes and the `<ul style="...">` layout attribute in the built-in FAQ `answer_html` entries with CSS classes (`.faq-link` for green documentation links, `.faq-kill-verb` for the red Kill label). The keyboard-shortcuts `<ul>` inline style was removed entirely; the existing `.faq-a ul` rule already handles list layout.
+- Replaced the 30-branch `if/elif` chain in `execute_fake_command()` with a module-level `_FAKE_COMMAND_DISPATCH` dict of lambdas normalised to `(cmd, sid) -> list[dict]`. The public function body is four lines; adding a new helper requires one dict entry.
+- Reviewed all other config/content surfaces (help text, shortcuts output, MOTD renderer, operator-editable YAML assets, FAQ limits builder): no inline styles or presentation mixing found.
 
 ### Backend Route Decomposition
 

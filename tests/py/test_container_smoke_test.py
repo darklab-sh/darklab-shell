@@ -17,7 +17,6 @@ import json
 import os
 import re
 import shutil
-import socket
 import subprocess
 import tempfile
 import time
@@ -106,12 +105,6 @@ def _run_streaming(cmd: list[str], *, timeout: int) -> subprocess.CompletedProce
     return subprocess.CompletedProcess(cmd, proc.returncode, stdout, "")
 
 
-def _free_port() -> int:
-    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
-        sock.bind(("127.0.0.1", 0))
-        return sock.getsockname()[1]
-
-
 def _docker_reach_host() -> str:
     """Return the hostname used to reach ports published by Docker containers.
 
@@ -147,6 +140,19 @@ def test_docker_reach_host(monkeypatch: pytest.MonkeyPatch, docker_host: str | N
         monkeypatch.setenv("DOCKER_HOST", docker_host)
 
     assert _docker_reach_host() == expected
+
+
+@pytest.mark.parametrize(
+    "output,expected",
+    [
+        ("0.0.0.0:49153\n", 49153),
+        ("127.0.0.1:8888\n", 8888),
+        ("[::]:43017\n", 43017),
+        ("", None),
+    ],
+)
+def test_parse_compose_port_output(output: str, expected: int | None) -> None:
+    assert _parse_compose_port_output(output) == expected
 
 
 def _load_autocomplete_commands() -> list[str]:
@@ -328,6 +334,32 @@ def _post_run(
     return events, killed_early
 
 
+def _parse_compose_port_output(output: str) -> int | None:
+    for raw_line in output.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        match = re.search(r":(\d+)$", line)
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _published_host_port(compose: list[str], service: str, container_port: int, timeout: int = 30) -> int:
+    deadline = time.time() + timeout
+    last_output = ""
+    while time.time() < deadline:
+        proc = _run(compose + ["port", service, str(container_port)], timeout=10, check=False)
+        last_output = proc.stdout.strip()
+        published_port = _parse_compose_port_output(proc.stdout)
+        if proc.returncode == 0 and published_port is not None:
+            return published_port
+        time.sleep(1)
+    raise AssertionError(
+        f"docker compose did not publish port {container_port} for {service!r} within {timeout}s: {last_output!r}"
+    )
+
+
 def _wait_for_health(base_url: str, timeout: int = 180) -> None:
     deadline = time.time() + timeout
     last_error: Exception | None = None
@@ -349,8 +381,8 @@ def container_smoke_test():
     _require_docker()
 
     image_tag = f"shell-darklab-test:{uuid.uuid4().hex[:12]}"
+    runtime_image_tag = f"shell-darklab-test-runtime:{uuid.uuid4().hex[:12]}"
     project = f"shell-darklab-test-{uuid.uuid4().hex[:8]}"
-    host_port = _free_port()
     reach_host = _docker_reach_host()
 
     STANDALONE_COMPOSE = ROOT / "examples" / "docker-compose.standalone.yml"
@@ -358,59 +390,43 @@ def container_smoke_test():
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
 
-        # Copy the whole app/ tree into a temp directory and inject
-        # config.local.yaml there.  This avoids overlapping bind mounts:
-        # the standalone compose file has ../app:/app:ro, and adding a second
-        # mount at /app/conf does not work reliably across Docker runtimes.
-        # On macOS Docker Desktop the more-specific /app/conf mount was
-        # honoured; on Linux DinD (GitLab CI) it was silently ignored, leaving
-        # rate limiting active and causing 429s for most /run requests.
-        # Using a single /app mount that already contains config.local.yaml
-        # eliminates the overlapping-mount problem on all platforms.
-        app_dir = tmp_path / "app"
-        shutil.copytree(ROOT / "app", app_dir)
-        (app_dir / "conf" / "config.local.yaml").write_text(
+        config_local = tmp_path / "config.local.yaml"
+        config_local.write_text(
             "rate_limit_enabled: false\n"
             "rate_limit_per_minute: 10000\n"
             "rate_limit_per_second: 10000\n"
             "command_timeout_seconds: 120\n"
         )
 
+        runtime_container_name = f"shell-darklab-test-runtime-{uuid.uuid4().hex[:12]}"
+
         # Load the standalone compose file and apply test-specific overrides:
         # - unique image tag so the build doesn't overwrite the dev image
-        # - bind only to a free localhost port instead of the fixed 8888
-        # - replace the ../app:/app:ro entry with the temp copy above
-        # - resolve other relative paths (context, other volumes) to absolute
-        #   so they remain valid when the compose file is written to a temp dir
+        # - remove runtime bind mounts that rely on the daemon sharing the
+        #   client's filesystem (DinD does not); instead we stream the app tree
+        #   and smoke-test config into a committed runtime image
+        # - publish container port 8888 on an ephemeral host port so we do not
+        #   guess a free port in the wrong network namespace
         compose_cfg = yaml.safe_load(STANDALONE_COMPOSE.read_text())
         compose_base = STANDALONE_COMPOSE.parent.resolve()
         shell = compose_cfg["services"]["shell"]
-        build = shell.get("build", {})
-        if isinstance(build, dict) and "context" in build:
-            build["context"] = str((compose_base / build["context"]).resolve())
+        build_cfg = shell.get("build", {})
+        build_context = compose_base / ".."
+        dockerfile_path = build_context / "Dockerfile"
+        if isinstance(build_cfg, dict):
+            if "context" in build_cfg:
+                build_context = (compose_base / str(build_cfg["context"])).resolve()
+            if "dockerfile" in build_cfg:
+                dockerfile_path = (build_context / str(build_cfg["dockerfile"])).resolve()
         shell.pop("container_name", None)
-        shell["image"] = image_tag
-        # Omit the host-IP prefix so Docker binds on 0.0.0.0 of the daemon
-        # host.  This is required in GitLab CI DinD environments where the
-        # daemon runs in a separate sidecar container and 127.0.0.1:{port}
-        # would publish only on the sidecar's loopback, unreachable from the
-        # job container.
-        shell["ports"] = [f"{host_port}:8888"]
-        resolved_volumes = []
-        for v in shell.get("volumes", []):
-            parts = v.split(":")
-            container_path = parts[1] if len(parts) >= 2 else ""
-            src = parts[0]
-            rest = ":".join(parts[1:])
-            if container_path == "/app":
-                # Substitute the temp app copy (which includes config.local.yaml)
-                # for the original ../app source.
-                resolved_volumes.append(f"{app_dir}:{rest}")
-            elif src.startswith("."):
-                resolved_volumes.append(f"{(compose_base / src).resolve()}:{rest}")
-            else:
-                resolved_volumes.append(v)
-        shell["volumes"] = resolved_volumes
+        shell.pop("build", None)
+        shell["image"] = runtime_image_tag
+        shell["ports"] = ["8888"]
+        shell["volumes"] = []
+        tmpfs_mounts = list(shell.get("tmpfs", []))
+        if "/data" not in tmpfs_mounts:
+            tmpfs_mounts.append("/data")
+        shell["tmpfs"] = tmpfs_mounts
 
         compose_file = tmp_path / "docker-compose.yml"
         compose_file.write_text(yaml.dump(compose_cfg))
@@ -419,16 +435,47 @@ def container_smoke_test():
 
         try:
             print(f"[container-smoke-test] building image: {image_tag}", flush=True)
-            _run_streaming(compose + ["build", "--pull"], timeout=DEFAULT_BUILD_TIMEOUT)
+            _run_streaming(
+                [
+                    "docker",
+                    "build",
+                    "--pull",
+                    "-t",
+                    image_tag,
+                    "-f",
+                    str(dockerfile_path),
+                    str(build_context),
+                ],
+                timeout=DEFAULT_BUILD_TIMEOUT,
+            )
+            print(f"[container-smoke-test] building runtime image: {runtime_image_tag}", flush=True)
+            _run(["docker", "create", "--name", runtime_container_name, image_tag], timeout=30)
+            _run(
+                ["docker", "cp", f"{ROOT / 'app'}/.", f"{runtime_container_name}:/app"],
+                timeout=120,
+            )
+            _run(
+                ["docker", "cp", str(config_local), f"{runtime_container_name}:/app/conf/config.local.yaml"],
+                timeout=30,
+            )
+            _run(
+                ["docker", "commit", runtime_container_name, runtime_image_tag],
+                timeout=DEFAULT_BUILD_TIMEOUT,
+            )
             print(f"[container-smoke-test] starting services: {project}", flush=True)
             _run(compose + ["up", "-d"], timeout=120)
 
+            host_port = _published_host_port(compose, "shell", 8888)
             base_url = f"http://{reach_host}:{host_port}"
             print(f"[container-smoke-test] waiting for health check: {base_url}", flush=True)
             _wait_for_health(base_url)
             print(f"[container-smoke-test] container ready: {base_url}", flush=True)
             yield base_url
         finally:
+            logs = subprocess.run(compose + ["logs", "--no-color"], cwd=ROOT, capture_output=True, text=True)
+            if logs.stdout.strip():
+                print("[container-smoke-test] container logs:\n" + logs.stdout, flush=True)
+            subprocess.run(["docker", "rm", "-f", runtime_container_name], cwd=ROOT, capture_output=True, text=True)
             print(f"[container-smoke-test] stopping services: {project}", flush=True)
             subprocess.run(compose + ["down", "--rmi", "local", "--volumes"], cwd=ROOT, capture_output=True, text=True)
 
