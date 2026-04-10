@@ -112,6 +112,25 @@ def _free_port() -> int:
         return sock.getsockname()[1]
 
 
+def _docker_reach_host() -> str:
+    """Return the hostname used to reach ports published by Docker containers.
+
+    Locally, Docker publishes to 127.0.0.1 (default bridge).  In GitLab CI
+    with a ``docker:dind`` service, the daemon runs in a separate sidecar and
+    ``DOCKER_HOST`` is set to something like ``tcp://docker:2376``.  Containers
+    started by that daemon publish their ports on the *dind* container's
+    interfaces, not on the job container's loopback — so we must connect via
+    the dind service hostname, not 127.0.0.1.
+    """
+    docker_host = os.environ.get("DOCKER_HOST", "")
+    if docker_host.startswith("tcp://"):
+        from urllib.parse import urlparse
+        host = urlparse(docker_host).hostname
+        if host:
+            return host
+    return "127.0.0.1"
+
+
 def _load_autocomplete_commands() -> list[str]:
     commands: list[str] = []
     for raw_line in COMMANDS_FILE.read_text().splitlines():
@@ -314,6 +333,7 @@ def container_smoke_test():
     image_tag = f"shell-darklab-test:{uuid.uuid4().hex[:12]}"
     project = f"shell-darklab-test-{uuid.uuid4().hex[:8]}"
     host_port = _free_port()
+    reach_host = _docker_reach_host()
 
     STANDALONE_COMPOSE = ROOT / "examples" / "docker-compose.standalone.yml"
 
@@ -342,7 +362,12 @@ def container_smoke_test():
             build["context"] = str((compose_base / build["context"]).resolve())
         shell.pop("container_name", None)
         shell["image"] = image_tag
-        shell["ports"] = [f"127.0.0.1:{host_port}:8888"]
+        # Omit the host-IP prefix so Docker binds on 0.0.0.0 of the daemon
+        # host.  This is required in GitLab CI DinD environments where the
+        # daemon runs in a separate sidecar container and 127.0.0.1:{port}
+        # would publish only on the sidecar's loopback, unreachable from the
+        # job container.
+        shell["ports"] = [f"{host_port}:8888"]
         shell["volumes"] = [
             str((compose_base / v.split(":")[0]).resolve()) + ":" + ":".join(v.split(":")[1:])
             if v.split(":")[0].startswith(".") else v
@@ -361,7 +386,7 @@ def container_smoke_test():
             print(f"[container-smoke-test] starting services: {project}", flush=True)
             _run(compose + ["up", "-d"], timeout=120)
 
-            base_url = f"http://127.0.0.1:{host_port}"
+            base_url = f"http://{reach_host}:{host_port}"
             print(f"[container-smoke-test] waiting for health check: {base_url}", flush=True)
             _wait_for_health(base_url)
             print(f"[container-smoke-test] container ready: {base_url}", flush=True)
