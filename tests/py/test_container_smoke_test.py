@@ -254,6 +254,24 @@ def _assert_patterns(text: str, patterns: list[str], command: str) -> None:
             )
 
 
+def _matches_outcome(visible_lines: list[str], outcome: dict[str, object]) -> bool:
+    """Return True if visible_lines satisfies a single any_of outcome."""
+    text = "\n".join(visible_lines)
+    if bool(outcome.get("no_output")):
+        return not visible_lines
+    raw_text = outcome.get("expected_text", [])
+    expected_text: list[str] = list(raw_text) if isinstance(raw_text, list) else []
+    for snippet in expected_text:
+        if snippet not in text:
+            return False
+    raw_patterns = outcome.get("expected_patterns", [])
+    expected_patterns: list[str] = list(raw_patterns) if isinstance(raw_patterns, list) else []
+    for pattern in expected_patterns:
+        if not re.search(pattern, text, flags=re.MULTILINE):
+            return False
+    return True
+
+
 def _post_kill(base_url: str, run_id: str) -> None:
     payload = json.dumps({"run_id": run_id}).encode("utf-8")
     req = urllib.request.Request(
@@ -495,16 +513,31 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
 
     print(f"[container-smoke-test] running {command}", flush=True)
 
+    any_of = list(case.get("any_of", []))
     expected_text = list(case.get("expected_text", []))
     expected_patterns = list(case.get("expected_patterns", []))
+
+    # Collect stop hints from all possible outcomes so the runner can exit early
+    # as soon as any candidate's expected text appears.
+    if any_of:
+        stop_text_hints: list[str] = []
+        stop_pattern_hints: list[str] = []
+        for outcome in any_of:
+            stop_text_hints.extend(outcome.get("expected_text", []))
+            stop_pattern_hints.extend(outcome.get("expected_patterns", []))
+        stop_text = stop_text_hints or None
+        stop_patterns = stop_pattern_hints or None
+    else:
+        stop_text = expected_text or None
+        stop_patterns = expected_patterns or None
 
     events, killed_early = _post_run(
         container_smoke_test,
         command,
         container_smoke_test_session_id,
         timeout=DEFAULT_RUN_TIMEOUT,
-        stop_text=expected_text or None,
-        stop_patterns=expected_patterns or None,
+        stop_text=stop_text,
+        stop_patterns=stop_patterns,
     )
 
     event_types = [str(event.get("type", "")) for event in events]
@@ -525,6 +558,14 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
     )
 
     visible_lines = _collect_visible_lines(events, command)
+
+    if any_of:
+        assert any(_matches_outcome(visible_lines, o) for o in any_of), (
+            f"{command!r} output did not match any expected outcome;\n"
+            f"outcomes={any_of!r}\nactual={visible_lines!r}"
+        )
+        return
+
     if bool(case.get("no_output")):
         assert not visible_lines, f"{command!r} should not emit visible output; events={events[:10]}"
         return

@@ -2,6 +2,103 @@
 
 ## Open TODOs
 
+### Review Code for Logging Opportunities
+
+There has been several releases and countless features, bug fixes and improvements made since the logging framework was implemented. A comprehensive code review is needed to find additional opportunities for logging.
+
+### Mobile/Desktop Input Decoupling
+
+**Goal:** eliminate DOM-to-DOM composer syncing and move to a single JS `composerState` as the source of truth for command text and selection. Mobile and desktop inputs should become views/controllers over shared state rather than mirrored inputs that can drift and overwrite each other.
+
+**Background:** `setComposerValue` currently writes `.value` and `.setSelectionRange` to both `#cmd` (desktop) and `#mobile-cmd` (mobile) on every call regardless of mode. A `document.selectionchange` handler in `controller.js` additionally calls `syncHiddenCommandInputFromVisible` to push mobile cursor state back into `cmdInput`. The `controller.js` keydown handler and several helpers read `cmdInput.value` and `cmdInput.selectionStart` directly throughout. That means value and caret state currently live in multiple places and can be replayed out of order. The target architecture is one-way data flow: active input updates `composerState`, and render helpers project that state into the currently visible UI.
+
+---
+
+**Phase 1 — Introduce `composerState`**
+
+*Files: `app/static/js/state.js`, `app/static/js/ui_helpers.js`, `app/static/js/app.js`*
+
+- Add a shared composer store with explicit accessors for:
+  - `value`
+  - `selectionStart`
+  - `selectionEnd`
+  - `activeInput` (`desktop` or `mobile`)
+- Keep the API small and explicit: read state, write state, set active input, and reset state.
+- Update `getComposerValue()` and any equivalent selection helpers to read from `composerState` instead of directly from `cmdInput`.
+- Verify: state can be updated without touching either DOM input.
+
+**Phase 2 — Make rendering one-way from state to the active input**
+
+*Files: `app/static/js/ui_helpers.js`, `app/static/js/app.js`*
+
+- Rework `setComposerValue` so it updates `composerState` first, then renders only the currently active input.
+- Change the dispatch target to the active input only. No helper should ever write `.value` or `.setSelectionRange` to both inputs in the same call.
+- Keep `exclude` only if it is still required to avoid synthetic self-feedback loops; otherwise remove it.
+- Verify: loading a history chip on mobile no longer touches `cmdInput`, and the inverse is true on desktop.
+
+**Phase 3 — Make input events publish into `composerState`**
+
+*Files: `app/static/js/controller.js`, `app/static/js/app.js`, `app/static/js/ui_helpers.js`*
+
+- On `input`, `focus`, and relevant submit/history-chip/autocomplete paths, update `composerState` directly from the active input before any rendering.
+- Update `document.selectionchange` so it only publishes selection from the active input into `composerState`; it must never write into the inactive input.
+- Delete `syncHiddenCommandInputFromVisible` once no path requires input-to-input mirroring.
+- This phase should establish a strict rule: event handlers may publish DOM state into `composerState`, but they may not push DOM state from one input directly into the other input.
+
+**Phase 4 — Make cursor/edit helpers state-driven**
+
+*Files: `app/static/js/app.js`, `app/static/js/ui_helpers.js`*
+
+- Rework `getCmdSelection`, `moveCmdCaret`, `setCmdCaret`, `replaceCmdRange`, and `deleteCmdWordLeft` so they read/write `composerState` and then render the active input.
+- Avoid helpers that implicitly read `cmdInput`; they should accept state or use store accessors.
+- These helpers must behave identically for desktop keyboard input, mobile edit-bar actions, and Bluetooth keyboard input while mobile is active.
+
+**Phase 5 — Update the `controller.js` keydown and submit paths**
+
+*Files: `app/static/js/controller.js`, `app/static/js/runner.js`*
+
+- Replace direct `cmdInput.value` reads in key handlers and submit paths with `getComposerValue()` or direct `composerState` accessors.
+- The desktop-only `cmdInput.addEventListener('keydown', ...)` handler can stay bound to the desktop input, but it must stop treating `cmdInput` as the global composer store.
+- `submitComposerCommand(...)` callers should read from shared state, not from a specific DOM input.
+
+**Phase 6 — Make draft persistence and chip/autocomplete flows state-first**
+
+*Files: `app/static/js/controller.js`, `app/static/js/history.js`, `app/static/js/autocomplete.js`, `app/static/js/tabs.js`*
+
+- Ensure history chips, autocomplete accept, tab draft restore, and welcome/history synthetic inserts all update `composerState` first and then render.
+- `_activeTab.draftInput` should be fed from the shared composer state rather than whichever input happened to fire most recently.
+- Verify desktop/mobile transitions preserve draft text and caret position without syncing one input into the other.
+
+**Phase 7 — Render shell prompt from `composerState`**
+
+*File: `app/static/js/app.js` — `syncShellPrompt` lines 4–48*
+
+- `syncShellPrompt` should read value and selection from `composerState`, not from `cmdInput`.
+- Do not special-case correctness around mobile vs desktop by reading different inputs. The prompt render should stay correct regardless of which UI is active.
+- An optional early return for hidden mobile-only layouts is fine for performance, but only after the function is state-correct.
+
+**Phase 8 — Remove dead mirroring code and mode-coupled helpers**
+
+*Files: `app/static/js/app.js`, `app/static/js/controller.js`, `app/static/js/ui_helpers.js`*
+
+- Remove helpers that only existed to keep hidden and visible inputs mirrored.
+- Re-evaluate `handleComposerInputChange`, `exclude`, and any defensive click-time caret restoration logic. Delete what became redundant after the state refactor.
+- Keep `getVisibleComposerInput()` only as a rendering/focus helper, not as the app-level source of truth.
+
+**Phase 9 — Validation**
+
+- `npx vitest run tests/js/unit/*.test.js` — full unit suite must stay green.
+- Manual desktop check: typing, Ctrl+A/E/K, word-delete, history navigation, autocomplete, tab draft persistence all work with keyboard.
+- Manual mobile check: typing, arrow-button cursor movement, hold-to-repeat, history chip loading, repeated tap-to-reposition cursor moves, Bluetooth keyboard shortcuts if available.
+- Manual transition check: rotate/resize or switch between desktop/mobile layouts with existing draft text and a mid-line caret; value and caret must survive without snapping.
+- Manual transition check: load a recent-command chip, move the caret mid-line, switch tabs, return, and verify both draft text and caret position persist.
+- Manual Playwright: `npx playwright test tests/js/e2e/mobile.spec.js tests/js/e2e/tabs.spec.js`.
+
+**Phase 10 — Documentation And Cleanup**
+
+- Update `ARCHITECTURE.md`, `README.md`, `tests/README.md`, `CHANGELOG.md`, and the `/tmp/*.md` branch notes to document the new composer-state architecture and any new regression coverage.
+- Remove stale comments that still describe mirrored hidden/visible input behavior.
+
 ---
 
 ## Ideas

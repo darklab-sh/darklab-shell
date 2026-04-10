@@ -192,12 +192,14 @@ function _bindMobileComposerInteractions(uiRefs) {
   }, { passive: false });
   if (composerRefs.row) {
     composerRefs.row.addEventListener('pointerdown', e => {
-      if (useMobileTerminalViewportMode() && e.target !== runBtn) {
+      const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
+      if (useMobileTerminalViewportMode() && e.target !== runBtn && e.target !== mobileInput) {
         focusCommandInputFromGesture();
       }
     });
     composerRefs.row.addEventListener('touchstart', e => {
-      if (useMobileTerminalViewportMode() && e.target !== runBtn) {
+      const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
+      if (useMobileTerminalViewportMode() && e.target !== runBtn && e.target !== mobileInput) {
         focusCommandInputFromGesture();
       }
     }, { passive: false });
@@ -207,12 +209,27 @@ function _bindMobileComposerInteractions(uiRefs) {
 function _bindMobileEditBarInteractions(editBar) {
   if (!editBar || !cmdInput) return;
   editBar.querySelectorAll('button[data-edit-action]').forEach(btn => {
+    const action = btn.dataset.editAction;
+    const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
+    let _repeatDelay = null;
+    let _repeatInterval = null;
+    const _clearRepeat = () => {
+      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
+      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
+    };
     const handler = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      performMobileEditAction(btn.dataset.editAction);
+      performMobileEditAction(action);
+      if (repeating) {
+        _clearRepeat();
+        _repeatDelay = setTimeout(() => {
+          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
+        }, 400);
+      }
     };
+    const stopRepeat = () => _clearRepeat();
     if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
       btn.addEventListener('pointerdown', e => {
         handledPointerDown = true;
@@ -226,9 +243,19 @@ function _bindMobileEditBarInteractions(editBar) {
         }
         handler(e);
       });
+      if (repeating) {
+        btn.addEventListener('pointerup',     stopRepeat);
+        btn.addEventListener('pointercancel', stopRepeat);
+        btn.addEventListener('pointerleave',  stopRepeat);
+      }
     } else {
-      btn.addEventListener('mousedown', handler);
+      btn.addEventListener('mousedown',  handler);
       btn.addEventListener('touchstart', handler, { passive: false });
+      if (repeating) {
+        btn.addEventListener('mouseup',     stopRepeat);
+        btn.addEventListener('touchend',    stopRepeat);
+        btn.addEventListener('touchcancel', stopRepeat);
+      }
     }
   });
 }
@@ -613,7 +640,15 @@ function getInputSelection(input, value = input && input.value ? input.value : '
 }
 
 function syncHiddenCommandInputFromVisible(value, start = null, end = null) {
-  setComposerValue(value, start, end);
+  const nextValue = String(value ?? '');
+  if (cmdInput) {
+    if (cmdInput.value !== nextValue) cmdInput.value = nextValue;
+    if (typeof cmdInput.setSelectionRange === 'function') {
+      const nextStart = typeof start === 'number' ? start : nextValue.length;
+      const nextEnd = typeof end === 'number' ? end : nextStart;
+      cmdInput.setSelectionRange(nextStart, nextEnd);
+    }
+  }
 }
 
 function replaceCmdRange(value, start, end, replacement = '') {
@@ -745,12 +780,28 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
     syncMobileComposerKeyboard();
     queueMobileComposerKeyboardSync();
   });
+
+  // When the user returns to the browser from another app, the OS may have
+  // closed the keyboard without firing a visualViewport resize event, leaving
+  // the stale mobile-keyboard-open class and --mobile-keyboard-offset on the
+  // page.  Re-run a full viewport state sync after a short settle delay.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) return;
+      setTimeout(() => {
+        syncMobileComposerKeyboard();
+        syncMobileViewportState();
+      }, 50);
+    });
+  }
 }
 
 function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   if (!mobileInput || !mobileRunBtn) return;
   mobileInput.addEventListener('pointerdown', e => {
     if (!useMobileTerminalViewportMode()) return;
+    const alreadyFocused = typeof document !== 'undefined' && document.activeElement === mobileInput;
+    if (alreadyFocused) return;
     e.preventDefault();
     e.stopPropagation();
     if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
@@ -766,6 +817,8 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   });
   mobileInput.addEventListener('touchstart', e => {
     if (!useMobileTerminalViewportMode()) return;
+    const alreadyFocused = typeof document !== 'undefined' && document.activeElement === mobileInput;
+    if (alreadyFocused) return;
     e.preventDefault();
     e.stopPropagation();
     if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
@@ -799,16 +852,69 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
       _mobileSubmit();
     }
   });
+
+  // Guard against something resetting the cursor to end synchronously after a
+  // tap repositions it. Capture the cursor position at click time (iOS has
+  // already placed it by then) and restore it on the next tick if it moved
+  // specifically to end — the symptom of a spurious focus() or setSelectionRange
+  // call clobbering the tap-to-reposition result.
+  mobileInput.addEventListener('click', () => {
+    if (!useMobileTerminalViewportMode()) return;
+    if (typeof document === 'undefined' || document.activeElement !== mobileInput) return;
+    const savedStart = mobileInput.selectionStart;
+    const savedEnd   = mobileInput.selectionEnd;
+    const valueLen   = (mobileInput.value || '').length;
+    if (typeof savedStart !== 'number' || savedStart >= valueLen) return;
+    setTimeout(() => {
+      if (typeof document === 'undefined' || document.activeElement !== mobileInput) return;
+      if (mobileInput.selectionStart >= (mobileInput.value || '').length) {
+        mobileInput.setSelectionRange(savedStart, savedEnd);
+      }
+      syncHiddenCommandInputFromVisible(
+        mobileInput.value || '',
+        mobileInput.selectionStart,
+        mobileInput.selectionEnd
+      );
+      syncShellPrompt();
+    }, 0);
+  });
 }
 
 function bindMobileEditBarListeners(editBar) {
   if (!editBar) return;
   editBar.querySelectorAll('button[data-mobile-edit]').forEach(btn => {
+    const action = btn.dataset.mobileEdit;
+    const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
+    let _repeatDelay = null;
+    let _repeatInterval = null;
+    const _clearRepeat = () => {
+      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
+      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('pointerup',     stopRepeat);
+        document.removeEventListener('pointercancel', stopRepeat);
+        document.removeEventListener('touchend',      stopRepeat);
+        document.removeEventListener('touchcancel',   stopRepeat);
+      }
+    };
+    const stopRepeat = () => _clearRepeat();
     const handler = e => {
       e.preventDefault();
       e.stopPropagation();
-      performMobileEditAction(btn.dataset.mobileEdit);
+      performMobileEditAction(action);
+      if (repeating) {
+        _clearRepeat();
+        _repeatDelay = setTimeout(() => {
+          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
+        }, 400);
+        if (typeof document !== 'undefined') {
+          document.addEventListener('pointerup',     stopRepeat);
+          document.addEventListener('pointercancel', stopRepeat);
+          document.addEventListener('touchend',      stopRepeat);
+          document.addEventListener('touchcancel',   stopRepeat);
+        }
+      }
     };
     if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
       btn.addEventListener('pointerdown', e => {
@@ -823,9 +929,19 @@ function bindMobileEditBarListeners(editBar) {
         }
         handler(e);
       });
+      if (repeating) {
+        btn.addEventListener('pointerup',     stopRepeat);
+        btn.addEventListener('pointercancel', stopRepeat);
+        btn.addEventListener('pointerleave',  stopRepeat);
+      }
     } else {
-      btn.addEventListener('mousedown', handler);
+      btn.addEventListener('mousedown',  handler);
       btn.addEventListener('touchstart', handler, { passive: false });
+      if (repeating) {
+        btn.addEventListener('mouseup',     stopRepeat);
+        btn.addEventListener('touchend',    stopRepeat);
+        btn.addEventListener('touchcancel', stopRepeat);
+      }
     }
   });
 }

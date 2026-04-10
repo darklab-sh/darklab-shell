@@ -421,6 +421,8 @@ function createTab(label) {
     if (id !== activeTabId) return;
     if (e.target.closest('.term-action-btn')) return;
     if (e.target.closest('.welcome-command-loadable')) return;
+    // Don't steal focus while the user has text selected — they may be about to copy.
+    if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;
     if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
   });
   panel.querySelectorAll('[data-action]').forEach(btn => {

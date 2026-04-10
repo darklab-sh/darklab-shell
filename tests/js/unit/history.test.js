@@ -234,7 +234,7 @@ describe('command history hydration', () => {
     expect(chips[0].querySelector('span:last-child')?.textContent).toBe('one')
     expect(chips[1].querySelector('span:last-child')?.textContent).toBe('two')
     expect(chips[2].querySelector('span:last-child')?.textContent).toBe('three')
-    expect(chips[3].textContent).toBe('+1 more')
+    expect(chips[3].textContent).toBe('+ more')
   })
 })
 

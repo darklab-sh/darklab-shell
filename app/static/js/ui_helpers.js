@@ -121,14 +121,17 @@
     }, closeDelay);
     return false;
   };
-  global.setComposerValue = (value, start = null, end = null, { dispatch = true } = {}) => {
+  global.setComposerValue = (value, start = null, end = null, { dispatch = true, exclude = null } = {}) => {
     const nextValue = String(value ?? '');
     const { desktop, mobile } = global.getComposerInputs();
     const inputs = [];
     if (desktop) inputs.push(desktop);
     if (mobile && mobile !== desktop) inputs.push(mobile);
     for (const input of inputs) {
-      input.value = nextValue;
+      // Skip programmatic value assignment on the excluded input (typically the
+      // source that just triggered an input event). Assigning .value on a focused
+      // input resets the browser's OS key-repeat state, breaking hold-to-repeat.
+      if (input !== exclude) input.value = nextValue;
       if (typeof input.setSelectionRange === 'function') {
         const nextStart = typeof start === 'number' ? start : nextValue.length;
         const nextEnd = typeof end === 'number' ? end : nextStart;
@@ -143,12 +146,18 @@
   };
   global.handleComposerInputChange = (sourceInput) => {
     if (!sourceInput) return;
+    // Typing always snaps the output back to bottom so the prompt stays visible.
+    const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    if (_activeTab) _activeTab.followOutput = true;
+    const _out = typeof document !== 'undefined'
+      ? document.querySelector('.tab-panel.active .output') : null;
+    if (_out) _out.scrollTop = _out.scrollHeight;
     if (typeof syncShellPrompt === 'function') syncShellPrompt();
     if (typeof syncMobileViewportState === 'function') syncMobileViewportState();
     const value = sourceInput.value;
     const start = typeof sourceInput.selectionStart === 'number' ? sourceInput.selectionStart : value.length;
     const end = typeof sourceInput.selectionEnd === 'number' ? sourceInput.selectionEnd : value.length;
-    global.setComposerValue(value, start, end, { dispatch: false });
+    global.setComposerValue(value, start, end, { dispatch: false, exclude: sourceInput });
     const keepHistoryNav = typeof _suspendCmdHistoryNavReset !== 'undefined' && _suspendCmdHistoryNavReset;
     if (keepHistoryNav) _suspendCmdHistoryNavReset = false;
     else if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();

@@ -390,6 +390,24 @@ document.addEventListener('keydown', e => {
     clearSearch();
     if (isHistoryPanelOpen()) hideHistoryPanel();
   }
+
+  // If a printable key lands outside the command input (e.g. user had text selected
+  // in the output), forward it to the prompt so no keystroke is lost.
+  if (
+    e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing
+    && document.activeElement !== cmdInput
+    && !isEditableTarget(e.target)
+    && !(e.target && e.target.closest && e.target.closest('button, a, select'))
+    && cmdInput
+    && !isFaqOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
+    && !isKillOverlayOpen()
+  ) {
+    e.preventDefault();
+    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+    const value = cmdInput.value;
+    const { start, end } = getCmdSelection(value);
+    replaceCmdRange(value, start, end, e.key);
+  }
 });
 
 // ── Global click: dismiss mobile menu and autocomplete ──
@@ -446,8 +464,21 @@ if (cmdInput) {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('selectionchange', () => {
-    if (!cmdInput || document.activeElement !== cmdInput) return;
-    syncShellPrompt();
+    if (!cmdInput) return;
+    const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
+    const mobileInput = composerInputs.mobile || null;
+    if (document.activeElement === cmdInput) {
+      syncShellPrompt();
+      return;
+    }
+    if (mobileInput && document.activeElement === mobileInput) {
+      syncHiddenCommandInputFromVisible(
+        mobileInput.value || '',
+        mobileInput.selectionStart,
+        mobileInput.selectionEnd
+      );
+      syncShellPrompt();
+    }
   });
 }
 
@@ -462,6 +493,10 @@ cmdInput.addEventListener('input', () => {
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchInput === 'function') handleHistSearchInput(cmdInput.value);
+    const _hsTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    if (_hsTab) _hsTab.followOutput = true;
+    const _hsOut = document.querySelector('.tab-panel.active .output');
+    if (_hsOut) _hsOut.scrollTop = _hsOut.scrollHeight;
     return;
   }
   handleComposerInputChange(cmdInput);
@@ -636,6 +671,23 @@ cmdInput.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape')    { acHide(); return; }
+
+  // Suppress the macOS 'Press and Hold' accent picker. On macOS, holding a key
+  // on a native <input> shows an accent chooser instead of repeating the character.
+  // Calling preventDefault() signals that we handle the key ourselves, so the OS
+  // never intercepts the repeat. We then insert the character manually so the
+  // input value stays correct. Guard: skip modifier combos (handled above),
+  // non-printable keys (length !== 1), IME composition sequences, and the welcome
+  // settle phase (the document keydown handler owns key routing while welcome is
+  // active, including Space/Enter/Escape settle triggers and printable insertion).
+  if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing
+      && !(_welcomeActive && welcomeOwnsTab(activeTabId))) {
+    e.preventDefault();
+    const value = cmdInput.value;
+    const { start, end } = getCmdSelection(value);
+    replaceCmdRange(value, start, end, e.key);
+    return;
+  }
 });
 
 if (typeof window !== 'undefined') {

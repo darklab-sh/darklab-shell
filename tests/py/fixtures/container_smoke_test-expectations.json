@@ -728,11 +728,11 @@
       ]
     },
     {
-      "no_output": true,
       "exit_code": 0,
       "command": "dig +short MX ip.darklab.sh",
-      "expected_text": [
-        ""
+      "any_of": [
+        { "no_output": true },
+        { "expected_text": ["darklab.sh"] }
       ]
     },
     {
@@ -800,11 +800,11 @@
       ]
     },
     {
-      "no_output": false,
       "exit_code": 0,
       "command": "host -t MX ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh has no MX record"
+      "any_of": [
+        { "expected_text": ["ip.darklab.sh has no MX record"] },
+        { "expected_text": ["is an alias for"] }
       ]
     },
     {

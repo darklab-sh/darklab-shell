@@ -258,7 +258,7 @@ test.describe('mobile menu', () => {
 
     const chips = page.locator('#history-row .hist-chip')
     await expect(chips).toHaveCount(4)
-    await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+1 more')
+    await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+ more')
     await expect(chips.nth(0)).toContainText('test-4')
     await expect(chips.nth(1)).toContainText('test-3')
     await expect(chips.nth(2)).toContainText('test-2')

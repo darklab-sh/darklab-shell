@@ -798,6 +798,9 @@ body.ts-clock .output .shell-prompt-line {
   padding: 8px 10px 6px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
+  /* Clip to one row so wrapped chips never flash while JS measures and removes them. */
+  overflow: hidden;
+  max-height: 42px;
 }
 
 .history-label {
@@ -2790,4 +2793,46 @@ body .welcome-status-loaded {
   }
 
 
+}
+
+/* ── Landscape orientation block ── */
+/* Hidden by default; shown only on touch devices in landscape with short viewports
+   (phones). Tablets and desktops are excluded by the max-height: 500px guard. */
+#landscape-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  background: var(--bg);
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 16px;
+}
+#landscape-msg {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+}
+#landscape-icon {
+  font-size: 48px;
+  line-height: 1;
+  animation: landscape-spin 2s ease-in-out infinite;
+  display: inline-block;
+}
+#landscape-text {
+  font-family: var(--font-mono);
+  font-size: 15px;
+  letter-spacing: 0.05em;
+}
+@keyframes landscape-spin {
+  0%   { transform: rotate(0deg); }
+  40%  { transform: rotate(-90deg); }
+  60%  { transform: rotate(-90deg); }
+  100% { transform: rotate(0deg); }
+}
+@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px) {
+  #landscape-overlay { display: flex; }
 }

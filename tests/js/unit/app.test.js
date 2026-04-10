@@ -1018,9 +1018,10 @@ describe('app helpers', () => {
     cmdInput.setSelectionRange(2, 2)
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
 
-    expect(cmdInput.value).toBe('ab')
-    expect(cmdInput.selectionStart).toBe(2)
-    expect(cmdInput.selectionEnd).toBe(2)
+    // Handler inserts the character once (accent-picker suppression path) — value is 'abc', not 'abcc'
+    expect(cmdInput.value).toBe('abc')
+    expect(cmdInput.selectionStart).toBe(3)
+    expect(cmdInput.selectionEnd).toBe(3)
   })
 
   it('updates the visible cursor when the selection changes without typing', async () => {
@@ -1038,6 +1039,33 @@ describe('app helpers', () => {
     expect(shellPromptText.textContent).toContain('curl')
     expect(shellPromptText.textContent).toContain('darklab.sh')
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
+  })
+
+  it('mirrors mobile-only caret moves into the hidden command input', async () => {
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+    })
+    const cmdInput = document.getElementById('cmd')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const shellPromptText = document.getElementById('shell-prompt-text')
+
+    cmdInput.value = 'ping darklab.sh'
+    mobileCmdInput.value = 'ping darklab.sh'
+    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    mobileCmdInput.setSelectionRange(4, 4)
+
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => mobileCmdInput,
+    })
+    document.body.classList.add('mobile-terminal-mode')
+    document.dispatchEvent(new Event('selectionchange'))
+
+    expect(cmdInput.selectionStart).toBe(4)
+    expect(cmdInput.selectionEnd).toBe(4)
+    expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
+
+    restoreViewport()
   })
 
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {

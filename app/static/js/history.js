@@ -81,6 +81,52 @@ function hydrateCmdHistory(runs) {
   renderHistory();
 }
 
+function _makeOverflowChip(_count) {
+  const chip = document.createElement('button');
+  chip.className = 'hist-chip hist-chip-overflow';
+  chip.textContent = '+ more';
+  chip.title = 'Open history panel';
+  chip.addEventListener('click', () => {
+    if (!historyPanel) return;
+    showHistoryPanel();
+    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+  });
+  return chip;
+}
+
+function _applyDesktopChipOverflow() {
+  const chips = Array.from(histRow.querySelectorAll('.hist-chip:not(.hist-chip-overflow)'));
+  if (!chips.length) return;
+
+  // getBoundingClientRect forces a synchronous layout so positions are accurate.
+  // In jsdom all rects are zero so the guard below falls through cleanly.
+  const firstTop = chips[0].getBoundingClientRect().top;
+
+  // Find the first chip that has wrapped to a second row.
+  let overflowIdx = chips.length;
+  for (let i = 1; i < chips.length; i++) {
+    if (chips[i].getBoundingClientRect().top > firstTop + 2) {
+      overflowIdx = i;
+      break;
+    }
+  }
+  if (overflowIdx === chips.length) return; // all chips fit on one row
+
+  // Remove overflowing chips and add the history shortcut chip.
+  for (let i = chips.length - 1; i >= overflowIdx; i--) {
+    histRow.removeChild(chips[i]);
+  }
+  const overflowChip = _makeOverflowChip();
+  histRow.appendChild(overflowChip);
+
+  // If the overflow chip itself wrapped (getBoundingClientRect forces another reflow),
+  // pull one more regular chip to make room for it.
+  if (overflowChip.getBoundingClientRect().top > firstTop + 2) {
+    const last = histRow.querySelector('.hist-chip:not(.hist-chip-overflow):last-of-type');
+    if (last) histRow.removeChild(last);
+  }
+}
+
 function renderHistory() {
   while (histRow.children.length > 1) histRow.removeChild(histRow.lastChild);
   if (!cmdHistory.length) { hideHistoryRow(); return; }
@@ -92,9 +138,9 @@ function renderHistory() {
     ...cmdHistory.filter(c => starred.has(c)),
     ...cmdHistory.filter(c => !starred.has(c)),
   ];
-  const visible = (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
-    ? sorted.slice(0, 3)
-    : sorted;
+
+  const isMobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const visible = isMobile ? sorted.slice(0, 3) : sorted;
 
   visible.forEach(cmd => {
     const isStarred = starred.has(cmd);
@@ -125,18 +171,20 @@ function renderHistory() {
     histRow.appendChild(chip);
   });
 
-  if (visible.length < sorted.length) {
-    const overflowChip = document.createElement('button');
-    overflowChip.className = 'hist-chip hist-chip-overflow';
-    overflowChip.textContent = `+${sorted.length - visible.length} more`;
-    overflowChip.title = 'Open history panel';
-    overflowChip.addEventListener('click', () => {
-      if (!historyPanel) return;
-      showHistoryPanel();
-      if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
-    });
-    histRow.appendChild(overflowChip);
+  if (isMobile && visible.length < sorted.length) {
+    histRow.appendChild(_makeOverflowChip());
+  } else if (!isMobile) {
+    _applyDesktopChipOverflow();
   }
+}
+
+// Re-measure chip overflow when the window is resized on desktop.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('resize', () => {
+    if (typeof useMobileTerminalViewportMode === 'function' && !useMobileTerminalViewportMode()) {
+      renderHistory();
+    }
+  });
 }
 
 function _setHistoryDeleteMessage(title, detail) {
