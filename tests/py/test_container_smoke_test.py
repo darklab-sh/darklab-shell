@@ -131,6 +131,24 @@ def _docker_reach_host() -> str:
     return "127.0.0.1"
 
 
+@pytest.mark.parametrize(
+    "docker_host,expected",
+    [
+        (None, "127.0.0.1"),
+        ("tcp://docker:2376", "docker"),
+        ("tcp://127.0.0.1:2375", "127.0.0.1"),
+        ("unix:///var/run/docker.sock", "127.0.0.1"),
+    ],
+)
+def test_docker_reach_host(monkeypatch: pytest.MonkeyPatch, docker_host: str | None, expected: str) -> None:
+    if docker_host is None:
+        monkeypatch.delenv("DOCKER_HOST", raising=False)
+    else:
+        monkeypatch.setenv("DOCKER_HOST", docker_host)
+
+    assert _docker_reach_host() == expected
+
+
 def _load_autocomplete_commands() -> list[str]:
     commands: list[str] = []
     for raw_line in COMMANDS_FILE.read_text().splitlines():

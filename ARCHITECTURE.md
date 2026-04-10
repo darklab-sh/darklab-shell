@@ -386,7 +386,7 @@ The goal is to keep local inspection easy while still having a container-image-s
 
 In GitLab CI, the `dependency-version-check` job runs the local version-check script on a schedule and stores the output as a short-lived artifact, which makes it easy to spot stale base images or pinned Python packages during routine maintenance.
 
-After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads `examples/docker-compose.standalone.yml`, resolves all relative paths to absolute, injects a unique image tag and a free port, and writes a temporary compose file so the test build never collides with a running dev stack. It builds with `docker compose build --pull`, starts the service with `docker compose up -d`, waits for the `/health` endpoint, and then submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
+After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads `examples/docker-compose.standalone.yml`, resolves all relative paths to absolute, injects a unique image tag and a free port, and writes a temporary compose file so the test build never collides with a running dev stack. It builds with `docker compose build --pull`, starts the service with `docker compose up -d`, waits for the `/health` endpoint, and then submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A small unit regression in the same module verifies the Docker host resolution helper so DinD jobs keep probing the daemon host instead of hard-coding `127.0.0.1`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
 
 GitLab CI mirrors that same smoke test in the `container-smoke-test` job, which runs on schedules or can be started manually when you want to verify a fresh image before merging dependency or Dockerfile changes.
 
@@ -438,10 +438,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 716
+- `pytest`: 717
 - `vitest`: 248
 - `playwright`: 128
-- total: 1,092
+- total: 1,093
 
 ### Testing Architecture
 
