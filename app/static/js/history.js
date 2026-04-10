@@ -136,6 +136,71 @@ function renderHistory() {
   }
 }
 
+function _setHistoryDeleteMessage(title, detail) {
+  const msg = histDelMsg;
+  if (!msg) return;
+  msg.replaceChildren();
+  msg.appendChild(document.createTextNode(title));
+  msg.appendChild(document.createElement('br'));
+  const note = document.createElement('span');
+  note.className = 'history-delete-note';
+  note.textContent = detail;
+  msg.appendChild(note);
+}
+
+function _createHistoryEntry(run, isStarred) {
+  const entry = document.createElement('div');
+  entry.className = 'history-entry' + (isStarred ? ' starred' : '');
+  const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
+  const time = new Date(run.started).toLocaleTimeString();
+
+  const cmd = document.createElement('div');
+  cmd.className = 'history-entry-cmd';
+  cmd.textContent = run.command || '';
+  entry.appendChild(cmd);
+
+  const meta = document.createElement('div');
+  meta.className = 'history-entry-meta';
+  const timeEl = document.createElement('span');
+  timeEl.textContent = time;
+  meta.appendChild(timeEl);
+  const exitEl = document.createElement('span');
+  exitEl.className = exitCls;
+  exitEl.textContent = `exit ${run.exit_code}`;
+  meta.appendChild(exitEl);
+  entry.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-actions';
+
+  const starBtn = document.createElement('button');
+  starBtn.className = 'history-action-btn star-btn' + (isStarred ? ' starred' : '');
+  starBtn.dataset.action = 'star';
+  starBtn.textContent = isStarred ? '★ starred' : '☆ star';
+  actions.appendChild(starBtn);
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'history-action-btn';
+  copyBtn.dataset.action = 'copy';
+  copyBtn.textContent = 'copy command';
+  actions.appendChild(copyBtn);
+
+  const permalinkBtn = document.createElement('button');
+  permalinkBtn.className = 'history-action-btn';
+  permalinkBtn.dataset.action = 'permalink';
+  permalinkBtn.textContent = 'permalink';
+  actions.appendChild(permalinkBtn);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'history-action-btn';
+  deleteBtn.dataset.action = 'delete';
+  deleteBtn.textContent = 'delete';
+  actions.appendChild(deleteBtn);
+
+  entry.appendChild(actions);
+  return entry;
+}
+
 
 // ── Run history panel ──
 let pendingHistAction = null;
@@ -145,11 +210,11 @@ function confirmHistAction(type, id, command) {
   const msg      = histDelMsg;
   const confirm  = histDelConfirmBtn;
   if (type === 'clear') {
-    msg.innerHTML = 'Clear run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    _setHistoryDeleteMessage('Clear run history?', 'This cannot be undone.');
     showHistoryDeleteNonfav();
     confirm.textContent   = 'Delete all';
   } else {
-    msg.innerHTML = 'Remove this run from history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    _setHistoryDeleteMessage('Remove this run from history?', 'This cannot be undone.');
     hideHistoryDeleteNonfav();
     confirm.textContent   = 'Delete';
   }
@@ -204,9 +269,12 @@ function _setHistoryLoadState(loading) {
 
 function refreshHistoryPanel() {
   apiFetch('/history').then(r => r.json()).then(data => {
-    historyList.innerHTML = '';
+    historyList.replaceChildren();
     if (!data.runs.length) {
-      historyList.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">No runs yet.</div>';
+      const empty = document.createElement('div');
+      empty.className = 'history-empty-state';
+      empty.textContent = 'No runs yet.';
+      historyList.appendChild(empty);
       return;
     }
 
@@ -219,22 +287,7 @@ function refreshHistoryPanel() {
 
     sorted.forEach(run => {
       const isStarred = starred.has(run.command);
-      const entry = document.createElement('div');
-      entry.className = 'history-entry' + (isStarred ? ' starred' : '');
-      const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
-      const time = new Date(run.started).toLocaleTimeString();
-      entry.innerHTML = `
-        <div class="history-entry-cmd">${escapeHtml(run.command)}</div>
-        <div class="history-entry-meta">
-          <span>${time}</span>
-          <span class="${exitCls}">exit ${run.exit_code}</span>
-        </div>
-        <div class="history-actions">
-          <button class="history-action-btn star-btn${isStarred ? ' starred' : ''}" data-action="star">${isStarred ? '★ starred' : '☆ star'}</button>
-          <button class="history-action-btn" data-action="copy">copy command</button>
-          <button class="history-action-btn" data-action="permalink">permalink</button>
-          <button class="history-action-btn" data-action="delete">delete</button>
-        </div>`;
+      const entry = _createHistoryEntry(run, isStarred);
 
       // Click anywhere on the entry (except buttons) to load into a new tab,
       // or switch to the existing tab if this command is already loaded there.

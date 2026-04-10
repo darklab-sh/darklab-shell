@@ -63,11 +63,11 @@
   </div>
 </div>
 
-<div style="display:none;padding:6px 0" id="motd-wrap">
-  <span id="motd" style="display:inline-block;padding:5px 14px;background:var(--green-glow);border:1px solid var(--green-dim);border-radius:4px;color:var(--green);font-size:12px;font-family:var(--font-mono);letter-spacing:0.5px;white-space:pre-wrap"></span>
+<div id="motd-wrap" class="u-hidden motd-wrap">
+  <span id="motd" class="motd-pill"></span>
 </div>
 
-<div id="history-row" class="history-row" style="display:none">
+<div id="history-row" class="history-row u-hidden">
   <span class="history-label">Recent:</span>
 </div>
 
@@ -88,9 +88,9 @@
       <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
     </div>
     <span id="status" class="status-pill idle">IDLE</span>
-    <span id="run-timer" style="font-size:11px;color:var(--muted);font-family:var(--font-mono);display:none"></span>
+    <span id="run-timer" class="run-timer u-hidden"></span>
   </div>
-  <div class="search-bar" id="search-bar" style="display:none">
+  <div class="search-bar u-hidden" id="search-bar">
     <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
     <div class="search-toggles">
       <button id="search-case-btn" class="search-toggle" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
@@ -112,7 +112,7 @@
       <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
     </div>
   </div>
-  <div id="ac-dropdown" class="ac-dropdown" style="display:none"></div>
+  <div id="ac-dropdown" class="ac-dropdown u-hidden"></div>
   <div class="shell-input-row" aria-hidden="true">
     <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" aria-label="Command">
     <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
@@ -123,8 +123,8 @@
 <div id="history-panel">
   <div class="history-panel-header">
     <span class="history-panel-title">RUN HISTORY</span>
-    <button id="hist-clear-all-btn" class="history-action-btn" style="margin-left:auto">clear all</button>
-    <button class="history-panel-close" id="history-close" style="margin-left:0" aria-label="Close history panel">✕</button>
+    <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">clear all</button>
+    <button class="history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
   <div id="history-load-overlay" aria-hidden="true">
     <div class="history-load-modal">
@@ -139,27 +139,27 @@
 <div id="permalink-toast">Link copied to clipboard</div>
 
 <!-- Kill confirmation modal -->
-<div id="kill-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
-  <div id="kill-modal" style="background:var(--surface);border:1px solid var(--red);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
-    <div style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px">
+<div id="kill-overlay" class="modal-overlay u-hidden">
+  <div id="kill-modal" class="modal-card modal-card-danger">
+    <div class="modal-copy">
       Kill the running process in this tab?<br>
-      <span style="color:var(--muted);font-size:11px">This sends SIGTERM to the entire process group.</span>
+      <span class="modal-copy-note">This sends SIGTERM to the entire process group.</span>
     </div>
-    <div style="display:flex;gap:10px;justify-content:flex-end">
+    <div class="modal-actions">
       <button id="kill-cancel" class="term-action-btn">Cancel</button>
-      <button id="kill-confirm" style="background:var(--red);color:#fff;border:none;border-radius:4px;padding:6px 18px;font-family:var(--font-mono);font-size:12px;cursor:pointer">■ Kill</button>
+      <button id="kill-confirm" class="modal-primary modal-primary-danger" type="button">■ Kill</button>
     </div>
   </div>
 </div>
 
 <!-- History delete confirmation modal -->
-<div id="hist-del-overlay" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.75);z-index:300;align-items:center;justify-content:center;backdrop-filter:blur(3px)">
-  <div id="hist-del-modal" style="background:var(--surface);border:1px solid var(--amber);border-radius:6px;padding:28px 32px;width:min(400px,90vw);box-shadow:0 16px 48px rgba(0,0,0,0.7)">
-    <div id="hist-del-msg" style="font-family:var(--font-mono);font-size:13px;color:var(--text);margin-bottom:20px"></div>
-    <div style="display:flex;gap:10px;justify-content:flex-end;flex-wrap:wrap">
+<div id="hist-del-overlay" class="modal-overlay u-hidden">
+  <div id="hist-del-modal" class="modal-card modal-card-warning">
+    <div id="hist-del-msg" class="modal-copy"></div>
+    <div class="modal-actions modal-actions-wrap">
       <button id="hist-del-cancel" class="term-action-btn">Cancel</button>
-      <button id="hist-del-nonfav" style="display:none;background:transparent;color:var(--amber);border:1px solid var(--amber);border-radius:4px;padding:6px 18px;font-family:var(--font-mono);font-size:12px;cursor:pointer">Delete Non-Favorites</button>
-      <button id="hist-del-confirm" style="background:var(--amber);color:#000;border:none;border-radius:4px;padding:6px 18px;font-family:var(--font-mono);font-size:12px;cursor:pointer">Delete</button>
+      <button id="hist-del-nonfav" class="modal-secondary modal-secondary-warning" type="button">Delete Non-Favorites</button>
+      <button id="hist-del-confirm" class="modal-primary modal-primary-warning" type="button">Delete</button>
     </div>
   </div>
 </div>

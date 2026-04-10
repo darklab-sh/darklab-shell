@@ -195,6 +195,27 @@ header .version {
   animation: prompt-load-flash 0.95s ease;
 }
 
+.u-hidden {
+  display: none;
+}
+
+.motd-wrap {
+  padding: 6px 0;
+}
+
+.motd-pill {
+  display: inline-block;
+  padding: 5px 14px;
+  background: var(--green-glow);
+  border: 1px solid var(--green-dim);
+  border-radius: 4px;
+  color: var(--green);
+  font-size: 12px;
+  font-family: var(--font-mono);
+  letter-spacing: 0.5px;
+  white-space: pre-wrap;
+}
+
 .shell-prompt-wrap {
   display: flex;
   width: 100%;
@@ -725,6 +746,12 @@ body.ts-clock .output .shell-prompt-line {
   padding-right: 2px;
 }
 
+.run-timer {
+  font-size: 11px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+
 .hist-chip {
   background: transparent;
   border: 1px solid var(--border-bright);
@@ -764,6 +791,7 @@ body.ts-clock .output .shell-prompt-line {
 #options-btn:hover { border-color: var(--green-dim); color: var(--green); }
 
 /* Modal overlay */
+.modal-overlay,
 #faq-overlay,
 #theme-overlay,
 #options-overlay {
@@ -780,6 +808,7 @@ body.ts-clock .output .shell-prompt-line {
 #theme-overlay.open,
 #options-overlay.open { display: flex; }
 
+.modal-card,
 #faq-modal,
 #theme-modal,
 #options-modal {
@@ -802,6 +831,60 @@ body.ts-clock .output .shell-prompt-line {
 
 #theme-modal {
   width: min(1080px, 96vw);
+}
+
+.modal-card-danger { border-color: var(--red); }
+.modal-card-warning { border-color: var(--amber); }
+
+.modal-copy {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  color: var(--text);
+  margin-bottom: 20px;
+}
+
+.modal-copy-note {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.modal-actions {
+  display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.modal-actions-wrap {
+  flex-wrap: wrap;
+}
+
+.modal-primary,
+.modal-secondary {
+  border-radius: 4px;
+  padding: 6px 18px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.modal-primary {
+  border: none;
+}
+
+.modal-primary-danger {
+  background: var(--red);
+  color: #fff;
+}
+
+.modal-secondary-warning {
+  background: transparent;
+  color: var(--amber);
+  border: 1px solid var(--amber);
+}
+
+.modal-primary-warning {
+  background: var(--amber);
+  color: #000;
 }
 
 .faq-header {
@@ -1740,6 +1823,12 @@ body .history-entry:hover { background: var(--theme-history-entry-hover-bg); }
   font-size: 11px;
   color: var(--text);
 }
+
+.history-empty-state {
+  padding: 16px;
+  color: var(--muted);
+  font-size: 12px;
+}
 .history-entry {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
@@ -1770,6 +1859,10 @@ body .history-entry:hover { background: var(--theme-history-entry-hover-bg); }
 }
 .history-entry-meta .exit-ok { color: var(--green); }
 .history-entry-meta .exit-fail { color: var(--red); }
+.history-delete-note {
+  color: var(--muted);
+  font-size: 11px;
+}
 .history-actions {
   display: flex;
   gap: 6px;
@@ -1811,6 +1904,10 @@ body .history-entry:hover { background: var(--theme-history-entry-hover-bg); }
 .history-action-btn:hover { color: var(--green); border-color: var(--green-dim); }
 .star-btn.starred { color: var(--amber); border-color: var(--amber); }
 .star-btn.starred:hover { color: var(--amber); border-color: var(--amber); opacity: 0.75; }
+.tab-kill-btn-danger {
+  color: var(--red);
+  border-color: var(--red);
+}
 
 #hist-btn, #search-toggle-btn, #ts-btn, #ln-btn {
   background: transparent;

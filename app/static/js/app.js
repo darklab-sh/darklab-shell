@@ -1109,7 +1109,7 @@ function _setTsMode(mode) {
 
 let allowedCommandsFaqData = null;
 
-function formatFaqLimits(cfg) {
+function _buildFaqLimitsContent(cfg) {
   if (!cfg) return '';
   function _fmtDuration(s) {
     if (s >= 3600 && s % 3600 === 0) return (s / 3600) + (s / 3600 === 1 ? ' hour' : ' hours');
@@ -1141,19 +1141,34 @@ function formatFaqLimits(cfg) {
     },
   ];
 
-  const tableRows = rows.map(r =>
-    `<tr><td style="padding:2px 12px 2px 0;white-space:nowrap;color:var(--muted)">${r.label}</td>` +
-    `<td style="padding:2px 0">${r.value}</td></tr>`
-  ).join('');
+  const frag = document.createDocumentFragment();
+  const table = document.createElement('table');
+  table.className = 'faq-limits-table';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const labelCell = document.createElement('td');
+    labelCell.className = 'faq-limits-label';
+    labelCell.textContent = r.label;
+    const valueCell = document.createElement('td');
+    valueCell.className = 'faq-limits-value';
+    valueCell.innerHTML = r.value;
+    tr.appendChild(labelCell);
+    tr.appendChild(valueCell);
+    table.appendChild(tr);
+  });
+  frag.appendChild(table);
 
-  return `<table style="border-collapse:collapse;margin-bottom:6px">${tableRows}</table>` +
-    '<span style="color:var(--muted);font-size:11px">These limits are configured by the operator of this instance.</span>';
+  const note = document.createElement('span');
+  note.className = 'faq-limits-note';
+  note.textContent = 'These limits are configured by the operator of this instance.';
+  frag.appendChild(note);
+  return frag;
 }
 
 function renderFaqLimits(cfg) {
   const limitsEl = document.getElementById('faq-limits-text') || faqLimitsText;
   if (!limitsEl || !cfg) return;
-  limitsEl.innerHTML = formatFaqLimits(cfg);
+  limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
 
 function activateFaqCommandChip(cmd) {
@@ -1195,7 +1210,11 @@ function renderAllowedCommandsFaq(data) {
     return;
   }
 
-  el.innerHTML = 'Click any command to load it into the prompt:';
+  el.replaceChildren();
+  const intro = document.createElement('div');
+  intro.className = 'allowed-intro';
+  intro.textContent = 'Click any command to load it into the prompt:';
+  el.appendChild(intro);
   if (data.groups && data.groups.length > 0) {
     data.groups.forEach(group => {
       const groupEl = document.createElement('div');

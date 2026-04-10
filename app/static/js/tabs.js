@@ -313,6 +313,68 @@ function updateNewTabBtn() {
   btn.title = atLimit ? `Tab limit reached (max ${APP_CONFIG.max_tabs})` : '';
 }
 
+function _createTabHeader(id, label) {
+  const tab = document.createElement('div');
+  tab.className = 'tab';
+  tab.dataset.id = id;
+
+  const status = document.createElement('span');
+  status.className = 'tab-status idle';
+  tab.appendChild(status);
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'tab-label';
+  labelEl.textContent = label;
+  tab.appendChild(labelEl);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'tab-close';
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'Close tab');
+  closeBtn.textContent = '✕';
+  tab.appendChild(closeBtn);
+
+  return { tab, labelEl };
+}
+
+function _createTabActionButton(id, action, label, { hidden = false, danger = false } = {}) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'term-action-btn' + (action === 'kill' ? ' tab-kill-btn' : '') + (danger ? ' tab-kill-btn-danger' : '');
+  btn.dataset.action = action;
+  btn.dataset.tab = id;
+  if (hidden) btn.hidden = true;
+  btn.textContent = label;
+  return btn;
+}
+
+function _createTabPanel(id) {
+  const panel = document.createElement('div');
+  panel.className = 'tab-panel';
+  panel.dataset.id = id;
+
+  const terminalBody = document.createElement('div');
+  terminalBody.className = 'terminal-body';
+
+  const output = document.createElement('div');
+  output.className = 'output';
+  output.id = `output-${id}`;
+  terminalBody.appendChild(output);
+
+  const terminalActions = document.createElement('div');
+  terminalActions.className = 'terminal-actions';
+  terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
+  terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'permalink'));
+  terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
+  terminalActions.appendChild(_createTabActionButton(id, 'save', 'save txt'));
+  terminalActions.appendChild(_createTabActionButton(id, 'html', 'save html'));
+  terminalActions.appendChild(_createTabActionButton(id, 'clear', 'clear'));
+  terminalBody.appendChild(terminalActions);
+
+  panel.appendChild(terminalBody);
+  return { panel, output, terminalBody };
+}
+
 function createTab(label) {
   if (APP_CONFIG.max_tabs > 0 && tabs.length >= APP_CONFIG.max_tabs) {
     showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
@@ -320,10 +382,7 @@ function createTab(label) {
   }
   const id = 'tab-' + Date.now();
 
-  const tab = document.createElement('div');
-  tab.className = 'tab';
-  tab.dataset.id = id;
-  tab.innerHTML = `<span class="tab-status idle"></span><span class="tab-label">${escapeHtml(label)}</span><button class="tab-close" type="button" aria-label="Close tab">✕</button>`;
+  const { tab, labelEl } = _createTabHeader(id, label);
   tab.addEventListener('click', e => {
     if (Date.now() < _tabDragSuppressClickUntil) return;
     if (e.target.classList.contains('tab-close')) {
@@ -335,7 +394,6 @@ function createTab(label) {
   });
 
   // Double-click tab label to rename
-  const labelEl = tab.querySelector('.tab-label');
   labelEl.addEventListener('dblclick', e => {
     e.stopPropagation();
     startTabRename(id, labelEl);
@@ -349,22 +407,7 @@ function createTab(label) {
     tabsBar.appendChild(tab);
   }
 
-  const panel = document.createElement('div');
-  panel.className = 'tab-panel';
-  panel.dataset.id = id;
-  panel.innerHTML = `
-    <div class="terminal-body">
-      <div class="output" id="output-${id}"></div>
-      <div class="terminal-actions">
-        <button class="term-action-btn tab-kill-btn" data-action="kill" data-tab="${id}" style="display:none;color:var(--red);border-color:var(--red)">■ Kill</button>
-        <button class="term-action-btn" data-action="permalink" data-tab="${id}">permalink</button>
-        <button class="term-action-btn" data-action="copy"      data-tab="${id}">copy</button>
-        <button class="term-action-btn" data-action="save"      data-tab="${id}">save txt</button>
-        <button class="term-action-btn" data-action="html"      data-tab="${id}">save html</button>
-        <button class="term-action-btn" data-action="clear"     data-tab="${id}">clear</button>
-      </div>
-    </div>`;
-  const outputEl = panel.querySelector('.output');
+  const { panel, output: outputEl, terminalBody } = _createTabPanel(id);
   if (outputEl) {
     outputEl.addEventListener('scroll', () => {
       const t = getTab(id);
@@ -373,7 +416,7 @@ function createTab(label) {
       t.followOutput = nearBottom;
     }, { passive: true });
   }
-  panel.querySelector('.terminal-body')?.addEventListener('click', e => {
+  terminalBody?.addEventListener('click', e => {
     if (id !== activeTabId) return;
     if (e.target.closest('.term-action-btn')) return;
     if (e.target.closest('.welcome-command-loadable')) return;

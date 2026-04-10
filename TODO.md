@@ -2,25 +2,6 @@
 
 ## Open TODOs
 
-### Phase 5: DOM Construction And Template Cleanup
-
-- Replace repeated `innerHTML`-built UI fragments with more maintainable structures where the payoff is high:
-  - history entries in [app/static/js/history.js](/Users/nona/repos/shell.darklab.sh/app/static/js/history.js)
-  - tab headers and terminal action rows in [app/static/js/tabs.js](/Users/nona/repos/shell.darklab.sh/app/static/js/tabs.js)
-  - FAQ limits/allowed-command dynamic sections in [app/static/js/app.js](/Users/nona/repos/shell.darklab.sh/app/static/js/app.js)
-- Prefer one of:
-  - small DOM builder helpers, or
-  - `<template>` elements in [app/templates/index.html](/Users/nona/repos/shell.darklab.sh/app/templates/index.html)
-- Remove avoidable inline styles from:
-  - [app/templates/index.html](/Users/nona/repos/shell.darklab.sh/app/templates/index.html)
-  - runtime HTML snippets in JS
-  - built-in FAQ HTML in [app/commands.py](/Users/nona/repos/shell.darklab.sh/app/commands.py)
-- Move presentation details into CSS classes where possible so the theme-selector styling stays centralized
-- Keep the behavior and semantics unchanged:
-  - action button labels
-  - modal copy
-  - ARIA labels and focus behavior
-
 ### Phase 6: Search Highlighting Hardening
 
 - Rework [app/static/js/search.js](/Users/nona/repos/shell.darklab.sh/app/static/js/search.js) so it no longer rewrites serialized `innerHTML`
@@ -213,6 +194,14 @@ Validation:
 - `node --check app/static/js/state.js`
 - `node --check app/static/js/ui_helpers.js`
 - `node --check tests/js/unit/helpers/extract.js`
+
+### DOM Construction And Template Cleanup
+
+The repeated `innerHTML` fragments in `app/static/js/history.js`, `app/static/js/tabs.js`, and the FAQ limits / allowed-command sections in `app/static/js/app.js` now use direct DOM construction instead of stitched HTML strings. The browser template also uses class-based modal and hidden-state wrappers for the shell chrome, which removes the remaining avoidable inline layout styles without changing labels, copy, or accessibility behavior.
+
+Validation:
+- `npx vitest run tests/js/unit/app.test.js tests/js/unit/history.test.js tests/js/unit/tabs.test.js`
+- `npx vitest run tests/js/unit/*.test.js`
 
 ### Trust Boundary And Request Identity
 
