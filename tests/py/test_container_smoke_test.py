@@ -357,9 +357,19 @@ def container_smoke_test():
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
-        conf_dir = tmp_path / "conf"
-        shutil.copytree(ROOT / "app" / "conf", conf_dir)
-        (conf_dir / "config.local.yaml").write_text(
+
+        # Copy the whole app/ tree into a temp directory and inject
+        # config.local.yaml there.  This avoids overlapping bind mounts:
+        # the standalone compose file has ../app:/app:ro, and adding a second
+        # mount at /app/conf does not work reliably across Docker runtimes.
+        # On macOS Docker Desktop the more-specific /app/conf mount was
+        # honoured; on Linux DinD (GitLab CI) it was silently ignored, leaving
+        # rate limiting active and causing 429s for most /run requests.
+        # Using a single /app mount that already contains config.local.yaml
+        # eliminates the overlapping-mount problem on all platforms.
+        app_dir = tmp_path / "app"
+        shutil.copytree(ROOT / "app", app_dir)
+        (app_dir / "conf" / "config.local.yaml").write_text(
             "rate_limit_enabled: false\n"
             "rate_limit_per_minute: 10000\n"
             "rate_limit_per_second: 10000\n"
@@ -369,9 +379,9 @@ def container_smoke_test():
         # Load the standalone compose file and apply test-specific overrides:
         # - unique image tag so the build doesn't overwrite the dev image
         # - bind only to a free localhost port instead of the fixed 8888
-        # - inject the test conf dir so config.local.yaml is picked up
-        # - resolve relative paths (context, volumes) to absolute so they
-        #   remain valid when the compose file is written to a temp directory
+        # - replace the ../app:/app:ro entry with the temp copy above
+        # - resolve other relative paths (context, other volumes) to absolute
+        #   so they remain valid when the compose file is written to a temp dir
         compose_cfg = yaml.safe_load(STANDALONE_COMPOSE.read_text())
         compose_base = STANDALONE_COMPOSE.parent.resolve()
         shell = compose_cfg["services"]["shell"]
@@ -386,12 +396,21 @@ def container_smoke_test():
         # would publish only on the sidecar's loopback, unreachable from the
         # job container.
         shell["ports"] = [f"{host_port}:8888"]
-        shell["volumes"] = [
-            str((compose_base / v.split(":")[0]).resolve()) + ":" + ":".join(v.split(":")[1:])
-            if v.split(":")[0].startswith(".") else v
-            for v in shell.get("volumes", [])
-        ]
-        shell["volumes"].append(f"{conf_dir}:/app/conf:ro")
+        resolved_volumes = []
+        for v in shell.get("volumes", []):
+            parts = v.split(":")
+            container_path = parts[1] if len(parts) >= 2 else ""
+            src = parts[0]
+            rest = ":".join(parts[1:])
+            if container_path == "/app":
+                # Substitute the temp app copy (which includes config.local.yaml)
+                # for the original ../app source.
+                resolved_volumes.append(f"{app_dir}:{rest}")
+            elif src.startswith("."):
+                resolved_volumes.append(f"{(compose_base / src).resolve()}:{rest}")
+            else:
+                resolved_volumes.append(v)
+        shell["volumes"] = resolved_volumes
 
         compose_file = tmp_path / "docker-compose.yml"
         compose_file.write_text(yaml.dump(compose_cfg))
