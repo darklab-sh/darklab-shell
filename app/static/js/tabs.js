@@ -349,6 +349,41 @@ function _createTabActionButton(id, action, label, { hidden = false, danger = fa
   return btn;
 }
 
+function _getOutputFollowButton(id) {
+  return _getTabPanelEl(id)?.querySelector('.output-follow-btn') || null;
+}
+
+function _isOutputAtTail(out) {
+  if (!out) return true;
+  const scrollTop = Number(out.scrollTop || 0);
+  const clientHeight = Number(out.clientHeight || 0);
+  const scrollHeight = Number(out.scrollHeight || 0);
+  if (!Number.isFinite(scrollTop) || !Number.isFinite(clientHeight) || !Number.isFinite(scrollHeight)) return true;
+  if (scrollHeight <= clientHeight + 2) return true;
+  return Math.max(0, scrollHeight - (scrollTop + clientHeight)) <= 16;
+}
+
+function updateOutputFollowButton(id) {
+  const tab = getTab(id);
+  const out = getOutput(id);
+  const btn = _getOutputFollowButton(id);
+  if (!tab || !btn || !out) return;
+
+  const hasOutput = Array.isArray(tab.rawLines) && tab.rawLines.length > 0;
+  const atTail = _isOutputAtTail(out);
+  if (atTail && tab.followOutput === false) tab.followOutput = true;
+  const show = hasOutput && !atTail && tab.followOutput === false;
+  const isLive = show && tab.st === 'running';
+  const label = isLive ? 'jump to live' : 'jump to bottom';
+
+  btn.hidden = !show;
+  btn.textContent = label;
+  btn.title = isLive ? 'Jump to the live output tail' : 'Jump to the bottom of the output';
+  btn.setAttribute('aria-label', label);
+  btn.classList.toggle('is-live', isLive);
+  btn.classList.toggle('is-bottom', show && !isLive);
+}
+
 function _createTabPanel(id) {
   const panel = document.createElement('div');
   panel.className = 'tab-panel';
@@ -361,6 +396,27 @@ function _createTabPanel(id) {
   output.className = 'output';
   output.id = `output-${id}`;
   terminalBody.appendChild(output);
+
+  const followBtn = document.createElement('button');
+  followBtn.type = 'button';
+  followBtn.className = 'output-follow-btn';
+  followBtn.hidden = true;
+  followBtn.textContent = 'jump to live';
+  followBtn.title = 'Jump to the live output tail';
+  followBtn.setAttribute('aria-label', 'Jump to the live output tail');
+  followBtn.addEventListener('click', () => {
+    const tab = getTab(id);
+    const out = getOutput(id);
+    if (!tab || !out) return;
+    tab.followOutput = true;
+    if (typeof _stickOutputToBottom === 'function') {
+      _stickOutputToBottom(out, tab);
+    } else {
+      out.scrollTop = out.scrollHeight;
+    }
+    updateOutputFollowButton(id);
+  });
+  terminalBody.appendChild(followBtn);
 
   const terminalActions = document.createElement('div');
   terminalActions.className = 'terminal-actions';
@@ -413,8 +469,8 @@ function createTab(label) {
     outputEl.addEventListener('scroll', () => {
       const t = getTab(id);
       if (!t || t.suppressOutputScrollTracking) return;
-      const nearBottom = outputEl.scrollTop + outputEl.clientHeight >= outputEl.scrollHeight - 8;
-      t.followOutput = nearBottom;
+      t.followOutput = _isOutputAtTail(outputEl);
+      updateOutputFollowButton(id);
     }, { passive: true });
   }
   terminalBody?.addEventListener('click', e => {
@@ -471,6 +527,7 @@ function createTab(label) {
     renamed: false,
     draftInput: '',
   });
+  updateOutputFollowButton(id);
   activateTab(id);
   updateNewTabBtn();
   updateTabScrollButtons();
@@ -512,6 +569,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   resetCmdHistoryNav();
   if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  updateOutputFollowButton(id);
 }
 
 function closeTab(id) {
@@ -589,6 +647,7 @@ function setTabStatus(id, st) {
     else mountShellPrompt(id);
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   }
+  updateOutputFollowButton(id);
 }
 
 function setTabLabel(id, label) {
@@ -642,6 +701,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     setTabStatus(id, 'idle');
     if (id === activeTabId) { setStatus('idle'); clearSearch(); }
   }
+  updateOutputFollowButton(id);
   if (typeof document !== 'undefined'
     && document.body
     && document.body.classList

@@ -191,6 +191,7 @@ function _flushPendingOutputBatch(tabId) {
   if (shouldStickToBottom) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
 
   if (state.items.length > 0) {
     _schedulePendingOutputFlush(tabId);
@@ -337,6 +338,7 @@ function appendLine(text, cls, tabId) {
   if (tab?.followOutput !== false) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
 
   _syncTabRawLines(tab, rawLine);
 }

@@ -87,6 +87,9 @@ def get_history():
         item["full_output_available"] = bool(item.get("full_output_available"))
         item["full_output_truncated"] = bool(item.get("full_output_truncated"))
         runs.append(item)
+    log.info("HISTORY_VIEWED", extra={
+        "ip": get_client_ip(), "session": session_id, "count": len(runs),
+    })
     return jsonify({"runs": runs})
 
 

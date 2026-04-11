@@ -122,10 +122,12 @@ function _applyDesktopChipOverflow() {
   histRow.appendChild(overflowChip);
 
   // If the overflow chip itself wrapped (getBoundingClientRect forces another reflow),
-  // pull one more regular chip to make room for it.
-  if (overflowChip.getBoundingClientRect().top > firstTop + 2) {
-    const last = histRow.querySelector('.hist-chip:not(.hist-chip-overflow):last-of-type');
-    if (last) histRow.removeChild(last);
+  // keep pulling regular chips until the overflow chip sits on the first row.
+  while (overflowChip.getBoundingClientRect().top > firstTop + 2) {
+    const regularChips = Array.from(histRow.querySelectorAll('.hist-chip:not(.hist-chip-overflow)'));
+    const lastRegularChip = regularChips[regularChips.length - 1];
+    if (!lastRegularChip) break;
+    histRow.removeChild(lastRegularChip);
   }
 }
 

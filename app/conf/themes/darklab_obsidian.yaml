@@ -18,7 +18,7 @@ label: "Darklab Obsidian"
 # ── Backgrounds ───────────────────────────────────────────────────────────────
 
 # Page background (body)
-bg: "#0d0d0d"
+bg: "#000000"
 
 # Terminal window and surface background (panels, modals, dropdowns)
 surface: "#141414"
@@ -26,10 +26,10 @@ surface: "#141414"
 # ── Borders ───────────────────────────────────────────────────────────────────
 
 # Subtle border (dividers, section separators)
-border: "#1f1f1f"
+border: "#2a2a2a"
 
 # Prominent border (input focus rings, modal outlines)
-border_bright: "#2e2e2e"
+border_bright: "#3c3c3c"
 
 # ── Text ──────────────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ border_bright: "#2e2e2e"
 text: "#e0e0e0"
 
 # Muted / secondary text color (labels, hints, timestamps)
-muted: "#7a7a7a"
+muted: "#9a9a9a"
 
 # ── Accent Colors ─────────────────────────────────────────────────────────────
 
@@ -76,19 +76,19 @@ prompt_line_text: "#e8e8e8"
 
 # Terminal pane / panel styling
 panel_bg: "#141414"
-panel_alt_bg: "#101010"
-panel_border: "#2e2e2e"
+panel_alt_bg: "#0c0c0c"
+panel_border: "#3c3c3c"
 panel_shadow: "rgba(0,0,0,0.7)"
-terminal_bar_bg: "#0d0d0d"
-terminal_bar_border: "#1f1f1f"
+terminal_bar_bg: "#000000"
+terminal_bar_border: "#2a2a2a"
 terminal_actions_bg: "transparent"
-terminal_wrap_border: "#2e2e2e"
+terminal_wrap_border: "#3c3c3c"
 terminal_wrap_shadow: "rgba(0,0,0,0.7)"
 
 # Header / toolbar buttons
 toolbar_button_bg: "transparent"
-toolbar_button_border: "#2e2e2e"
-toolbar_button_text: "#7a7a7a"
+toolbar_button_border: "#3c3c3c"
+toolbar_button_text: "#9a9a9a"
 toolbar_button_hover_bg: "transparent"
 toolbar_button_hover_border: "#1a7a08"
 toolbar_button_hover_text: "#39ff14"
@@ -98,27 +98,27 @@ toolbar_button_active_text: "#39ff14"
 
 # History chips / starred chips
 chip_bg: "transparent"
-chip_border: "#2e2e2e"
-chip_text: "#7a7a7a"
+chip_border: "#3c3c3c"
+chip_text: "#9a9a9a"
 chip_hover_bg: "rgba(57,255,20,0.12)"
 chip_hover_border: "#1a7a08"
 chip_hover_text: "#e0e0e0"
 chip_overflow_text: "#39ff14"
 
 # Tabs bar / tabs
-tabs_bar_bg: "#0d0d0d"
+tabs_bar_bg: "#000000"
 tabs_bar_scrollbar_track: "rgba(255,255,255,0.06)"
-tabs_bar_scrollbar_thumb: "#555555"
-tabs_bar_scrollbar_thumb_hover: "#777777"
+tabs_bar_scrollbar_thumb: "#6d6d6d"
+tabs_bar_scrollbar_thumb_hover: "#8a8a8a"
 tabs_scroll_btn_bg: "transparent"
-tabs_scroll_btn_border: "#1f1f1f"
-tabs_scroll_btn_text: "#7a7a7a"
+tabs_scroll_btn_border: "#2a2a2a"
+tabs_scroll_btn_text: "#9a9a9a"
 tabs_scroll_btn_hover_bg: "transparent"
-tabs_scroll_btn_hover_border: "#2e2e2e"
+tabs_scroll_btn_hover_border: "#3c3c3c"
 tabs_scroll_btn_hover_text: "#e0e0e0"
 tab_bg: "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))"
-tab_border: "#2e2e2e"
-tab_text: "#7a7a7a"
+tab_border: "#3c3c3c"
+tab_text: "#9a9a9a"
 tab_hover_text: "#e0e0e0"
 tab_active_bg: "rgba(57,255,20,0.04)"
 tab_active_border: "color-mix(in srgb, var(--green) 42%, transparent)"
@@ -126,14 +126,14 @@ tab_active_text: "#39ff14"
 tab_active_shadow: "none"
 tab_close_bg: "rgba(255,255,255,0.02)"
 tab_close_border: "rgba(255,255,255,0.06)"
-tab_close_hover_bg: "color-mix(in srgb, var(--red) 18%, transparent)"
-tab_close_hover_border: "color-mix(in srgb, var(--red) 30%, transparent)"
+tab_close_hover_bg: "color-mix(in srgb, var(--green-dim) 18%, transparent)"
+tab_close_hover_border: "color-mix(in srgb, var(--green-dim) 30%, transparent)"
 tab_close_hover_text: "inherit"
 tab_touch_drag_text_shadow: "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)"
 tab_drop_shadow: "0 0 10px color-mix(in srgb, var(--green) 45%, transparent)"
 
 # History panel and restore overlay
-history_panel_bg: "#0d0d0d"
+history_panel_bg: "#000000"
 history_entry_hover_bg: "rgba(57,255,20,0.12)"
 history_load_overlay_bg: "rgba(0,0,0,0.76)"
 history_load_modal_bg: "color-mix(in srgb, var(--surface) 88%, #000)"
@@ -152,7 +152,7 @@ dropdown_shadow: "rgba(0,0,0,0.35)"
 dropdown_up_bg: "color-mix(in srgb, var(--surface) 98%, transparent)"
 dropdown_up_border: "color-mix(in srgb, var(--green) 28%, transparent)"
 dropdown_up_shadow: "rgba(0,0,0,0.45)"
-dropdown_item_text: "#7a7a7a"
+dropdown_item_text: "#9a9a9a"
 
 # FAQ / options controls
 faq_code_bg: "#141414"
@@ -169,12 +169,12 @@ toast_error_text: "#ff3c3c"
 toast_error_border: "color-mix(in srgb, var(--red) 45%, transparent)"
 
 # Mobile shell / menu
-mobile_composer_host_bg: "linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))"
+mobile_composer_host_bg: "linear-gradient(180deg, rgba(0,0,0,0.92), rgba(0,0,0,0.98))"
 mobile_composer_host_light_bg: "linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))"
 mobile_menu_bg: "#141414"
-mobile_menu_border: "#2e2e2e"
+mobile_menu_border: "#3c3c3c"
 mobile_menu_shadow: "rgba(0,0,0,0.6)"
-mobile_menu_button_border: "#1f1f1f"
+mobile_menu_button_border: "#2a2a2a"
 mobile_menu_button_hover_bg: "var(--green-glow)"
 mobile_menu_button_hover_text: "#39ff14"
 

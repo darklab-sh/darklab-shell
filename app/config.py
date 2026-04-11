@@ -113,12 +113,12 @@ CFG = load_config()
 
 _THEME_DEFAULTS = {
     "dark": {
-        "bg":                  "#0d0d0d",
+        "bg":                  "#000000",
         "surface":             "#141414",
-        "border":              "#1f1f1f",
-        "border_bright":       "#2e2e2e",
+        "border":              "#2a2a2a",
+        "border_bright":       "#3c3c3c",
         "text":                "#e0e0e0",
-        "muted":               "#7a7a7a",
+        "muted":               "#9a9a9a",
         "green":               "#39ff14",
         "green_dim":           "#1a7a08",
         "green_glow":          "rgba(57,255,20,0.12)",
@@ -129,17 +129,17 @@ _THEME_DEFAULTS = {
         "terminal_line_height": "1.65",
         "prompt_line_text":    "#e8e8e8",
         "panel_bg":            "#141414",
-        "panel_alt_bg":        "#101010",
-        "panel_border":        "#2e2e2e",
+        "panel_alt_bg":        "#0c0c0c",
+        "panel_border":        "#3c3c3c",
         "panel_shadow":        "rgba(0,0,0,0.7)",
-        "terminal_bar_bg":     "#0d0d0d",
-        "terminal_bar_border": "#1f1f1f",
+        "terminal_bar_bg":     "#000000",
+        "terminal_bar_border": "#2a2a2a",
         "terminal_actions_bg":  "transparent",
-        "terminal_wrap_border": "#2e2e2e",
+        "terminal_wrap_border": "#3c3c3c",
         "terminal_wrap_shadow": "rgba(0,0,0,0.7)",
         "toolbar_button_bg":   "transparent",
-        "toolbar_button_border": "#2e2e2e",
-        "toolbar_button_text": "#7a7a7a",
+        "toolbar_button_border": "#3c3c3c",
+        "toolbar_button_text": "#9a9a9a",
         "toolbar_button_hover_bg": "transparent",
         "toolbar_button_hover_border": "#1a7a08",
         "toolbar_button_hover_text": "#39ff14",
@@ -147,25 +147,25 @@ _THEME_DEFAULTS = {
         "toolbar_button_active_border": "#1a7a08",
         "toolbar_button_active_text": "#39ff14",
         "chip_bg":             "transparent",
-        "chip_border":         "#2e2e2e",
-        "chip_text":           "#7a7a7a",
+        "chip_border":         "#3c3c3c",
+        "chip_text":           "#9a9a9a",
         "chip_hover_bg":       "rgba(57,255,20,0.12)",
         "chip_hover_border":   "#1a7a08",
         "chip_hover_text":     "#e0e0e0",
         "chip_overflow_text":  "#39ff14",
-        "tabs_bar_bg":         "#0d0d0d",
+        "tabs_bar_bg":         "#000000",
         "tabs_bar_scrollbar_track": "rgba(255,255,255,0.06)",
-        "tabs_bar_scrollbar_thumb": "#555555",
-        "tabs_bar_scrollbar_thumb_hover": "#777777",
+        "tabs_bar_scrollbar_thumb": "#6d6d6d",
+        "tabs_bar_scrollbar_thumb_hover": "#8a8a8a",
         "tabs_scroll_btn_bg":   "transparent",
-        "tabs_scroll_btn_border": "#1f1f1f",
-        "tabs_scroll_btn_text": "#7a7a7a",
+        "tabs_scroll_btn_border": "#2a2a2a",
+        "tabs_scroll_btn_text": "#9a9a9a",
         "tabs_scroll_btn_hover_bg": "transparent",
-        "tabs_scroll_btn_hover_border": "#2e2e2e",
+        "tabs_scroll_btn_hover_border": "#3c3c3c",
         "tabs_scroll_btn_hover_text": "#e0e0e0",
         "tab_bg":               "linear-gradient(180deg, rgba(255,255,255,0.03), rgba(255,255,255,0.01))",
-        "tab_border":           "#2e2e2e",
-        "tab_text":             "#7a7a7a",
+        "tab_border":           "#3c3c3c",
+        "tab_text":             "#9a9a9a",
         "tab_hover_text":       "#e0e0e0",
         "tab_active_bg":        "rgba(57,255,20,0.04)",
         "tab_active_border":    "color-mix(in srgb, var(--green) 42%, transparent)",
@@ -173,12 +173,12 @@ _THEME_DEFAULTS = {
         "tab_active_shadow":    "none",
         "tab_close_bg":         "rgba(255,255,255,0.02)",
         "tab_close_border":     "rgba(255,255,255,0.06)",
-        "tab_close_hover_bg":   "color-mix(in srgb, var(--red) 18%, transparent)",
-        "tab_close_hover_border": "color-mix(in srgb, var(--red) 30%, transparent)",
+        "tab_close_hover_bg":   "color-mix(in srgb, var(--green-dim) 18%, transparent)",
+        "tab_close_hover_border": "color-mix(in srgb, var(--green-dim) 30%, transparent)",
         "tab_close_hover_text": "inherit",
         "tab_touch_drag_text_shadow": "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)",
         "tab_drop_shadow":      "0 0 10px color-mix(in srgb, var(--green) 45%, transparent)",
-        "history_panel_bg":     "#0d0d0d",
+        "history_panel_bg":     "#000000",
         "history_entry_hover_bg": "rgba(57,255,20,0.12)",
         "history_load_overlay_bg": "rgba(0,0,0,0.76)",
         "history_load_modal_bg": "color-mix(in srgb, var(--surface) 88%, #000)",
@@ -193,7 +193,7 @@ _THEME_DEFAULTS = {
         "dropdown_up_bg":       "color-mix(in srgb, var(--surface) 98%, transparent)",
         "dropdown_up_border":   "color-mix(in srgb, var(--green) 28%, transparent)",
         "dropdown_up_shadow":   "rgba(0,0,0,0.45)",
-        "dropdown_item_text":   "#7a7a7a",
+        "dropdown_item_text":   "#9a9a9a",
         "faq_code_bg":          "#141414",
         "allowed_chip_bg":      "#141414",
         "options_select_bg":    "#141414",
@@ -204,14 +204,14 @@ _THEME_DEFAULTS = {
         "toast_error_bg":       "color-mix(in srgb, var(--red) 8%, var(--bg))",
         "toast_error_text":     "#ff3c3c",
         "toast_error_border":   "color-mix(in srgb, var(--red) 45%, transparent)",
-        "mobile_composer_host_bg": "linear-gradient(180deg, rgba(20,20,20,0.92), rgba(20,20,20,0.98))",
+        "mobile_composer_host_bg": "linear-gradient(180deg, rgba(0,0,0,0.92), rgba(0,0,0,0.98))",
         "mobile_composer_host_light_bg": "linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))",
         "mobile_menu_bg":      "#141414",
-        "mobile_menu_border":  "#2e2e2e",
+        "mobile_menu_border":  "#3c3c3c",
         "mobile_menu_shadow":  "rgba(0,0,0,0.6)",
         "mobile_menu_button_hover_bg": "var(--green-glow)",
         "mobile_menu_button_hover_text": "#39ff14",
-        "mobile_menu_button_border": "#1f1f1f",
+        "mobile_menu_button_border": "#2a2a2a",
         "welcome_command_hover_bg": "color-mix(in srgb, var(--green) 6%, transparent)",
         "welcome_command_hover_shadow": "0 0 0 1px var(--green-glow)",
         "welcome_ascii_text_shadow": (
@@ -282,8 +282,8 @@ _THEME_DEFAULTS = {
         "tab_active_shadow":    "inset 0 0 0 1px rgba(255,255,255,0.22)",
         "tab_close_bg":         "rgba(255,255,255,0.02)",
         "tab_close_border":     "rgba(255,255,255,0.06)",
-        "tab_close_hover_bg":   "color-mix(in srgb, var(--red) 18%, transparent)",
-        "tab_close_hover_border": "color-mix(in srgb, var(--red) 30%, transparent)",
+        "tab_close_hover_bg":   "color-mix(in srgb, var(--green-dim) 18%, transparent)",
+        "tab_close_hover_border": "color-mix(in srgb, var(--green-dim) 30%, transparent)",
         "tab_close_hover_text": "inherit",
         "tab_touch_drag_text_shadow": "0 0 10px rgba(42,93,24,0.08)",
         "tab_drop_shadow":      "0 0 10px rgba(42,93,24,0.18)",
@@ -474,6 +474,46 @@ def theme_runtime_css_vars(theme: dict) -> dict:
     return css_vars
 
 
+def _parse_theme_rgb(value: str):
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    if raw.startswith("#"):
+        hex_value = raw[1:]
+        if len(hex_value) == 3:
+            try:
+                return tuple(int(ch * 2, 16) for ch in hex_value)
+            except ValueError:
+                return None
+        if len(hex_value) == 6:
+            try:
+                return tuple(int(hex_value[i:i + 2], 16) for i in (0, 2, 4))
+            except ValueError:
+                return None
+        return None
+    if raw.lower().startswith("rgb(") or raw.lower().startswith("rgba("):
+        parts = raw[raw.find("(") + 1: raw.rfind(")")].split(",")
+        if len(parts) < 3:
+            return None
+        try:
+            return tuple(max(0, min(255, int(float(parts[i].strip())))) for i in range(3))
+        except ValueError:
+            return None
+    return None
+
+
+def theme_color_scheme(theme: dict) -> str:
+    """Return a best-effort document color-scheme hint for the resolved theme."""
+    for key in ("bg", "surface", "panel_bg"):
+        rgb = _parse_theme_rgb(theme.get(key, ""))
+        if rgb is None:
+            continue
+        red, green, blue = rgb
+        luminance = (0.299 * red) + (0.587 * green) + (0.114 * blue)
+        return "only light" if luminance >= 160 else "only dark"
+    return "light dark"
+
+
 def _theme_name_stem(name: str) -> str:
     stem = str(name).strip()
     if stem.lower().endswith(".yaml"):
@@ -555,6 +595,7 @@ def _builtin_theme_entry(name):
         "group": "Other",
         "sort": 0,
         "source": "built-in",
+        "color_scheme": theme_color_scheme(theme),
         "vars": theme_runtime_css_vars(theme),
         "theme_vars": theme_css_vars(theme),
     }
@@ -576,6 +617,7 @@ def _theme_entry(name, *, source="variant"):
         "group": group,
         "sort": _theme_sort_value(user_theme.get("sort")),
         "source": source,
+        "color_scheme": theme_color_scheme(theme),
         "vars": theme_runtime_css_vars(theme),
         "theme_vars": theme_css_vars(theme),
     }

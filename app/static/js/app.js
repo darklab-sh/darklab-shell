@@ -1083,6 +1083,9 @@ function _applyThemeVars(entry) {
   Object.entries(entry.vars).forEach(([name, value]) => {
     document.documentElement.style.setProperty(name, value);
   });
+  document.documentElement.style.colorScheme = entry.color_scheme || 'light dark';
+  const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+  if (colorSchemeMeta) colorSchemeMeta.setAttribute('content', entry.color_scheme || 'light dark');
 }
 
 function _applyThemePreviewVars(target, vars) {

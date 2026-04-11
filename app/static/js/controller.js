@@ -391,6 +391,8 @@ document.addEventListener('keydown', e => {
     if (isHistoryPanelOpen()) hideHistoryPanel();
   }
 
+  if (_replayPromptShortcutAfterSelection(e)) return;
+
   // If a printable key lands outside the command input (e.g. user had text selected
   // in the output), forward it to the prompt so no keystroke is lost.
   if (
@@ -409,6 +411,58 @@ document.addEventListener('keydown', e => {
     replaceCmdRange(value, start, end, e.key);
   }
 });
+
+function _replayPromptShortcutAfterSelection(e) {
+  if (!cmdInput || document.activeElement === cmdInput) return false;
+  if (isEditableTarget(e.target)) return false;
+  const isCtrlR = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R');
+  const isSelectionShortcut = e.key === 'Enter' || e.key === 'ArrowDown' || e.key === 'ArrowUp' || isCtrlR;
+  if (!isSelectionShortcut) return false;
+  const selection = typeof window !== 'undefined' && typeof window.getSelection === 'function'
+    ? window.getSelection()
+    : null;
+  const selectedText = selection && typeof selection.toString === 'function' ? selection.toString() : '';
+  if (!selectedText) return false;
+
+  e.preventDefault();
+  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  if (isCtrlR) {
+    if (typeof enterHistSearch === 'function') enterHistSearch();
+    return true;
+  }
+  if (e.key === 'ArrowDown') {
+    if (isAcDropdownOpen() && acFiltered.length) {
+      acIndex = (acIndex + 1) % acFiltered.length;
+      if (typeof acShow === 'function') acShow(acFiltered);
+    } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(-1)) {
+      if (typeof acHide === 'function') acHide();
+    }
+    return true;
+  }
+  if (e.key === 'ArrowUp') {
+    if (isAcDropdownOpen() && acFiltered.length) {
+      acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+      if (typeof acShow === 'function') acShow(acFiltered);
+    } else if (typeof navigateCmdHistory === 'function' && navigateCmdHistory(1)) {
+      if (typeof acHide === 'function') acHide();
+    }
+    return true;
+  }
+  if (e.key === 'Enter') {
+    if (acIndex >= 0 && acFiltered[acIndex]) {
+      if (typeof acAccept === 'function') acAccept(acFiltered[acIndex]);
+    } else {
+      if (typeof acHide === 'function') acHide();
+      if (typeof submitComposerCommand === 'function') {
+        submitComposerCommand(typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || ''), { dismissKeyboard: true });
+      } else if (typeof runCommand === 'function') {
+        runCommand();
+      }
+    }
+    return true;
+  }
+  return true;
+}
 
 // ── Global click: dismiss mobile menu and autocomplete ──
 document.addEventListener('click', e => {

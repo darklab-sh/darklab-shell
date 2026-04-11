@@ -1,5 +1,6 @@
 <style>
   :root {
+    color-scheme: {{ current_theme.color_scheme | default('light dark') }};
   {% for name, value in current_theme_css.items() %}
     {{ name }}: {{ value }};
   {% endfor %}

@@ -18,23 +18,75 @@ from commands import (
     load_welcome,
     load_welcome_hints,
 )
-from helpers import get_client_ip, ip_is_in_cidrs
+from helpers import get_client_ip, get_session_id, ip_is_in_cidrs
 
 log = logging.getLogger("shell")
 
 content_bp = Blueprint("content", __name__)
 
 
+def _log_content_view(route: str, **extra):
+    log.info(
+        "CONTENT_VIEWED",
+        extra={
+            "ip": get_client_ip(),
+            "session": get_session_id(),
+            "route": route,
+            **extra,
+        },
+    )
+
+
 def _current_theme_name():
     theme_name = request.cookies.get("pref_theme_name", "").strip()
     if theme_name and theme_name in _config.THEME_REGISTRY_MAP:
+        log.debug(
+            "THEME_SELECTED",
+            extra={
+                "ip": get_client_ip(),
+                "session": get_session_id(),
+                "route": request.path,
+                "theme": theme_name,
+                "source": "pref_theme_name",
+            },
+        )
         return theme_name
     legacy = request.cookies.get("pref_theme", "").strip()
     if legacy and legacy in _config.THEME_REGISTRY_MAP:
+        log.debug(
+            "THEME_SELECTED",
+            extra={
+                "ip": get_client_ip(),
+                "session": get_session_id(),
+                "route": request.path,
+                "theme": legacy,
+                "source": "pref_theme",
+            },
+        )
         return legacy
     default_theme = _config.CFG.get("default_theme", "darklab_obsidian.yaml")
     if default_theme in _config.THEME_REGISTRY_MAP:
+        log.debug(
+            "THEME_SELECTED",
+            extra={
+                "ip": get_client_ip(),
+                "session": get_session_id(),
+                "route": request.path,
+                "theme": default_theme,
+                "source": "default_theme",
+            },
+        )
         return default_theme
+    log.debug(
+        "THEME_SELECTED",
+        extra={
+            "ip": get_client_ip(),
+            "session": get_session_id(),
+            "route": request.path,
+            "theme": default_theme,
+            "source": "fallback",
+        },
+    )
     return default_theme
 
 
@@ -47,8 +99,15 @@ def _current_theme_entry():
 
 @content_bp.route("/")
 def index():
-    log.info("PAGE_LOAD", extra={"ip": get_client_ip()})
     current_theme = _current_theme_entry()
+    log.info(
+        "PAGE_LOAD",
+        extra={
+            "ip": get_client_ip(),
+            "session": get_session_id(),
+            "theme": current_theme["name"],
+        },
+    )
     return render_template(
         "index.html",
         app_name=_config.CFG["app_name"],
@@ -59,21 +118,11 @@ def index():
         fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
     )
 
-
-@content_bp.route("/repro/mobile-keyboard")
-def mobile_keyboard_repro():
-    """Minimal mobile keyboard/focus repro page, isolated from the main shell UI."""
-    return render_template(
-        "mobile_keyboard_repro.html",
-        app_name=_config.CFG["app_name"],
-    )
-
-
 @content_bp.route("/config")
 def get_config():
     """Return frontend-relevant config values."""
     cfg = _config.CFG
-    return jsonify({
+    payload = {
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
         "prompt_prefix":         cfg["prompt_prefix"],
@@ -100,16 +149,21 @@ def get_config():
             request.remote_addr or "",
             cfg.get("diagnostics_allowed_cidrs") or [],
         ),
-    })
+    }
+    _log_content_view("/config", key_count=len(payload))
+    return jsonify(payload)
 
 
 @content_bp.route("/themes")
 def get_themes():
     """Return the available theme registry and the active selection."""
-    return jsonify({
-        "current": _current_theme_entry(),
+    current = _current_theme_entry()
+    payload = {
+        "current": current,
         "themes": _config.THEME_REGISTRY,
-    })
+    }
+    _log_content_view("/themes", current=current.get("name"), count=len(payload["themes"]))
+    return jsonify(payload)
 
 
 @content_bp.route("/allowed-commands")
@@ -117,48 +171,62 @@ def allowed_commands():
     """Return the list of allowed command prefixes for display in the UI."""
     prefixes, _ = load_allowed_commands()
     if prefixes is None:
+        _log_content_view("/allowed-commands", restricted=False, count=0)
         return jsonify({"restricted": False, "commands": [], "groups": []})
     groups = load_allowed_commands_grouped() or []
+    _log_content_view("/allowed-commands", restricted=True, count=len(prefixes))
     return jsonify({"restricted": True, "commands": prefixes, "groups": groups})
 
 
 @content_bp.route("/faq")
 def faq():
     """Return built-in FAQ entries plus any custom faq.yaml entries."""
-    return jsonify({"items": load_all_faq(_config.CFG["app_name"], _config.CFG["project_readme"])})
+    items = load_all_faq(_config.CFG["app_name"], _config.CFG["project_readme"])
+    _log_content_view("/faq", count=len(items))
+    return jsonify({"items": items})
 
 
 @content_bp.route("/autocomplete")
 def autocomplete():
     """Return the list of autocomplete suggestions from auto_complete.txt."""
-    return jsonify({"suggestions": load_autocomplete()})
+    suggestions = load_autocomplete()
+    _log_content_view("/autocomplete", count=len(suggestions))
+    return jsonify({"suggestions": suggestions})
 
 
 @content_bp.route("/welcome")
 def get_welcome():
     """Return welcome message blocks for the startup typeout animation."""
-    return jsonify(load_welcome())
+    blocks = load_welcome()
+    _log_content_view("/welcome", count=len(blocks))
+    return jsonify(blocks)
 
 
 @content_bp.route("/welcome/ascii")
 def get_welcome_ascii():
     """Return the ASCII banner art used by the welcome animation."""
+    _log_content_view("/welcome/ascii")
     return Response(load_ascii_art(), mimetype="text/plain")
 
 
 @content_bp.route("/welcome/ascii-mobile")
 def get_welcome_ascii_mobile():
     """Return the compact ASCII banner art used by mobile welcome."""
+    _log_content_view("/welcome/ascii-mobile")
     return Response(load_ascii_mobile_art(), mimetype="text/plain")
 
 
 @content_bp.route("/welcome/hints")
 def get_welcome_hints():
     """Return rotating footer hints for the welcome animation."""
-    return jsonify({"items": load_welcome_hints()})
+    items = load_welcome_hints()
+    _log_content_view("/welcome/hints", count=len(items))
+    return jsonify({"items": items})
 
 
 @content_bp.route("/welcome/hints-mobile")
 def get_mobile_welcome_hints():
     """Return rotating footer hints for the mobile welcome animation."""
-    return jsonify({"items": load_mobile_welcome_hints()})
+    items = load_mobile_welcome_hints()
+    _log_content_view("/welcome/hints-mobile", count=len(items))
+    return jsonify({"items": items})
