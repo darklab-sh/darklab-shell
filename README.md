@@ -83,14 +83,15 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │       ├── unit/               # Vitest unit tests for pure JS functions
 │       │   ├── helpers/
 │       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, modal controls
+│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, active-input composer boundary, composer-host spacing guard, mobile output-follow regression, state-driven cursor-helper regression, phase-5 keydown/submit boundary, phase-7 prompt render boundary, modal controls
 │       │   ├── runner.test.js      # _formatElapsed, run/kill edge cases, stall recovery
-│       │   ├── history.test.js     # starred state, clipboard, delete/clear failures, mobile chip behavior
+│       │   ├── history.test.js     # starred state, clipboard, delete/clear failures, mobile chip behavior, composer-state draft restore
+│       │   ├── state.test.js       # composer state store accessors and reset behavior
 │       │   ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
 │       │   ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
 │       │   ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
 │       │   ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
-│       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll
+│       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
 │       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
 │       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
 │       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
@@ -1009,7 +1010,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **762 pytest + 276 Vitest + 135 Playwright = 1,173 tests**.
+Current totals: **762 pytest + 282 Vitest + 135 Playwright = 1,179 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

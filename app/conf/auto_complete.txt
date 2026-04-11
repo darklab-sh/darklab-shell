@@ -117,7 +117,7 @@ nslookup -type=NS ip.darklab.sh
 
 # host
 host -t A ip.darklab.sh
-host -t MX ip.darklab.sh
+host -t MX darklab.sh
 host -t TXT ip.darklab.sh
 host -t NS ip.darklab.sh
 
@@ -190,7 +190,7 @@ dnsrecon -d ip.darklab.sh -t axfr
 dnsrecon -d ip.darklab.sh -t brt
 dnsrecon -d ip.darklab.sh -t srv
 dnsrecon -d ip.darklab.sh -t zonewalk
-dnsrecon -d ip.darklab.sh -t mx
+dnsrecon -d ip.darklab.sh -t crt
 
 # nikto
 nikto -Help

@@ -329,7 +329,7 @@ document.addEventListener('keydown', e => {
     if (isPrintable) {
       requestWelcomeSettle(activeTabId);
       refocusTerminalInput();
-      setComposerValue((cmdInput.value || '') + e.key);
+      setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
       e.preventDefault();
       return;
     }
@@ -365,12 +365,12 @@ document.addEventListener('keydown', e => {
   ) {
     requestWelcomeSettle(activeTabId);
     refocusTerminalInput();
-    setComposerValue((cmdInput.value || '') + e.key);
+    setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
     e.preventDefault();
     return;
   }
   if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
-    if (cmdInput && cmdInput.value.trim()) return;
+    if ((typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) return;
     requestWelcomeSettle(activeTabId);
     refocusTerminalInput();
     e.preventDefault();
@@ -404,7 +404,7 @@ document.addEventListener('keydown', e => {
   ) {
     e.preventDefault();
     if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
     const { start, end } = getCmdSelection(value);
     replaceCmdRange(value, start, end, e.key);
   }
@@ -449,6 +449,14 @@ _bindMobileEditBarInteractions(_mobileUiLayoutRefs && _mobileUiLayoutRefs.compos
 
 if (cmdInput) {
   cmdInput.addEventListener('focus', () => {
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        value: cmdInput.value || '',
+        selectionStart: typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : (cmdInput.value || '').length,
+        selectionEnd: typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : (cmdInput.value || '').length,
+        activeInput: 'desktop',
+      });
+    }
     if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
     syncShellPrompt();
     syncMobileViewportState();
@@ -468,15 +476,26 @@ if (typeof document !== 'undefined') {
     const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
     const mobileInput = composerInputs.mobile || null;
     if (document.activeElement === cmdInput) {
+      if (typeof setComposerState === 'function') {
+        setComposerState({
+          value: cmdInput.value || '',
+          selectionStart: typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : (cmdInput.value || '').length,
+          selectionEnd: typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : (cmdInput.value || '').length,
+          activeInput: 'desktop',
+        });
+      }
       syncShellPrompt();
       return;
     }
     if (mobileInput && document.activeElement === mobileInput) {
-      syncHiddenCommandInputFromVisible(
-        mobileInput.value || '',
-        mobileInput.selectionStart,
-        mobileInput.selectionEnd
-      );
+      if (typeof setComposerState === 'function') {
+        setComposerState({
+          value: mobileInput.value || '',
+          selectionStart: typeof mobileInput.selectionStart === 'number' ? mobileInput.selectionStart : (mobileInput.value || '').length,
+          selectionEnd: typeof mobileInput.selectionEnd === 'number' ? mobileInput.selectionEnd : (mobileInput.value || '').length,
+          activeInput: 'mobile',
+        });
+      }
       syncShellPrompt();
     }
   });
@@ -492,7 +511,10 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
 cmdInput.addEventListener('input', () => {
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
-    if (typeof handleHistSearchInput === 'function') handleHistSearchInput(cmdInput.value);
+    if (typeof handleHistSearchInput === 'function') {
+      const value = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
+      handleHistSearchInput(value);
+    }
     const _hsTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
     if (_hsTab) _hsTab.followOutput = true;
     const _hsOut = document.querySelector('.tab-panel.active .output');
@@ -502,7 +524,9 @@ cmdInput.addEventListener('input', () => {
   handleComposerInputChange(cmdInput);
   // Keep the active tab's draft current so activateTab can read it directly
   const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
-  if (_activeTab && _activeTab.st !== 'running') _activeTab.draftInput = cmdInput.value;
+  if (_activeTab && _activeTab.st !== 'running') {
+    _activeTab.draftInput = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
+  }
 });
 
 cmdInput.addEventListener('keydown', e => {
@@ -543,7 +567,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start, end } = getCmdSelection(value);
 
     if (start !== end) {
@@ -560,7 +584,7 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'u' || e.key === 'U')) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start, end } = getCmdSelection(value);
     if (start !== end) {
       replaceCmdRange(value, start, end);
@@ -573,14 +597,15 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'a' || e.key === 'A')) {
     e.preventDefault();
-    cmdInput.setSelectionRange(0, 0);
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(0, 0);
+    else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(0, 0);
     syncShellPrompt();
     return;
   }
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start, end } = getCmdSelection(value);
     if (start !== end) {
       replaceCmdRange(value, start, end);
@@ -593,35 +618,38 @@ cmdInput.addEventListener('keydown', e => {
 
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'e' || e.key === 'E')) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const end = value.length;
-    cmdInput.setSelectionRange(end, end);
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(end, end);
+    else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(end, end);
     syncShellPrompt();
     return;
   }
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start } = getCmdSelection(value);
     const next = findWordBoundaryLeft(value, start);
-    cmdInput.setSelectionRange(next, next);
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next);
+    else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
     syncShellPrompt();
     return;
   }
 
   if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { end } = getCmdSelection(value);
     const next = findWordBoundaryRight(value, end);
-    cmdInput.setSelectionRange(next, next);
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next);
+    else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
     syncShellPrompt();
     return;
   }
 
   if (e.key === 'Enter') {
-    if (_welcomeActive && welcomeOwnsTab(activeTabId) && !cmdInput.value.trim()) {
+    if (_welcomeActive && welcomeOwnsTab(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
       e.preventDefault();
       requestWelcomeSettle(activeTabId);
       refocusTerminalInput();
@@ -634,7 +662,7 @@ cmdInput.addEventListener('keydown', e => {
       e.preventDefault();
       acHide();
       if (typeof submitComposerCommand === 'function') {
-        submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
+        submitComposerCommand(typeof getComposerValue === 'function' ? getComposerValue() : '', { dismissKeyboard: true });
       } else {
         runCommand();
       }
@@ -683,7 +711,7 @@ cmdInput.addEventListener('keydown', e => {
   if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey && !e.isComposing
       && !(_welcomeActive && welcomeOwnsTab(activeTabId))) {
     e.preventDefault();
-    const value = cmdInput.value;
+    const value = typeof getComposerValue === 'function' ? getComposerValue() : '';
     const { start, end } = getCmdSelection(value);
     replaceCmdRange(value, start, end, e.key);
     return;

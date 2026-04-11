@@ -31,7 +31,9 @@ function navigateCmdHistory(delta) {
 
   if (delta > 0) {
     if (_cmdHistoryNavIndex === -1) {
-      _cmdHistoryNavDraft = cmdInput.value;
+      _cmdHistoryNavDraft = (typeof getComposerValue === 'function')
+        ? getComposerValue()
+        : (cmdInput ? cmdInput.value : '');
       _cmdHistoryNavIndex = 0;
     } else if (_cmdHistoryNavIndex < cmdHistory.length - 1) {
       _cmdHistoryNavIndex++;
@@ -543,8 +545,6 @@ function enterHistSearch() {
   // The draft is preserved in _histSearchPreDraft and restored on Escape / Ctrl+G.
   if (typeof setComposerValue === 'function') {
     setComposerValue('', 0, 0, { dispatch: false });
-  } else if (cmdInput) {
-    cmdInput.value = '';
   }
   if (typeof acHide === 'function') acHide();
   _renderHistSearch();
@@ -559,16 +559,10 @@ function exitHistSearch(accept, { keepCurrent = false } = {}) {
     const chosen = _histSearchIndex >= 0 ? matches[_histSearchIndex] : (matches[0] || _histSearchPreDraft);
     if (typeof setComposerValue === 'function') {
       setComposerValue(chosen, chosen.length, chosen.length);
-    } else if (cmdInput) {
-      cmdInput.value = chosen;
-      cmdInput.dispatchEvent(new Event('input'));
     }
   } else if (!keepCurrent) {
     if (typeof setComposerValue === 'function') {
       setComposerValue(_histSearchPreDraft, _histSearchPreDraft.length, _histSearchPreDraft.length);
-    } else if (cmdInput) {
-      cmdInput.value = _histSearchPreDraft;
-      cmdInput.dispatchEvent(new Event('input'));
     }
   }
   _histSearchQuery = '';
@@ -603,8 +597,9 @@ function handleHistSearchKey(e) {
     } else {
       exitHistSearch(false, { keepCurrent: true });
     }
+    const currentValue = (typeof getComposerValue === 'function') ? getComposerValue() : '';
     if (typeof submitComposerCommand === 'function') {
-      submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
+      submitComposerCommand(currentValue, { dismissKeyboard: true });
     } else if (typeof runCommand === 'function') {
       runCommand();
     }
@@ -627,8 +622,6 @@ function handleHistSearchKey(e) {
       _histSearchIndex = (_histSearchIndex + 1) % matches.length;
       if (typeof setComposerValue === 'function') {
         setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
-      } else if (cmdInput) {
-        cmdInput.value = matches[_histSearchIndex];
       }
       _renderHistSearch();
     }
@@ -641,8 +634,6 @@ function handleHistSearchKey(e) {
       _histSearchIndex = _histSearchIndex <= 0 ? matches.length - 1 : _histSearchIndex - 1;
       if (typeof setComposerValue === 'function') {
         setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
-      } else if (cmdInput) {
-        cmdInput.value = matches[_histSearchIndex];
       }
       _renderHistSearch();
     }

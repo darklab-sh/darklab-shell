@@ -483,17 +483,13 @@ function activateTab(id, { focusComposer = true } = {}) {
     if (typeof exitHistSearch === 'function') exitHistSearch(false);
   }
   // Flush the current composer value into the leaving tab's draftInput before switching.
-  // Read cmdInput.value directly (not via getComposerValue) to avoid the mobile/desktop
-  // selector race that can occur when the body class hasn't fully settled yet.
   const prevId = activeTabId;
   if (prevId && prevId !== id) {
     const prevTab = getTab(prevId);
     if (prevTab && prevTab.st === 'running') {
       prevTab.draftInput = '';
     } else if (prevTab) {
-      if (typeof cmdInput !== 'undefined' && cmdInput) {
-        prevTab.draftInput = cmdInput.value;
-      }
+      prevTab.draftInput = (typeof getComposerValue === 'function') ? getComposerValue() : (cmdInput ? cmdInput.value : '');
     }
   }
   setActiveTabId(id);
@@ -512,8 +508,6 @@ function activateTab(id, { focusComposer = true } = {}) {
   const draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
   if (typeof setComposerValue === 'function') {
     setComposerValue(draft, draft.length, draft.length, { dispatch: false });
-  } else if (cmdInput) {
-    cmdInput.value = draft;
   }
   resetCmdHistoryNav();
   if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });

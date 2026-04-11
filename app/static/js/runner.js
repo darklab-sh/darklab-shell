@@ -453,5 +453,6 @@ function submitVisibleComposerCommand({ rawCmd = null, dismissKeyboard = false, 
 
 function runCommand() {
   if (typeof isRunButtonDisabled === 'function' && isRunButtonDisabled()) return;
-  submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput ? cmdInput.value : '');
+  submitComposerCommand(value, { dismissKeyboard: true });
 }

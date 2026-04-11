@@ -481,12 +481,12 @@ An anonymous UUID is generated in `localStorage` on first visit and sent as `X-S
 
 Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `chdir`s to `app/` and inserts it into `sys.path` before import so `app.py` can find its relative-path assets (`templates/`, `conf/`, etc.) and app modules are importable.
 
-Current totals on this branch:
+Current totals:
 
 - `pytest`: 762
-- `vitest`: 276
+- `vitest`: 282
 - `playwright`: 135
-- total: 1,173
+- total: 1,179
 
 ### Testing Architecture
 
@@ -499,7 +499,27 @@ Current totals on this branch:
 
 - The browser JS remains non-module global-scope code, so Vitest uses `tests/js/unit/helpers/extract.js` to load selected functions from each script into an isolated execution context with `new Function(...)`. That keeps the production client architecture unchanged while still allowing targeted unit coverage. The page bootstrap moved into `app/static/js/controller.js`, while shared state now lives in `app/static/js/state.js` and DOM-facing helpers live in `app/static/js/ui_helpers.js`; the extracted scripts still depend on the globals defined by the earlier scripts.
 
+- `app/static/js/state.js` now also owns the shared composer store (`composerState`) with explicit value, selection, and active-input accessors. `setComposerValue()` now writes to the visible active input only, and the mobile selection / history / autocomplete paths publish through the shared store instead of mirroring one DOM input into the other. The state store and helper layer are now the single source of truth for composer value/selection, which makes the later cursor/edit-helper phases much smaller.
+
 - The jsdom harness mirrors production load order by prepending `app/static/js/state.js` and `app/static/js/ui_helpers.js` before the script under test. `tests/js/unit/helpers/extract.js` also supports an optional `initCode` block so tests can seed `tabs` / `activeTabId` before evaluating module code, which keeps `getTab()` and `getActiveTab()` aligned with the real browser state.
+
+- The new shared composer store is covered in isolation by `tests/js/unit/state.test.js`. That file checks the store accessors and reset behavior without touching DOM inputs, and the jsdom/mobile tests now assert that mobile composer writes stay on the active input instead of mirroring into the hidden desktop field.
+
+- Phase 3 of the composer-state migration completed the remaining input-publishing cleanup: focus and `selectionchange` events now publish into `composerState`, the hidden-input mirroring helper is gone, and the remaining composer-side regression coverage now exercises the active-input publish path directly.
+
+- Phase 4 of the composer-state migration moved the cursor and mobile edit helpers onto shared composer state, so caret movement now follows `composerState` instead of stale DOM selection and the mobile edit bar can adjust the active input without reviving hidden-input mirroring.
+
+- Phase 5 of the composer-state migration moved the controller keydown and submit paths onto shared composer state as well, so `controller.js` and `runner.js` no longer treat `cmdInput.value` as the global composer source during Enter/shortcut handling. The controller now reads the active composer value through the shared store before key handlers submit, mutate, or inspect prompt text.
+
+- Phase 6 of the composer-state migration made tab draft persistence and history-search interactions state-first too: tab switches now capture the shared composer value for `draftInput`, autocomplete and recent-chip updates continue to render from the active composer state, and hist-search restore / accept flows now feed the shared store before submitting or rehydrating the prompt.
+
+- Phase 7 of the composer-state migration moved `syncShellPrompt` onto shared composer state, so the prompt render now reads value and selection from `composerState` instead of whichever DOM input happens to be current. That keeps the shell prompt rendering correct across desktop typing, mobile typing, tab switching, and history/search restores without relying on hidden-input state.
+
+- Phase 8 of the composer-state migration removed the leftover dead mirroring branches and tightened the mode-coupled helpers around the shared store boundary. `tabs.js`, `history.js`, and the controller no longer fall back to the inactive input just to keep the mirrored prompt state alive; `getVisibleComposerInput()` remains only as a focus/render helper, not as a second source of truth.
+
+- A small stylesheet regression guard in `app.test.js` now asserts that `#mobile-composer-host` stays free of keyboard-height spacing in the simplified shell, so the stale mobile gap cannot silently creep back in during later tuning.
+
+- A mobile output-follow regression in `app.test.js` now asserts that the active tab stays pinned to the bottom when the keyboard opens, which keeps the last line visible while the simplified mobile shell is resizing around the composer.
 
 - Search highlighting now walks text nodes and clones the line structure instead of rewriting serialized `innerHTML`, which keeps mixed-content lines and helper markup intact while preserving plain-text search, regex search, case sensitivity, and current-match navigation. A related initialisation fix in `ui_helpers.js` sets the search bar's inline `display` style to `none` on load so the `.u-hidden` utility class correctly hides it regardless of the `.search-bar { display: flex }` rule that follows it at equal specificity; `isSearchBarOpen()` was also tightened to check `=== 'flex'` instead of `!== 'none'`.
 

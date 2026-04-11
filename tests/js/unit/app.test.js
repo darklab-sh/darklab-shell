@@ -1,3 +1,5 @@
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
 async function loadAppFns({
@@ -29,6 +31,7 @@ async function loadAppFns({
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
   acHide: acHideOverride = () => {},
+  getOutput: getOutputOverride = null,
   mobileViewport = null,
   mobileTouch = true,
 } = {}) {
@@ -338,7 +341,7 @@ async function loadAppFns({
     AnsiUp: FakeAnsiUp,
     ThemeRegistry: themeRegistry,
     ...domBindings,
-    getOutput: () => document.getElementById('history-list'),
+    getOutput: getOutputOverride || (() => document.getElementById('history-list')),
     renderMotd: (text) => text,
     updateNewTabBtn: () => {},
     createTab: createTabOverride,
@@ -426,6 +429,10 @@ async function loadAppFns({
     _setLnMode,
     handleComposerInputChange,
     setComposerValue,
+    moveCmdCaret,
+    setCmdCaret,
+    deleteCmdWordLeft,
+    performMobileEditAction,
     syncMobileComposerKeyboardState,
     focusVisibleComposerInput,
     blurVisibleComposerInput,
@@ -442,6 +449,10 @@ async function loadAppFns({
     isKillOverlayOpen,
     confirmPendingKill,
     closeKillOverlay,
+    getComposerState,
+    setComposerState,
+    resetComposerState,
+    syncShellPrompt,
     _getAcIndex: () => acIndex,
   }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
@@ -478,6 +489,7 @@ async function loadAppFns({
     isKillOverlayOpen: fns.isKillOverlayOpen,
     confirmPendingKill: fns.confirmPendingKill,
     closeKillOverlay: fns.closeKillOverlay,
+    syncShellPrompt: fns.syncShellPrompt,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
       else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
@@ -996,27 +1008,34 @@ describe('app helpers', () => {
     expect(runCommand).not.toHaveBeenCalled()
   })
 
-  it('mirrors the hidden command input into the shell prompt line', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('renders the shell prompt line from composer state instead of the stale hidden input', async () => {
+    const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
     const shellPromptWrap = document.getElementById('shell-prompt-wrap')
 
     expect(shellPromptText.textContent).toBe('')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(true)
 
-    cmdInput.value = 'ping darklab.sh'
-    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
-    cmdInput.dispatchEvent(new Event('input'))
+    cmdInput.value = 'stale prompt'
+    cmdInput.setSelectionRange(0, 0)
+    setComposerState({
+      value: 'ping darklab.sh',
+      selectionStart: 'ping darklab.sh'.length,
+      selectionEnd: 'ping darklab.sh'.length,
+      activeInput: 'desktop',
+    })
+    syncShellPrompt()
 
     expect(shellPromptText.textContent).toBe('ping darklab.sh')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
   it('manually inserts printable desktop keydown input once', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'ab'
     cmdInput.setSelectionRange(2, 2)
+    setComposerState({ value: 'ab', selectionStart: 2, selectionEnd: 2, activeInput: 'desktop' })
     Object.defineProperty(document, 'activeElement', {
       configurable: true,
       get: () => cmdInput,
@@ -1045,6 +1064,21 @@ describe('app helpers', () => {
     expect(shellPromptText.textContent).toContain('curl')
     expect(shellPromptText.textContent).toContain('darklab.sh')
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
+  })
+
+  it('moves the cursor from composer state instead of stale DOM selection', async () => {
+    const { moveCmdCaret, setComposerState } = await loadAppFns()
+    const cmdInput = document.getElementById('cmd')
+
+    cmdInput.value = 'abc'
+    cmdInput.setSelectionRange(3, 3)
+    setComposerState({ value: 'abc', selectionStart: 1, selectionEnd: 1, activeInput: 'desktop' })
+
+    moveCmdCaret(1)
+
+    expect(cmdInput.selectionStart).toBe(2)
+    expect(cmdInput.selectionEnd).toBe(2)
+    expect(cmdInput.value).toBe('abc')
   })
 
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
@@ -1170,6 +1204,41 @@ describe('app helpers', () => {
       expect(mobileShellOverlays.contains(historyPanel)).toBe(true)
       expect(mobileShellOverlays.contains(faqOverlay)).toBe(true)
       expect(mobileShellOverlays.contains(optionsOverlay)).toBe(true)
+    } finally {
+      restoreViewport()
+    }
+  })
+
+  it('keeps the active output pinned to the bottom when the mobile keyboard opens', async () => {
+    const output = document.createElement('div')
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: value => { scrollTop = value },
+    })
+    Object.defineProperty(output, 'scrollHeight', {
+      configurable: true,
+      get: () => 300,
+    })
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+      tabs: [{ id: 'tab-1', followOutput: true, suppressOutputScrollTracking: false, _outputFollowToken: 0 }],
+      getOutput: () => output,
+    })
+    try {
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      document.body.classList.add('mobile-terminal-mode')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => mobileCmdInput,
+      })
+
+      scrollTop = 12
+      window.visualViewport.height = 500
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+
+      expect(scrollTop).toBe(300)
     } finally {
       restoreViewport()
     }
@@ -1316,13 +1385,14 @@ describe('app helpers', () => {
   })
 
   it('reads the visible mobile composer value through the shared accessor', async () => {
-    const { getComposerValue, restoreViewport } = await loadAppFns({
+    const { getComposerValue, setComposerState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const mobileCmdInput = document.getElementById('mobile-cmd')
     document.body.classList.add('mobile-terminal-mode')
 
     mobileCmdInput.value = 'curl darklab.sh'
+    setComposerState({ value: 'curl darklab.sh', selectionStart: 15, selectionEnd: 15, activeInput: 'mobile' })
 
     expect(getComposerValue()).toBe('curl darklab.sh')
 
@@ -1343,7 +1413,8 @@ describe('app helpers', () => {
     mobileCmdInput.value = 'curl'
     mobileCmdInput.dispatchEvent(new Event('input', { bubbles: true }))
 
-    expect(cmdInput.value).toBe('curl')
+    expect(mobileCmdInput.value).toBe('curl')
+    expect(cmdInput.value).toBe('')
     expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
 
     restoreViewport()
@@ -1363,10 +1434,42 @@ describe('app helpers', () => {
     mobileCmdInput.value = 'curl'
     handleComposerInputChange(mobileCmdInput)
 
-    expect(cmdInput.value).toBe('curl')
+    expect(mobileCmdInput.value).toBe('curl')
+    expect(cmdInput.value).toBe('')
     expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
 
     restoreViewport()
+  })
+
+  it('publishes mobile focus and selection changes into composer state without mirroring the hidden input', async () => {
+    const { getComposerState, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    try {
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      const cmdInput = document.getElementById('cmd')
+      document.body.classList.add('mobile-terminal-mode')
+
+      mobileCmdInput.value = 'curl'
+      mobileCmdInput.setSelectionRange(4, 4)
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => mobileCmdInput,
+      })
+
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('selectionchange'))
+
+      expect(getComposerState()).toEqual({
+        value: 'curl',
+        selectionStart: 4,
+        selectionEnd: 4,
+        activeInput: 'mobile',
+      })
+      expect(cmdInput.value).toBe('')
+    } finally {
+      restoreViewport()
+    }
   })
 
   it('does not enter mobile mode on a narrow desktop viewport without touch support', async () => {
@@ -1462,6 +1565,14 @@ describe('app helpers', () => {
     setRunButtonDisabled(false)
     expect(runBtn.disabled).toBe(false)
     expect(mobileRunBtn.disabled).toBe(false)
+  })
+
+  it('keeps the mobile composer host free of keyboard-height spacing in the simplified shell', () => {
+    const css = readFileSync(resolve(process.cwd(), 'app/static/css/styles.css'), 'utf8')
+    const match = css.match(/body\.mobile-terminal-mode #mobile-composer-host\s*\{([\s\S]*?)\}/)
+
+    expect(match).not.toBeNull()
+    expect(match[1]).not.toMatch(/margin-bottom\s*:/)
   })
 
   it('disables both run buttons for an empty command and enables them once input is present', async () => {
@@ -1598,38 +1709,54 @@ describe('app helpers', () => {
     expect(document.getElementById('ac-dropdown').style.display).toBe('none')
   })
 
-  it('renders cursor and selection state from the hidden input', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('renders cursor and selection state from composer state', async () => {
+    const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
     const shellPromptWrap = document.getElementById('shell-prompt-wrap')
 
-    cmdInput.value = 'nothing'
-    cmdInput.setSelectionRange(3, 3)
-    cmdInput.dispatchEvent(new Event('keyup'))
+    cmdInput.value = 'stale'
+    cmdInput.setSelectionRange(0, 0)
+    setComposerState({
+      value: 'nothing',
+      selectionStart: 3,
+      selectionEnd: 3,
+      activeInput: 'desktop',
+    })
+    syncShellPrompt()
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent).toBe('h')
     expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(false)
 
-    cmdInput.setSelectionRange(1, 4)
-    cmdInput.dispatchEvent(new Event('select'))
+    setComposerState({
+      selectionStart: 1,
+      selectionEnd: 4,
+    })
+    syncShellPrompt()
     expect(shellPromptText.querySelector('.shell-prompt-selection')?.textContent).toBe('oth')
     expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(true)
   })
 
   it('supports ctrl+w to delete one word to the left', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('dig darklab.sh ')
   })
 
   it('supports ctrl+u to delete to the beginning of the line', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(12, 12)
+    setComposerState({ value: 'dig darklab.sh A', selectionStart: 12, selectionEnd: 12, activeInput: 'desktop' })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('sh A')
@@ -1649,10 +1776,11 @@ describe('app helpers', () => {
   })
 
   it('supports ctrl+k to delete to the end of the line', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(4, 4)
+    setComposerState({ value: 'dig darklab.sh A', selectionStart: 4, selectionEnd: 4, activeInput: 'desktop' })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('dig ')
@@ -1661,10 +1789,16 @@ describe('app helpers', () => {
   })
 
   it('supports ctrl+e to move to the end of the line', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(4, 4)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: 4,
+      selectionEnd: 4,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.selectionStart).toBe(cmdInput.value.length)
@@ -1672,10 +1806,16 @@ describe('app helpers', () => {
   })
 
   it('supports Alt+B and Alt+F to move by word', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
     expect(cmdInput.selectionStart).toBe(15)
     expect(cmdInput.selectionEnd).toBe(15)
@@ -1690,10 +1830,16 @@ describe('app helpers', () => {
   })
 
   it('supports macOS Option+B and Option+F word movement via physical key codes', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
       key: '∫',
       code: 'KeyB',
@@ -1712,18 +1858,27 @@ describe('app helpers', () => {
   })
 
   it('supports the mobile edit bar actions', async () => {
-    const { getVisibleComposerInput } = await loadAppFns()
+    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
     const press = (selector) => {
       document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }
 
-    const visibleInput = getVisibleComposerInput()
+    document.body.classList.add('mobile-terminal-mode')
     const cmdInput = document.getElementById('cmd')
     const mobileCmdInput = document.getElementById('mobile-cmd')
     cmdInput.value = 'ping -c 4 example.com'
     mobileCmdInput.value = 'ping -c 4 example.com'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
     mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
+    setComposerState({
+      value: mobileCmdInput.value,
+      selectionStart: mobileCmdInput.value.length,
+      selectionEnd: mobileCmdInput.value.length,
+      activeInput: 'mobile',
+    })
+    const visibleInput = getVisibleComposerInput()
 
     press('[data-edit-action="left"]')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length - 1)

@@ -283,7 +283,7 @@ test.describe('mobile menu', () => {
     const commandText = await chip.getAttribute('title')
     await chip.click()
 
-    await expect(page.locator('#cmd')).toHaveValue(commandText || '')
+    await expect(page.locator('#mobile-cmd')).toHaveValue(commandText || '')
     await expect(page.locator('#mobile-composer')).toBeVisible()
   })
 
