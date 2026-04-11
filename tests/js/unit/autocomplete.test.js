@@ -122,7 +122,7 @@ describe('autocomplete helpers', () => {
     acAccept('nmap -sV')
 
     expect(mobileInput.value).toBe('nmap -sV')
-    expect(desktopInput.value).toBe('nmap -sV')
+    expect(desktopInput.value).toBe('')
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(mobileFocusSpy).toHaveBeenCalledTimes(1)
     expect(desktopFocusSpy).not.toHaveBeenCalled()

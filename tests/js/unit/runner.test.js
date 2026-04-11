@@ -145,7 +145,7 @@ function loadRunnerFns({
     showToast,
     dismissMobileKeyboardAfterSubmit,
     _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
-    ...(getComposerValueOverride ? { getComposerValue: getComposerValueOverride } : {}),
+    getComposerValue: getComposerValueOverride || (() => cmdValue),
     ...(getVisibleComposerInputOverride ? { getVisibleComposerInput: getVisibleComposerInputOverride } : {}),
     describeFetchError: (err, context = 'server') => {
       const message = err && err.message ? err.message : 'unknown network error'

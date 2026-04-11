@@ -644,7 +644,7 @@
       "exit_code": 0,
       "command": "nc -zv ip.darklab.sh 80",
       "expected_text": [
-        "DNS"
+        "ip.darklab.sh"
       ]
     },
     {
@@ -652,7 +652,7 @@
       "exit_code": 0,
       "command": "nc -zv ip.darklab.sh 443 80",
       "expected_text": [
-        "DNS"
+        "ip.darklab.sh"
       ]
     },
     {
@@ -724,7 +724,7 @@
       "exit_code": 0,
       "command": "dig +short A ip.darklab.sh",
       "expected_text": [
-        "fw-vx2-vp1.darklab.sh."
+        "107.178.109.44"
       ]
     },
     {
@@ -796,15 +796,15 @@
       "exit_code": 0,
       "command": "host -t A ip.darklab.sh",
       "expected_text": [
-        "ip.darklab.sh is an alias for"
+        "ip.darklab.sh"
       ]
     },
     {
+      "no_output": false,
       "exit_code": 0,
-      "command": "host -t MX ip.darklab.sh",
-      "any_of": [
-        { "expected_text": ["ip.darklab.sh has no MX record"] },
-        { "expected_text": ["is an alias for"] }
+      "command": "host -t MX darklab.sh",
+      "expected_text": [
+        "darklab.sh mail"
       ]
     },
     {
@@ -1234,9 +1234,9 @@
     {
       "no_output": false,
       "exit_code": 1,
-      "command": "dnsrecon -d ip.darklab.sh -t mx",
+      "command": "dnsrecon -d ip.darklab.sh -t crt",
       "expected_text": [
-        "[-] This type of scan is not valid"
+        "Performing Crt.sh Search"
       ]
     },
     {

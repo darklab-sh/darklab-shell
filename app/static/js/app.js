@@ -2,11 +2,19 @@
 // Shared helpers for keyboard shortcuts, overlays, and mobile-layout glue.
 
 function syncShellPrompt() {
-  if (typeof shellPromptText === 'undefined' || !shellPromptText || !cmdInput) return;
-  const value = cmdInput.value || '';
+  if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
+  const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+  const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
+  const value = composer && typeof composer.value === 'string'
+    ? composer.value
+    : (fallbackInput ? fallbackInput.value || '' : '');
   const len = value.length;
-  let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : len;
-  let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : len;
+  let start = composer && typeof composer.selectionStart === 'number'
+    ? composer.selectionStart
+    : (fallbackInput && typeof fallbackInput.selectionStart === 'number' ? fallbackInput.selectionStart : len);
+  let end = composer && typeof composer.selectionEnd === 'number'
+    ? composer.selectionEnd
+    : (fallbackInput && typeof fallbackInput.selectionEnd === 'number' ? fallbackInput.selectionEnd : len);
   start = Math.max(0, Math.min(start, len));
   end = Math.max(0, Math.min(end, len));
   if (start > end) [start, end] = [end, start];
@@ -374,6 +382,13 @@ function syncMobileViewportState() {
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
   if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
+  if (activeMobileMode && keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
+    setTimeout(() => {
+      if (!useMobileTerminalViewportMode()) return;
+      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
+      _refreshFollowingOutputsAfterLayout();
+    }, 0);
+  }
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -617,9 +632,27 @@ function handleActionShortcut(e) {
   return false;
 }
 
-function getCmdSelection(value = cmdInput.value || '') {
-  let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : value.length;
-  let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : value.length;
+function getComposerStateSnapshot() {
+  if (typeof getComposerState === 'function') {
+    const composer = getComposerState();
+    if (composer) return composer;
+  }
+  return null;
+}
+
+function getCmdSelection(value = null) {
+  const composer = getComposerStateSnapshot();
+  const sourceValue = typeof value === 'string'
+    ? value
+    : (composer && typeof composer.value === 'string'
+      ? composer.value
+      : (cmdInput.value || ''));
+  let start = composer && typeof composer.selectionStart === 'number'
+    ? composer.selectionStart
+    : (typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : sourceValue.length);
+  let end = composer && typeof composer.selectionEnd === 'number'
+    ? composer.selectionEnd
+    : (typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : sourceValue.length);
   if (start > end) [start, end] = [end, start];
   return { start, end };
 }
@@ -631,40 +664,30 @@ function getInputSelection(input, value = input && input.value ? input.value : '
   return { start, end };
 }
 
-function syncHiddenCommandInputFromVisible(value, start = null, end = null) {
-  const nextValue = String(value ?? '');
-  if (cmdInput) {
-    if (cmdInput.value !== nextValue) cmdInput.value = nextValue;
-    if (typeof cmdInput.setSelectionRange === 'function') {
-      const nextStart = typeof start === 'number' ? start : nextValue.length;
-      const nextEnd = typeof end === 'number' ? end : nextStart;
-      cmdInput.setSelectionRange(nextStart, nextEnd);
-    }
-  }
-}
-
 function replaceCmdRange(value, start, end, replacement = '') {
   const nextPos = start + replacement.length;
   setComposerValue(value.slice(0, start) + replacement + value.slice(end), nextPos, nextPos);
 }
 
 function moveCmdCaret(delta) {
-  const value = cmdInput.value || '';
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
   const { start, end } = getCmdSelection(value);
   const next = Math.max(0, Math.min(value.length, (delta < 0 ? start : end) + delta));
-  cmdInput.setSelectionRange(next, next);
+  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
+  else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
   syncShellPrompt();
 }
 
 function setCmdCaret(position) {
-  const value = cmdInput.value || '';
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
   const next = Math.max(0, Math.min(value.length, position));
-  cmdInput.setSelectionRange(next, next);
+  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
+  else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
   syncShellPrompt();
 }
 
 function deleteCmdWordLeft() {
-  const value = cmdInput.value || '';
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
   const { start, end } = getCmdSelection(value);
   if (start !== end) {
     replaceCmdRange(value, start, end);
@@ -686,8 +709,13 @@ function performMobileEditAction(action) {
   if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
   if (typeof acHide === 'function') acHide();
 
-  const value = input.value || '';
-  const { start, end } = getInputSelection(input, value);
+  const composer = getComposerStateSnapshot();
+  const value = composer && typeof composer.value === 'string'
+    ? composer.value
+    : (input.value || '');
+  const { start, end } = composer
+    ? getCmdSelection(value)
+    : getInputSelection(input, value);
   let nextValue = value;
   let nextStart = start;
   let nextEnd = end;
@@ -719,7 +747,12 @@ function performMobileEditAction(action) {
     }
   }
 
-  setComposerValue(nextValue, nextStart, nextEnd);
+  if (action === 'left' || action === 'right' || action === 'home' || action === 'end') {
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
+    else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
+  } else {
+    setComposerValue(nextValue, nextStart, nextEnd);
+  }
 
   if (typeof focusAnyComposerInput === 'function') setTimeout(() => focusAnyComposerInput({ preventScroll: true }), 0);
 }
@@ -751,6 +784,12 @@ function syncMobileComposerKeyboard({ open = null } = {}) {
     ? syncMobileComposerKeyboardState(offset, { open })
     : !!open;
   syncMobileViewportHeight({ keyboardOpen });
+  if (keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
+    setTimeout(() => {
+      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
+      _refreshFollowingOutputsAfterLayout();
+    }, 0);
+  }
 }
 
 let _mobileComposerKeyboardSyncTimer = null;
@@ -789,6 +828,14 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
     });
   }
   mobileInput.addEventListener('focus', () => {
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        value: mobileInput.value || '',
+        selectionStart: typeof mobileInput.selectionStart === 'number' ? mobileInput.selectionStart : (mobileInput.value || '').length,
+        selectionEnd: typeof mobileInput.selectionEnd === 'number' ? mobileInput.selectionEnd : (mobileInput.value || '').length,
+        activeInput: 'mobile',
+      });
+    }
     if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
     syncMobileComposerKeyboard();
     queueMobileComposerKeyboardSync();
@@ -833,7 +880,7 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   mobileRunBtn.addEventListener('click', _mobileSubmit);
 
   // Sync mobile input through the shared composer handler so autocomplete and
-  // hidden-desktop mirroring stay on the same path.
+  // shared composer state stay on the same path.
   mobileInput.addEventListener('input', () => {
     handleComposerInputChange(mobileInput);
   });
@@ -862,11 +909,14 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
       if (mobileInput.selectionStart >= (mobileInput.value || '').length) {
         mobileInput.setSelectionRange(savedStart, savedEnd);
       }
-      syncHiddenCommandInputFromVisible(
-        mobileInput.value || '',
-        mobileInput.selectionStart,
-        mobileInput.selectionEnd
-      );
+      if (typeof setComposerState === 'function') {
+        setComposerState({
+          value: mobileInput.value || '',
+          selectionStart: typeof mobileInput.selectionStart === 'number' ? mobileInput.selectionStart : (mobileInput.value || '').length,
+          selectionEnd: typeof mobileInput.selectionEnd === 'number' ? mobileInput.selectionEnd : (mobileInput.value || '').length,
+          activeInput: 'mobile',
+        });
+      }
       syncShellPrompt();
     }, 0);
   });

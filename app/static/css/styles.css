@@ -2504,7 +2504,6 @@ body .welcome-status-loaded {
   body.mobile-terminal-mode #mobile-composer-host {
     padding: 0;
     background: transparent;
-    margin-bottom: var(--mobile-keyboard-offset, 0px);
   }
   body.mobile-terminal-mode #mobile-edit-bar,
   body.mobile-terminal-mode #mobile-composer-row {

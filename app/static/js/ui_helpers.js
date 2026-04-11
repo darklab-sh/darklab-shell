@@ -24,9 +24,41 @@
     if (mobileShellActive && mobile) return mobile;
     return desktop;
   };
+  global.getActiveComposerInput = () => {
+    const { desktop, mobile } = global.getComposerInputs();
+    const visible = global.getVisibleComposerInput();
+    if (visible) return visible;
+    const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+    if (composer?.activeInput === 'mobile' && mobile) return mobile;
+    if (composer?.activeInput === 'desktop' && desktop) return desktop;
+    return desktop || mobile || null;
+  };
   global.getComposerValue = () => {
+    if (typeof getComposerState === 'function') {
+      const composer = getComposerState();
+      if (composer && typeof composer.value === 'string') return composer.value;
+    }
     const input = global.getVisibleComposerInput();
     return input ? input.value : '';
+  };
+  global.getComposerSelection = () => {
+    if (typeof getComposerState === 'function') {
+      const composer = getComposerState();
+      if (composer) {
+        const value = typeof composer.value === 'string' ? composer.value : '';
+        const len = value.length;
+        const start = typeof composer.selectionStart === 'number' ? Math.max(0, Math.min(composer.selectionStart, len)) : len;
+        const end = typeof composer.selectionEnd === 'number' ? Math.max(0, Math.min(composer.selectionEnd, len)) : len;
+        return start <= end ? { start, end } : { start: end, end: start };
+      }
+    }
+    const input = global.getVisibleComposerInput();
+    if (!input) return { start: 0, end: 0 };
+    const value = input.value || '';
+    let start = typeof input.selectionStart === 'number' ? input.selectionStart : value.length;
+    let end = typeof input.selectionEnd === 'number' ? input.selectionEnd : value.length;
+    if (start > end) [start, end] = [end, start];
+    return { start, end };
   };
   global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
     const target = input || global.getVisibleComposerInput();
@@ -161,27 +193,66 @@
   };
   global.setComposerValue = (value, start = null, end = null, { dispatch = true, exclude = null } = {}) => {
     const nextValue = String(value ?? '');
-    const { desktop, mobile } = global.getComposerInputs();
-    const inputs = [];
-    if (desktop) inputs.push(desktop);
-    if (mobile && mobile !== desktop) inputs.push(mobile);
-    for (const input of inputs) {
+    const nextStart = typeof start === 'number' ? start : nextValue.length;
+    const nextEnd = typeof end === 'number' ? end : nextStart;
+    const target = typeof getActiveComposerInput === 'function'
+      ? getActiveComposerInput()
+      : global.getVisibleComposerInput();
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        value: nextValue,
+        selectionStart: nextStart,
+        selectionEnd: nextEnd,
+        activeInput: (typeof document !== 'undefined'
+          && document.body
+          && document.body.classList
+          && document.body.classList.contains('mobile-terminal-mode'))
+          ? 'mobile'
+          : 'desktop',
+      });
+    }
+    if (target && target !== exclude) {
       // Skip programmatic value assignment on the excluded input (typically the
       // source that just triggered an input event). Assigning .value on a focused
       // input resets the browser's OS key-repeat state, breaking hold-to-repeat.
-      if (input !== exclude) input.value = nextValue;
-      if (typeof input.setSelectionRange === 'function') {
-        const nextStart = typeof start === 'number' ? start : nextValue.length;
-        const nextEnd = typeof end === 'number' ? end : nextStart;
-        input.setSelectionRange(nextStart, nextEnd);
+      target.value = nextValue;
+      if (typeof target.setSelectionRange === 'function') {
+        target.setSelectionRange(nextStart, nextEnd);
       }
     }
-    if (dispatch) {
-      const dispatchTarget = desktop || mobile;
-      if (dispatchTarget) dispatchTarget.dispatchEvent(new Event('input'));
+    if (dispatch && target && target !== exclude) {
+      target.dispatchEvent(new Event('input'));
     }
     if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
     return nextValue;
+  };
+  global.syncComposerSelection = (start = null, end = null, { input = null } = {}) => {
+    const target = input || global.getActiveComposerInput();
+    const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+    const value = composer && typeof composer.value === 'string'
+      ? composer.value
+      : (target && typeof target.value === 'string' ? target.value : '');
+    const len = value.length;
+    const nextStart = typeof start === 'number' ? Math.max(0, Math.min(start, len)) : len;
+    const nextEnd = typeof end === 'number' ? Math.max(0, Math.min(end, len)) : nextStart;
+    const orderedStart = Math.min(nextStart, nextEnd);
+    const orderedEnd = Math.max(nextStart, nextEnd);
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        selectionStart: orderedStart,
+        selectionEnd: orderedEnd,
+        activeInput: (typeof document !== 'undefined'
+          && document.body
+          && document.body.classList
+          && document.body.classList.contains('mobile-terminal-mode'))
+          ? 'mobile'
+          : 'desktop',
+      });
+    }
+    if (target && typeof target.setSelectionRange === 'function') {
+      target.setSelectionRange(orderedStart, orderedEnd);
+    }
+    return { start: orderedStart, end: orderedEnd };
   };
   global.handleComposerInputChange = (sourceInput) => {
     if (!sourceInput) return;

@@ -127,6 +127,14 @@ describe('command history hydration', () => {
       historyPanel,
       refreshHistoryPanel: vi.fn(),
       useMobileTerminalViewportMode: () => false,
+      setComposerState: (next) => {
+        if (Object.prototype.hasOwnProperty.call(next, 'value')) cmdInput.value = String(next.value ?? '');
+        if (Object.prototype.hasOwnProperty.call(next, 'selectionStart') || Object.prototype.hasOwnProperty.call(next, 'selectionEnd')) {
+          const start = typeof next.selectionStart === 'number' ? next.selectionStart : cmdInput.value.length;
+          const end = typeof next.selectionEnd === 'number' ? next.selectionEnd : start;
+          cmdInput.setSelectionRange(start, end);
+        }
+      },
     }, `{
       hydrateCmdHistory,
       navigateCmdHistory,
@@ -169,6 +177,7 @@ describe('command history hydration', () => {
     ])
 
     cmdInput.value = 'pin'
+    setComposerState({ value: 'pin', selectionStart: 3, selectionEnd: 3, activeInput: 'desktop' })
     expect(navigateCmdHistory(1)).toBe(true)
     expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(1)).toBe(true)
@@ -192,6 +201,7 @@ describe('command history hydration', () => {
     expect(cmdInput.value).toBe('dig darklab.sh A')
 
     cmdInput.value = 'typed now'
+    setComposerState({ value: 'typed now', selectionStart: 9, selectionEnd: 9, activeInput: 'desktop' })
     resetCmdHistoryNav()
 
     expect(navigateCmdHistory(-1)).toBe(false)
