@@ -230,7 +230,6 @@ describe('command history hydration', () => {
 
     const chips = [...document.querySelectorAll('.hist-chip')]
     expect(chips).toHaveLength(4)
-    expect(chips[0].querySelector('.chip-star')?.textContent).toBe('☆')
     expect(chips[0].querySelector('span:last-child')?.textContent).toBe('one')
     expect(chips[1].querySelector('span:last-child')?.textContent).toBe('two')
     expect(chips[2].querySelector('span:last-child')?.textContent).toBe('three')

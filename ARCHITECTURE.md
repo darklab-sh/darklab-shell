@@ -27,7 +27,7 @@ helpers.py     — trusted-proxy IP resolver, session-ID extractor
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
 permalinks.py  — Flask context/render helpers for permalink pages
-templates/     — Jinja templates for the main shell and permalink pages
+templates/     — Jinja templates for the main shell, permalink pages, and focused repro harnesses
 run_output_store.py — preview/full-output capture and artifact helpers
 export_html.js — shared browser-side HTML export helpers for tab downloads and permalink save HTML
     ↑
@@ -35,7 +35,7 @@ extensions.py  — Flask-Limiter singleton (limiter.init_app deferred to app.py)
     ↑
 blueprints/
   assets.py    — /vendor/*, /favicon.ico, /health, /diag (IP-gated)
-  content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*
+  content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*, /repro/mobile-keyboard
   run.py       — /run (rate-limited SSE), /kill; run-output capture helpers
   history.py   — /history*, /share*; preview-output shaping helpers
     ↑
@@ -250,16 +250,21 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 
 ### Dedicated Mobile Shell
 
-The mobile UI uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The mobile composer dock and mobile menu are first-class mobile-owned UI, not runtime-moved siblings of the desktop terminal.
+The mobile UI still uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The difference now is that the shell was deliberately simplified back to a normal-flow layout after a focused repro proved the Firefox mobile bug was coming from the app’s integration layer, not from the browser itself.
 
-That structure makes the mobile layout easier to reason about:
+The current shape is intentional:
 
-- `#tab-panels` is reparented into the mobile transcript mount at runtime so output rendering stays shared while the mobile surface gets its own container.
-- `#mobile-composer-host` stays fixed in the mobile composer mount and uses a dynamic spacing variable for keyboard height.
-- Mobile input focus is user-driven; the code avoids forcing focus back into the composer after tab switches or closes on mobile because that was causing browser scroll jumps.
+- `#tab-panels` is still reparented into the mobile transcript mount at runtime so output rendering stays shared while the mobile surface gets its own container.
+- `#mobile-shell` stays in normal document flow instead of pinning the whole mobile terminal with fixed-shell viewport math.
+- `#mobile-composer-host` uses in-flow `margin-bottom: var(--mobile-keyboard-offset)` spacing to clear the on-screen keyboard, rather than page-scroll resets, `visualViewport` pan compensation, or body-level transforms.
+- Mobile input focus is user-driven; the code no longer relies on synthetic focus handlers on the composer host or lower hit area because those were a major source of scroll jumps and transient bad frames on Firefox mobile.
 - Overlays are mounted into a separate mobile overlay area so the shell can manage menu, history, FAQ, and options surfaces independently of the desktop wrapper.
 
-This keeps the mobile surface structured without needing a separate frontend bundle or framework split.
+The key architectural decision here is negative: the app no longer tries to outsmart the mobile browser with page-scroll correction or fixed full-shell keyboard choreography. Those experiments made the Firefox keyboard bug worse. The stable model is closer to a normal mobile document with a dedicated composer block at the bottom of the shell.
+
+To make that debugging path repeatable, `content.py` also serves `/repro/mobile-keyboard`, backed by `templates/mobile_keyboard_repro.html`. That page is a stripped-down control harness for mobile keyboard/composer behavior and now serves as the reference surface when future mobile keyboard regressions appear.
+
+This keeps the mobile surface structured without needing a separate frontend bundle or framework split, while preserving the simplified layout that fixed the Firefox mobile issue.
 
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
 
@@ -478,10 +483,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals on this branch:
 
-- `pytest`: 760
-- `vitest`: 273
+- `pytest`: 762
+- `vitest`: 276
 - `playwright`: 135
-- total: 1,168
+- total: 1,173
 
 ### Testing Architecture
 
@@ -498,7 +503,9 @@ Current totals on this branch:
 
 - Search highlighting now walks text nodes and clones the line structure instead of rewriting serialized `innerHTML`, which keeps mixed-content lines and helper markup intact while preserving plain-text search, regex search, case sensitivity, and current-match navigation. A related initialisation fix in `ui_helpers.js` sets the search bar's inline `display` style to `none` on load so the `.u-hidden` utility class correctly hides it regardless of the `.search-bar { display: flex }` rule that follows it at equal specificity; `isSearchBarOpen()` was also tightened to check `=== 'flex'` instead of `!== 'none'`.
 
-- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile keyboard visibility, the lower-composer tap hit-target fix, mobile input tap no-scroll focus, tab isolation, permalink preference cookies, close-running-tab / clear-preserve behavior, and history-panel action-button close behavior.
+- Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile shell visibility and tab-row behavior, tab isolation, permalink preference cookies, close-running-tab / clear-preserve behavior, and history-panel action-button close behavior.
+
+- The Firefox mobile keyboard investigation added a durable test/control split: `/repro/mobile-keyboard` now has route coverage in `test_routes.py`, while `app.test.js` locks the main shell to the simplified mobile-shell DOM structure, the “no programmatic mobile focus” behavior, and shared desktop/mobile Run-button disable rules for both typed and programmatic composer updates.
 
 - The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 

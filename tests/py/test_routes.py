@@ -42,6 +42,21 @@ class TestIndexRoute:
         assert b"<!DOCTYPE html>" in resp.data or b"<html" in resp.data.lower()
 
 
+class TestMobileKeyboardReproRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/repro/mobile-keyboard")
+        assert resp.status_code == 200
+
+    def test_returns_expected_repro_markup(self):
+        client = get_client()
+        resp = client.get("/repro/mobile-keyboard")
+        assert b"Mobile Keyboard Repro" in resp.data
+        assert b'id="metrics"' in resp.data
+        assert b'id="helper-row"' in resp.data
+        assert b'id="mobile-input"' in resp.data
+
+
 # ── /health ───────────────────────────────────────────────────────────────────
 
 class TestHealthRoute:

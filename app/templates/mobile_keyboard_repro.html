@@ -1,0 +1,300 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>{{ app_name }} Mobile Keyboard Repro</title>
+<style>
+  :root {
+    --bg: #17142b;
+    --panel: #090909;
+    --panel-alt: #151515;
+    --line: #2d2749;
+    --line-bright: #3e3564;
+    --text: #d7d7dc;
+    --muted: #8d88a6;
+    --green: #39ff14;
+    --blue: #6ab0f5;
+    --shadow: rgba(0, 0, 0, 0.45);
+    --kbd-offset: 0px;
+  }
+
+  * { box-sizing: border-box; }
+
+  html, body {
+    margin: 0;
+    min-height: 100%;
+    background: var(--bg);
+    color: var(--text);
+    font: 14px/1.45 "JetBrains Mono", ui-monospace, SFMono-Regular, Menlo, monospace;
+  }
+
+  body {
+    min-height: 100svh;
+  }
+
+  .page {
+    min-height: 100svh;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .topbar {
+    position: sticky;
+    top: 0;
+    z-index: 20;
+    padding: max(12px, env(safe-area-inset-top)) 14px 10px;
+    background: linear-gradient(180deg, rgba(23,20,43,0.98), rgba(23,20,43,0.94));
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(8px);
+  }
+
+  .title {
+    margin: 0;
+    font-size: 18px;
+    font-weight: 400;
+    letter-spacing: 2px;
+    color: var(--green);
+  }
+
+  .subtitle {
+    margin: 6px 0 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+
+  .shell {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  .metrics {
+    margin: 12px 12px 0;
+    padding: 8px 10px;
+    background: rgba(0, 0, 0, 0.72);
+    border: 1px solid rgba(57,255,20,0.22);
+    border-radius: 8px;
+    color: var(--green);
+    font-size: 11px;
+    white-space: pre-wrap;
+  }
+
+  .transcript {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin: 12px;
+    padding: 14px;
+    border: 1px solid var(--line-bright);
+    border-radius: 12px;
+    background: linear-gradient(180deg, rgba(9,9,9,0.96), rgba(17,17,17,0.92));
+    box-shadow: 0 20px 50px var(--shadow);
+    overflow: auto;
+  }
+
+  .transcript h2 {
+    margin: 0 0 12px;
+    color: var(--green);
+    font-size: 14px;
+    letter-spacing: 1px;
+    font-weight: 400;
+  }
+
+  .transcript p {
+    margin: 0 0 10px;
+    color: var(--text);
+  }
+
+  .transcript .hint {
+    color: var(--muted);
+    font-style: italic;
+  }
+
+  .spacer {
+    height: 42vh;
+  }
+
+  .composer-wrap {
+    margin-top: auto;
+    padding: 0 12px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(23,20,43,0), rgba(23,20,43,0.94) 18%, rgba(23,20,43,0.98));
+  }
+
+  .helper-row {
+    display: none;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 6px;
+    margin: 0 0 8px;
+  }
+
+  body.keyboard-open .helper-row {
+    display: grid;
+  }
+
+  .helper-row button {
+    appearance: none;
+    border: 1px solid var(--line-bright);
+    background: rgba(0,0,0,0.28);
+    color: var(--text);
+    border-radius: 8px;
+    min-height: 38px;
+    font: inherit;
+  }
+
+  .composer {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    gap: 10px;
+    align-items: center;
+    border: 1px solid var(--line-bright);
+    border-radius: 12px;
+    background: rgba(9,9,9,0.96);
+    padding: 10px 12px;
+    transform: translateY(calc(-1 * var(--kbd-offset)));
+  }
+
+  .prompt {
+    color: var(--blue);
+    font-size: 18px;
+  }
+
+  .composer input {
+    width: 100%;
+    min-width: 0;
+    border: 0;
+    outline: none;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 16px;
+  }
+
+  .composer button {
+    appearance: none;
+    border: 1px solid color-mix(in srgb, var(--green) 35%, transparent);
+    color: var(--green);
+    background: rgba(57,255,20,0.08);
+    border-radius: 10px;
+    min-height: 40px;
+    padding: 0 14px;
+    font: inherit;
+  }
+
+  .footnote {
+    margin: 10px 2px 0;
+    color: var(--muted);
+    font-size: 11px;
+  }
+</style>
+</head>
+<body>
+  <div class="page">
+    <header class="topbar">
+      <h1 class="title">{{ app_name }} Mobile Keyboard Repro</h1>
+      <p class="subtitle">Standalone focus/keyboard page. No hidden input sync, no shell reparenting, no app runner state.</p>
+    </header>
+
+    <main class="shell">
+      <pre class="metrics" id="metrics">loading...</pre>
+
+      <section class="transcript" id="transcript">
+        <h2>Focus Harness</h2>
+        <p>Use this page to reproduce the mobile keyboard issue without the full app shell.</p>
+        <p class="hint">Tap the lower edge of the input repeatedly. Background and foreground the browser. Compare Firefox behaviour against this reduced DOM.</p>
+        <p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed non mauris vel justo volutpat aliquet. Nulla facilisi.</p>
+        <p>Vivamus at orci commodo, fermentum elit sed, malesuada mauris. Curabitur suscipit dui non est facilisis, ut semper erat blandit.</p>
+        <p>Praesent pulvinar, metus sit amet luctus ultrices, erat augue bibendum neque, vitae vulputate lorem erat sed urna.</p>
+        <div class="spacer" aria-hidden="true"></div>
+      </section>
+
+      <div class="composer-wrap">
+        <div class="helper-row" id="helper-row" aria-label="Keyboard helpers">
+          <button type="button">Home</button>
+          <button type="button">Left</button>
+          <button type="button">Right</button>
+          <button type="button">End</button>
+          <button type="button">Del Word</button>
+        </div>
+
+        <div class="composer" id="composer">
+          <span class="prompt">$</span>
+          <input id="mobile-input" type="text" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" placeholder="Type a command">
+          <button type="button" id="run-btn">Run</button>
+        </div>
+
+        <p class="footnote">Metrics update on pointer, focus, blur, scroll, and visualViewport changes.</p>
+      </div>
+    </main>
+  </div>
+
+<script>
+(() => {
+  const metrics = document.getElementById('metrics');
+  const input = document.getElementById('mobile-input');
+  const transcript = document.getElementById('transcript');
+  const composer = document.getElementById('composer');
+  const helperRow = document.getElementById('helper-row');
+
+  function pageScrollY() {
+    return Math.round(
+      window.scrollY
+      || window.pageYOffset
+      || document.documentElement.scrollTop
+      || document.body.scrollTop
+      || 0
+    );
+  }
+
+  function keyboardOffset() {
+    if (!window.visualViewport) return 0;
+    return Math.max(0, Math.round(window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop));
+  }
+
+  function updateKeyboardClass() {
+    const focused = document.activeElement === input;
+    const open = focused && (keyboardOffset() > 0 || pageScrollY() > 0 || ((window.visualViewport && window.visualViewport.offsetTop) || 0) > 0);
+    document.body.classList.toggle('keyboard-open', open);
+    document.documentElement.style.setProperty('--kbd-offset', `${keyboardOffset()}px`);
+  }
+
+  function render(reason) {
+    updateKeyboardClass();
+    const vv = window.visualViewport;
+    const shellBox = transcript.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    metrics.textContent = [
+      `reason=${reason}`,
+      `focus=${document.activeElement === input ? 1 : 0} helper=${document.body.classList.contains('keyboard-open') ? 1 : 0}`,
+      `inner=${Math.round(window.innerHeight || 0)} vv.h=${vv ? Math.round(vv.height || 0) : 0} vv.top=${vv ? Math.round(vv.offsetTop || 0) : 0}`,
+      `off=${keyboardOffset()} scrollY=${pageScrollY()}`,
+      `transcript.y=${Math.round(shellBox.top)} transcript.h=${Math.round(shellBox.height)}`,
+      `composer.y=${Math.round(composerBox.top)} composer.h=${Math.round(composerBox.height)}`,
+    ].join('\n');
+  }
+
+  input.addEventListener('pointerdown', () => render('input:pointerdown'));
+  input.addEventListener('touchstart', () => render('input:touchstart'), { passive: true });
+  input.addEventListener('focus', () => render('input:focus'));
+  input.addEventListener('blur', () => render('input:blur'));
+  input.addEventListener('input', () => render('input:input'));
+  window.addEventListener('scroll', () => render('window:scroll'), { passive: true });
+  window.addEventListener('focus', () => render('window:focus'));
+  document.addEventListener('visibilitychange', () => render(`visibility:${document.hidden ? 'hidden' : 'visible'}`));
+
+  if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
+    window.visualViewport.addEventListener('resize', () => render('visualViewport:resize'));
+    window.visualViewport.addEventListener('scroll', () => render('visualViewport:scroll'));
+  }
+
+  helperRow.addEventListener('pointerdown', event => {
+    const button = event.target.closest('button');
+    if (!button) return;
+    event.preventDefault();
+  });
+
+  render('load');
+})();
+</script>
+</body>
+</html>

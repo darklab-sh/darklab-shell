@@ -54,19 +54,23 @@ function refocusTerminalInput() {
   }, 0);
 }
 
-function focusCommandInputFromGesture() {
+function focusCommandInputFromGesture({ preventScroll = true } = {}) {
   if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
     const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
     if (mobileInput && typeof focusComposerInput === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      focusComposerInput(mobileInput, { preventScroll: true });
+      focusComposerInput(mobileInput, { preventScroll });
       return;
     }
     if (mobileInput && typeof mobileInput.focus === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      try {
-        mobileInput.focus({ preventScroll: true });
-      } catch (_) {
+      if (preventScroll) {
+        try {
+          mobileInput.focus({ preventScroll: true });
+        } catch (_) {
+          mobileInput.focus();
+        }
+      } else {
         mobileInput.focus();
       }
     }
@@ -171,39 +175,6 @@ const _uiOverlayRefs = {
 function _bindMobileComposerInteractions(uiRefs) {
   const composerRefs = uiRefs && uiRefs.composer;
   if (!composerRefs || !composerRefs.host || !cmdInput) return;
-  composerRefs.host.addEventListener('click', e => {
-    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
-      focusCommandInputFromGesture();
-    }
-  });
-  composerRefs.host.addEventListener('pointerdown', e => {
-    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
-      e.preventDefault();
-      e.stopPropagation();
-      focusCommandInputFromGesture();
-    }
-  });
-  composerRefs.host.addEventListener('touchstart', e => {
-    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
-      e.preventDefault();
-      e.stopPropagation();
-      focusCommandInputFromGesture();
-    }
-  }, { passive: false });
-  if (composerRefs.row) {
-    composerRefs.row.addEventListener('pointerdown', e => {
-      const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
-      if (useMobileTerminalViewportMode() && e.target !== runBtn && e.target !== mobileInput) {
-        focusCommandInputFromGesture();
-      }
-    });
-    composerRefs.row.addEventListener('touchstart', e => {
-      const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
-      if (useMobileTerminalViewportMode() && e.target !== runBtn && e.target !== mobileInput) {
-        focusCommandInputFromGesture();
-      }
-    }, { passive: false });
-  }
 }
 
 function _bindMobileEditBarInteractions(editBar) {
@@ -350,7 +321,16 @@ function isChromeIOS() {
 
 function getMobileKeyboardOffset() {
   if (!useMobileTerminalViewportMode() || !window.visualViewport) return 0;
-  return Math.max(0, Math.round(window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop));
+  const liveInnerHeight = Math.round(window.innerHeight || 0);
+  const visualHeight = Math.round(window.visualViewport.height || 0);
+  const offsetTop = Math.round(window.visualViewport.offsetTop || 0);
+  const closedHeight = typeof getMobileViewportClosedHeight === 'function'
+    ? getMobileViewportClosedHeight()
+    : null;
+  const baselineHeight = typeof closedHeight === 'number' && closedHeight > 0
+    ? Math.max(closedHeight, liveInnerHeight)
+    : liveInnerHeight;
+  return Math.max(0, baselineHeight - visualHeight - offsetTop);
 }
 
 function isMobileKeyboardOpen(offset = null) {
@@ -358,6 +338,13 @@ function isMobileKeyboardOpen(offset = null) {
   const mobileInputEl = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
   const mobileInputFocused = !!(mobileInputEl && typeof document !== 'undefined' && document.activeElement === mobileInputEl);
   if (!mobileInputFocused) return false;
+  const keyboardMarkedOpen = !!(
+    typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-keyboard-open')
+  );
+  if (keyboardMarkedOpen) return true;
   const keyboardBaseline = typeof getMobileKeyboardOffsetBaseline === 'function'
     ? getMobileKeyboardOffsetBaseline()
     : null;
@@ -377,11 +364,16 @@ function syncMobileViewportState() {
   if (!hasMobileShell) return;
   document.body.classList.toggle('mobile-terminal-mode', activeMobileMode);
   document.body.classList.toggle('mobile-chrome-ios', activeMobileMode && isChromeIOS());
-  if (typeof syncMobileComposerKeyboardState === 'function') syncMobileComposerKeyboardState(keyboardOffset, { active: activeMobileMode });
+  if (typeof syncMobileComposerKeyboardState === 'function') {
+    syncMobileComposerKeyboardState(keyboardOffset, {
+      active: activeMobileMode,
+      open: activeMobileMode && keyboardOpen,
+    });
+  }
   else document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
-  if (activeMobileMode) syncMobileViewportHeight();
+  if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -732,17 +724,33 @@ function performMobileEditAction(action) {
   if (typeof focusAnyComposerInput === 'function') setTimeout(() => focusAnyComposerInput({ preventScroll: true }), 0);
 }
 
-function syncMobileViewportHeight() {
+function syncMobileViewportHeight({ keyboardOpen = null } = {}) {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
-  const h = window.visualViewport ? Math.round(window.visualViewport.height) : window.innerHeight;
+  const visualHeight = window.visualViewport ? Math.round(window.visualViewport.height) : 0;
+  const innerHeight = Math.round(window.innerHeight || 0);
+  const useKeyboardOpen = typeof keyboardOpen === 'boolean'
+    ? keyboardOpen
+    : !!(typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-keyboard-open'));
+  if (!useKeyboardOpen && innerHeight > 0 && typeof setMobileViewportClosedHeight === 'function') {
+    setMobileViewportClosedHeight(innerHeight);
+  }
+  const h = useKeyboardOpen
+    ? (visualHeight || innerHeight)
+    : Math.max(innerHeight, visualHeight);
+  if (!(h > 0)) return;
   document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
 }
 
-function syncMobileComposerKeyboard() {
+function syncMobileComposerKeyboard({ open = null } = {}) {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();
-  if (typeof syncMobileComposerKeyboardState === 'function') syncMobileComposerKeyboardState(offset);
-  syncMobileViewportHeight();
+  const keyboardOpen = typeof syncMobileComposerKeyboardState === 'function'
+    ? syncMobileComposerKeyboardState(offset, { open })
+    : !!open;
+  syncMobileViewportHeight({ keyboardOpen });
 }
 
 let _mobileComposerKeyboardSyncTimer = null;
@@ -760,12 +768,22 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
   const closeMobileKeyboard = (delay = 120) => {
     if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay });
   };
+  const resetClosedMobileKeyboardLayout = () => {
+    if (typeof syncMobileComposerKeyboardState === 'function') {
+      syncMobileComposerKeyboardState(0, { open: false });
+    }
+    syncMobileViewportHeight({ keyboardOpen: false });
+  };
+  const queueMobileViewportRecovery = (delays = [50, 180]) => {
+    delays.forEach(delay => {
+      setTimeout(() => {
+        syncMobileComposerKeyboard();
+        syncMobileViewportState();
+      }, delay);
+    });
+  };
   if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
     window.visualViewport.addEventListener('resize', () => {
-      syncMobileComposerKeyboard();
-      queueMobileComposerKeyboardSync();
-    });
-    window.visualViewport.addEventListener('scroll', () => {
       syncMobileComposerKeyboard();
       queueMobileComposerKeyboardSync();
     });
@@ -787,51 +805,25 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
   // page.  Re-run a full viewport state sync after a short settle delay.
   if (typeof document !== 'undefined') {
     document.addEventListener('visibilitychange', () => {
-      if (document.hidden) return;
-      setTimeout(() => {
-        syncMobileComposerKeyboard();
-        syncMobileViewportState();
-      }, 50);
+      if (document.hidden) {
+        closeMobileKeyboard(0);
+        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+        resetClosedMobileKeyboardLayout();
+        return;
+      }
+      queueMobileViewportRecovery();
     });
   }
+  window.addEventListener('focus', () => {
+    queueMobileViewportRecovery([80, 220]);
+  });
+  window.addEventListener('pageshow', () => {
+    queueMobileViewportRecovery([0, 120]);
+  });
 }
 
 function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   if (!mobileInput || !mobileRunBtn) return;
-  mobileInput.addEventListener('pointerdown', e => {
-    if (!useMobileTerminalViewportMode()) return;
-    const alreadyFocused = typeof document !== 'undefined' && document.activeElement === mobileInput;
-    if (alreadyFocused) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-    if (typeof focusComposerInput === 'function') {
-      focusComposerInput(mobileInput, { preventScroll: true });
-    } else if (typeof mobileInput.focus === 'function') {
-      try {
-        mobileInput.focus({ preventScroll: true });
-      } catch (_) {
-        mobileInput.focus();
-      }
-    }
-  });
-  mobileInput.addEventListener('touchstart', e => {
-    if (!useMobileTerminalViewportMode()) return;
-    const alreadyFocused = typeof document !== 'undefined' && document.activeElement === mobileInput;
-    if (alreadyFocused) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-    if (typeof focusComposerInput === 'function') {
-      focusComposerInput(mobileInput, { preventScroll: true });
-    } else if (typeof mobileInput.focus === 'function') {
-      try {
-        mobileInput.focus({ preventScroll: true });
-      } catch (_) {
-        mobileInput.focus();
-      }
-    }
-  }, { passive: false });
   // Submit handler — read the visible composer input and submit through the
   // shared command engine.
   function _mobileSubmit() {

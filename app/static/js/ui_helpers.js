@@ -51,6 +51,16 @@
     state._mobileKeyboardOffsetBaseline = typeof value === 'number' ? value : null;
     return state._mobileKeyboardOffsetBaseline;
   };
+  global.getMobileViewportClosedHeight = () => state._mobileViewportClosedHeight;
+  global.setMobileViewportClosedHeight = (value) => {
+    state._mobileViewportClosedHeight = typeof value === 'number' ? value : null;
+    return state._mobileViewportClosedHeight;
+  };
+  global.getMobileKeyboardLastOpenOffset = () => state._mobileKeyboardLastOpenOffset || 0;
+  global.setMobileKeyboardLastOpenOffset = (value) => {
+    state._mobileKeyboardLastOpenOffset = Math.max(0, Number(value) || 0);
+    return state._mobileKeyboardLastOpenOffset;
+  };
   global.blurVisibleComposerInput = () => {
     const target = (typeof getVisibleComposerInput === 'function')
       ? getVisibleComposerInput()
@@ -66,9 +76,16 @@
   global.focusAnyComposerInput = ({ preventScroll = false } = {}) => {
     return global.focusVisibleComposerInput({ preventScroll });
   };
-  global.syncMobileComposerKeyboardState = (offset = null, { active = true } = {}) => {
+  global.syncMobileComposerKeyboardState = (offset = null, { active = true, open = null } = {}) => {
     if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
-    const nextOffset = typeof offset === 'number' ? offset : 0;
+    const requestedOffset = typeof offset === 'number' ? offset : 0;
+    const requestedOpen = typeof open === 'boolean'
+      ? open
+      : document.body.classList.contains('mobile-keyboard-open');
+    const lastOpenOffset = global.getMobileKeyboardLastOpenOffset();
+    const nextOffset = requestedOpen && requestedOffset <= 0 && lastOpenOffset > 0
+      ? lastOpenOffset
+      : requestedOffset;
     document.documentElement?.style?.setProperty('--mobile-keyboard-offset', `${nextOffset}px`);
     if (!active) {
       state._mobileKeyboardOffsetBaseline = nextOffset;
@@ -82,7 +99,11 @@
     if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
       state._mobileKeyboardOffsetBaseline = nextOffset;
     }
-    return document.body.classList.contains('mobile-keyboard-open');
+    const nextOpen = requestedOpen;
+    if (nextOpen && nextOffset > 0) state._mobileKeyboardLastOpenOffset = nextOffset;
+    if (!nextOpen) state._mobileKeyboardOffsetBaseline = nextOffset;
+    document.body.classList.toggle('mobile-keyboard-open', nextOpen);
+    return nextOpen;
   };
   global.setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
     if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
@@ -116,8 +137,25 @@
     _mobileKeyboardVisibilityTimer = setTimeout(() => {
       _mobileKeyboardVisibilityTimer = null;
       const mobileInput = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-      if (mobileInput && document.activeElement === mobileInput) return;
+      const keyboardStillOpen = !!(
+        mobileInput
+        && document.activeElement === mobileInput
+        && typeof getMobileKeyboardOffset === 'function'
+        && typeof isMobileKeyboardOpen === 'function'
+        && isMobileKeyboardOpen(getMobileKeyboardOffset())
+      );
+      if (keyboardStillOpen) return;
       document.body.classList.remove('mobile-keyboard-open');
+      // Reset keyboard CSS vars to their closed-keyboard values. Use window.innerHeight
+      // rather than visualViewport.height — the keyboard animation may still be in
+      // progress at this point, leaving visualViewport.height at a mid-animation
+      // (shrunk) value that would break the layout.  window.innerHeight is stable
+      // on iOS and unaffected by the software keyboard.
+      if (typeof window !== 'undefined' && document.documentElement) {
+        const h = window.innerHeight || 0;
+        if (h > 0) document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
+        global.syncMobileComposerKeyboardState(0, { open: false });
+      }
     }, closeDelay);
     return false;
   };
@@ -142,6 +180,7 @@
       const dispatchTarget = desktop || mobile;
       if (dispatchTarget) dispatchTarget.dispatchEvent(new Event('input'));
     }
+    if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
     return nextValue;
   };
   global.handleComposerInputChange = (sourceInput) => {
@@ -296,13 +335,14 @@
   global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
   global.setRunButtonDisabled = (disabled) => {
     const next = !!disabled;
-    if (runBtn) runBtn.disabled = next;
+    if (typeof runBtn !== 'undefined' && runBtn) runBtn.disabled = next;
     if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = next;
   };
   global.syncRunButtonDisabled = () => {
     const active = typeof getActiveTab === 'function' ? getActiveTab() : null;
-    const disabled = !!(active && active.st === 'running');
-    if (runBtn) runBtn.disabled = disabled;
+    const composerValue = typeof global.getComposerValue === 'function' ? String(global.getComposerValue() || '') : '';
+    const disabled = !!(active && active.st === 'running') || !composerValue.trim();
+    if (typeof runBtn !== 'undefined' && runBtn) runBtn.disabled = disabled;
     if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = disabled;
     return disabled;
   };

@@ -593,19 +593,10 @@ body.mobile-terminal-mode #mobile-composer-host {
 }
 
 body.mobile-terminal-mode.mobile-keyboard-open #mobile-composer-host {
-  border-top: 1px solid var(--border-bright);
+  margin-top: 0;
 }
 
-body.mobile-terminal-mode {
-  position: fixed;
-  inset: 0;
-  width: 100%;
-  height: var(--mobile-viewport-height, 100svh);
-  min-height: 0;
-  overflow: hidden;
-  padding: 0;
-  gap: 0;
-}
+body.mobile-terminal-mode { padding: 0; gap: 0; }
 
 .terminal-bar {
   display: flex;
@@ -832,9 +823,14 @@ body.ts-clock .output .shell-prompt-line {
   text-overflow: ellipsis;
   white-space: nowrap;
   transition: border-color 0.15s, color 0.15s;
+  -webkit-tap-highlight-color: transparent;
 }
 
-.hist-chip:hover { border-color: var(--green-dim); color: var(--text); }
+.hist-chip:focus:not(:focus-visible) { outline: none; }
+.hist-chip:active { border-color: var(--green-dim); color: var(--text); opacity: 0.7; }
+@media (hover: hover) {
+  .hist-chip:hover { border-color: var(--green-dim); color: var(--text); }
+}
 .hist-chip-overflow { color: var(--green); }
 
 /* ── Header utility buttons ── */
@@ -1466,10 +1462,12 @@ body .hist-chip {
   border-color: var(--theme-chip-border);
   color: var(--theme-chip-text);
 }
-body .hist-chip:hover {
-  background: var(--theme-chip-hover-bg);
-  border-color: var(--theme-chip-hover-border);
-  color: var(--theme-chip-hover-text);
+@media (hover: hover) {
+  body .hist-chip:hover {
+    background: var(--theme-chip-hover-bg);
+    border-color: var(--theme-chip-hover-border);
+    color: var(--theme-chip-hover-text);
+  }
 }
 body .hist-chip-overflow { color: var(--theme-chip-overflow-text); }
 body #faq-btn,
@@ -1590,7 +1588,7 @@ body .star-btn.starred:hover {
 #new-tab-btn:disabled { opacity: 0.25; cursor: not-allowed; }
 #new-tab-btn:disabled:hover { color: var(--muted); }
 
-.tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; }
+.tab-panel { display: none; flex: 1; flex-direction: column; overflow: hidden; min-height: 0; }
 .tab-panel.active { display: flex; }
 
 /* ── Output search ── */
@@ -1968,6 +1966,7 @@ body .history-entry:hover { background: var(--theme-history-entry-hover-bg); }
 }
 .hist-chip.starred .chip-star { color: var(--amber); }
 .hist-chip.starred { border-color: color-mix(in srgb, var(--amber) 40%, transparent); }
+.hist-chip.starred:active { border-color: var(--green-dim); color: var(--text); opacity: 0.7; }
 
 .history-entry.starred { border-left: 2px solid var(--amber); padding-left: 14px; }
 
@@ -2478,23 +2477,34 @@ body .welcome-status-loaded {
   }
   body.mobile-terminal-mode #mobile-shell {
     display: flex;
-    flex: 1;
+    flex: 1 1 auto;
     min-height: 0;
     flex-direction: column;
-    gap: 0;
-    overflow: hidden;
+    gap: 8px;
+    overflow: visible;
+    position: relative;
   }
   body.mobile-terminal-mode #mobile-shell-chrome {
     flex: 0 0 auto;
-    overflow: hidden;
+    overflow: visible;
   }
   body.mobile-terminal-mode #mobile-shell-transcript {
     flex: 1;
     min-height: 0;
     overflow: hidden;
+    padding-bottom: 0;
+  }
+  body.mobile-terminal-mode #mobile-shell-composer {
+    position: relative;
+    margin-top: auto;
+    z-index: 40;
+    padding: 0 12px calc(12px + env(safe-area-inset-bottom));
+    background: linear-gradient(180deg, rgba(13,13,13,0), rgba(13,13,13,0.94) 18%, rgba(13,13,13,0.98));
   }
   body.mobile-terminal-mode #mobile-composer-host {
-    padding: 10px 0 calc(10px + env(safe-area-inset-bottom));
+    padding: 0;
+    background: transparent;
+    margin-bottom: var(--mobile-keyboard-offset, 0px);
   }
   body.mobile-terminal-mode #mobile-edit-bar,
   body.mobile-terminal-mode #mobile-composer-row {
@@ -2520,6 +2530,10 @@ body .welcome-status-loaded {
   }
   body.mobile-terminal-mode #mobile-shell-composer #mobile-composer {
     display: flex;
+    border: 1px solid var(--border-bright);
+    border-radius: 12px;
+    background: rgba(13,13,13,0.96);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.28);
   }
   /* Mobile session bar: hide desktop-only chrome and enlarge touch targets */
   body.mobile-terminal-mode .terminal-bar {
@@ -2557,14 +2571,28 @@ body .welcome-status-loaded {
     padding: 2px 6px;
   }
   body.mobile-terminal-mode header .status-pill {
-    margin-left: auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    align-self: center;
+    margin-left: 0;
     font-size: 11px;
+    line-height: 1;
     padding: 3px 9px;
+    transform: translateY(4px);
+    animation: none;
   }
   body.mobile-terminal-mode header {
     align-items: center;
+    gap: 10px;
+    z-index: 90;
+    padding-left: 12px;
+    padding-right: 12px;
+    background: var(--bg);
   }
   body.mobile-terminal-mode header h1 {
+    flex: 1 1 auto;
+    min-width: 0;
     margin-left: 10px;
   }
   body.mobile-terminal-mode #run-timer {
@@ -2630,6 +2658,9 @@ body .welcome-status-loaded {
     color: var(--muted);
     border-color: var(--border-bright);
     background: transparent;
+  }
+  body.mobile-terminal-mode .terminal-actions {
+    padding: 8px 12px;
   }
 
   /* Mobile overlays: bottom sheet layout for FAQ and options */
@@ -2777,9 +2808,16 @@ body .welcome-status-loaded {
     text-overflow: ellipsis;
   }
 
-  #mobile-edit-bar button:hover {
+  #mobile-edit-bar button:active {
     border-color: var(--green-dim);
     color: var(--text);
+    opacity: 0.7;
+  }
+  @media (hover: hover) {
+    #mobile-edit-bar button:hover {
+      border-color: var(--green-dim);
+      color: var(--text);
+    }
   }
 
   #mobile-edit-bar button[data-mobile-edit="left"],

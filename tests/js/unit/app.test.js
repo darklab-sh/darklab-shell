@@ -425,6 +425,7 @@ async function loadAppFns({
     _setTsMode,
     _setLnMode,
     handleComposerInputChange,
+    setComposerValue,
     syncMobileComposerKeyboardState,
     focusVisibleComposerInput,
     blurVisibleComposerInput,
@@ -1011,14 +1012,19 @@ describe('app helpers', () => {
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
-  it('does not manually duplicate printable desktop keydown input', async () => {
+  it('manually inserts printable desktop keydown input once', async () => {
     const { cmdInput } = await loadAppFns()
 
     cmdInput.value = 'ab'
     cmdInput.setSelectionRange(2, 2)
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => cmdInput,
+    })
+    const ev = new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true })
+    cmdInput.dispatchEvent(ev)
 
-    // Handler inserts the character once (accent-picker suppression path) — value is 'abc', not 'abcc'
+    expect(ev.defaultPrevented).toBe(true)
     expect(cmdInput.value).toBe('abc')
     expect(cmdInput.selectionStart).toBe(3)
     expect(cmdInput.selectionEnd).toBe(3)
@@ -1039,33 +1045,6 @@ describe('app helpers', () => {
     expect(shellPromptText.textContent).toContain('curl')
     expect(shellPromptText.textContent).toContain('darklab.sh')
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
-  })
-
-  it('mirrors mobile-only caret moves into the hidden command input', async () => {
-    const { restoreViewport } = await loadAppFns({
-      mobileViewport: { height: 768, offsetTop: 0 },
-    })
-    const cmdInput = document.getElementById('cmd')
-    const mobileCmdInput = document.getElementById('mobile-cmd')
-    const shellPromptText = document.getElementById('shell-prompt-text')
-
-    cmdInput.value = 'ping darklab.sh'
-    mobileCmdInput.value = 'ping darklab.sh'
-    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
-    mobileCmdInput.setSelectionRange(4, 4)
-
-    Object.defineProperty(document, 'activeElement', {
-      configurable: true,
-      get: () => mobileCmdInput,
-    })
-    document.body.classList.add('mobile-terminal-mode')
-    document.dispatchEvent(new Event('selectionchange'))
-
-    expect(cmdInput.selectionStart).toBe(4)
-    expect(cmdInput.selectionEnd).toBe(4)
-    expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
-
-    restoreViewport()
   })
 
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
@@ -1146,6 +1125,56 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
+  it('keeps the simplified mobile shell node structure intact while the keyboard is open', async () => {
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+    })
+    try {
+      const header = document.querySelector('header')
+      const status = document.getElementById('status')
+      const runTimer = document.getElementById('run-timer')
+      const histRow = document.getElementById('history-row')
+      const terminalBar = document.querySelector('.terminal-bar')
+      const searchBar = document.getElementById('search-bar')
+      const tabPanels = document.getElementById('tab-panels')
+      const historyPanel = document.getElementById('history-panel')
+      const faqOverlay = document.getElementById('faq-overlay')
+      const optionsOverlay = document.getElementById('options-overlay')
+      const mobileShell = document.getElementById('mobile-shell')
+      const mobileShellChrome = document.getElementById('mobile-shell-chrome')
+      const mobileShellTranscript = document.getElementById('mobile-shell-transcript')
+      const mobileShellComposer = document.getElementById('mobile-shell-composer')
+      const mobileShellOverlays = document.getElementById('mobile-shell-overlays')
+      const mobileComposerHost = document.getElementById('mobile-composer-host')
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+
+      document.body.classList.add('mobile-terminal-mode')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => mobileCmdInput,
+      })
+      window.visualViewport.height = 500
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+
+      expect(header.contains(status)).toBe(true)
+      expect(header.contains(runTimer)).toBe(true)
+      expect(mobileShell.contains(mobileShellChrome)).toBe(true)
+      expect(mobileShell.contains(mobileShellTranscript)).toBe(true)
+      expect(mobileShell.contains(mobileShellComposer)).toBe(true)
+      expect(mobileShell.contains(mobileShellOverlays)).toBe(true)
+      expect(mobileShellChrome.contains(histRow)).toBe(true)
+      expect(mobileShellChrome.contains(terminalBar)).toBe(true)
+      expect(mobileShellChrome.contains(searchBar)).toBe(true)
+      expect(mobileShellTranscript.contains(tabPanels)).toBe(true)
+      expect(mobileShellComposer.contains(mobileComposerHost)).toBe(true)
+      expect(mobileShellOverlays.contains(historyPanel)).toBe(true)
+      expect(mobileShellOverlays.contains(faqOverlay)).toBe(true)
+      expect(mobileShellOverlays.contains(optionsOverlay)).toBe(true)
+    } finally {
+      restoreViewport()
+    }
+  })
+
   it('keeps the mobile keyboard helper row visible when the viewport resize lands before focus', async () => {
     const { syncMobileComposerKeyboardState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
@@ -1185,37 +1214,41 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
-  it('focuses the mobile composer with preventScroll when the user taps the input', async () => {
+  it('does not programmatically refocus the mobile composer when the user taps the input', async () => {
     const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const visibleInput = getVisibleComposerInput()
-    document.body.classList.add('mobile-terminal-mode')
+    try {
+      const visibleInput = getVisibleComposerInput()
+      document.body.classList.add('mobile-terminal-mode')
 
-    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
-    Object.assign(ev, { pointerType: 'touch' })
-    visibleInput.dispatchEvent(ev)
+      const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+      Object.assign(ev, { pointerType: 'touch' })
+      visibleInput.dispatchEvent(ev)
 
-    expect(visibleInput.focus).toHaveBeenCalledWith({ preventScroll: true })
-
-    restoreViewport()
+      expect(visibleInput.focus).not.toHaveBeenCalled()
+    } finally {
+      restoreViewport()
+    }
   })
 
-  it('focuses the mobile composer host with preventScroll when the user taps the lower composer area', async () => {
+  it('does not programmatically focus the mobile composer when the user taps the lower composer area', async () => {
     const { restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const mobileComposerHost = document.getElementById('mobile-composer-host')
-    const mobileCmdInput = document.getElementById('mobile-cmd')
-    document.body.classList.add('mobile-terminal-mode')
+    try {
+      const mobileComposerHost = document.getElementById('mobile-composer-host')
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      document.body.classList.add('mobile-terminal-mode')
 
-    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
-    Object.assign(ev, { pointerType: 'touch' })
-    mobileComposerHost.dispatchEvent(ev)
+      const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+      Object.assign(ev, { pointerType: 'touch' })
+      mobileComposerHost.dispatchEvent(ev)
 
-    expect(mobileCmdInput.focus).toHaveBeenCalledWith({ preventScroll: true })
-
-    restoreViewport()
+      expect(mobileCmdInput.focus).not.toHaveBeenCalled()
+    } finally {
+      restoreViewport()
+    }
   })
 
   it('prefers the mobile composer as the visible input while mobile mode is active', async () => {
@@ -1250,6 +1283,7 @@ describe('app helpers', () => {
   it('focuses the desktop composer through the shared visible helper', async () => {
     const { focusVisibleComposerInput } = await loadAppFns()
     const cmdInput = document.getElementById('cmd')
+    document.body.classList.remove('mobile-terminal-mode')
 
     expect(focusVisibleComposerInput({ preventScroll: true })).toBe(true)
     expect(cmdInput.focus).toHaveBeenCalled()
@@ -1407,6 +1441,7 @@ describe('app helpers', () => {
 
     mobileCmdInput.dispatchEvent(new Event('focus'))
     mobileCmdInput.value = 'curl darklab.sh'
+    mobileCmdInput.dispatchEvent(new Event('input'))
     mobileRunBtn.click()
 
     expect(submitVisibleComposerCommand).toHaveBeenCalledWith({ dismissKeyboard: true, focusAfterSubmit: false })
@@ -1427,6 +1462,54 @@ describe('app helpers', () => {
     setRunButtonDisabled(false)
     expect(runBtn.disabled).toBe(false)
     expect(mobileRunBtn.disabled).toBe(false)
+  })
+
+  it('disables both run buttons for an empty command and enables them once input is present', async () => {
+    const { handleComposerInputChange, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    try {
+      const runBtn = document.getElementById('run-btn')
+      const mobileRunBtn = document.getElementById('mobile-run-btn')
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      document.body.classList.add('mobile-terminal-mode')
+
+      expect(runBtn.disabled).toBe(true)
+      expect(mobileRunBtn.disabled).toBe(true)
+
+      mobileCmdInput.value = 'ping darklab.sh'
+      mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
+      handleComposerInputChange(mobileCmdInput)
+
+      expect(runBtn.disabled).toBe(false)
+      expect(mobileRunBtn.disabled).toBe(false)
+
+      mobileCmdInput.value = '   '
+      mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
+      handleComposerInputChange(mobileCmdInput)
+
+      expect(runBtn.disabled).toBe(true)
+      expect(mobileRunBtn.disabled).toBe(true)
+    } finally {
+      restoreViewport()
+    }
+  })
+
+  it('keeps both run buttons in sync for programmatic composer value changes', async () => {
+    const { setComposerValue } = await loadAppFns()
+    const runBtn = document.getElementById('run-btn')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
+
+    expect(runBtn.disabled).toBe(true)
+    expect(mobileRunBtn.disabled).toBe(true)
+
+    setComposerValue('ping darklab.sh', 15, 15, { dispatch: false })
+    expect(runBtn.disabled).toBe(false)
+    expect(mobileRunBtn.disabled).toBe(false)
+
+    setComposerValue('   ', 3, 3, { dispatch: false })
+    expect(runBtn.disabled).toBe(true)
+    expect(mobileRunBtn.disabled).toBe(true)
   })
 
   it('closes transient ui while the mobile keyboard is open', async () => {

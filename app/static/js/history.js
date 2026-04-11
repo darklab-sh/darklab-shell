@@ -148,22 +148,25 @@ function renderHistory() {
     chip.className = 'hist-chip' + (isStarred ? ' starred' : '');
     chip.title = cmd;
 
-    const starEl = document.createElement('span');
-    starEl.className = 'chip-star';
-    starEl.textContent = isStarred ? '★' : '☆';
-    starEl.title = isStarred ? 'Unstar' : 'Star';
-    starEl.addEventListener('click', e => {
-      e.stopPropagation();
-      _toggleStar(cmd);
-      renderHistory();
-    });
-
     const textEl = document.createElement('span');
     textEl.textContent = cmd;
 
-    chip.appendChild(starEl);
+    if (!isMobile) {
+      const starEl = document.createElement('span');
+      starEl.className = 'chip-star';
+      starEl.textContent = isStarred ? '★' : '☆';
+      starEl.title = isStarred ? 'Unstar' : 'Star';
+      starEl.addEventListener('click', e => {
+        e.stopPropagation();
+        _toggleStar(cmd);
+        renderHistory();
+      });
+      chip.appendChild(starEl);
+    }
+
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
+      chip.blur();
       setComposerValue(cmd, cmd.length, cmd.length);
       if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
       resetCmdHistoryNav();
@@ -186,6 +189,7 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
     }
   });
 }
+
 
 function _setHistoryDeleteMessage(title, detail) {
   const msg = histDelMsg;

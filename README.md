@@ -24,7 +24,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Tab rename** — double-click any tab label to rename it inline; press **Enter** or click away to confirm, **Escape** to cancel
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and `app_hints_mobile.txt` and skips the sampled commands from `welcome.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
-- **Mobile composer dock** — on touch-sized screens the app uses a visible mobile composer with a Run button, a compact helper row that appears only while the keyboard is open, and shared syncing for command chips and autocomplete
+- **Mobile composer dock** — on touch-sized screens the app uses a visible mobile composer with a Run button, a compact helper row that appears only while the keyboard is open, and a simpler normal-flow shell layout that keeps the transcript/composer stack stable on Firefox mobile without page-scroll or `visualViewport` pan compensation tricks. The desktop and mobile Run buttons stay disabled together for blank prompts and running tabs so duplicate or empty submits cannot drift between surfaces
 - **Terminal-like command flow** — while a command is running, the prompt is hidden and the Run action is disabled; completed commands are echoed inline above their output; pressing **Enter** on a blank line inserts a fresh prompt line; **Ctrl+C** opens kill confirmation when running, or drops to a new prompt line when idle
 - **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `shortcuts` shows current keyboard shortcuts, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
@@ -83,9 +83,9 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │       ├── unit/               # Vitest unit tests for pure JS functions
 │       │   ├── helpers/
 │       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│       │   ├── app.test.js         # bootstrap wiring, modal controls, FAQ/theme/search orchestration
+│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, modal controls
 │       │   ├── runner.test.js      # _formatElapsed, run/kill edge cases, stall recovery
-│       │   ├── history.test.js     # starred state, clipboard, delete/clear failures
+│       │   ├── history.test.js     # starred state, clipboard, delete/clear failures, mobile chip behavior
 │       │   ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
 │       │   ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
 │       │   ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
@@ -113,7 +113,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
     ├── blueprints/
     │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
-    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
+    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*, /repro/mobile-keyboard
     │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
     │   └── history.py          # /history*, /share*; preview-output shaping helpers
     ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
@@ -138,6 +138,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── templates/
     │   ├── index.html          # Frontend HTML shell rendered by Flask
     │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
+    │   ├── mobile_keyboard_repro.html # Minimal mobile keyboard/composer control page for regression isolation
     │   ├── permalink_base.html # Shared shell for permalink pages
     │   ├── permalink.html      # Live permalink page template
     │   └── permalink_error.html # Missing/expired permalink template
@@ -316,6 +317,12 @@ Install JS dev dependencies (Node 22 recommended — see `.nvmrc`):
 
 ```bash
 npm install
+```
+
+Then the package-level convenience test command runs the full local chain:
+
+```bash
+npm test
 ```
 
 
@@ -1002,7 +1009,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals in this branch: **760 pytest + 273 Vitest + 135 Playwright = 1,168 tests**.
+Current totals in this branch: **762 pytest + 276 Vitest + 135 Playwright = 1,173 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

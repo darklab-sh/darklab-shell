@@ -19,7 +19,7 @@ app/static/js/vendor/*
 data/
 
 # Optional local config overlay for production/server-specific overrides.
-app/conf/config.local.yaml
+app/conf/*.local.*
  
 # Node / JS tooling
 node_modules/

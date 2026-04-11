@@ -60,6 +60,15 @@ def index():
     )
 
 
+@content_bp.route("/repro/mobile-keyboard")
+def mobile_keyboard_repro():
+    """Minimal mobile keyboard/focus repro page, isolated from the main shell UI."""
+    return render_template(
+        "mobile_keyboard_repro.html",
+        app_name=_config.CFG["app_name"],
+    )
+
+
 @content_bp.route("/config")
 def get_config():
     """Return frontend-relevant config values."""

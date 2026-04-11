@@ -12,6 +12,8 @@ There has been several releases and countless features, bug fixes and improvemen
 
 **Background:** `setComposerValue` currently writes `.value` and `.setSelectionRange` to both `#cmd` (desktop) and `#mobile-cmd` (mobile) on every call regardless of mode. A `document.selectionchange` handler in `controller.js` additionally calls `syncHiddenCommandInputFromVisible` to push mobile cursor state back into `cmdInput`. The `controller.js` keydown handler and several helpers read `cmdInput.value` and `cmdInput.selectionStart` directly throughout. That means value and caret state currently live in multiple places and can be replayed out of order. The target architecture is one-way data flow: active input updates `composerState`, and render helpers project that state into the currently visible UI.
 
+**Guardrail:** this refactor must stay scoped to composer value/selection ownership and input rendering. It must not reintroduce page-scroll correction, visualViewport pan compensation, fixed-shell math, or other mobile layout coupling that was removed during the mobile keyboard shell rebuild. The current normal-flow mobile shell is the baseline to preserve.
+
 ---
 
 **Phase 1 — Introduce `composerState`**
@@ -34,6 +36,7 @@ There has been several releases and countless features, bug fixes and improvemen
 - Rework `setComposerValue` so it updates `composerState` first, then renders only the currently active input.
 - Change the dispatch target to the active input only. No helper should ever write `.value` or `.setSelectionRange` to both inputs in the same call.
 - Keep `exclude` only if it is still required to avoid synthetic self-feedback loops; otherwise remove it.
+- Keep rendering changes local to the input elements and prompt render. Do not fold mobile viewport/layout behavior into this phase.
 - Verify: loading a history chip on mobile no longer touches `cmdInput`, and the inverse is true on desktop.
 
 **Phase 3 — Make input events publish into `composerState`**
@@ -92,12 +95,96 @@ There has been several releases and countless features, bug fixes and improvemen
 - Manual mobile check: typing, arrow-button cursor movement, hold-to-repeat, history chip loading, repeated tap-to-reposition cursor moves, Bluetooth keyboard shortcuts if available.
 - Manual transition check: rotate/resize or switch between desktop/mobile layouts with existing draft text and a mid-line caret; value and caret must survive without snapping.
 - Manual transition check: load a recent-command chip, move the caret mid-line, switch tabs, return, and verify both draft text and caret position persist.
+- Manual shell check: repeated keyboard open/close, lower-edge taps, and browser background/foreground must remain as stable as the post-repro mobile shell fix. Input decoupling work is not allowed to regress the current shell layout behavior.
 - Manual Playwright: `npx playwright test tests/js/e2e/mobile.spec.js tests/js/e2e/tabs.spec.js`.
 
 **Phase 10 — Documentation And Cleanup**
 
 - Update `ARCHITECTURE.md`, `README.md`, `tests/README.md`, `CHANGELOG.md`, and the `/tmp/*.md` branch notes to document the new composer-state architecture and any new regression coverage.
 - Remove stale comments that still describe mirrored hidden/visible input behavior.
+
+---
+
+### Mobile Keyboard Repro-Driven Shell Migration
+
+**Goal:** replace the current mobile shell keyboard/layout behavior with a simpler architecture modeled after `/repro/mobile-keyboard`, which reproduces stable Firefox mobile focus/keyboard behavior without the main app shell complexity.
+
+**Background:** the isolated repro page does **not** exhibit the flash/gap issue, while the full mobile shell does. That narrows the problem to the integration layer in the main app: viewport-sized shell layout, page-scroll correction, shell reparenting, helper-row state coordination, and other mobile-only glue. The correct next step is not more timing tweaks in the existing shell. It is to rebuild the real mobile layout from the repro page upward, reintroducing only the features that are actually needed.
+
+---
+
+**Phase 1 — Freeze the current experiment and use the repro page as the control**
+
+*Files: `app/templates/mobile_keyboard_repro.html`, `app/static/js/app.js`, `app/static/css/styles.css`*
+
+- Keep `/repro/mobile-keyboard` available as the reference harness while the real mobile shell is being rebuilt.
+- Stop layering new keyboard/viewport tweaks onto the existing app shell unless they are needed by the repro too.
+- Treat the repro page as the behavioral baseline: if a change is not required there, it needs strong justification before it belongs in the main mobile shell.
+
+**Phase 2 — Reduce the real mobile shell to the repro layout model**
+
+*Files: `app/templates/index.html`, `app/static/css/styles.css`, `app/static/js/app.js`*
+
+- Restructure the real mobile shell around the same concepts used in the repro page:
+  - normal document flow
+  - simple header
+  - transcript/output region
+  - helper row
+  - composer block at the bottom of the shell
+- Remove viewport-sized shell math that the repro does not need.
+- Remove page-scroll/visualViewport compensation code that only exists to keep the current shell alive.
+
+**Phase 3 — Reintroduce only the minimum app features**
+
+*Files: `app/static/js/app.js`, `app/static/js/controller.js`, `app/static/js/ui_helpers.js`*
+
+- Reconnect the real mobile composer to:
+  - run submission
+  - helper-row actions
+  - prompt rendering
+  - basic mobile menu open/close behavior
+- Keep this phase intentionally narrow.
+- Do **not** reintroduce history chips, autocomplete, overlay movement, or hidden-input syncing until the basic focus/keyboard path stays stable.
+
+**Phase 4 — Add transcript/tab integration back incrementally**
+
+*Files: `app/static/js/tabs.js`, `app/static/js/history.js`, `app/static/js/controller.js`, `app/templates/index.html`*
+
+- Reconnect the tab panels and transcript region to the simplified shell.
+- Validate that tab switching, output scroll, and helper/input placement still behave like the repro page while the keyboard opens and closes.
+- Keep DOM reparenting under scrutiny. If a node does not need to move between desktop and mobile containers, leave it in place.
+
+**Phase 5 — Reintroduce richer mobile behaviors one at a time**
+
+*Files: `app/static/js/history.js`, `app/static/js/autocomplete.js`, `app/static/js/controller.js`, `app/static/js/ui_helpers.js`*
+
+- Add back, in this order:
+  - recent-command chips
+  - autocomplete
+  - mobile menu / overlays
+  - history panel interactions
+- After each addition, compare behavior against the repro baseline.
+- If the flash/gap returns, the last reintroduced feature is the suspect by default.
+
+**Phase 6 — Align with the composer-state refactor**
+
+*Files: `app/static/js/state.js`, `app/static/js/ui_helpers.js`, `app/static/js/controller.js`, `app/static/js/app.js`*
+
+- Once the simplified mobile shell is stable, continue the `composerState` migration against that simpler shell architecture.
+- Do not carry the old mirrored-input assumptions forward into the rebuilt mobile shell.
+
+**Phase 7 — Validation**
+
+- Manual repro harness check: `/repro/mobile-keyboard` still opens/closes the keyboard cleanly on Firefox mobile.
+- Manual real-app check: repeated taps, lower-edge taps, browser background/foreground, and transcript taps do not produce the old flash/gap.
+- Manual feature check: helper row, run button, history chips, autocomplete, and tab switching all remain stable as they are reintroduced.
+- Browser check: Firefox mobile first, then at least one secondary mobile browser to ensure the new model is not Firefox-only by accident.
+
+**Phase 8 — Documentation And Cleanup**
+
+- Document the new mobile shell architecture in `ARCHITECTURE.md` once it is actually in place.
+- Update `README.md`, `tests/README.md`, `CHANGELOG.md`, and the `/tmp/*.md` branch notes after the migration lands.
+- Remove the repro route only if the final mobile shell is stable and there is another reliable regression strategy in place.
 
 ---
 

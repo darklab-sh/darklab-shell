@@ -695,7 +695,6 @@ if (typeof window !== 'undefined') {
   if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
     // Mobile keyboards resize the visual viewport after focus; keep the prompt pinned above it.
     window.visualViewport.addEventListener('resize', syncMobileViewportState);
-    window.visualViewport.addEventListener('scroll', syncMobileViewportState);
   }
 }
 
@@ -703,5 +702,6 @@ if (typeof window !== 'undefined') {
 runBtn.addEventListener('click', runCommand);
 
 syncShellPrompt();
+if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
 
 setupMobileComposer();
