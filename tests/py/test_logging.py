@@ -22,6 +22,8 @@ import sqlite3
 import uuid
 import unittest.mock as mock
 
+import pytest
+
 import app as shell_app
 import database as db_module
 from database import DB_PATH, db_connect, db_init
@@ -1174,6 +1176,48 @@ class TestHistoryClearedEvent:
         assert call.kwargs["extra"]["count"] == 0
 
 
+# ── HISTORY_VIEWED ───────────────────────────────────────────────────────────
+
+class TestHistoryViewedEvent:
+    """HISTORY_VIEWED is emitted at INFO when the history list is requested."""
+
+    def _insert_run(self, run_id, session_id="hv-session"):
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, session_id, "ping test", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
+            )
+            conn.commit()
+
+    def test_history_viewed_emits_info(self):
+        run_id = "hv-test-run-1"
+        self._insert_run(run_id)
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get("/history", headers={"X-Session-ID": "hv-session"})
+            viewed = [c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED"]
+            assert len(viewed) == 1
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+    def test_history_viewed_extra_has_count(self):
+        run_id = "hv-test-run-2"
+        self._insert_run(run_id)
+        try:
+            with mock.patch.object(shell_app.log, "info") as mock_info:
+                get_client().get("/history", headers={"X-Session-ID": "hv-session"})
+            call = next(c for c in mock_info.call_args_list if c[0][0] == "HISTORY_VIEWED")
+            assert call.kwargs["extra"]["count"] == 1
+            assert call.kwargs["extra"]["session"] == "hv-session"
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+
 # ── PAGE_LOAD ─────────────────────────────────────────────────────────────────
 
 class TestPageLoadEvent:
@@ -1190,6 +1234,102 @@ class TestPageLoadEvent:
             get_client().get("/", headers={"X-Forwarded-For": "9.9.9.9"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         assert call.kwargs["extra"]["ip"] == "9.9.9.9"
+
+    def test_page_load_extra_has_session_when_present(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/", headers={"X-Session-ID": "page-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
+        assert call.kwargs["extra"]["session"] == "page-session"
+
+    def test_page_load_extra_has_theme(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/")
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
+        assert call.kwargs["extra"]["theme"]
+
+
+class TestThemeSelectedDebugEvent:
+    """THEME_SELECTED is emitted at DEBUG when the current theme is resolved."""
+
+    def test_theme_selected_emits_debug(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/themes")
+        calls = [c for c in mock_debug.call_args_list if c[0][0] == "THEME_SELECTED"]
+        assert len(calls) == 1
+
+    def test_theme_selected_extra_has_theme_and_source(self):
+        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+            get_client().get("/themes", headers={"X-Session-ID": "theme-session"})
+        call = next(c for c in mock_debug.call_args_list if c[0][0] == "THEME_SELECTED")
+        assert call.kwargs["extra"]["theme"]
+        assert call.kwargs["extra"]["source"] in {"pref_theme_name", "pref_theme", "default_theme", "fallback"}
+        assert call.kwargs["extra"]["session"] == "theme-session"
+
+
+class TestContentViewedEvents:
+    """CONTENT_VIEWED is emitted at INFO for content/config read routes."""
+
+    @pytest.mark.parametrize(
+        "route",
+        [
+            "/config",
+            "/themes",
+            "/allowed-commands",
+            "/faq",
+            "/autocomplete",
+            "/welcome",
+            "/welcome/ascii",
+            "/welcome/ascii-mobile",
+            "/welcome/hints",
+            "/welcome/hints-mobile",
+        ],
+    )
+    def test_content_viewed_emits_info(self, route):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get(route, headers={"X-Session-ID": "content-session"})
+        calls = [c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED"]
+        assert len(calls) == 1
+        call = calls[0]
+        assert call.kwargs["extra"]["route"] == route
+        assert call.kwargs["extra"]["session"] == "content-session"
+
+    def test_config_viewed_extra_has_key_count(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/config", headers={"X-Session-ID": "cfg-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
+        assert call.kwargs["extra"]["route"] == "/config"
+        assert call.kwargs["extra"]["session"] == "cfg-session"
+        assert call.kwargs["extra"]["key_count"] >= 1
+
+    def test_themes_viewed_extra_has_current_and_count(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            get_client().get("/themes", headers={"X-Session-ID": "themes-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
+        assert call.kwargs["extra"]["route"] == "/themes"
+        assert call.kwargs["extra"]["session"] == "themes-session"
+        assert call.kwargs["extra"]["current"]
+        assert call.kwargs["extra"]["count"] >= 1
+
+    def test_allowed_commands_viewed_extra_reflects_restricted_list(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "curl"], [])):
+                with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=[]):
+                    get_client().get("/allowed-commands", headers={"X-Session-ID": "ac-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
+        assert call.kwargs["extra"]["route"] == "/allowed-commands"
+        assert call.kwargs["extra"]["session"] == "ac-session"
+        assert call.kwargs["extra"]["restricted"] is True
+        assert call.kwargs["extra"]["count"] == 2
+
+    def test_allowed_commands_viewed_extra_reflects_unrestricted_mode(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            with mock.patch("blueprints.content.load_allowed_commands", return_value=(None, [])):
+                get_client().get("/allowed-commands", headers={"X-Session-ID": "ac-session"})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "CONTENT_VIEWED")
+        assert call.kwargs["extra"]["route"] == "/allowed-commands"
+        assert call.kwargs["extra"]["session"] == "ac-session"
+        assert call.kwargs["extra"]["restricted"] is False
+        assert call.kwargs["extra"]["count"] == 0
 
 
 # ── RUN_NOT_FOUND / SHARE_NOT_FOUND ──────────────────────────────────────────

@@ -9,6 +9,7 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - [Configuration](#configuration)
 - [Operator Diagnostics](#operator-diagnostics)
 - [Development & Testing](#development--testing)
+- [Architecture At A Glance](#architecture-at-a-glance)
 - [Architecture & Docs](#architecture--decision-log)
 
 ---
@@ -25,6 +26,8 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - **Welcome animation** — on first page load, the terminal can render a startup sequence with decorative ASCII art, fake status lines, curated sampled commands, and rotating app hints. Sampled commands are clickable, the featured sample gets a `TRY THIS FIRST` badge, and the whole sequence cancels cleanly when the user starts working. Desktop uses `welcome.yaml`, `ascii.txt`, and `app_hints.txt`; mobile uses the same status/hint flow with `ascii_mobile.txt` and `app_hints_mobile.txt` and skips the sampled commands from `welcome.yaml`
 - **Shell-style inline prompt** — the visible command surface now lives inside the terminal output area; a hidden real input preserves browser/mobile keyboard behavior while rendering a terminal-native prompt and caret
 - **Mobile composer dock** — on touch-sized screens the app uses a visible mobile composer with a Run button, a compact helper row that appears only while the keyboard is open, and a simpler normal-flow shell layout that keeps the transcript/composer stack stable on Firefox mobile without page-scroll or `visualViewport` pan compensation tricks. The desktop and mobile Run buttons stay disabled together for blank prompts and running tabs so duplicate or empty submits cannot drift between surfaces
+- **Live output tail helper** — when you scroll away from the bottom of a streaming tab, the active output now shows a small jump-to-live / jump-to-bottom button that follows the tab's live-tail state and switches labels once the command stops
+- **Selection-safe prompt shortcuts** — after highlighting transcript text on desktop, pressing `ArrowUp`, `ArrowDown`, `Enter`, or `Ctrl+R` returns control to the prompt without losing the shortcut keystroke, so history navigation, submit, and reverse-search still work immediately after a selection
 - **Terminal-like command flow** — while a command is running, the prompt is hidden and the Run action is disabled; completed commands are echoed inline above their output; pressing **Enter** on a blank line inserts a fresh prompt line; **Ctrl+C** opens kill confirmation when running, or drops to a new prompt line when idle
 - **Useful fake shell commands** — a small web-shell helper layer makes common shell commands useful inside the app: `ls` lists the current allowlist, `help` lists the available helpers, `shortcuts` shows current keyboard shortcuts, `history` shows recent session commands, `last` shows recent completed runs with timestamps and exit codes, and `ps` shows the current `ps` invocation with a fake PID plus prior completed commands with exit/start/end columns. `env`, `pwd`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, and `uptime` return stable shell-style identity and environment details without exposing host internals. `limits`, `retention`, and `status` surface instance and session settings directly in-terminal. `which <cmd>` and `type <cmd>` distinguish helper commands, real commands, and missing commands. `version` shows the web shell version plus app, Flask, and Python versions. `faq` renders the built-in FAQ plus any custom `faq.yaml` entries in-terminal, `banner` prints the configured ASCII banner without replaying the full welcome animation, `fortune` prints a short operator-themed one-liner, and `clear` clears the current terminal tab without spawning a real process. `sudo`, `reboot`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit web-shell guardrail messages instead of pretending to run. `man <allowed-command>` renders the real system man page for allowlisted topics when the runtime has both man-page tooling and the underlying command installed, and `man <fake-command>` falls back to the matching web-shell helper description instead of rejecting it. Missing binaries now surface the same instance-level message across both fake commands and normal allowlisted `/run` commands.
 - **Command allowlist** — restrict which commands can be run via a plain-text config file, no restart required
@@ -69,21 +72,29 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 ├── vitest.config.js            # Vitest unit test config (jsdom environment)
 ├── playwright.config.js        # Playwright e2e test config (starts Flask on port 5001)
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
+├── scripts/
+│   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
+│   ├── container_smoke_test.sh # Fresh-image Container Smoke Test wrapper
+│   ├── capture_container_smoke_test_outputs.sh # Re-captures the smoke-test baseline from a known-good container
+│   └── node/
+│       └── capture_output_for_smoke-test.mjs # Browser-driven smoke-test corpus capture helper
 ├── tests/
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
+│   │   ├── fixtures/
+│   │   │   └── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
 │   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
 │   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
 │   │   ├── test_run_history_share.py # Higher-value /run, history, share, fake-command, and persistence flows
 │   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and fake-command resolution
 │   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
-│   │   └── test_logging.py     # Structured logging: formatters, configure_logging, all log events
+│   │   └── test_logging.py     # Structured logging: formatters, configure_logging, all log events, including CONTENT_VIEWED / THEME_SELECTED / HISTORY_VIEWED
 │   └── js/
 │       ├── unit/               # Vitest unit tests for pure JS functions
 │       │   ├── helpers/
 │       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, active-input composer boundary, composer-host spacing guard, mobile output-follow regression, state-driven cursor-helper regression, phase-5 keydown/submit boundary, phase-7 prompt render boundary, modal controls
+│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, active-input composer boundary, composer-host spacing guard, mobile output-follow regression, live-tail helper regression, state-driven cursor-helper regression, phase-5 keydown/submit boundary, phase-7 prompt render boundary, modal controls
 │       │   ├── runner.test.js      # _formatElapsed, run/kill edge cases, stall recovery
 │       │   ├── history.test.js     # starred state, clipboard, delete/clear failures, mobile chip behavior, composer-state draft restore
 │       │   ├── state.test.js       # composer state store accessors and reset behavior
@@ -97,11 +108,21 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 │       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── helpers.js      # runCommand/openHistory helpers
+│           ├── commands.spec.js # command execution, denial, and status rendering
 │           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
 │           ├── runner-stall.spec.js   # SSE stall recovery
 │           ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
+│           ├── kill.spec.js    # kill confirmation and running-tab stop behavior
+│           ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
+│           ├── output.spec.js  # copy/clear/save/export behavior
+│           ├── rate-limit.spec.js # per-session /run rate limiting
+│           ├── search.spec.js  # search/highlight/navigation behavior
 │           ├── share.spec.js    # snapshot permalinks and clipboard behavior
 │           ├── history.spec.js  # History drawer: load command, dedup tab, star/chip cleanup
+│           ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
+│           ├── timestamps.spec.js # timestamp and line-number toggle behavior
+│           ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
+│           ├── welcome.spec.js # welcome animation/browser interaction coverage
 │           └── tabs.spec.js     # Tab lifecycle, rename, reorder, and new-tab behaviour
 ├── examples/
 │   ├── docker-compose.standalone.yml   # Minimal docker-compose with no nginx-proxy or logging
@@ -114,11 +135,12 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
     ├── blueprints/
     │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
-    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*, /repro/mobile-keyboard
+    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
     │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
     │   └── history.py          # /history*, /share*; preview-output shaping helpers
     ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
     ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
+    ├── logging_setup.py        # structured logging formatters and logger configuration
     ├── database.py             # SQLite connection, schema init, retention pruning
     ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
@@ -139,7 +161,6 @@ A web-based shell for running network diagnostics and vulnerability scans agains
     ├── templates/
     │   ├── index.html          # Frontend HTML shell rendered by Flask
     │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
-    │   ├── mobile_keyboard_repro.html # Minimal mobile keyboard/composer control page for regression isolation
     │   ├── permalink_base.html # Shared shell for permalink pages
     │   ├── permalink.html      # Live permalink page template
     │   └── permalink_error.html # Missing/expired permalink template
@@ -393,11 +414,12 @@ If you run this repo in GitLab CI, the `dependency-version-check` job in `.gitla
 - each theme YAML may include an optional `label:` field; the selector uses that friendly name when present and falls back to a humanized filename stem otherwise
 - theme resolution order is: `localStorage.theme`, then `default_theme` from `config.yaml` (full filename, normalized to the registry entry), then the baked-in dark fallback palette
 - `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables and a theme registry
-- `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell and permalink pages share one theme source of truth
+- `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell, including the mobile composer surfaces, and permalink pages share one theme source of truth
 - `app/templates/theme_vars_script.html` exposes the same resolved values plus the full theme registry to the browser-side runtime selector and export helpers
 - `app/static/js/app.js` exposes the theme helpers, and `app/static/js/controller.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
 - `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
 - `app/app.py` also exposes `/themes` for clients that want to inspect the available registry
+- the resolved theme also drives a best-effort document `color-scheme` hint (`only light`, `only dark`, or `light dark`) so mobile browsers that honor standards-based scheme hints are less likely to auto-darken light themes
 - `app/app.py` also exposes `project_readme` through `/config` so the FAQ and synthetic README links can point at a project-specific URL
 
 See [THEME.md](THEME.md) for the full architecture walkthrough and a complete appendix of every supported theme option and default.
@@ -414,8 +436,8 @@ Log level and format are configured in `config.yaml` and take effect after `dock
 |-------|----------------|
 | `ERROR` | Application errors — subprocess spawn failures (`RUN_SPAWN_ERROR`), SSE stream errors (`RUN_STREAM_ERROR`), DB save failures (`RUN_SAVED_ERROR`), health check failures (`HEALTH_DB_FAIL`, `HEALTH_REDIS_FAIL`) |
 | `WARN` | Warnings — commands blocked by the allowlist (`CMD_DENIED`), rate limit hits (`RATE_LIMIT`), trusted-proxy misses (`UNTRUSTED_PROXY`), commands killed by the server timeout (`CMD_TIMEOUT`), kill signal delivery failures (`KILL_FAILED`), health degradation aggregate (`HEALTH_DEGRADED`), expired or invalid permalink access (`RUN_NOT_FOUND`, `SHARE_NOT_FOUND`) |
-| `INFO` | Operational events — page load (`PAGE_LOAD`), command start (`RUN_START`), command end (`RUN_END`), process kill (`RUN_KILL`), startup DB pruning (`DB_PRUNED`), logging startup confirmation (`LOGGING_CONFIGURED`), permalink snapshot created (`SHARE_CREATED`), snapshot viewed (`SHARE_VIEWED`), run permalink viewed (`RUN_VIEWED`), history entry deleted (`HISTORY_DELETED`), history cleared (`HISTORY_CLEARED`). All INFO events include the client IP |
-| `DEBUG` | Everything above, plus every HTTP request (`REQUEST`) and response (`RESPONSE`), command rewrites (`CMD_REWRITE`), kill misses (`KILL_MISS`), health check pass (`HEALTH_OK`) |
+| `INFO` | Operational events — page load (`PAGE_LOAD`), content/config reads (`CONTENT_VIEWED`), command start (`RUN_START`), command end (`RUN_END`), process kill (`RUN_KILL`), startup DB pruning (`DB_PRUNED`), logging startup confirmation (`LOGGING_CONFIGURED`), history list viewed (`HISTORY_VIEWED`), permalink snapshot created (`SHARE_CREATED`), snapshot viewed (`SHARE_VIEWED`), run permalink viewed (`RUN_VIEWED`), history entry deleted (`HISTORY_DELETED`), history cleared (`HISTORY_CLEARED`). All INFO events include the client IP, and many also include route/session, theme, or event-specific counts |
+| `DEBUG` | Everything above, plus theme resolution (`THEME_SELECTED`), every HTTP request (`REQUEST`) and response (`RESPONSE`), command rewrites (`CMD_REWRITE`), kill misses (`KILL_MISS`), health check pass (`HEALTH_OK`) |
 
 ### Log formats
 
@@ -1010,7 +1032,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **762 pytest + 282 Vitest + 135 Playwright = 1,179 tests**.
+Current totals: **784 pytest + 289 Vitest + 138 Playwright = 1,211 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
@@ -1026,6 +1048,18 @@ Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped
 The canonical testing guide lives in [tests/README.md](tests/README.md). It contains the full file-by-file appendix, focused run commands, suite-specific notes, and maintenance conventions. `ARCHITECTURE.md` only keeps the architectural rationale for how the suites are split and why they are implemented the way they are.
 
 The permalink/export refactor was primarily about removing duplicated static HTML/CSS/JS and moving the shared page chrome and export styling into reusable templates and helpers, so the live permalink view and downloadable export stay easier to maintain together.
+
+## Architecture At A Glance
+
+For a higher-level explanation of how the app works, start with [ARCHITECTURE.md](ARCHITECTURE.md):
+
+- `System Overview` for the major runtime pieces and responsibilities
+- `Runtime Topology` for the browser / Flask / Redis / SQLite / scanner-process diagram
+- `Primary Request Flows` for page load, `/run`, `/kill`, history/share, and diagnostics flow
+- `Frontend Composition` for the browser script load order and ownership boundaries
+- `Persistence Model` for the split between run previews, snapshots, and full-output artifacts
+
+Use the rest of `ARCHITECTURE.md` after that for the deeper decision log: why SSE was chosen, why Redis is used for cross-worker coordination, how the two-user runtime model works, why the mobile shell was simplified, and how the test layers are split.
 
 ### Linting & Security Scanning
 

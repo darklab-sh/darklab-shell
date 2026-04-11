@@ -379,6 +379,7 @@ class TestThemeRegistry:
         assert themes[0]["name"] == "only_theme"
         assert themes[0]["label"] == "Only Theme"
         assert app_config.load_theme("only_theme")["bg"] == "#101010"
+        assert themes[0]["color_scheme"] == "only dark"
 
     def test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately(self, tmp_path, monkeypatch):
         theme_dir, _ = self._write_theme(
@@ -428,6 +429,15 @@ class TestThemeRegistry:
         finally:
             os.unlink(path)
         assert result == []
+
+    def test_theme_color_scheme_marks_light_backgrounds_as_only_light(self):
+        assert app_config.theme_color_scheme({"bg": "#eef4fa"}) == "only light"
+
+    def test_theme_color_scheme_marks_dark_backgrounds_as_only_dark(self):
+        assert app_config.theme_color_scheme({"bg": "#0d0d0d"}) == "only dark"
+
+    def test_theme_color_scheme_falls_back_when_color_is_not_parseable(self):
+        assert app_config.theme_color_scheme({"bg": "linear-gradient(180deg, #111, #222)"}) == "light dark"
 
     def test_empty_yaml_returns_empty(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

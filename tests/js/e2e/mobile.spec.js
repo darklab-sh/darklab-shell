@@ -234,6 +234,29 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
   })
 
+  test('selecting a theme on mobile applies the shell palette, not just the modal preview', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="theme"]').click()
+
+    await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+
+    const shellColors = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement)
+      return {
+        bg: root.getPropertyValue('--bg').trim(),
+        surface: root.getPropertyValue('--surface').trim(),
+        terminalBar: root.getPropertyValue('--theme-terminal-bar-bg').trim(),
+        panel: root.getPropertyValue('--theme-panel-bg').trim(),
+      }
+    })
+
+    expect(shellColors.bg).toBe('#eef4fa')
+    expect(shellColors.surface).toBe('#fbfdff')
+    expect(shellColors.terminalBar).toBe('#d9e5f1')
+    expect(shellColors.panel).toBe('#edf4fb')
+  })
+
   test('clicking outside the menu closes it', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu')).toHaveClass(/open/)

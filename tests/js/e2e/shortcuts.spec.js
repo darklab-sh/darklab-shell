@@ -184,6 +184,33 @@ test.describe('keyboard shortcuts', () => {
       await expect(promptCaret).toHaveText(ch)
     }
   })
+
+  test('history and submit shortcuts still work after transcript text is selected', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    const lineCountBefore = await page.locator('.tab-panel.active .output .line').count()
+
+    await page.evaluate(() => {
+      const firstLine = document.querySelector('.tab-panel.active .output .line')
+      const searchBtn = document.getElementById('search-toggle-btn')
+      if (!firstLine || !searchBtn) throw new Error('selection setup failed')
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(firstLine)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      searchBtn.focus()
+    })
+
+    await page.keyboard.press('ArrowUp')
+    await expect(page.locator('#cmd')).toHaveValue('hostname')
+
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(
+      (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
+      lineCountBefore,
+      { timeout: 15_000 }
+    )
+  })
 })
 
 test.describe('Ctrl+R reverse-history search', () => {

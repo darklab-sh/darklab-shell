@@ -88,6 +88,7 @@ function loadTabsFns({
   }, `{
     updateNewTabBtn,
     updateTabScrollButtons,
+    updateOutputFollowButton,
     createTab,
     activateTab,
     startTabRename,
@@ -463,6 +464,71 @@ describe('tabs helpers', () => {
     scrollTop = 200
     output.dispatchEvent(new Event('scroll'))
     expect(tab.followOutput).toBe(true)
+  })
+
+  it('shows a live jump button while output is streaming off the live tail', () => {
+    const { createTab, _getTabs, setTabStatus, updateOutputFollowButton } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const button = document.querySelector(`.tab-panel[data-id="${id}"] .output-follow-btn`)
+
+    Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', { configurable: true, get: () => 0 })
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+    tab.followOutput = false
+    setTabStatus(id, 'running')
+    updateOutputFollowButton(id)
+
+    expect(button.hidden).toBe(false)
+    expect(button.textContent).toBe('jump to live')
+    expect(button.classList.contains('is-live')).toBe(true)
+    expect(button.title).toBe('Jump to the live output tail')
+  })
+
+  it('hides the jump button when the output is already pinned to the bottom', () => {
+    const { createTab, _getTabs, updateOutputFollowButton } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const button = document.querySelector(`.tab-panel[data-id="${id}"] .output-follow-btn`)
+
+    Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', { configurable: true, get: () => 200 })
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+    tab.followOutput = false
+
+    updateOutputFollowButton(id)
+
+    expect(button.hidden).toBe(true)
+    expect(tab.followOutput).toBe(true)
+  })
+
+  it('returns the output to the tail when the jump button is clicked', () => {
+    const { createTab, _getTabs, updateOutputFollowButton } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const button = document.querySelector(`.tab-panel[data-id="${id}"] .output-follow-btn`)
+
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: value => { scrollTop = value },
+    })
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+    tab.followOutput = false
+    updateOutputFollowButton(id)
+
+    button.click()
+
+    expect(tab.followOutput).toBe(true)
+    expect(scrollTop).toBe(300)
+    expect(button.hidden).toBe(true)
   })
 
   it('keeps follow-output enabled when the terminal scrolls itself to the bottom', () => {

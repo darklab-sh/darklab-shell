@@ -2,10 +2,6 @@
 
 ## Open TODOs
 
-### Review Code for Logging Opportunities
-
-There has been several releases and countless features, bug fixes and improvements made since the logging framework was implemented. A comprehensive code review is needed to find additional opportunities for logging.
-
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
@@ -23,8 +19,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - **Richer history filtering and search**
   - Add filtering by command root, exit code, starred status, date, and full-output availability.
   - Current history is useful, but it will become harder to navigate as usage grows.
-
-- **Per-tab draft input persistence** *(shipped — see Completed)*
 
 - **Context-aware autocomplete**
   - Move beyond a flat suggestion list and tailor completions by command root and prior tokens.
@@ -47,12 +41,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 - **Additional export formats**
   - Add Markdown and JSONL export in addition to `.txt` and themed `.html`.
-
-- **Snapshot metadata block** *(shipped — see Completed)*
-
-- **Command recall improvements** *(shipped — see Completed)*
-
-- **Per-tab draft input persistence** *(shipped — see Completed)*
 
 - **Better output navigation**
   - Jump to top/bottom, jump between warnings/errors, sticky command header for long runs, and optional output collapsing.
@@ -108,6 +96,12 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ## Completed
 
+### Logging Review
+
+- Expanded the main content-route logging surface so config, theme, FAQ, autocomplete, and welcome reads emit `CONTENT_VIEWED` info logs with route/session context.
+- Added `PAGE_LOAD` theme/session context and a `THEME_SELECTED` DEBUG breadcrumb so startup theme resolution is easier to trace when debugging browser or cookie state.
+- Added `HISTORY_VIEWED` info logging for plain `/history` list reads so history-panel access has the same structured visibility as run and snapshot permalink reads.
+
 ### Command Recall (Ctrl+R) and Per-Tab Draft Persistence
 
 **Command recall (Ctrl+R reverse-history search):**
@@ -144,14 +138,14 @@ Every permalink page (`/history/<run_id>` and `/share/<id>`) and downloaded HTML
 - CSS theme-override block updated so `#diag-btn` follows `--theme-toolbar-button-*` variables like all other header buttons.
 - 7 new pytest tests: 4 in `TestConfigRoute` (diag_enabled true/false/X-Forwarded-For isolation), 3 in `TestDiagRoute` (DIAG_VIEWED log, HTML content, `?format=json` content-type); existing denied-log test extended to assert `allowed_cidrs` field.
 
-### Phase 9: Documentation And Test Follow-Through
+### Documentation And Test Follow-Through
 
 - Updated `README.md` project structure tree: `app.py` corrected to thin-factory description, `blueprints/` subtree added with all four blueprint files, `helpers.py` and `extensions.py` added, `config.py` notes theme registry.
 - Updated `README.md` test tree: added `test_backend_modules.py` and `test_container_smoke_test.py` to the pytest section; expanded Vitest section from 4 to 11 test files (`tabs`, `search`, `welcome`, `autocomplete`, `session`, `config`, `utils`).
 - `ARCHITECTURE.md` verified up-to-date: blueprint diagram, helpers.py/extensions.py, state.js/ui_helpers.js split, controller.js load order, trusted proxy, theme system, and test strategy sections all accurate.
 - `tests/README.md` suite inventory and counts already updated in earlier session work.
 
-### Phase 7: Content/Presentation Separation
+### Content / Presentation Separation
 
 - Replaced the three inline `style="color:var(--...)"` attributes and the `<ul style="...">` layout attribute in the built-in FAQ `answer_html` entries with CSS classes (`.faq-link` for green documentation links, `.faq-kill-verb` for the red Kill label). The keyboard-shortcuts `<ul>` inline style was removed entirely; the existing `.faq-a ul` rule already handles list layout.
 - Replaced the 30-way `if/elif` chain in `execute_fake_command()` with a module-level `_FAKE_COMMAND_DISPATCH` dict of lambdas normalised to `(cmd, sid) -> list[dict]`. The public function body is four lines; adding a new helper requires one dict entry.
@@ -232,7 +226,7 @@ Mobile uses the same selector with a full-screen chooser and a two-column previe
 
 ### Mobile Keyboard Shell Rebuild
 
-- Added `/repro/mobile-keyboard` as a stripped-down Firefox mobile control harness, used it to isolate the keyboard issue to the main app integration layer, then rebuilt the real mobile shell around the repro page’s simpler normal-flow layout.
+- Used a stripped-down control surface during debugging to isolate the keyboard issue to the main app integration layer, then rebuilt the real mobile shell around that simpler normal-flow layout.
 - The final mobile shell keeps the composer anchored by normal flow, uses the simplified bottom composer block instead of the old fixed-shell / page-scroll / `visualViewport` compensation stack, and preserves the stable output-follow behavior when the keyboard opens.
 - Supporting regressions cover the repro route, the simplified mobile shell DOM structure, the mobile composer-host spacing guard, and the output-follow / open-close stability fixes. The repro route remains available as a manual diagnostic control.
 

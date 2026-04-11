@@ -1,6 +1,6 @@
 # Architecture & Decision Log
 
-This document captures the key architectural decisions, bugs encountered, and reasoning behind implementation choices made during the development of darklab shell. It is intended as a durable decision log for anyone picking up this project — particularly for use with AI coding assistants like Claude Code that can read the codebase but not the conversation history.
+This document explains the overall architecture of darklab shell and records the key architectural decisions, tradeoffs, bugs, and implementation reasoning that shaped the current design. It serves both as a high-level system guide for anyone new to the project and as a durable decision log for future maintenance and refactoring work.
 
 ---
 
@@ -10,11 +10,208 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 
 ## Table of Contents
 - [Project Overview](#project-overview)
+- [System Overview](#system-overview)
+- [Logical Components](#logical-components)
+- [Runtime Topology](#runtime-topology)
+- [Primary Request Flows](#primary-request-flows)
+- [Frontend Composition](#frontend-composition)
+- [Persistence Model](#persistence-model)
 - [Key Architectural Decisions](#key-architectural-decisions)
 - [Shared Frontend State Layer](#shared-frontend-state-layer)
 - [Dedicated Mobile Shell](#dedicated-mobile-shell)
 - [Project Tests](#project-tests)
 - [Testing Strategy](#testing-strategy)
+
+## System Overview
+
+At a mid to high level, darklab shell works like this:
+
+- A browser-based terminal UI loads a Flask-rendered shell page, then hydrates itself from focused read routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
+- Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
+- `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
+- `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
+- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input.
+- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
+
+## Logical Components
+
+```mermaid
+flowchart LR
+  Browser["Browser"]
+
+  subgraph Frontend["Frontend"]
+    ShellUI["Terminal UI"]
+    Composer["composerState + input helpers"]
+    ClientModules["tabs / output / history / search / autocomplete / welcome / runner"]
+  end
+
+  subgraph Docker["Docker Runtime"]
+    subgraph Backend["Backend"]
+      Flask["Flask + Gunicorn"]
+      Content["content / assets / history / run blueprints"]
+      CommandLayer["commands.py + fake_commands.py"]
+    end
+
+    subgraph Services["Runtime Services"]
+      Redis["Redis"]
+      SQLite["SQLite"]
+      Artifacts["Artifact files"]
+      Scanner["scanner subprocesses"]
+    end
+  end
+
+  Browser --> Frontend
+  Frontend --> Flask
+  Flask --> Content
+  Content --> CommandLayer
+  Flask <--> Redis
+  Flask <--> SQLite
+  Flask <--> Artifacts
+  Flask --> Scanner
+```
+
+This diagram is meant to answer the “what talks to what?” question quickly:
+
+- the browser hosts the terminal UI and shared composer state
+- the Flask/Gunicorn app is the backend entry point
+- the blueprints split content reads, run/kill, history/share, and asset/diagnostic concerns
+- the command layer decides what can run and what should be handled as a fake shell helper
+- Redis handles cross-worker coordination
+- SQLite and artifact files hold durable history/share state
+- Docker is the operational boundary that packages all of those pieces together in the default deployment model
+
+## Runtime Topology
+
+```mermaid
+flowchart LR
+  Browser["Browser UI"]
+  Flask["Flask + Gunicorn"]
+  Redis["Redis"]
+  SQLite["SQLite"]
+  Artifacts["Run Output Artifacts"]
+  Scanner["scanner subprocesses"]
+
+  Browser -->|GET /, /config, /themes, /faq, /autocomplete, /welcome*| Flask
+  Browser -->|POST /run + SSE stream| Flask
+  Browser -->|POST /kill| Flask
+  Browser -->|GET /history, /share, /diag| Flask
+
+  Flask <--> Redis
+  Flask <--> SQLite
+  Flask <--> Artifacts
+  Flask --> Scanner
+```
+
+This is the stable runtime boundary of the app. Browser concerns stay in the client, worker-coordination concerns stay in Redis, durable history/share state stays in SQLite plus artifacts, and actual command execution happens in isolated subprocesses rather than inside the web worker process itself.
+
+## Primary Request Flows
+
+```mermaid
+sequenceDiagram
+  participant B as Browser
+  participant C as content/history/assets routes
+  participant R as /run + /kill
+  participant X as Redis
+  participant P as scanner process
+  participant D as SQLite + artifacts
+
+  B->>C: GET / + startup content routes
+  C-->>B: HTML + config/theme/FAQ/autocomplete/welcome payloads
+
+  B->>R: POST /run
+  R->>X: register run_id -> pid
+  R->>P: spawn fake command or real process
+  R-->>B: SSE started/output/exit
+  R->>D: save preview and metadata
+  R->>D: save full artifact when enabled
+
+  B->>R: POST /kill
+  R->>X: getdel pid
+  R->>P: kill process group
+
+  B->>C: GET /history /share /diag
+  C->>D: read run/snapshot/usage state
+  C-->>B: JSON or themed HTML
+```
+
+There are three core request classes:
+
+- content/bootstrap reads
+- run/kill lifecycle
+- history/share/diagnostic reads
+
+That split is reflected directly in the blueprint structure.
+
+## Frontend Composition
+
+```mermaid
+flowchart TD
+  Session["session.js"]
+  State["state.js"]
+  Utils["utils.js"]
+  Config["config.js"]
+  DOM["dom.js"]
+  UI["ui_helpers.js"]
+  Tabs["tabs.js"]
+  Output["output.js"]
+  Search["search.js"]
+  Auto["autocomplete.js"]
+  History["history.js"]
+  Welcome["welcome.js"]
+  Runner["runner.js"]
+  App["app.js"]
+  Controller["controller.js"]
+
+  Session --> State
+  State --> UI
+  Utils --> UI
+  Config --> Controller
+  DOM --> UI
+  UI --> Tabs
+  UI --> History
+  UI --> Runner
+  Tabs --> Controller
+  Output --> Controller
+  Search --> Controller
+  Auto --> Controller
+  History --> Controller
+  Welcome --> Controller
+  Runner --> Controller
+  App --> Controller
+```
+
+This is still a classic-script frontend, not an ES-module app. The architecture relies on a deliberate load order:
+
+- `state.js` owns shared state
+- `ui_helpers.js` owns DOM-facing setters/getters
+- domain scripts own tab/output/search/history/welcome/runner logic
+- `controller.js` is the composition root and last loader
+
+The important recent architectural change is that prompt ownership now lives in `composerState`, not in whichever DOM input happened to update last.
+
+## Persistence Model
+
+```mermaid
+flowchart LR
+  Runs["runs table"]
+  Snapshots["snapshots table"]
+  ArtifactRows["run_output_artifacts table"]
+  Files["gzip full-output files"]
+
+  Runs -->|history drawer + run restore| Hist["History UI"]
+  Runs -->|canonical permalink| RunPage["/history/:id"]
+  Snapshots -->|snapshot permalink| SharePage["/share/:id"]
+  ArtifactRows --> Files
+  ArtifactRows -->|full-output lookup| RunPage
+```
+
+The persistence model is intentionally split:
+
+- `runs` stores fast, capped preview data for the interactive UI
+- `snapshots` stores share-specific captured state
+- `run_output_artifacts` plus gzip files store optional full output without bloating the main `runs` table
+
+That split is what allows the app to keep the interactive shell fast while still supporting durable full-output permalinks and exports.
 
 The Python backend is split into focused modules with acyclic dependencies:
 
@@ -27,7 +224,7 @@ helpers.py     — trusted-proxy IP resolver, session-ID extractor
 database.py    — SQLite connect/init/prune
 process.py     — Redis setup, pid_register/pid_pop
 permalinks.py  — Flask context/render helpers for permalink pages
-templates/     — Jinja templates for the main shell, permalink pages, and focused repro harnesses
+templates/     — Jinja templates for the main shell and permalink pages
 run_output_store.py — preview/full-output capture and artifact helpers
 export_html.js — shared browser-side HTML export helpers for tab downloads and permalink save HTML
     ↑
@@ -35,7 +232,7 @@ extensions.py  — Flask-Limiter singleton (limiter.init_app deferred to app.py)
     ↑
 blueprints/
   assets.py    — /vendor/*, /favicon.ico, /health, /diag (IP-gated)
-  content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*, /repro/mobile-keyboard
+  content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*
   run.py       — /run (rate-limited SSE), /kill; run-output capture helpers
   history.py   — /history*, /share*; preview-output shaping helpers
     ↑
@@ -106,10 +303,13 @@ Both formatters use a shared `_extra_fields(record)` helper that extracts caller
 | INFO  | `RUN_END` | generate() | ip, run_id, session, exit_code, elapsed, cmd |
 | INFO  | `RUN_KILL` | kill_command | ip, run_id, pid, pgid |
 | INFO  | `DB_PRUNED` | db_init | runs, snapshots, retention_days |
-| INFO  | `PAGE_LOAD` | index | ip |
+| INFO  | `PAGE_LOAD` | index | ip, session, theme |
+| INFO  | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
 | INFO  | `SHARE_CREATED` | save_share | ip, share_id, label |
 | INFO  | `SHARE_VIEWED` | get_share | ip, share_id, label |
 | INFO  | `RUN_VIEWED` | get_run | ip, run_id, cmd |
+| INFO  | `HISTORY_VIEWED` | get_history | ip, session, count |
 | INFO  | `HISTORY_DELETED` | delete_run | ip, run_id, session |
 | INFO  | `HISTORY_CLEARED` | clear_history | ip, session, count |
 | WARN  | `RUN_NOT_FOUND` | get_run | ip, run_id |
@@ -256,13 +456,12 @@ The current shape is intentional:
 
 - `#tab-panels` is still reparented into the mobile transcript mount at runtime so output rendering stays shared while the mobile surface gets its own container.
 - `#mobile-shell` stays in normal document flow instead of pinning the whole mobile terminal with fixed-shell viewport math.
-- `#mobile-composer-host` uses in-flow `margin-bottom: var(--mobile-keyboard-offset)` spacing to clear the on-screen keyboard, rather than page-scroll resets, `visualViewport` pan compensation, or body-level transforms.
+- `#mobile-composer-host` stays free of keyboard-height spacing, and the mobile shell now relies on its simplified normal-flow layout instead of page-scroll resets, `visualViewport` pan compensation, or body-level transforms.
 - Mobile input focus is user-driven; the code no longer relies on synthetic focus handlers on the composer host or lower hit area because those were a major source of scroll jumps and transient bad frames on Firefox mobile.
+- The active output can surface a tab-scoped jump-to-live / jump-to-bottom helper when follow-output is paused. It is driven by the same `followOutput` and `st` state that already governs live-tail behavior, so the control stays with the panel as it moves between desktop and mobile layouts.
 - Overlays are mounted into a separate mobile overlay area so the shell can manage menu, history, FAQ, and options surfaces independently of the desktop wrapper.
 
 The key architectural decision here is negative: the app no longer tries to outsmart the mobile browser with page-scroll correction or fixed full-shell keyboard choreography. Those experiments made the Firefox keyboard bug worse. The stable model is closer to a normal mobile document with a dedicated composer block at the bottom of the shell.
-
-To make that debugging path repeatable, `content.py` also serves `/repro/mobile-keyboard`, backed by `templates/mobile_keyboard_repro.html`. That page is a stripped-down control harness for mobile keyboard/composer behavior and now serves as the reference surface when future mobile keyboard regressions appear.
 
 This keeps the mobile surface structured without needing a separate frontend bundle or framework split, while preserving the simplified layout that fixed the Firefox mobile issue.
 
@@ -404,7 +603,7 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `project_readme`, `prompt_prefix`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins. `project_readme` is used by the built-in FAQ and synthetic README-style helper output so those links can be branded per deployment without changing code.
 
-Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. On mobile the selector opens as a full-screen chooser with a two-column preview layout on wider phones so the preview cards stay readable while keeping each grouped section the same width. Each YAML variant may provide an optional `label:` field; that label is what the selector preview card shows, `group:` controls the modal section header, and `sort:` controls the order inside the preview grid while the filename stem remains the persisted theme name. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only; they are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in dark fallback palette in `app/config.py`. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots. This completed theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
+Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. On mobile the selector opens as a full-screen chooser with a two-column preview layout on wider phones so the preview cards stay readable while keeping each grouped section the same width. Each YAML variant may provide an optional `label:` field; that label is what the selector preview card shows, `group:` controls the modal section header, and `sort:` controls the order inside the preview grid while the filename stem remains the persisted theme name. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only; they are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in dark fallback palette in `app/config.py`. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots, including the simplified mobile composer shell, which now uses the same injected theme variables as the desktop shell instead of hardcoded dark CSS. The same resolution step also infers a best-effort document `color-scheme` hint from the resolved theme background and pushes it into the templates and runtime theme switcher so browsers that honor standards-based scheme hints have less reason to auto-darken light themes. This completed theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
 
 ### Theme System
 
@@ -483,10 +682,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals:
 
-- `pytest`: 762
-- `vitest`: 282
-- `playwright`: 135
-- total: 1,179
+- `pytest`: 784
+- `vitest`: 289
+- `playwright`: 138
+- total: 1,211
 
 ### Testing Architecture
 
@@ -521,11 +720,16 @@ Current totals:
 
 - A mobile output-follow regression in `app.test.js` now asserts that the active tab stays pinned to the bottom when the keyboard opens, which keeps the last line visible while the simplified mobile shell is resizing around the composer.
 
+- A live output-tail helper regression in `tabs.test.js` now asserts that the per-tab jump-to-live / jump-to-bottom control appears when follow-output is paused, updates its label when the stream stops, and returns the output to the live tail when clicked. The helper button is styled with an explicit `[hidden] { display: none !important; }` rule so the author-defined `inline-flex` display never overrides its hidden state in browsers.
+- A desktop output-selection shortcut regression in `app.test.js` now asserts that `ArrowUp`, `ArrowDown`, `Enter`, and `Ctrl+R` are replayed through the prompt after transcript text is highlighted, so output selection no longer eats history, submit, or reverse-search shortcuts just because focus left the composer.
+- Playwright now carries browser-level checks for two high-risk surfaces that were previously only covered indirectly: the live output-tail helper (`output.spec.js`) and the transcript-selection shortcut replay path (`shortcuts.spec.js`). That keeps real scroll geometry, focus transfer, and keyboard dispatch in the regression net instead of relying only on jsdom.
+- `CONTENT_VIEWED` now covers the main content/config read routes with route/session context, `PAGE_LOAD` now records the resolved theme on the home page, `THEME_SELECTED` adds a DEBUG breadcrumb for theme resolution, and `HISTORY_VIEWED` keeps the plain `/history` list read visible so access patterns on the history drawer and startup content reads have the same structured visibility as run and snapshot permalink reads without adding extra noise to the write paths.
+
 - Search highlighting now walks text nodes and clones the line structure instead of rewriting serialized `innerHTML`, which keeps mixed-content lines and helper markup intact while preserving plain-text search, regex search, case sensitivity, and current-match navigation. A related initialisation fix in `ui_helpers.js` sets the search bar's inline `display` style to `none` on load so the `.u-hidden` utility class correctly hides it regardless of the `.search-bar { display: flex }` rule that follows it at equal specificity; `isSearchBarOpen()` was also tightened to check `=== 'flex'` instead of `!== 'none'`.
 
 - Playwright runs with `workers: 1` by design. `/run` rate limiting is per session, so parallel browser workers create false failures rather than meaningful concurrency coverage. Recent browser regressions are captured in the suite for mobile shell visibility and tab-row behavior, tab isolation, permalink preference cookies, close-running-tab / clear-preserve behavior, and history-panel action-button close behavior.
 
-- The Firefox mobile keyboard investigation added a durable test/control split: `/repro/mobile-keyboard` now has route coverage in `test_routes.py`, while `app.test.js` locks the main shell to the simplified mobile-shell DOM structure, the “no programmatic mobile focus” behavior, and shared desktop/mobile Run-button disable rules for both typed and programmatic composer updates.
+- The Firefox mobile keyboard investigation is now covered through the main shell regressions: `app.test.js` locks the simplified mobile-shell DOM structure, the “no programmatic mobile focus” behavior, and shared desktop/mobile Run-button disable rules for both typed and programmatic composer updates.
 
 - The permalink/export refactor exists to remove duplicated static HTML/CSS/JS and to centralize shared page chrome and export styling in reusable templates/helpers. The live permalink page and the downloadable export should stay maintainable together without carrying separate copies of the same presentation code.
 

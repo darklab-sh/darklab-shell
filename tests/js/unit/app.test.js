@@ -25,6 +25,8 @@ async function loadAppFns({
   copyTab: copyTabOverride = vi.fn(),
   clearTab: clearTabOverride = vi.fn(),
   cancelWelcome: cancelWelcomeOverride = vi.fn(),
+  navigateCmdHistory: navigateCmdHistoryOverride = vi.fn(() => false),
+  enterHistSearch: enterHistSearchOverride = vi.fn(),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
@@ -375,7 +377,7 @@ async function loadAppFns({
     acShow: acShowOverride,
     acAccept: () => {},
     resetCmdHistoryNav: () => {},
-    navigateCmdHistory: () => false,
+    navigateCmdHistory: navigateCmdHistoryOverride,
     setupTabScrollControls: () => {},
     hydrateCmdHistory: () => {},
     mountShellPrompt: () => {},
@@ -390,6 +392,7 @@ async function loadAppFns({
     copyTab: copyTabOverride,
     clearTab: clearTabOverride,
     cancelWelcome: cancelWelcomeOverride,
+    enterHistSearch: enterHistSearchOverride,
     interruptPromptLine: interruptPromptLineOverride,
     _welcomeActive: welcomeActive,
     welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -437,6 +440,7 @@ async function loadAppFns({
     focusVisibleComposerInput,
     blurVisibleComposerInput,
     blurVisibleComposerInputIfMobile,
+    _replayPromptShortcutAfterSelection,
     refocusTerminalInput,
     getVisibleComposerInput,
     getComposerValue,
@@ -476,6 +480,8 @@ async function loadAppFns({
     copyTab: copyTabOverride,
     clearTab: clearTabOverride,
     cancelWelcome: cancelWelcomeOverride,
+    navigateCmdHistory: navigateCmdHistoryOverride,
+    enterHistSearch: enterHistSearchOverride,
     interruptPromptLine: interruptPromptLineOverride,
     runCommand: runCommandOverride,
     submitComposerCommand: submitComposerCommandOverride,
@@ -1049,6 +1055,67 @@ describe('app helpers', () => {
     expect(cmdInput.selectionEnd).toBe(3)
   })
 
+  it.each([
+    {
+      key: 'ArrowDown',
+      keydown: { key: 'ArrowDown' },
+      expectAction: (helpers) => expect(helpers.navigateCmdHistory).toHaveBeenCalledWith(-1),
+    },
+    {
+      key: 'Enter',
+      keydown: { key: 'Enter' },
+      expectAction: (helpers) => expect(helpers.submitComposerCommand).toHaveBeenCalledWith('ping darklab.sh', { dismissKeyboard: true }),
+    },
+    {
+      key: 'Ctrl+R',
+      keydown: { key: 'r', ctrlKey: true },
+      expectAction: (helpers) => expect(helpers.enterHistSearch).toHaveBeenCalled(),
+    },
+  ])('replays %s after desktop output text is selected', async ({ keydown, expectAction }) => {
+    const navigateCmdHistory = vi.fn(() => false)
+    const enterHistSearch = vi.fn()
+    const submitComposerCommand = vi.fn()
+    const { cmdInput, _replayPromptShortcutAfterSelection, setComposerState } = await loadAppFns({
+      navigateCmdHistory,
+      enterHistSearch,
+      submitComposerCommand,
+    })
+
+    const originalGetSelection = window.getSelection
+    let activeElement = document.body
+    const focusSpy = vi.fn(() => {
+      activeElement = cmdInput
+    })
+    cmdInput.focus = focusSpy
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => activeElement,
+    })
+    Object.defineProperty(window, 'getSelection', {
+      configurable: true,
+      value: () => ({ toString: () => 'highlighted output' }),
+    })
+
+    try {
+      cmdInput.value = 'ping darklab.sh'
+      setComposerState({
+        value: 'ping darklab.sh',
+        selectionStart: 'ping darklab.sh'.length,
+        selectionEnd: 'ping darklab.sh'.length,
+        activeInput: 'desktop',
+      })
+      const ev = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...keydown })
+      const handled = _replayPromptShortcutAfterSelection(ev)
+
+      expect(handled).toBe(true)
+      expect(ev.defaultPrevented).toBe(true)
+      expect(focusSpy).toHaveBeenCalled()
+      expectAction({ navigateCmdHistory, enterHistSearch, submitComposerCommand })
+    } finally {
+      Object.defineProperty(window, 'getSelection', { configurable: true, value: originalGetSelection })
+    }
+  })
+
   it('updates the visible cursor when the selection changes without typing', async () => {
     const { cmdInput } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
@@ -1573,6 +1640,22 @@ describe('app helpers', () => {
 
     expect(match).not.toBeNull()
     expect(match[1]).not.toMatch(/margin-bottom\s*:/)
+  })
+
+  it('keeps the themed mobile composer surfaces free of hard-coded dark colors', () => {
+    const css = readFileSync(resolve(process.cwd(), 'app/static/css/styles.css'), 'utf8')
+    const shellMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer\s*\{([\s\S]*?)\}/)
+    const composerMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer #mobile-composer\s*\{([\s\S]*?)\}/)
+
+    expect(shellMatch).not.toBeNull()
+    expect(shellMatch[1]).toMatch(/background:\s*var\(--theme-mobile-composer-host-bg\)/)
+    expect(shellMatch[1]).not.toMatch(/rgba\(13,13,13/)
+
+    expect(composerMatch).not.toBeNull()
+    expect(composerMatch[1]).toMatch(/background:\s*var\(--theme-panel-bg\)/)
+    expect(composerMatch[1]).toMatch(/border:\s*1px solid var\(--theme-panel-border\)/)
+    expect(composerMatch[1]).toMatch(/box-shadow:\s*0 10px 30px var\(--theme-panel-shadow\)/)
+    expect(composerMatch[1]).not.toMatch(/rgba\(13,13,13/)
   })
 
   it('disables both run buttons for an empty command and enables them once input is present', async () => {

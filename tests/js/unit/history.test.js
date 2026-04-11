@@ -245,6 +245,53 @@ describe('command history hydration', () => {
     expect(chips[2].querySelector('span:last-child')?.textContent).toBe('three')
     expect(chips[3].textContent).toBe('+ more')
   })
+
+  it('drops one more desktop chip if the overflow chip itself wraps', () => {
+    document.body.innerHTML = `
+      <div id="history-row"><span class="history-label">Recent:</span></div>
+      <input id="cmd" />
+      <div id="history-panel"></div>
+    `
+
+    const helpers = fromDomScripts([
+      'app/static/js/history.js',
+    ], {
+      document,
+      localStorage: new MemoryStorage(),
+      APP_CONFIG: { recent_commands_limit: 8 },
+      histRow: document.getElementById('history-row'),
+      cmdInput: document.getElementById('cmd'),
+      historyPanel: document.getElementById('history-panel'),
+      refreshHistoryPanel: vi.fn(),
+      useMobileTerminalViewportMode: () => false,
+    }, `({
+      hydrateCmdHistory,
+    })`)
+
+    const originalRect = window.HTMLElement.prototype.getBoundingClientRect
+    window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
+      if (!this.classList?.contains('hist-chip')) return { top: 0 }
+      const regularChipCount = document.querySelectorAll('.hist-chip:not(.hist-chip-overflow)').length
+      if (this.classList.contains('hist-chip-overflow')) {
+        return { top: regularChipCount > 2 ? 26 : 10 }
+      }
+      return { top: this.textContent === '☆four' ? 26 : 10 }
+    }
+
+    try {
+      helpers.hydrateCmdHistory([
+        { command: 'one' },
+        { command: 'two' },
+        { command: 'three' },
+        { command: 'four' },
+      ])
+
+      const visibleChips = [...document.querySelectorAll('.hist-chip')]
+      expect(visibleChips.map(chip => chip.textContent)).toEqual(['☆one', '☆two', '+ more'])
+    } finally {
+      window.HTMLElement.prototype.getBoundingClientRect = originalRect
+    }
+  })
 })
 
 describe('history panel actions', () => {

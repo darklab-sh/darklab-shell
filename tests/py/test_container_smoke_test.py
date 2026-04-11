@@ -155,6 +155,53 @@ def test_parse_compose_port_output(output: str, expected: int | None) -> None:
     assert _parse_compose_port_output(output) == expected
 
 
+def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyPatch) -> None:
+    class _FakeResponse:
+        def __init__(self, lines: list[str]):
+            self._lines = [line.encode("utf-8") for line in lines]
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def readline(self):
+            if not self._lines:
+                return b""
+            return self._lines.pop(0)
+
+    killed: list[tuple[str, str]] = []
+
+    def _fake_urlopen(req, timeout=0):
+        del timeout
+        assert req.full_url == "http://example.test/run"
+        return _FakeResponse([
+            'data: {"type":"started","run_id":"run-123"}\n',
+            'data: {"type":"output","text":"Current nuclei version\\n"}\n',
+            'data: {"type":"exit","code":0}\n',
+        ])
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_post_kill",
+        lambda base_url, run_id: killed.append((base_url, run_id)),
+    )
+
+    events, killed_early = _post_run(
+        "http://example.test",
+        "nuclei -u https://ip.darklab.sh -t network/",
+        "session-123",
+        timeout=10,
+        stop_text=["Current nuclei version"],
+    )
+
+    assert killed_early is True
+    assert [event["type"] for event in events] == ["started", "output"]
+    assert killed == [("http://example.test", "run-123")]
+
+
 def _load_autocomplete_commands() -> list[str]:
     commands: list[str] = []
     for raw_line in COMMANDS_FILE.read_text().splitlines():
