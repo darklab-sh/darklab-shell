@@ -317,6 +317,9 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
     await expect(page.locator('.status-pill').filter({ hasNotText: 'RUNNING' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('#mobile-run-btn')).toBeDisabled()
+
+    await page.locator('#mobile-cmd').fill('hostname')
     await expect(page.locator('#mobile-run-btn')).toBeEnabled()
   })
 
