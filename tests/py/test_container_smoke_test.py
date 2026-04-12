@@ -284,6 +284,13 @@ def _load_cases() -> list[dict[str, object]]:
     return cases
 
 
+def _selected_commands_from_env() -> list[str]:
+    raw = os.environ.get("RUN_CONTAINER_SMOKE_TEST_COMMANDS", "")
+    if not raw.strip():
+        return []
+    return [line.strip() for line in raw.splitlines() if line.strip()]
+
+
 def _assert_contains(actual: list[str], expected: list[str], command: str) -> None:
     text = "\n".join(actual)
     for snippet in expected:
@@ -552,7 +559,18 @@ def container_smoke_test_session_id() -> str:
     return f"container-smoke-test-{uuid.uuid4().hex}"
 
 
+_SELECTED_COMMANDS = _selected_commands_from_env()
 SMOKE_TEST_CASES = _load_cases()
+if _SELECTED_COMMANDS:
+    SMOKE_TEST_CASES = [
+        case for case in SMOKE_TEST_CASES
+        if str(case["command"]) in set(_SELECTED_COMMANDS)
+    ]
+    if not SMOKE_TEST_CASES:
+        raise RuntimeError(
+            "RUN_CONTAINER_SMOKE_TEST_COMMANDS did not match any smoke-test commands: "
+            + ", ".join(_SELECTED_COMMANDS)
+        )
 
 
 def test_container_smoke_test_startup(container_smoke_test):

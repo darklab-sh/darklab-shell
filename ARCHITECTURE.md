@@ -659,7 +659,7 @@ The goal is to keep local inspection easy while still having a container-image-s
 
 In GitLab CI, the `dependency-version-check` job is exposed as a manual run in pipelines and stores the output as a short-lived artifact, which makes it easy to spot stale base images or pinned Python packages during routine maintenance.
 
-After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads `examples/docker-compose.standalone.yml`, resolves build paths, builds a unique base image with `docker build --pull`, creates a temporary runtime container from that image, copies the repo `app/` tree plus a generated `config.local.yaml` into `/app`, commits that as a runtime image, and writes a temporary compose file that runs the committed image with no client-side bind mounts. It then starts the service with `docker compose up -d`, discovers the real published host port with `docker compose port`, waits for `/health`, and submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. Focused unit regressions in the same module verify `_docker_reach_host()` and compose-port parsing so DinD jobs keep probing the daemon host and the actual published port instead of hard-coding `127.0.0.1` or guessing a free localhost port from the wrong namespace. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
+After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads the root `docker-compose.yml`, resolves build paths, builds a unique base image with `docker build --pull`, creates a temporary runtime container from that image, copies the repo `app/` tree plus a generated `config.local.yaml` into `/app`, commits that as a runtime image, and writes a temporary compose file that runs the committed image with no client-side bind mounts. That generated compose also strips fixed `container_name` values so locally running stacks do not collide with the test Redis or shell services. The wrapper performs a startup gate first and stops immediately if build, compose startup, or health checks fail; only then does the fixture start the full command corpus. It discovers the real published host port with `docker compose port`, waits for `/health`, and submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. Focused unit regressions in the same module verify `_docker_reach_host()`, compose-port parsing, and the early-kill contract so DinD jobs keep probing the daemon host, the actual published port, and the stop-on-expected-output path instead of hard-coding `127.0.0.1` or guessing a free localhost port from the wrong namespace. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
 
 GitLab CI mirrors that same smoke test in the `container-smoke-test` job, which is exposed as a manual run in pipelines when you want to verify a fresh image before merging dependency or Dockerfile changes.
 
@@ -711,10 +711,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals:
 
-- `pytest`: 784
+- `pytest`: 785
 - `vitest`: 289
 - `playwright`: 138
-- total: 1,211
+- total: 1,212
 
 ### Testing Architecture
 
@@ -794,9 +794,10 @@ Active process tracking (`run_id → pid`) was previously a third table (`active
 
 ## Infrastructure Notes (darklab.sh specific)
 
-The production `docker-compose.yml` includes:
-- `nginx-proxy` + `acme-companion` for SSL termination via `VIRTUAL_HOST` / `LETSENCRYPT_HOST`
-- GELF logging to Graylog via UDP
-- External Docker network `darklab-net`
+The root `docker-compose.yml` is the standalone deployment base:
+- `shell` + `redis`
+- health checks
+- tmpfs mounts
+- `init: true`
 
-None of these are required to run the app. The `examples/docker-compose.standalone.yml` strips all of this out for a clean standalone deployment.
+Optional deployment-specific logging is layered on with overrides such as `examples/docker-compose.gelf.yml`, rather than being baked into the base compose.

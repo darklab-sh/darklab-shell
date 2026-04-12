@@ -149,8 +149,17 @@ test.describe('output follow helper', () => {
 
     await expect(followBtn).toBeHidden()
     await page.waitForFunction(() => {
-      const out = document.querySelector('.tab-panel.active .output')
-      return !!out && out.scrollHeight > out.clientHeight + 50
+      const out = getOutput(activeTabId)
+      const tab = getTab(activeTabId)
+      const pending = typeof _pendingOutputBatches !== 'undefined'
+        ? _pendingOutputBatches.get(activeTabId)
+        : null
+      return !!out
+        && !!tab
+        && Array.isArray(tab.rawLines)
+        && tab.rawLines.length === 600
+        && (!pending || (!pending.scheduled && pending.items.length === 0))
+        && out.scrollHeight > out.clientHeight + 50
     })
 
     await page.evaluate(() => {
