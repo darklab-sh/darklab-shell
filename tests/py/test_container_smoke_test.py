@@ -445,12 +445,12 @@ def container_smoke_test():
         pytest.skip("set RUN_CONTAINER_SMOKE_TEST=1 to run the container smoke suite")
     _require_docker()
 
-    image_tag = f"shell-darklab-test:{uuid.uuid4().hex[:12]}"
-    runtime_image_tag = f"shell-darklab-test-runtime:{uuid.uuid4().hex[:12]}"
-    project = f"shell-darklab-test-{uuid.uuid4().hex[:8]}"
+    image_tag = f"darklab-shell-test:{uuid.uuid4().hex[:12]}"
+    runtime_image_tag = f"darklab-shell-test-runtime:{uuid.uuid4().hex[:12]}"
+    project = f"darklab-shell-test-{uuid.uuid4().hex[:8]}"
     reach_host = _docker_reach_host()
 
-    STANDALONE_COMPOSE = ROOT / "examples" / "docker-compose.standalone.yml"
+    STANDALONE_COMPOSE = ROOT / "docker-compose.yml"
 
     with tempfile.TemporaryDirectory() as tmp:
         tmp_path = Path(tmp)
@@ -463,9 +463,9 @@ def container_smoke_test():
             "command_timeout_seconds: 120\n"
         )
 
-        runtime_container_name = f"shell-darklab-test-runtime-{uuid.uuid4().hex[:12]}"
+        runtime_container_name = f"darklab-shell-test-runtime-{uuid.uuid4().hex[:12]}"
 
-        # Load the standalone compose file and apply test-specific overrides:
+        # Load the base compose file and apply test-specific overrides:
         # - unique image tag so the build doesn't overwrite the dev image
         # - remove runtime bind mounts that rely on the daemon sharing the
         #   client's filesystem (DinD does not); instead we stream the app tree
@@ -474,16 +474,18 @@ def container_smoke_test():
         #   guess a free port in the wrong network namespace
         compose_cfg = yaml.safe_load(STANDALONE_COMPOSE.read_text())
         compose_base = STANDALONE_COMPOSE.parent.resolve()
+        for service_cfg in compose_cfg.get("services", {}).values():
+            if isinstance(service_cfg, dict):
+                service_cfg.pop("container_name", None)
         shell = compose_cfg["services"]["shell"]
         build_cfg = shell.get("build", {})
-        build_context = compose_base / ".."
+        build_context = compose_base
         dockerfile_path = build_context / "Dockerfile"
         if isinstance(build_cfg, dict):
             if "context" in build_cfg:
                 build_context = (compose_base / str(build_cfg["context"])).resolve()
             if "dockerfile" in build_cfg:
                 dockerfile_path = (build_context / str(build_cfg["dockerfile"])).resolve()
-        shell.pop("container_name", None)
         shell.pop("build", None)
         shell["image"] = runtime_image_tag
         shell["ports"] = ["8888"]
@@ -551,6 +553,10 @@ def container_smoke_test_session_id() -> str:
 
 
 SMOKE_TEST_CASES = _load_cases()
+
+
+def test_container_smoke_test_startup(container_smoke_test):
+    assert container_smoke_test.startswith("http://")
 
 
 @pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))

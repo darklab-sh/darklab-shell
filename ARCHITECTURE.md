@@ -36,27 +36,27 @@ At a mid to high level, darklab shell works like this:
 ## Logical Components
 
 ```mermaid
-flowchart LR
+flowchart TB
   Browser["Browser"]
 
   subgraph Frontend["Frontend"]
     ShellUI["Terminal UI"]
-    Composer["composerState + input helpers"]
-    ClientModules["tabs / output / history / search / autocomplete / welcome / runner"]
+    Composer["composerState"]
+    ClientModules["client modules"]
   end
 
   subgraph Docker["Docker Runtime"]
     subgraph Backend["Backend"]
       Flask["Flask + Gunicorn"]
-      Content["content / assets / history / run blueprints"]
-      CommandLayer["commands.py + fake_commands.py"]
+      Content["blueprints"]
+      CommandLayer["command layer"]
     end
 
     subgraph Services["Runtime Services"]
       Redis["Redis"]
       SQLite["SQLite"]
       Artifacts["Artifact files"]
-      Scanner["scanner subprocesses"]
+      Scanner["Scanner subprocesses"]
     end
   end
 
@@ -83,18 +83,18 @@ This diagram is meant to answer the “what talks to what?” question quickly:
 ## Runtime Topology
 
 ```mermaid
-flowchart LR
+flowchart TB
   Browser["Browser UI"]
   Flask["Flask + Gunicorn"]
   Redis["Redis"]
   SQLite["SQLite"]
-  Artifacts["Run Output Artifacts"]
-  Scanner["scanner subprocesses"]
+  Artifacts["Artifacts"]
+  Scanner["Scanner subprocesses"]
 
-  Browser -->|GET /, /config, /themes, /faq, /autocomplete, /welcome*| Flask
-  Browser -->|POST /run + SSE stream| Flask
+  Browser -->|bootstrap reads| Flask
+  Browser -->|/run SSE| Flask
   Browser -->|POST /kill| Flask
-  Browser -->|GET /history, /share, /diag| Flask
+  Browser -->|history/share/diag| Flask
 
   Flask <--> Redis
   Flask <--> SQLite
@@ -146,27 +146,34 @@ That split is reflected directly in the blueprint structure.
 
 ```mermaid
 flowchart TD
-  Session["session.js"]
-  State["state.js"]
-  Utils["utils.js"]
-  Config["config.js"]
-  DOM["dom.js"]
-  UI["ui_helpers.js"]
-  Tabs["tabs.js"]
-  Output["output.js"]
-  Search["search.js"]
-  Auto["autocomplete.js"]
-  History["history.js"]
-  Welcome["welcome.js"]
-  Runner["runner.js"]
-  App["app.js"]
+  subgraph Foundations["Foundations"]
+    Session["session.js"]
+    State["state.js"]
+    Utils["utils.js"]
+    Config["config.js"]
+    DOM["dom.js"]
+    UI["ui_helpers.js"]
+    App["app.js"]
+  end
+
+  subgraph Features["Feature Modules"]
+    Tabs["tabs.js"]
+    Output["output.js"]
+    Search["search.js"]
+    Auto["autocomplete.js"]
+    History["history.js"]
+    Welcome["welcome.js"]
+    Runner["runner.js"]
+  end
+
   Controller["controller.js"]
 
   Session --> State
   State --> UI
   Utils --> UI
-  Config --> Controller
   DOM --> UI
+  Config --> Controller
+  App --> Controller
   UI --> Tabs
   UI --> History
   UI --> Runner
@@ -177,7 +184,6 @@ flowchart TD
   History --> Controller
   Welcome --> Controller
   Runner --> Controller
-  App --> Controller
 ```
 
 This is still a classic-script frontend, not an ES-module app. The architecture relies on a deliberate load order:
@@ -192,13 +198,13 @@ The important recent architectural change is that prompt ownership now lives in 
 ## Persistence Model
 
 ```mermaid
-flowchart LR
+flowchart TB
   Runs["runs table"]
   Snapshots["snapshots table"]
-  ArtifactRows["run_output_artifacts table"]
+  ArtifactRows["artifact rows"]
   Files["gzip full-output files"]
 
-  Runs -->|history drawer + run restore| Hist["History UI"]
+  Runs -->|history + restore| Hist["History UI"]
   Runs -->|canonical permalink| RunPage["/history/:id"]
   Snapshots -->|snapshot permalink| SharePage["/share/:id"]
   ArtifactRows --> Files
@@ -213,35 +219,58 @@ The persistence model is intentionally split:
 
 That split is what allows the app to keep the interactive shell fast while still supporting durable full-output permalinks and exports.
 
-The Python backend is split into focused modules with acyclic dependencies:
+The Python backend is split into focused layers with acyclic dependencies:
 
-```
-config.py        — CFG defaults, SCANNER_PREFIX (no app dependencies)
-    ↑
-logging_setup.py — GELFFormatter, _TextFormatter, configure_logging(cfg)
-    ↑
-helpers.py     — trusted-proxy IP resolver, session-ID extractor
-database.py    — SQLite connect/init/prune
-process.py     — Redis setup, pid_register/pid_pop
-permalinks.py  — Flask context/render helpers for permalink pages
-templates/     — Jinja templates for the main shell and permalink pages
-run_output_store.py — preview/full-output capture and artifact helpers
-export_html.js — shared browser-side HTML export helpers for tab downloads and permalink save HTML
-    ↑
-extensions.py  — Flask-Limiter singleton (limiter.init_app deferred to app.py)
-    ↑
-blueprints/
-  assets.py    — /vendor/*, /favicon.ico, /health, /diag (IP-gated)
-  content.py   — /, /config, /themes, /faq, /autocomplete, /welcome*
-  run.py       — /run (rate-limited SSE), /kill; run-output capture helpers
-  history.py   — /history*, /share*; preview-output shaping helpers
-    ↑
-app.py         — Flask factory: logging setup, limiter.init_app(app),
-                 blueprint registration, before/after-request hooks, 429 handler
+```mermaid
+flowchart TB
+  Config["config.py"]
+  Logging["logging_setup.py"]
 
-commands.py    — Command validation and rewrites (no CFG dependency, standalone)
-fake_commands.py — Synthetic shell helpers for /run
+  subgraph Infra["Infrastructure + Shared Helpers"]
+    Helpers["helpers.py"]
+    Database["database.py"]
+    Process["process.py"]
+    Permalinks["permalinks.py"]
+    OutputStore["run_output_store.py"]
+    Extensions["extensions.py"]
+  end
+
+  subgraph Commands["Command Layer"]
+    CommandRules["commands.py"]
+    FakeCommands["fake_commands.py"]
+  end
+
+  subgraph Blueprints["Blueprints"]
+    Assets["assets.py"]
+    Content["content.py"]
+    Run["run.py"]
+    History["history.py"]
+  end
+
+  App["app.py"]
+
+  Config --> Logging
+  Logging --> Helpers
+  Logging --> Database
+  Logging --> Process
+  Logging --> Permalinks
+  Logging --> OutputStore
+  Extensions --> Blueprints
+  Helpers --> Blueprints
+  Database --> Blueprints
+  Process --> Blueprints
+  Permalinks --> Blueprints
+  OutputStore --> Blueprints
+  CommandRules --> Run
+  FakeCommands --> Run
+  Blueprints --> App
 ```
+
+- `config.py` is the root configuration/theme layer and stays free of Flask app dependencies.
+- `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
+- The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
+- `commands.py` and `fake_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
+- The blueprint layer owns the actual HTTP surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
 `commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. Each blueprint imports by name from the modules it depends on (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
 

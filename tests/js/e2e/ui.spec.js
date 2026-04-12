@@ -88,7 +88,7 @@ test.describe('FAQ modal', () => {
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
-    await expect(page.locator('.faq-a a[href*="darklab.sh#darklab-shell"]').first()).toBeVisible()
+    await expect(page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first()).toBeVisible()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
   })
 })

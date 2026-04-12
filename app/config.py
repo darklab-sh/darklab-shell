@@ -57,7 +57,7 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab shell",
-        "project_readme":             "https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell",
+        "project_readme":             "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell",
         "prompt_prefix":              "anon@darklab:~$",
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",

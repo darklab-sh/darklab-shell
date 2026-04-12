@@ -138,52 +138,6 @@ Every permalink page (`/history/<run_id>` and `/share/<id>`) and downloaded HTML
 - CSS theme-override block updated so `#diag-btn` follows `--theme-toolbar-button-*` variables like all other header buttons.
 - 7 new pytest tests: 4 in `TestConfigRoute` (diag_enabled true/false/X-Forwarded-For isolation), 3 in `TestDiagRoute` (DIAG_VIEWED log, HTML content, `?format=json` content-type); existing denied-log test extended to assert `allowed_cidrs` field.
 
-### Documentation And Test Follow-Through
-
-- Updated `README.md` project structure tree: `app.py` corrected to thin-factory description, `blueprints/` subtree added with all four blueprint files, `helpers.py` and `extensions.py` added, `config.py` notes theme registry.
-- Updated `README.md` test tree: added `test_backend_modules.py` and `test_container_smoke_test.py` to the pytest section; expanded Vitest section from 4 to 11 test files (`tabs`, `search`, `welcome`, `autocomplete`, `session`, `config`, `utils`).
-- `ARCHITECTURE.md` verified up-to-date: blueprint diagram, helpers.py/extensions.py, state.js/ui_helpers.js split, controller.js load order, trusted proxy, theme system, and test strategy sections all accurate.
-- `tests/README.md` suite inventory and counts already updated in earlier session work.
-
-### Content / Presentation Separation
-
-- Replaced the three inline `style="color:var(--...)"` attributes and the `<ul style="...">` layout attribute in the built-in FAQ `answer_html` entries with CSS classes (`.faq-link` for green documentation links, `.faq-kill-verb` for the red Kill label). The keyboard-shortcuts `<ul>` inline style was removed entirely; the existing `.faq-a ul` rule already handles list layout.
-- Replaced the 30-way `if/elif` chain in `execute_fake_command()` with a module-level `_FAKE_COMMAND_DISPATCH` dict of lambdas normalised to `(cmd, sid) -> list[dict]`. The public function body is four lines; adding a new helper requires one dict entry.
-- Reviewed all other config/content surfaces (help text, shortcuts output, MOTD renderer, operator-editable YAML assets, FAQ limits builder): no inline styles or presentation mixing found.
-
-### Backend Route Decomposition
-
-`app/app.py` has been split into Flask Blueprints under `app/blueprints/`: `assets.py` (vendor assets, favicon, health check), `content.py` (index, config, themes, FAQ, autocomplete, welcome), `run.py` (execution and kill with run-output helpers), and `history.py` (history and share with preview-output helpers). Shared per-request utilities live in `app/helpers.py` (trusted-proxy IP resolution, session-ID extraction) and the Flask-Limiter singleton in `app/extensions.py`. `app/app.py` is now a thin factory. All route behavior, response formats, status codes, rate limits, and SSE streaming are unchanged. Route test patches were updated to target blueprint namespaces.
-
-### Frontend Controller Split
-
-`app/static/js/app.js` now keeps the shared UI helpers, while the page bootstrap, config loading, top-level button wiring, search/history/FAQ orchestration, and mobile composer setup live in `app/static/js/controller.js`. The browser template and JS unit loader both load the controller after `app.js` so the classic-script globals stay intact. The controller split keeps the welcome flow, mobile keyboard handling, overlay open/close behavior, FAQ loading, and command-chip behavior stable.
-
-Validation:
-- `python3 -m pytest tests/py/test_routes.py -q`
-- `npx vitest run tests/js/unit/app.test.js`
-- `npx vitest run tests/js/unit/runner.test.js`
-- `npx vitest run tests/js/unit/*.test.js`
-
-### Global-State And Script-Order Coupling
-
-`app/static/js/state.js` now owns the shared store boundary and explicit accessors for tabs and active-tab state, while DOM-facing helpers moved into `app/static/js/ui_helpers.js`. The browser template loads `ui_helpers.js` immediately after `dom.js`, and `tests/js/unit/helpers/extract.js` mirrors that order so the jsdom harness sees the same classic-script globals as production. That keeps the non-module browser architecture intact while reducing the number of implicit dependencies on script order.
-
-Validation:
-- `python3 -m pytest tests/js/unit/app.test.js tests/js/unit/tabs.test.js tests/js/unit/runner.test.js -q`
-- `npx vitest run tests/js/unit/*.test.js`
-- `node --check app/static/js/state.js`
-- `node --check app/static/js/ui_helpers.js`
-- `node --check tests/js/unit/helpers/extract.js`
-
-### DOM Construction And Template Cleanup
-
-The repeated `innerHTML` fragments in `app/static/js/history.js`, `app/static/js/tabs.js`, and the FAQ limits / allowed-command sections in `app/static/js/app.js` now use direct DOM construction instead of stitched HTML strings. The browser template also uses class-based modal and hidden-state wrappers for the shell chrome, which removes the remaining avoidable inline layout styles without changing labels, copy, or accessibility behavior.
-
-Validation:
-- `npx vitest run tests/js/unit/app.test.js tests/js/unit/history.test.js tests/js/unit/tabs.test.js`
-- `npx vitest run tests/js/unit/*.test.js`
-
 ### Search Highlighting Hardening
 
 `app/static/js/search.js` now highlights matches by walking text nodes and cloning the line structure instead of rewriting serialized `innerHTML`. That keeps mixed-content lines intact, preserves prompt/helper markup, and still supports plain-text search, regex mode, case sensitivity, current-match navigation, and scroll-into-view.
@@ -209,8 +163,6 @@ Theme resolution follows the documented order:
 3. baked-in dark fallback palette
 
 Mobile uses the same selector with a full-screen chooser and a two-column preview layout on wider phones. The theme examples in `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are copyable templates only; the runtime selector reads the registry in `app/conf/themes/`.
-
----
 
 ### Shell-Style Input Refactor
 

@@ -18,8 +18,8 @@
 # app_name: "darklab shell"
 
 # URL to the project README shown in the built-in FAQ and synthetic README links.
-# Server default if unset: https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell
-# project_readme: "https://gitlab.com/darklab.sh/shell.darklab.sh#darklab-shell"
+# Server default if unset: https://gitlab.com/darklab.sh/darklab-shell#darklab-shell
+# project_readme: "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"
 
 # Prompt prefix shown at the start of the terminal prompt and welcome samples.
 # Server default if unset: "anon@darklab:~$"

@@ -27,8 +27,15 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 mkdir -p "$ROOT_DIR/test-results"
 
+env RUN_CONTAINER_SMOKE_TEST=1 python3 -m pytest \
+    "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
+    --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
+    -v -s \
+    -k "test_container_smoke_test_startup"
+
 exec env RUN_CONTAINER_SMOKE_TEST=1 python3 -m pytest \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
     --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
     -v -s \
+    -k "not test_container_smoke_test_startup" \
     "$@"
