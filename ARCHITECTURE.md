@@ -800,4 +800,11 @@ The root `docker-compose.yml` is the standalone deployment base:
 - tmpfs mounts
 - `init: true`
 
-Optional deployment-specific logging is layered on with overrides such as `examples/docker-compose.gelf.yml`, rather than being baked into the base compose.
+The entrypoint reads Gunicorn runtime sizing from environment variables instead of hard-coding operator tuning into the shell script:
+
+- `WEB_CONCURRENCY` for worker count
+- `WEB_THREADS` for threads per worker
+
+These stay optional and fall back to the current defaults when unset, which keeps runtime tuning in `.env` / Compose rather than requiring entrypoint edits.
+
+Optional production-specific deployment behavior is layered on with overrides such as `examples/docker-compose.prod.yml`. That override removes host port publishing, switches the shell service to `expose`, joins the external `darklab-net` network, adds the `VIRTUAL_HOST` / `LETSENCRYPT_HOST` environment variables for `nginx-proxy`, pins production-specific container names for `shell` and `redis`, and enables Docker GELF transport for both containers without forcing any of that behavior into the standalone base compose.

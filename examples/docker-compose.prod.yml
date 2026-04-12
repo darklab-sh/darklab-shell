@@ -1,0 +1,30 @@
+# Optional production Docker Compose override.
+# Use with the root compose file, for example:
+#   docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up -d
+# This file is not a complete stack on its own.
+services:
+  shell:
+    container_name: shell.darklab.sh
+    ports: !reset []
+    expose:
+      - "${APP_PORT:-8888}"
+    environment:
+      - WEB_CONCURRENCY=${WEB_CONCURRENCY:-8}
+      - WEB_THREADS=${WEB_THREADS:-4}
+      - VIRTUAL_HOST=shell.darklab.sh
+      - LETSENCRYPT_HOST=shell.darklab.sh
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
+  redis:
+    container_name: redis-shell.darklab.sh
+    logging:
+      driver: gelf
+      options:
+        gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
+
+networks:
+  default:
+    external: true
+    name: darklab-net

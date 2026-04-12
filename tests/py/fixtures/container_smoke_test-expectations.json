@@ -644,7 +644,7 @@
       "exit_code": 0,
       "command": "nc -zv ip.darklab.sh 80",
       "expected_text": [
-        "ip.darklab.sh"
+        "open"
       ]
     },
     {
@@ -652,7 +652,7 @@
       "exit_code": 0,
       "command": "nc -zv ip.darklab.sh 443 80",
       "expected_text": [
-        "ip.darklab.sh"
+        "open"
       ]
     },
     {

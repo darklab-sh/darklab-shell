@@ -100,7 +100,7 @@ See [Feature Details](#feature-details) for the full grouped capability list.
 │           ├── welcome.spec.js # welcome animation/browser interaction coverage
 │           └── tabs.spec.js     # Tab lifecycle, rename, reorder, and new-tab behaviour
 ├── examples/
-│   ├── docker-compose.gelf.yml  # Optional Docker Compose override for GELF container logging
+│   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
 │   └── run_local.sh             # Script to run without Docker using Python directly
 ├── data/                       # Writable volume — SQLite database (auto-created)
 │   └── history.db              #   stores run history and tab snapshots
@@ -196,14 +196,23 @@ The repo includes a root [`.env`](.env) file with:
 
 ```env
 APP_PORT=8888
+# WEB_CONCURRENCY=4
+# WEB_THREADS=4
 ```
 
 To run on a different port, edit [`.env`](.env) first, then start Compose again. That single value propagates through the Dockerfile `EXPOSE`, Gunicorn bind address, iptables rule, healthcheck, and published port.
 
-If you want Docker container logs to use GELF, set `DOCKER_GELF_ADDRESS` in [`.env`](.env), uncomment `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml), and start Compose with the optional override:
+The same file is also the operator-facing place to tune Gunicorn runtime sizing:
+
+- `WEB_CONCURRENCY` controls the number of Gunicorn worker processes
+- `WEB_THREADS` controls the number of threads per worker
+
+If they are unset, the entrypoint defaults remain `4` workers and `4` threads.
+
+If you want the stack to run in a proxy-aware production layout, use the optional production override. It removes the host port binding from the shell service, switches it to `expose`, adds the `VIRTUAL_HOST` / `LETSENCRYPT_HOST` environment variables for `nginx-proxy`, joins the external `darklab-net` Docker network, assigns production-specific container names to `shell` and `redis`, and enables Docker GELF transport for both containers. Set `DOCKER_GELF_ADDRESS` in [`.env`](.env), set `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml), and start Compose with:
 
 ```bash
-docker compose -f docker-compose.yml -f examples/docker-compose.gelf.yml up --build
+docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
 ```
 
 When config changes take effect in Docker:
@@ -261,20 +270,32 @@ If no data arrives from the server for 45 seconds (more than twice the heartbeat
 
 The tab is reset to an error state so you can run another command. The original command continues running server-side and its result will appear in the history panel once it finishes.
 
-#### GELF Logging
+#### Production Override
 
-The base [docker-compose.yml](docker-compose.yml) does not force a Docker logging driver. If you want GELF logging end-to-end, there are two separate pieces to enable:
+The base [docker-compose.yml](docker-compose.yml) is the standalone/local deployment shape. The optional production override at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) layers in deployment-specific behavior:
 
 1. Docker container log transport:
-   - use the optional override at [examples/docker-compose.gelf.yml](examples/docker-compose.gelf.yml)
-   - set `DOCKER_GELF_ADDRESS` in [`.env`](.env)
-2. Application log format:
-   - set `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
+   - enables the Docker `gelf` log driver for both `shell` and `redis`
+   - reads `DOCKER_GELF_ADDRESS` from [`.env`](.env)
+2. Reverse-proxy-aware environment:
+   - sets `VIRTUAL_HOST`
+   - sets `LETSENCRYPT_HOST`
+3. Network model:
+   - removes the host `ports:` binding from the base file
+   - switches the app to `expose:`
+   - joins the external Docker network `darklab-net`
+4. Production naming:
+   - pins `container_name: shell.darklab.sh`
+   - pins `container_name: redis-shell.darklab.sh`
+5. Application log format:
+   - still requires `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
+6. Optional runtime sizing:
+   - `WEB_CONCURRENCY` and `WEB_THREADS` can be set in [`.env`](.env) so operators can tune Gunicorn without editing `entrypoint.sh`
 
-Then start Compose with the override:
+Start Compose with the production override:
 
 ```bash
-docker compose -f docker-compose.yml -f examples/docker-compose.gelf.yml up --build
+docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
 ```
 
 #### Redis
@@ -524,15 +545,17 @@ Log level and format are configured in `config.yaml` and take effect after `dock
 
 ### GELF back-end integration
 
-Container-level GELF transport and application-level GELF formatting are configured separately:
+The production override and application log format are configured separately:
 
-- Docker transport:
-  - use [examples/docker-compose.gelf.yml](examples/docker-compose.gelf.yml)
+- Production Docker override:
+  - use [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml)
   - set `DOCKER_GELF_ADDRESS` in [`.env`](.env)
+  - make sure the external Docker network `darklab-net` exists
+  - the override also sets `VIRTUAL_HOST` and `LETSENCRYPT_HOST`, replaces the base `ports:` binding with `expose:`, assigns production-specific container names, and enables GELF transport for both `shell` and `redis`
 - App log formatting:
   - set `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
 
-Without the Compose override, Docker uses its default log driver. Without `log_format: gelf`, the application still emits plain `text` logs even if Docker is shipping container stdout to a GELF endpoint.
+Without the production override, Docker uses its default log driver and the app keeps its standalone/local host-port binding. Without `log_format: gelf`, the application still emits plain `text` logs even if Docker is shipping container stdout to a GELF endpoint.
 
 ---
 
