@@ -12,7 +12,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from commands import command_root, load_allowed_commands
 from config import APP_VERSION, CFG, THEME_REGISTRY_MAP, get_theme_entry
 from database import db_connect
-from helpers import ip_is_in_cidrs
+from helpers import get_client_ip, ip_is_in_cidrs
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -109,10 +109,10 @@ def health():
 def diag():
     """Operator diagnostics endpoint.
 
-    Returns 404 unless the direct peer IP falls within diagnostics_allowed_cidrs.
-    Uses request.remote_addr (not the resolved X-Forwarded-For client IP) so
-    access is limited to requests whose TCP connection originates from an
-    allowed address — e.g. inside the Docker network or via docker exec.
+    Returns 404 unless the resolved client IP falls within
+    diagnostics_allowed_cidrs. The client IP is resolved through the shared
+    trusted-proxy path, so X-Forwarded-For is only honored when the direct
+    peer IP is in trusted_proxy_cidrs.
 
     Enable in config.local.yaml:
         diagnostics_allowed_cidrs:
@@ -120,9 +120,9 @@ def diag():
           - "172.16.0.0/12"
     """
     allowed_cidrs = CFG.get("diagnostics_allowed_cidrs") or []
-    peer_ip = request.remote_addr or ""
-    if not ip_is_in_cidrs(peer_ip, allowed_cidrs):
-        log.warning("DIAG_DENIED", extra={"ip": peer_ip, "allowed_cidrs": allowed_cidrs})
+    client_ip = get_client_ip()
+    if not ip_is_in_cidrs(client_ip, allowed_cidrs):
+        log.warning("DIAG_DENIED", extra={"ip": client_ip, "allowed_cidrs": allowed_cidrs})
         abort(404)
 
     result: dict = {}
@@ -253,7 +253,7 @@ def diag():
     missing = sorted(r for r in roots if not shutil.which(r))
     result["tools"] = {"present": present, "missing": missing}
 
-    log.info("DIAG_VIEWED", extra={"ip": peer_ip})
+    log.info("DIAG_VIEWED", extra={"ip": client_ip})
 
     if request.args.get("format") == "json":
         return jsonify(result)

@@ -490,7 +490,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
-| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the direct TCP peer IP (`request.remote_addr`), not `X-Forwarded-For`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
+| `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
 | `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips below the input |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
@@ -1101,7 +1101,7 @@ diagnostics_allowed_cidrs:
   - "172.16.0.0/12"   # Docker bridge networks
 ```
 
-Access is checked against the direct TCP peer IP (`request.remote_addr`) — `X-Forwarded-For` headers are ignored regardless of `trusted_proxy_cidrs`, so the gate cannot be bypassed by spoofing forwarded headers. The page returns 404 for all other requests. Denied access is logged as `DIAG_DENIED` with the peer IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
+Access is checked against the resolved client IP, using the same trusted-proxy path as logging and rate limiting. `X-Forwarded-For` is only honored when the direct peer IP is inside `trusted_proxy_cidrs`; otherwise the app falls back to the direct peer IP and logs `UNTRUSTED_PROXY` when a forwarded header was supplied. The page returns 404 for all other requests. Denied access is logged as `DIAG_DENIED` with the resolved client IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
 
 When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop header and the mobile menu alongside the other toolbar buttons. It is hidden for all other visitors.
 
@@ -1150,7 +1150,7 @@ curl http://localhost:8888/diag?format=json
 | `POST` | `/kill` | Kills a running process by `run_id` |
 | `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
 | `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}` — 200 if healthy, 503 if degraded. `redis` is `null` when Redis is not configured |
-| `GET` | `/diag` | IP-gated operator diagnostics page — themed HTML summary of app health and usage stats. Returns 404 unless the direct TCP peer IP is in `diagnostics_allowed_cidrs`. Add `?format=json` for a JSON response |
+| `GET` | `/diag` | IP-gated operator diagnostics page — themed HTML summary of app health and usage stats. Returns 404 unless the resolved client IP is in `diagnostics_allowed_cidrs`, with forwarded headers only honored from `trusted_proxy_cidrs`. Add `?format=json` for a JSON response |
 
 ---
 
@@ -1220,7 +1220,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **789 pytest + 292 Vitest + 139 Playwright = 1,220 tests**.
+Current totals: **791 pytest + 295 Vitest + 139 Playwright = 1,225 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser

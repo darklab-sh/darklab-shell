@@ -148,7 +148,7 @@ def get_config():
         "welcome_hint_interval_ms": cfg["welcome_hint_interval_ms"],
         "welcome_hint_rotations": cfg["welcome_hint_rotations"],
         "diag_enabled": ip_is_in_cidrs(
-            request.remote_addr or "",
+            get_client_ip(),
             cfg.get("diagnostics_allowed_cidrs") or [],
         ),
     }

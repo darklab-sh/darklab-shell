@@ -82,21 +82,19 @@
 # health and row counts, Redis connectivity, vendor-asset source (built-in vs
 # fallback), and per-tool availability derived from the allowlist.
 #
-# The endpoint returns 404 to all callers unless their direct TCP connection IP
-# falls within one of the CIDRs listed here. It uses request.remote_addr — not
-# the resolved X-Forwarded-For client IP — so X-Forwarded-For headers cannot
-# bypass the gate. Leave the list empty (the default) to keep the endpoint
-# fully hidden.
+# The endpoint returns 404 to all callers unless the resolved client IP falls
+# within one of the CIDRs listed here. Client IP resolution uses the same
+# trusted-proxy rules as the rest of the app: X-Forwarded-For is only honored
+# when the direct peer IP is inside trusted_proxy_cidrs. Leave the list empty
+# (the default) to keep the endpoint fully hidden.
 #
 # Typical values:
 #   172.16.0.0/12  — Docker bridge / overlay networks (recommended for host access)
 #   10.0.0.0/8     — private LAN / VPN range
 #
-# Avoid 127.0.0.1/32: any process inside the container — including commands run
-# via the web shell — connects from 127.0.0.1, so it would pass the gate.
-# Host browser and curl access arrives as the Docker bridge gateway IP
-# (e.g. 172.17.0.1), not as 127.0.0.1, so the bridge range is the right scope.
-# For docker exec access use the container's bridge IP instead of localhost.
+# If you are behind a reverse proxy, also make sure trusted_proxy_cidrs covers
+# that proxy address/range; otherwise forwarded client IPs are ignored and the
+# proxy peer IP is used instead.
 #
 # Server default if unset: [] (disabled)
 # diagnostics_allowed_cidrs:

@@ -711,10 +711,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals:
 
-- `pytest`: 789
-- `vitest`: 292
+- `pytest`: 791
+- `vitest`: 295
 - `playwright`: 139
-- total: 1,220
+- total: 1,225
 
 ### Testing Architecture
 

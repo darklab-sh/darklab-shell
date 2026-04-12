@@ -207,26 +207,32 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
 
-    def test_diag_enabled_false_when_peer_not_in_cidrs(self):
-        # remote_addr is 127.0.0.1; CIDR does not include it
+    def test_diag_enabled_false_when_client_ip_not_in_cidrs(self):
         client = get_client(use_forwarded_for=False)
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
 
-    def test_diag_enabled_true_when_peer_in_cidrs(self):
-        # remote_addr is 127.0.0.1 (Werkzeug default for test client)
+    def test_diag_enabled_true_when_client_ip_in_cidrs(self):
         client = get_client(use_forwarded_for=False)
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is True
 
-    def test_diag_enabled_uses_remote_addr_not_forwarded_for(self):
-        # X-Forwarded-For claims an allowed IP but remote_addr (127.0.0.1) is not in the CIDR
-        client = get_client(use_forwarded_for=True)  # sets X-Forwarded-For to a 203.0.113.x address
+    def test_diag_enabled_uses_trusted_forwarded_for_when_present(self):
+        client = get_client(use_forwarded_for=True)
         with mock.patch.dict("config.CFG", {
             "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
             "trusted_proxy_cidrs": ["127.0.0.1/32"],
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is True
+
+    def test_diag_enabled_ignores_forwarded_for_from_untrusted_peer(self):
+        client = get_client(use_forwarded_for=True)
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+            "trusted_proxy_cidrs": ["10.0.0.0/8"],
         }):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
@@ -407,14 +413,13 @@ class TestDiagRoute:
             resp = client.get("/diag")
         assert resp.status_code == 404
 
-    def test_returns_404_when_peer_ip_not_in_cidrs(self):
-        client = get_client()  # sets X-Forwarded-For but remote_addr is still 127.0.0.1
-        # Use a CIDR that does NOT include 127.0.0.1
+    def test_returns_404_when_client_ip_not_in_cidrs(self):
+        client = get_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
             resp = client.get("/diag")
         assert resp.status_code == 404
 
-    def test_returns_200_when_peer_ip_in_cidrs(self):
+    def test_returns_200_when_client_ip_in_cidrs(self):
         client = self._allowed_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             resp = client.get("/diag")
@@ -497,11 +502,21 @@ class TestDiagRoute:
         for tool in present:
             assert _shutil.which(tool) is not None, f"{tool} in present but not found by which()"
 
-    def test_does_not_honor_forwarded_for_header(self):
-        """X-Forwarded-For must not bypass the peer-IP gate."""
+    def test_honors_forwarded_for_header_from_trusted_proxy(self):
         client = self._allowed_client()
-        # CIDR does NOT include 127.0.0.1, but X-Forwarded-For claims an allowed IP
-        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+        }):
+            resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert resp.status_code == 200
+
+    def test_ignores_forwarded_for_header_from_untrusted_proxy(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+            "trusted_proxy_cidrs": ["192.0.2.0/24"],
+        }):
             resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
         assert resp.status_code == 404
 
