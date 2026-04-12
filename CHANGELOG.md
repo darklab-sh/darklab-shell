@@ -4,7 +4,7 @@ All notable changes to darklab shell are documented here.
 
 ---
 
-## [1.4] — 2026-04-11
+## [1.4] — 2026-04-12
 
 ### Fixed
 - **Firefox mobile keyboard shell instability** — the mobile terminal shell was rebuilt around a simpler normal-flow layout after the investigation proved the browser itself was not the root cause. The fixed-shell / page-scroll / `visualViewport` pan-compensation stack was removed, `#mobile-shell` now stays in normal document flow, and the composer block stays layout-driven instead of relying on page transforms, scroll correction, or keyboard-height spacing on `#mobile-composer-host`. This removes the intermittent flash, gray-gap, floating-composer, and repeated open/close drift regressions that were showing up in Firefox mobile when the keyboard opened.
