@@ -1,13 +1,25 @@
-# shell.darklab.sh — Configuration
+# darklab shell — Configuration
 # ----------------------------------
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
+# Optional: add sibling *.local.* files for untracked server-specific overrides.
+# Examples: app/conf/config.local.yaml, app/conf/allowed_commands.local.txt,
+# app/conf/ascii.local.txt, app/conf/auto_complete.local.txt,
+# app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
+# app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
+# If present, each local overlay is applied after its checked-in base file.
+# Text/config lists append local entries; ASCII art files use the local file if
+# present; YAML config dictionaries merge key-by-key.
 
 # ── Branding ──────────────────────────────────────────────────────────────────
 
 # Name displayed in the browser tab, header, and permalink pages
-# Server default if unset: "shell.darklab.sh"
-# app_name: "shell.darklab.sh"
+# Server default if unset: "darklab shell"
+# app_name: "darklab shell"
+
+# Prompt prefix shown at the start of the terminal prompt and welcome samples.
+# Server default if unset: "anon@darklab:~$"
+# prompt_prefix: "anon@darklab:~$"
 
 # Optional message shown at the top of the terminal on page load.
 # Leave empty to disable.
@@ -16,9 +28,9 @@
 
 # ── Appearance ────────────────────────────────────────────────────────────────
 
-# Default color theme. Options: dark, light
-# Server default if unset: dark
-# default_theme: dark
+# Default color theme filename. Should match a file under app/conf/themes/.
+# If unset or invalid, the built-in fallback palette is used.
+# default_theme: darklab_obsidian.yaml
 
 # ── History & Retention ───────────────────────────────────────────────────────
 
@@ -38,7 +50,7 @@
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
-# Log verbosity level. Options: ERROR, WARN, INFO, DEBUG
+# Log verbosity level . Options: ERROR, WARN, INFO, DEBUG
 # ERROR — application errors only (spawn failures, health check failures, stream errors)
 # WARN  — errors plus warnings: denied commands, rate limit hits, command timeouts
 # INFO  — warnings plus operational events: run start/end/kill with client IP (default)
@@ -51,9 +63,49 @@
 # gelf — newline-delimited GELF 1.1 JSON for Graylog / GELF-compatible back-ends
 #         short_message contains the event name; all context is in _-prefixed fields
 # Server default if unset: text
-log_format: gelf
+# log_format: text
+
+# ── Trusted Proxies ──────────────────────────────────────────────────────────
+
+# IPs or CIDR ranges that are allowed to supply X-Forwarded-For values.
+# Requests from outside these ranges ignore forwarded headers and use the
+# direct connection IP instead. The default keeps loopback trusted for local
+# development and tests; production should list the actual reverse proxy subnet
+# here if it is not already covered.
+# trusted_proxy_cidrs:
+#   - 127.0.0.1/32
+#   - ::1/128
+
+# ── Operator Diagnostics ─────────────────────────────────────────────────────
+#
+# GET /diag returns a JSON summary of app version, operational config, SQLite
+# health and row counts, Redis connectivity, vendor-asset source (built-in vs
+# fallback), and per-tool availability derived from the allowlist.
+#
+# The endpoint returns 404 to all callers unless the resolved client IP falls
+# within one of the CIDRs listed here. Client IP resolution uses the same
+# trusted-proxy rules as the rest of the app: X-Forwarded-For is only honored
+# when the direct peer IP is inside trusted_proxy_cidrs. Leave the list empty
+# (the default) to keep the endpoint fully hidden.
+#
+# Typical values:
+#   172.16.0.0/12  — Docker bridge / overlay networks (recommended for host access)
+#   10.0.0.0/8     — private LAN / VPN range
+#
+# If you are behind a reverse proxy, also make sure trusted_proxy_cidrs covers
+# that proxy address/range; otherwise forwarded client IPs are ignored and the
+# proxy peer IP is used instead.
+#
+# Server default if unset: [] (disabled)
+# diagnostics_allowed_cidrs:
+#   - 172.16.0.0/12
 
 # ── Rate Limiting ─────────────────────────────────────────────────────────────
+
+# Whether the /run rate limiter is active at all. Set to false for test-only or
+# maintenance overlays where you want the app to accept runs without throttling.
+# Server default if unset: true
+# rate_limit_enabled: true
 
 # Maximum number of /run requests per minute per IP
 # Server default if unset: 30
@@ -82,16 +134,17 @@ log_format: gelf
 # Server default if unset: true
 # persist_full_run_output: true
 
-# Hard byte cap for persisted full-output artifacts.
-# Set to 0 for unlimited. If the artifact reaches this limit, the full-output page
-# remains available but includes a truncation notice.
-# Server default if unset: 5242880
-# full_output_max_bytes: 5242880
+# Hard cap for persisted full-output artifacts, expressed in megabytes.
+# The app multiplies this value by 1024*1024 internally. Set to 0 for unlimited.
+# If the artifact reaches this limit, the full-output page remains available but
+# includes a truncation notice.
+# Server default if unset: 5 MB
+# full_output_max_mb: 5MB
 
 # Automatically kill a running command after this many seconds.
 # Set to 0 to disable (commands run until they finish or are killed manually).
-# Server default if unset: 0
-command_timeout_seconds: 7200
+# Server default if unset: 3600
+# command_timeout_seconds: 3600
 
 # How often (in seconds) to send a heartbeat comment on idle SSE connections
 # to prevent nginx and the browser from dropping the connection.
@@ -162,7 +215,9 @@ command_timeout_seconds: 7200
 # Server default if unset: 4200
 # welcome_hint_interval_ms: 4200
 
-# Maximum number of footer-hint rotations after the initial hint is shown.
-# Set to 0 to keep only the first hint visible with no rotation.
-# Server default if unset: 2
-# welcome_hint_rotations: 2
+# Maximum number of hint states shown while the welcome tab remains idle.
+# Set to 0 to keep rotating until interrupted.
+# Set to 1 to keep only the first hint visible with no rotation.
+# Higher values allow that many total hint states, counting the first hint.
+# Server default if unset: 0
+# welcome_hint_rotations: 0

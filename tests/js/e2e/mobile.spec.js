@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { makeTestIp, waitForHistoryRuns } from './helpers.js'
 
 const MOBILE = { width: 375, height: 812 }
 const LONG_CMD = 'ping -c 4 8.8.8.8'
@@ -6,6 +7,15 @@ const LONG_CMD = 'ping -c 4 8.8.8.8'
 // Use a full mobile-like emulation so the mobile shell code sees the same
 // viewport and touch signals as real mobile browsers.
 test.use({ hasTouch: true, isMobile: true })
+
+// Browser specs share the same backend rate limiter, so derive a stable test-
+// scoped IP from the file/title instead of reusing one bucket for the suite.
+function testScopedIp(testInfo, baseOffset = 0) {
+  const key = `${testInfo.file}:${testInfo.title}`
+  let sum = 0
+  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
+  return makeTestIp(baseOffset + sum)
+}
 
 async function runCommandMobile(page, cmd) {
   await page.locator('#mobile-cmd').fill(cmd)
@@ -29,7 +39,8 @@ async function openMobileKeyboard(page) {
 }
 
 test.describe('mobile menu', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 101) })
     await page.setViewportSize(MOBILE)
     await page.goto('/')
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
@@ -109,7 +120,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#mobile-edit-bar')).toBeVisible()
 
     const startScrollY = await page.evaluate(() => window.scrollY)
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=actions')
+    await runCommandMobile(page, 'hostname')
     await page.locator('.tab-panel.active [data-action="permalink"]').click()
     await expect(page.locator('.tab-panel.active [data-action="permalink"]')).not.toBeFocused()
     await page.locator('.tab-panel.active [data-action="copy"]').click()
@@ -132,9 +143,9 @@ test.describe('mobile menu', () => {
   })
 
   test('closing a mobile tab after output returns to the active tab without jumping the page', async ({ page }) => {
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=close-scroll')
+    await runCommandMobile(page, 'hostname')
     await page.locator('#new-tab-btn').click()
-    await page.locator('#mobile-cmd').fill('curl http://localhost:5001/health?mobile=close-scroll-2')
+    await page.locator('#mobile-cmd').fill('date')
     await page.locator('#mobile-run-btn').click()
     await page.locator('.tab').nth(1).locator('.tab-close').click()
 
@@ -145,7 +156,7 @@ test.describe('mobile menu', () => {
 
   test('closing a mobile tab does not leave the close button focused', async ({ page }) => {
     await page.locator('#new-tab-btn').click()
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=tab-close-focus')
+    await runCommandMobile(page, 'hostname')
 
     const closeBtn = page.locator('.tab').nth(1).locator('.tab-close')
     await closeBtn.click()
@@ -155,7 +166,7 @@ test.describe('mobile menu', () => {
   })
 
   test('closing the only mobile tab does not leave the reset close button focused', async ({ page }) => {
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=single-close-focus')
+    await runCommandMobile(page, 'hostname')
 
     const closeBtn = page.locator('.tab').first().locator('.tab-close')
     await closeBtn.click()
@@ -165,9 +176,10 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile tabs bar can overflow and scroll horizontally', async ({ page }) => {
+    const overflowCmds = ['hostname', 'date', 'uptime', 'whoami', 'version', 'fortune']
     for (let i = 0; i < 6; i++) {
       await page.locator('#new-tab-btn').click()
-      await runCommandMobile(page, `curl http://localhost:5001/health?mobile=overflow-${i}-${'x'.repeat(22)}`)
+      await runCommandMobile(page, overflowCmds[i])
     }
 
     const tabsBar = page.locator('.terminal-bar .tabs-bar')
@@ -210,6 +222,52 @@ test.describe('mobile menu', () => {
     await expect(menu.locator('[data-action="theme"]')).toBeVisible()
   })
 
+  test('mobile theme selector opens full screen with evenly sized grouped sections', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="theme"]').click()
+
+    await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#theme-modal')).toBeVisible()
+
+    const viewport = page.viewportSize()
+    const modalBox = await page.locator('#theme-modal').boundingBox()
+    expect(modalBox).not.toBeNull()
+    expect(modalBox.width).toBeGreaterThanOrEqual(viewport.width * 0.95)
+    expect(modalBox.height).toBeGreaterThanOrEqual(viewport.height * 0.95)
+
+    const mobileColumns = await page.locator('#theme-select').evaluate(el => el.style.getPropertyValue('--theme-picker-columns-mobile'))
+    expect(mobileColumns).toBe('2')
+
+    const gridWidths = await page.locator('#theme-select .theme-picker-group-grid').evaluateAll(nodes => nodes.map(node => Math.round(node.getBoundingClientRect().width)))
+    expect(new Set(gridWidths).size).toBe(1)
+
+    await page.locator('#theme-overlay .theme-close').click()
+    await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
+  })
+
+  test('selecting a theme on mobile applies the shell palette, not just the modal preview', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="theme"]').click()
+
+    await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+
+    const shellColors = await page.evaluate(() => {
+      const root = getComputedStyle(document.documentElement)
+      return {
+        bg: root.getPropertyValue('--bg').trim(),
+        surface: root.getPropertyValue('--surface').trim(),
+        terminalBar: root.getPropertyValue('--theme-terminal-bar-bg').trim(),
+        panel: root.getPropertyValue('--theme-panel-bg').trim(),
+      }
+    })
+
+    expect(shellColors.bg).toBe('#eef4fa')
+    expect(shellColors.surface).toBe('#fbfdff')
+    expect(shellColors.terminalBar).toBe('#d9e5f1')
+    expect(shellColors.panel).toBe('#edf4fb')
+  })
+
   test('clicking outside the menu closes it', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
@@ -221,10 +279,10 @@ test.describe('mobile menu', () => {
 
   test('mobile recent chips collapse to one row and overflow opens history', async ({ page }) => {
     const commands = [
-      'curl http://localhost:5001/health?mobile=1',
-      'curl http://localhost:5001/health?mobile=2',
-      'curl http://localhost:5001/health?mobile=3',
-      'curl http://localhost:5001/health?mobile=4',
+      'banner chip-overflow-test-1',
+      'banner chip-overflow-test-2',
+      'banner chip-overflow-test-3',
+      'banner chip-overflow-test-4',
     ]
 
     for (const [index, command] of commands.entries()) {
@@ -234,10 +292,10 @@ test.describe('mobile menu', () => {
 
     const chips = page.locator('#history-row .hist-chip')
     await expect(chips).toHaveCount(4)
-    await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+1 more')
-    await expect(chips.nth(0)).toContainText('mobile=4')
-    await expect(chips.nth(1)).toContainText('mobile=3')
-    await expect(chips.nth(2)).toContainText('mobile=2')
+    await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+ more')
+    await expect(chips.nth(0)).toContainText('test-4')
+    await expect(chips.nth(1)).toContainText('test-3')
+    await expect(chips.nth(2)).toContainText('test-2')
 
     await page.locator('#history-row .hist-chip-overflow').click()
     await expect(page.locator('#history-panel')).toHaveClass(/open/)
@@ -245,9 +303,9 @@ test.describe('mobile menu', () => {
 
   test('mobile recent chips can load a visible command back into the prompt', async ({ page }) => {
     const commands = [
-      'curl http://localhost:5001/health?mobile=1',
-      'curl http://localhost:5001/health?mobile=2',
-      'curl http://localhost:5001/health?mobile=3',
+      'hostname',
+      'date',
+      'uptime',
     ]
 
     for (const [index, command] of commands.entries()) {
@@ -259,19 +317,20 @@ test.describe('mobile menu', () => {
     const commandText = await chip.getAttribute('title')
     await chip.click()
 
-    await expect(page.locator('#cmd')).toHaveValue(commandText || '')
+    await expect(page.locator('#mobile-cmd')).toHaveValue(commandText || '')
     await expect(page.locator('#mobile-composer')).toBeVisible()
   })
 
   test('mobile history restore works from a newly created session via the mobile menu', async ({ page }) => {
     const commands = [
-      'curl http://localhost:5001/health?mobile=history-1',
-      'curl http://localhost:5001/health?mobile=history-2',
+      'hostname',
+      'date',
     ]
 
     for (const command of commands) {
       await runCommandMobile(page, command)
     }
+    await waitForHistoryRuns(page, commands.length)
 
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
@@ -281,7 +340,7 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#history-panel')).toHaveClass(/open/)
 
     await page.locator('.history-entry').first().click()
-    await expect(page.locator('.tab-panel.active .output')).toContainText('mobile=history-2')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('date')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
@@ -293,11 +352,14 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
     await expect(page.locator('.status-pill').filter({ hasNotText: 'RUNNING' })).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('#mobile-run-btn')).toBeDisabled()
+
+    await page.locator('#mobile-cmd').fill('hostname')
     await expect(page.locator('#mobile-run-btn')).toBeEnabled()
   })
 
   test('mobile permalink copies via the fallback path when clipboard writeText is unavailable', async ({ page }) => {
-    await runCommandMobile(page, 'curl http://localhost:5001/health?mobile=share')
+    await runCommandMobile(page, 'hostname')
 
     await page.evaluate(() => {
       Object.defineProperty(navigator, 'clipboard', {
@@ -372,7 +434,7 @@ test.describe('mobile menu', () => {
       document.body.classList.add('mobile-keyboard-open')
     })
 
-    const longCommand = `curl http://localhost:5001/health?${'x'.repeat(120)}`
+    const longCommand = `curl https://example.com/health?${'x'.repeat(120)}`
     await page.locator('#mobile-cmd').fill(longCommand)
 
     await expect(page.locator('#mobile-cmd')).toHaveValue(longCommand)

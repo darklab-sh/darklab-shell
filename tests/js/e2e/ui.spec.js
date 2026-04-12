@@ -1,25 +1,40 @@
 import { test, expect } from '@playwright/test'
 
-test.describe('theme toggle', () => {
+test.describe('theme selector', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
 
-  test('clicking theme-btn switches to light mode', async ({ page }) => {
-    // Start in dark mode (no "light" class)
-    await expect(page.locator('body')).not.toHaveClass(/\blight\b/)
-
+  test('clicking theme-btn opens the theme selector', async ({ page }) => {
     await page.locator('#theme-btn').click()
-    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#theme-select .theme-card-active')).toBeFocused()
   })
 
-  test('clicking theme-btn twice returns to dark mode', async ({ page }) => {
+  test('selecting a theme applies it from the selector', async ({ page }) => {
     await page.locator('#theme-btn').click()
-    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    const optionLabels = await page.locator('#theme-select .theme-card-label').evaluateAll(labels => labels.map(label => label.textContent))
+    expect(optionLabels).toContain('Darklab Obsidian')
+    expect(optionLabels).toContain('Charcoal Steel')
+    const groupLabels = await page.locator('#theme-select .theme-picker-group-title').evaluateAll(labels => labels.map(label => label.textContent))
+    expect(groupLabels).toEqual(['Dark Neon', 'Dark Neutral', 'Warm Light', 'Cool Light', 'Neutral Light'])
+    await page.locator('#theme-select [data-theme-name="charcoal_steel"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'charcoal_steel')
 
-    await page.locator('#theme-btn').click()
-    await expect(page.locator('body')).not.toHaveClass(/\blight\b/)
+    await page.locator('#theme-select [data-theme-name="cobalt_obsidian"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'cobalt_obsidian')
+  })
+
+  test('falls back to the configured default theme when localStorage references a missing theme', async ({ page }) => {
+    await page.evaluate(() => {
+      localStorage.setItem('theme', 'theme_missing.yaml')
+    })
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'darklab_obsidian')
   })
 })
 
@@ -73,7 +88,7 @@ test.describe('FAQ modal', () => {
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
-    await expect(page.locator('.faq-a').filter({ hasText: 'README on GitLab' }).first()).toBeVisible()
+    await expect(page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first()).toBeVisible()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
   })
 })
@@ -85,22 +100,25 @@ test.describe('options modal', () => {
   })
 
   test('persists theme, timestamps, and line number preferences across reload', async ({ page }) => {
+    await page.locator('#theme-btn').click()
+    await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
+    await page.locator('.theme-close').click()
+
     await page.locator('#options-btn').click()
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
-
-    await page.locator('input[name="theme-pref"][value="light"]').check()
     await page.locator('#options-ts-select').selectOption('elapsed')
     await page.locator('#options-ln-toggle').check()
     await page.locator('.options-close').click()
 
-    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
 
     await page.reload()
     await page.locator('#cmd').waitFor()
 
-    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
   })

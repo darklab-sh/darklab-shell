@@ -1,12 +1,20 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, makeTestIp } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
-const TEST_IP = makeTestIp(67)
+const CMD = 'hostname'
+
+// Browser specs share the same backend rate limiter, so derive a stable test-
+// scoped IP from the file/title instead of reusing one bucket for the suite.
+function testScopedIp(testInfo, baseOffset = 0) {
+  const key = `${testInfo.file}:${testInfo.title}`
+  let sum = 0
+  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
+  return makeTestIp(baseOffset + sum)
+}
 
 test.describe('timestamp toggle', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
+  test.beforeEach(async ({ page }, testInfo) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 67) })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })

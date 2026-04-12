@@ -33,17 +33,29 @@ def get_client(*, use_forwarded_for=True):
 
 class TestRequestHelpers:
     def test_prefers_valid_forwarded_for(self):
-        with shell_app.app.test_request_context("/", headers={"X-Forwarded-For": "203.0.113.9"}):
+        with shell_app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"X-Forwarded-For": "203.0.113.9"},
+        ):
             assert shell_app.get_client_ip() == "203.0.113.9"
 
-    def test_uses_first_forwarded_for_when_multiple(self):
-        with shell_app.app.test_request_context("/", headers={"X-Forwarded-For": "198.51.100.5, 10.0.0.1"}):
-            assert shell_app.get_client_ip() == "198.51.100.5"
+    def test_uses_last_untrusted_forwarded_for_when_multiple(self):
+        with shell_app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"X-Forwarded-For": "198.51.100.5, 10.0.0.1"},
+        ):
+            assert shell_app.get_client_ip() == "10.0.0.1"
 
     def test_invalid_forwarded_for_falls_back(self):
-        with shell_app.app.test_request_context("/", headers={"X-Forwarded-For": "definitely-not-an-ip"}):
+        with shell_app.app.test_request_context(
+            "/",
+            environ_base={"REMOTE_ADDR": "127.0.0.1"},
+            headers={"X-Forwarded-For": "definitely-not-an-ip"},
+        ):
             # Flask test client context usually falls back to 127.0.0.1
-            assert shell_app.get_client_ip()
+            assert shell_app.get_client_ip() == "127.0.0.1"
 
     def test_get_session_id_strips_whitespace(self):
         with shell_app.app.test_request_context("/", headers={"X-Session-ID": "  abc123  "}):
@@ -56,7 +68,7 @@ class TestKillRoute:
     def test_kill_returns_404_when_run_missing(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=None):
+        with mock.patch("blueprints.run.pid_pop", return_value=None):
             resp = client.post("/kill", json={"run_id": "missing-run"})
 
         assert resp.status_code == 404
@@ -66,9 +78,9 @@ class TestKillRoute:
     def test_kill_sends_sigterm_to_process_group(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", return_value=1234), \
-             mock.patch("app.os.killpg") as killpg:
+        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.os.getpgid", return_value=1234), \
+             mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-123"})
 
         assert resp.status_code == 200
@@ -79,8 +91,8 @@ class TestKillRoute:
     def test_kill_still_returns_true_when_process_lookup_fails(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", side_effect=ProcessLookupError):
+        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.os.getpgid", side_effect=ProcessLookupError):
             resp = client.post("/kill", json={"run_id": "run-404"})
 
         assert resp.status_code == 200
@@ -90,18 +102,18 @@ class TestKillRoute:
     def test_kill_uses_scanner_sudo_path_when_configured(self):
         client = get_client()
 
-        with mock.patch("app.pid_pop", return_value=1234), \
-             mock.patch("app.os.getpgid", return_value=5678), \
-             mock.patch("app.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
-             mock.patch("app.subprocess.run") as run_cmd, \
-             mock.patch("app.os.killpg") as killpg:
+        with mock.patch("blueprints.run.pid_pop", return_value=1234), \
+             mock.patch("blueprints.run.SCANNER_PREFIX", ["sudo", "-u", "scanner", "env", "HOME=/tmp"]), \
+             mock.patch("blueprints.run.subprocess.run") as run_cmd, \
+             mock.patch("blueprints.run.os.killpg") as killpg:
             resp = client.post("/kill", json={"run_id": "run-scan"})
 
         assert resp.status_code == 200
         data = json.loads(resp.data)
         assert data["killed"] is True
+        # pgid == pid because setsid guarantees PGID == PID at spawn time
         run_cmd.assert_called_once_with(
-            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-5678"],
+            [shell_app.SUDO_BIN, "-u", "scanner", shell_app.KILL_BIN, "-TERM", "-1234"],
             timeout=5,
         )
         killpg.assert_not_called()

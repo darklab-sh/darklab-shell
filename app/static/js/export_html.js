@@ -1,11 +1,34 @@
 // ── Shared HTML export helpers ───────────────────────────────────────────────
 (function () {
+  // HTML export deliberately inlines the runtime theme variables so downloaded
+  // files preserve the active palette without depending on the live app shell.
   const EXPORT_FONT_FILES = [
     { family: 'JetBrains Mono', weight: 300, filename: 'JetBrainsMono-300.ttf' },
     { family: 'JetBrains Mono', weight: 400, filename: 'JetBrainsMono-400.ttf' },
     { family: 'JetBrains Mono', weight: 700, filename: 'JetBrainsMono-700.ttf' },
     { family: 'Syne', weight: 700, filename: 'Syne-700.ttf' },
     { family: 'Syne', weight: 800, filename: 'Syne-800.ttf' },
+  ];
+  const EXPORT_THEME_VAR_NAMES = [
+    '--bg',
+    '--surface',
+    '--border',
+    '--border-bright',
+    '--text',
+    '--muted',
+    '--green',
+    '--green-dim',
+    '--green-glow',
+    '--amber',
+    '--red',
+    '--blue',
+    '--theme-panel-bg',
+    '--theme-panel-border',
+    '--theme-panel-shadow',
+    '--theme-terminal-bar-bg',
+    '--theme-terminal-bar-border',
+    '--terminal-font-size',
+    '--terminal-line-height',
   ];
 
   function escapeExportHtml(text) {
@@ -28,17 +51,53 @@
     return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   }
 
+  function getThemeExportVars() {
+    const registryCurrent = window.ThemeRegistry
+      && window.ThemeRegistry.current
+      && window.ThemeRegistry.current.vars
+      && typeof window.ThemeRegistry.current.vars === 'object'
+      ? window.ThemeRegistry.current.vars
+      : null;
+    if (registryCurrent && Object.keys(registryCurrent).length) return registryCurrent;
+    const current = window.ThemeCssVars && window.ThemeCssVars.current;
+    if (current && typeof current === 'object' && Object.keys(current).length) return current;
+    const source = window.ThemeCssVars && window.ThemeCssVars.fallback;
+    if (source && typeof source === 'object') return source;
+    const target = document.documentElement;
+    const computed = getComputedStyle(target);
+    const fallback = {};
+    for (const name of EXPORT_THEME_VAR_NAMES) {
+      const value = computed.getPropertyValue(name).trim();
+      if (value) fallback[name] = value;
+    }
+    if (Object.keys(fallback).length) return fallback;
+    return {};
+  }
+
+  function getThemeExportColorScheme() {
+    const registryCurrent = window.ThemeRegistry && window.ThemeRegistry.current;
+    if (registryCurrent && typeof registryCurrent.color_scheme === 'string' && registryCurrent.color_scheme.trim()) {
+      return registryCurrent.color_scheme.trim();
+    }
+    const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+    if (colorSchemeMeta && typeof colorSchemeMeta.content === 'string' && colorSchemeMeta.content.trim()) {
+      return colorSchemeMeta.content.trim();
+    }
+    const docScheme = document.documentElement && document.documentElement.style
+      ? document.documentElement.style.colorScheme
+      : '';
+    if (typeof docScheme === 'string' && docScheme.trim()) return docScheme.trim();
+    return 'light dark';
+  }
+
   function buildTerminalExportStyles(fontFacesCss = '') {
+    const themeVars = getThemeExportVars();
+    const themeDecls = Object.entries(themeVars)
+      .map(([name, value]) => `    ${name}: ${value};`)
+      .join('\n');
     return `${fontFacesCss}
   :root {
-    --bg: #0d0d0d; --surface: #141414; --border: #2e2e2e; --border-bright: #2e2e2e;
-    --green: #39ff14; --green-dim: #1a7a08; --green-glow: rgba(57,255,20,0.12);
-    --amber: #ffb800; --red: #ff3c3c; --muted: #606060; --text: #e0e0e0;
-  }
-  body.light {
-    --bg: #e7e6e1; --surface: #f2f0eb; --border: #b8b7b0; --border-bright: #a9a79f;
-    --green: #2a5d18; --green-dim: #355f24; --green-glow: rgba(42,93,24,0.08);
-    --amber: #b37000; --red: #cc2200; --muted: #45453f; --text: #101010;
+${themeDecls}
   }
   *, *::before, *::after { box-sizing: border-box; }
   body {
@@ -46,29 +105,38 @@
     font-family: 'JetBrains Mono', monospace; font-size: 13px;
     padding: 28px 32px; margin: 0; line-height: 1.65;
   }
-  body.light { color: var(--text); }
   .header {
-    margin-bottom: 20px; padding-bottom: 14px;
-    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+    padding: 16px 18px;
+    border: 1px solid var(--theme-terminal-bar-border, var(--border));
+    background: var(--theme-terminal-bar-bg, var(--bg));
+    border-radius: 4px 4px 0 0;
   }
-  body.light .header { border-bottom-color: var(--border-bright); }
   .app-name { color: var(--green); font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }
   .meta { color: var(--muted); font-size: 11px; }
-  .output { white-space: pre-wrap; word-break: break-all; }
+  .output {
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: var(--theme-panel-bg, var(--surface));
+    border: 1px solid var(--theme-panel-border, var(--border));
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    padding: 16px 18px 18px;
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-panel-shadow, transparent) 74%, transparent);
+  }
   .line { display: block; }
   .line.exit-ok   { color: var(--green); font-weight: 700; margin-top: 8px; }
   .line.exit-fail { color: var(--red); font-weight: 700; margin-top: 8px; }
   .line.denied    { color: var(--amber); font-weight: 700; }
-  .line.notice    { color: #6ab0f5; font-style: italic; }
+  .line.notice    { color: var(--blue); font-style: italic; }
   .ts {
     display: inline-block; min-width: 58px; text-align: right;
-    color: #505050; font-size: 10px; user-select: none;
+    color: var(--muted); font-size: 10px; user-select: none;
     padding-right: 8px; margin-right: 6px;
     border-right: 1px solid var(--border);
     font-variant-numeric: tabular-nums;
   }
-  .prompt-prefix { color: #6ab0f5; font-weight: 700; margin-right: 8px; }
-  body.light .prompt-prefix { color: #335d83; }`;
+  .prompt-prefix { color: var(--blue); font-weight: 700; margin-right: 8px; }`;
   }
 
   function buildTerminalExportHtml({
@@ -76,20 +144,20 @@
     title,
     metaHtml = '',
     linesHtml = '',
-    themeClass = '',
     fontFacesCss = '',
   }) {
-    const bodyClass = themeClass ? ` class="${themeClass}"` : '';
+    const colorScheme = getThemeExportColorScheme();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="color-scheme" content="${escapeExportHtml(colorScheme)}">
 <title>${escapeExportHtml(title)} — ${escapeExportHtml(appName)}</title>
 <style>
 ${buildTerminalExportStyles(fontFacesCss)}
 </style>
 </head>
-<body${bodyClass}>
+<body>
 <div class="header">
   <div class="app-name">${escapeExportHtml(appName)}</div>
   ${metaHtml ? `<div class="meta">${metaHtml}</div>` : ''}

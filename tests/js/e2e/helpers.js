@@ -2,15 +2,19 @@
  * Shared helpers for Playwright e2e tests.
  */
 
-const TEST_IP_SEED = ((Date.now() ^ process.pid) % 200) + 1
+// Use the RFC 2544 benchmarking range so the test suite never accidentally
+// collides with a real routable address when synthesizing client IPs.
+const TEST_IP_SEED = (Date.now() ^ process.pid) >>> 0
 
 /**
- * Return a per-test-run RFC 5737 address so repeated suite runs do not reuse
- * the same rate-limit bucket.
+ * Return a per-test-run deterministic test-network address so repeated suite
+ * runs and parallel specs do not reuse the same rate-limit bucket.
  */
 export function makeTestIp(offset = 0) {
-  const host = ((TEST_IP_SEED + offset - 1) % 254) + 1
-  return `203.0.113.${host}`
+  const value = (TEST_IP_SEED + Math.max(0, offset)) >>> 0
+  const thirdOctet = (Math.floor(value / 254) % 254) + 1
+  const fourthOctet = (value % 254) + 1
+  return `198.18.${thirdOctet}.${fourthOctet}`
 }
 
 /**
@@ -45,6 +49,8 @@ export async function openHistory(page) {
  * retry the fetch — by then the commit will have landed.
  */
 export async function openHistoryWithEntries(page) {
+  // Wait for the server-backed history endpoint to contain real rows before
+  // opening the drawer; this avoids racing SQLite persistence after a run ends.
   await waitForHistoryRuns(page, 1)
   await openHistory(page)
   await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible', timeout: 10_000 })

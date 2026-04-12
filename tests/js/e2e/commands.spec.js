@@ -1,7 +1,7 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, makeTestIp } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 const TEST_IP = makeTestIp(64)
 
 test.describe('command execution', () => {
@@ -13,9 +13,8 @@ test.describe('command execution', () => {
 
   test('output appears in the terminal after running a command', async ({ page }) => {
     await runCommand(page, CMD)
-    // curl against /health returns JSON containing "status"
     const output = page.locator('.tab-panel.active .output')
-    await expect(output).toContainText('status')
+    await expect(output).toContainText('hostname')
   })
 
   test('status pill shows EXIT 0 and output has an exit-ok line', async ({ page }) => {

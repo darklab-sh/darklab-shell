@@ -1,7 +1,12 @@
+import { readFileSync } from 'fs'
+import { resolve } from 'path'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
+// This harness recreates the browser-global environment expected by the classic
+// script bundle so app.js can be tested without loading the full page.
 async function loadAppFns({
   theme = null,
+  themeRegistry = null,
   cookies = {},
   apiFetch: apiFetchOverride = null,
   doKill: doKillOverride = vi.fn(),
@@ -22,12 +27,15 @@ async function loadAppFns({
   copyTab: copyTabOverride = vi.fn(),
   clearTab: clearTabOverride = vi.fn(),
   cancelWelcome: cancelWelcomeOverride = vi.fn(),
+  navigateCmdHistory: navigateCmdHistoryOverride = vi.fn(() => false),
+  enterHistSearch: enterHistSearchOverride = vi.fn(),
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
   acHide: acHideOverride = () => {},
+  getOutput: getOutputOverride = null,
   mobileViewport = null,
   mobileTouch = true,
 } = {}) {
@@ -50,9 +58,6 @@ async function loadAppFns({
     <button id="hist-del-confirm"></button>
     <button id="kill-cancel"></button>
     <button id="kill-confirm"></button>
-    <div id="version-label"></div>
-    <div id="motd"></div>
-    <div id="motd-wrap"></div>
     <div id="mobile-shell" aria-hidden="true">
       <div id="mobile-shell-chrome"></div>
       <div id="mobile-shell-transcript"></div>
@@ -100,7 +105,7 @@ async function loadAppFns({
         <span id="run-timer"></span>
       </div>
       <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
-        <span class="prompt-prefix" data-mobile-label="$">anon@shell.darklab.sh:~$</span>
+        <span class="prompt-prefix" data-mobile-label="$">anon@darklab:~$</span>
         <div id="shell-prompt-line">
           <span id="shell-prompt-text" class="shell-prompt-text"></span>
           <span id="shell-prompt-caret"></span>
@@ -120,24 +125,27 @@ async function loadAppFns({
           <button id="search-prev"></button>
           <button id="search-next"></button>
         </div>
+        <button id="search-close-btn"></button>
       </div>
       <div id="tab-panels"></div>
-      <div id="faq-limits-text"></div>
-      <div id="faq-allowed-text"></div>
-      <div id="faq-overlay"></div>
-      <button class="faq-close"></button>
-      <div class="faq-body"></div>
-      <div id="options-overlay"></div>
-      <button class="options-close"></button>
-      <div id="options-modal"></div>
-      <select id="options-ts-select">
-        <option value="off">off</option>
-        <option value="elapsed">elapsed</option>
-        <option value="clock">clock</option>
+    <div id="faq-limits-text"></div>
+    <div id="faq-allowed-text"></div>
+    <div id="faq-overlay"></div>
+    <button class="faq-close"></button>
+    <div class="faq-body"></div>
+    <div id="theme-overlay"></div>
+    <button class="theme-close"></button>
+    <div id="theme-modal"></div>
+    <div id="theme-select" tabindex="-1"></div>
+    <div id="options-overlay"></div>
+    <button class="options-close"></button>
+    <div id="options-modal"></div>
+    <select id="options-ts-select">
+      <option value="off">off</option>
+      <option value="elapsed">elapsed</option>
+      <option value="clock">clock</option>
       </select>
       <input id="options-ln-toggle" type="checkbox" />
-      <label><input type="radio" name="theme-pref" value="dark" /></label>
-      <label><input type="radio" name="theme-pref" value="light" /></label>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
       </div>
@@ -160,9 +168,11 @@ async function loadAppFns({
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
-          app_name: 'shell.darklab.sh',
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
-          default_theme: 'dark',
+          project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+          default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 0,
           max_output_lines: 0,
@@ -191,6 +201,7 @@ async function loadAppFns({
     faqCloseBtn: document.querySelector('.faq-close'),
     optionsBtn: document.getElementById('options-btn'),
     optionsCloseBtn: document.querySelector('.options-close'),
+    themeCloseBtn: document.querySelector('.theme-close'),
     newTabBtn: document.getElementById('new-tab-btn'),
     searchToggleBtn: document.getElementById('search-toggle-btn'),
     histBtn: document.getElementById('hist-btn'),
@@ -203,23 +214,22 @@ async function loadAppFns({
     killConfirmBtn: document.getElementById('kill-confirm'),
     searchPrevBtn: document.getElementById('search-prev'),
     searchNextBtn: document.getElementById('search-next'),
+    searchCloseBtn: document.getElementById('search-close-btn'),
     optionsTsSelect: document.getElementById('options-ts-select'),
     optionsLnToggle: document.getElementById('options-ln-toggle'),
+    themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
     themeBtn: document.getElementById('theme-btn'),
     headerTitle: document.querySelector('header h1'),
-    themePrefInputs: document.querySelectorAll('input[name="theme-pref"]'),
     faqBody: document.querySelector('.faq-body'),
     faqLimitsText: document.getElementById('faq-limits-text'),
     faqAllowedText: document.getElementById('faq-allowed-text'),
-    versionLabel: document.getElementById('version-label'),
-    motd: document.getElementById('motd'),
-    motdWrap: document.getElementById('motd-wrap'),
     status: document.getElementById('status'),
     histRow: document.getElementById('history-row'),
     tabsBar: document.getElementById('tabs-bar'),
     tabPanels: document.getElementById('tab-panels'),
+    themeOverlay: document.getElementById('theme-overlay'),
     mobileShell: document.getElementById('mobile-shell'),
     mobileShellChrome: document.getElementById('mobile-shell-chrome'),
     mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
@@ -238,6 +248,7 @@ async function loadAppFns({
     historyList: document.getElementById('history-list'),
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
+    themeCloseBtn: document.querySelector('.theme-close'),
     killOverlay: document.getElementById('kill-overlay'),
     histDelOverlay: document.getElementById('hist-del-overlay'),
     faqOverlay: document.getElementById('faq-overlay'),
@@ -306,6 +317,9 @@ async function loadAppFns({
     })
   }
 
+  if (themeRegistry !== null) window.ThemeRegistry = themeRegistry
+  else delete window.ThemeRegistry
+
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -319,14 +333,16 @@ async function loadAppFns({
   const fns = fromDomScripts([
     'app/static/js/output.js',
     'app/static/js/app.js',
+    'app/static/js/controller.js',
   ], {
     document,
     localStorage: storage,
     apiFetch,
     APP_CONFIG: {},
     AnsiUp: FakeAnsiUp,
+    ThemeRegistry: themeRegistry,
     ...domBindings,
-    getOutput: () => document.getElementById('history-list'),
+    getOutput: getOutputOverride || (() => document.getElementById('history-list')),
     renderMotd: (text) => text,
     updateNewTabBtn: () => {},
     createTab: createTabOverride,
@@ -360,7 +376,7 @@ async function loadAppFns({
     acShow: acShowOverride,
     acAccept: () => {},
     resetCmdHistoryNav: () => {},
-    navigateCmdHistory: () => false,
+    navigateCmdHistory: navigateCmdHistoryOverride,
     setupTabScrollControls: () => {},
     hydrateCmdHistory: () => {},
     mountShellPrompt: () => {},
@@ -375,6 +391,7 @@ async function loadAppFns({
     copyTab: copyTabOverride,
     clearTab: clearTabOverride,
     cancelWelcome: cancelWelcomeOverride,
+    enterHistSearch: enterHistSearchOverride,
     interruptPromptLine: interruptPromptLineOverride,
     _welcomeActive: welcomeActive,
     welcomeOwnsTab: welcomeOwnsTabOverride,
@@ -413,10 +430,16 @@ async function loadAppFns({
     _setTsMode,
     _setLnMode,
     handleComposerInputChange,
+    setComposerValue,
+    moveCmdCaret,
+    setCmdCaret,
+    deleteCmdWordLeft,
+    performMobileEditAction,
     syncMobileComposerKeyboardState,
     focusVisibleComposerInput,
     blurVisibleComposerInput,
     blurVisibleComposerInputIfMobile,
+    _replayPromptShortcutAfterSelection,
     refocusTerminalInput,
     getVisibleComposerInput,
     getComposerValue,
@@ -429,6 +452,10 @@ async function loadAppFns({
     isKillOverlayOpen,
     confirmPendingKill,
     closeKillOverlay,
+    getComposerState,
+    setComposerState,
+    resetComposerState,
+    syncShellPrompt,
     _getAcIndex: () => acIndex,
   }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
@@ -452,6 +479,8 @@ async function loadAppFns({
     copyTab: copyTabOverride,
     clearTab: clearTabOverride,
     cancelWelcome: cancelWelcomeOverride,
+    navigateCmdHistory: navigateCmdHistoryOverride,
+    enterHistSearch: enterHistSearchOverride,
     interruptPromptLine: interruptPromptLineOverride,
     runCommand: runCommandOverride,
     submitComposerCommand: submitComposerCommandOverride,
@@ -465,6 +494,7 @@ async function loadAppFns({
     isKillOverlayOpen: fns.isKillOverlayOpen,
     confirmPendingKill: fns.confirmPendingKill,
     closeKillOverlay: fns.closeKillOverlay,
+    syncShellPrompt: fns.syncShellPrompt,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
       else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
@@ -480,15 +510,32 @@ async function loadAppFns({
 
 describe('app helpers', () => {
   beforeEach(() => {
-    ;['pref_theme', 'pref_timestamps', 'pref_line_numbers'].forEach(name => {
+    ;['pref_theme', 'pref_theme_name', 'pref_timestamps', 'pref_line_numbers'].forEach(name => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
   })
 
-  it('applies the saved light theme at startup', async () => {
-    await loadAppFns({ theme: 'light' })
+  it('applies the saved theme at startup', async () => {
+    await loadAppFns({
+      theme: 'theme_light_blue',
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+        ],
+      },
+    })
 
-    expect(document.body.classList.contains('light')).toBe(true)
   })
 
   it('applies saved timestamp and line number preferences from cookies at startup', async () => {
@@ -558,15 +605,268 @@ describe('app helpers', () => {
     expect(cmdInput.focus).toHaveBeenCalled()
   })
 
-  it('refocuses the terminal input after toggling theme', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('opens the theme selector from the theme button', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
 
     document.getElementById('theme-btn').click()
-    expect(cmdInput.focus).toHaveBeenCalled()
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
+    expect(document.querySelector('#theme-select .theme-card-active')).toBe(document.activeElement)
+  })
 
-    cmdInput.focus.mockClear()
-    document.querySelector('#mobile-menu [data-action="theme"]').click()
-    expect(cmdInput.focus).toHaveBeenCalled()
+  it('populates the theme select from the registry and applies the selected theme', async () => {
+    const themeRegistry = {
+      current: {
+        name: 'theme_light_blue',
+        label: 'Blue Paper',
+        source: 'variant',
+        vars: { '--bg': '#9ab7d0' },
+      },
+      themes: [
+        {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        {
+          name: 'theme_light_olive',
+          label: 'Olive Parchment',
+          source: 'variant',
+          vars: { '--bg': '#c0c0a8' },
+        },
+      ],
+    }
+
+    await loadAppFns({ themeRegistry })
+
+    const themeSelect = document.getElementById('theme-select')
+    expect(themeSelect).not.toBeNull()
+    const themeCards = Array.from(themeSelect.querySelectorAll('[data-theme-name]'))
+    expect(themeCards.map(card => card.dataset.themeName)).toEqual([
+      'theme_light_blue',
+      'theme_light_olive',
+    ])
+    expect(themeCards.map(card => card.querySelector('.theme-card-label')?.textContent)).toEqual([
+      'Blue Paper',
+      'Olive Parchment',
+    ])
+
+    themeSelect.querySelector('[data-theme-name="theme_light_blue"]').click()
+
+    expect(document.body.dataset.theme).toBe('theme_light_blue')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_blue')
+
+    themeSelect.querySelector('[data-theme-name="theme_light_olive"]').click()
+
+    expect(document.body.dataset.theme).toBe('theme_light_olive')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
+  })
+
+  it('groups theme cards into labeled sections in the preview modal', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'blue_paper',
+          label: 'Blue Paper',
+          group: 'Cool Light',
+          sort: 50,
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'blue_paper',
+            label: 'Blue Paper',
+            group: 'Cool Light',
+            sort: 50,
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'olive_grove',
+            label: 'Olive Grove',
+            group: 'Warm Light',
+            sort: 20,
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+          {
+            name: 'rose_quartz',
+            label: 'Rose Quartz',
+            group: 'Warm Light',
+            sort: 30,
+            source: 'variant',
+            vars: { '--bg': '#e6d7dc' },
+          },
+          {
+            name: 'graphite',
+            label: 'Graphite',
+            group: 'Neutral Light',
+            sort: 90,
+            source: 'variant',
+            vars: { '--bg': '#d0d0d0' },
+          },
+        ],
+      },
+    })
+
+    const groupTitles = Array.from(document.querySelectorAll('#theme-select .theme-picker-group-title')).map(node => node.textContent)
+    expect(groupTitles).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    const sectionGroups = Array.from(document.querySelectorAll('#theme-select .theme-picker-group')).map(node => node.dataset.themeGroup)
+    expect(sectionGroups).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    expect(document.getElementById('theme-select')?.style.getPropertyValue('--theme-picker-columns')).toBe('2')
+    expect(document.querySelectorAll('#theme-select [data-theme-name]').length).toBe(4)
+  })
+
+  it('falls back to the current/default theme when localStorage references a missing theme', async () => {
+    await loadAppFns({
+      theme: 'theme_missing',
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
+
+    expect(document.body.dataset.theme).toBe('theme_light_blue')
+    expect(document.querySelector('#theme-select .theme-card-active')?.dataset.themeName).toBe('theme_light_blue')
+  })
+
+  it('falls back to the baked-in dark palette when the configured default theme is missing', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: null,
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+      apiFetch: vi.fn((url) => {
+        if (url === '/config') {
+          return Promise.resolve({
+            json: () => Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              default_theme: 'theme_missing.yaml',
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+          })
+        }
+        if (url === '/allowed-commands') {
+          return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }) })
+        }
+        if (url === '/faq') {
+          return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+
+    expect(document.body.dataset.theme).toBe('dark')
+    expect(document.querySelector('#theme-select .theme-card-active')).toBeNull()
+  })
+
+  it('shows an empty state when no themes are registered and falls back to the baked-in dark palette', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: null,
+        themes: [],
+      },
+    })
+
+    expect(document.body.dataset.theme).toBe('dark')
+
+    document.getElementById('theme-btn').click()
+    expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
+    expect(document.getElementById('theme-select').textContent).toContain('No themes available')
+  })
+
+  it('renders a single theme card and applies it when only one theme is available', async () => {
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'only_theme',
+          label: 'Only Theme',
+          filename: 'only_theme.yaml',
+          source: 'variant',
+          vars: { '--bg': '#ccd9e6' },
+        },
+        themes: [
+          {
+            name: 'only_theme',
+            label: 'Only Theme',
+            filename: 'only_theme.yaml',
+            source: 'variant',
+            vars: { '--bg': '#ccd9e6' },
+          },
+        ],
+      },
+    })
+
+    const themeSelect = document.getElementById('theme-select')
+    const themeCards = Array.from(themeSelect.querySelectorAll('[data-theme-name]'))
+    expect(themeCards).toHaveLength(1)
+    expect(themeCards[0].dataset.themeName).toBe('only_theme')
+    expect(themeCards[0].querySelector('.theme-card-label')?.textContent).toBe('Only Theme')
+
+    themeCards[0].click()
+    expect(document.body.dataset.theme).toBe('only_theme')
+    expect(document.cookie).toContain('pref_theme_name=only_theme')
   })
 
   it('refocuses the terminal input after closing the FAQ modal', async () => {
@@ -628,9 +928,6 @@ describe('app helpers', () => {
       <button id="hist-del-confirm"></button>
       <button id="kill-cancel"></button>
       <button id="kill-confirm"></button>
-      <div id="version-label"></div>
-      <div id="motd"></div>
-      <div id="motd-wrap"></div>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
       <div id="mobile-menu">
@@ -667,7 +964,6 @@ describe('app helpers', () => {
     expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
     expect(logClientError).toHaveBeenCalledWith('failed to load /allowed-commands', expect.any(Error))
     expect(logClientError).toHaveBeenCalledWith('failed to load /autocomplete', expect.any(Error))
-    expect(document.body.classList.contains('light')).toBe(false)
     expect(storage.getItem('theme')).toBeNull()
   })
 
@@ -714,32 +1010,106 @@ describe('app helpers', () => {
     expect(runCommand).not.toHaveBeenCalled()
   })
 
-  it('mirrors the hidden command input into the shell prompt line', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('renders the shell prompt line from composer state instead of the stale hidden input', async () => {
+    const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
     const shellPromptWrap = document.getElementById('shell-prompt-wrap')
 
     expect(shellPromptText.textContent).toBe('')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(true)
 
-    cmdInput.value = 'ping darklab.sh'
-    cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
-    cmdInput.dispatchEvent(new Event('input'))
+    cmdInput.value = 'stale prompt'
+    cmdInput.setSelectionRange(0, 0)
+    setComposerState({
+      value: 'ping darklab.sh',
+      selectionStart: 'ping darklab.sh'.length,
+      selectionEnd: 'ping darklab.sh'.length,
+      activeInput: 'desktop',
+    })
+    syncShellPrompt()
 
     expect(shellPromptText.textContent).toBe('ping darklab.sh')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
   })
 
-  it('does not manually duplicate printable desktop keydown input', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('manually inserts printable desktop keydown input once', async () => {
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'ab'
     cmdInput.setSelectionRange(2, 2)
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', bubbles: true }))
+    setComposerState({ value: 'ab', selectionStart: 2, selectionEnd: 2, activeInput: 'desktop' })
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => cmdInput,
+    })
+    const ev = new KeyboardEvent('keydown', { key: 'c', bubbles: true, cancelable: true })
+    cmdInput.dispatchEvent(ev)
 
-    expect(cmdInput.value).toBe('ab')
-    expect(cmdInput.selectionStart).toBe(2)
-    expect(cmdInput.selectionEnd).toBe(2)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(cmdInput.value).toBe('abc')
+    expect(cmdInput.selectionStart).toBe(3)
+    expect(cmdInput.selectionEnd).toBe(3)
+  })
+
+  it.each([
+    {
+      key: 'ArrowDown',
+      keydown: { key: 'ArrowDown' },
+      expectAction: (helpers) => expect(helpers.navigateCmdHistory).toHaveBeenCalledWith(-1),
+    },
+    {
+      key: 'Enter',
+      keydown: { key: 'Enter' },
+      expectAction: (helpers) => expect(helpers.submitComposerCommand).toHaveBeenCalledWith('ping darklab.sh', { dismissKeyboard: true }),
+    },
+    {
+      key: 'Ctrl+R',
+      keydown: { key: 'r', ctrlKey: true },
+      expectAction: (helpers) => expect(helpers.enterHistSearch).toHaveBeenCalled(),
+    },
+  ])('replays %s after desktop output text is selected', async ({ keydown, expectAction }) => {
+    const navigateCmdHistory = vi.fn(() => false)
+    const enterHistSearch = vi.fn()
+    const submitComposerCommand = vi.fn()
+    const { cmdInput, _replayPromptShortcutAfterSelection, setComposerState } = await loadAppFns({
+      navigateCmdHistory,
+      enterHistSearch,
+      submitComposerCommand,
+    })
+
+    const originalGetSelection = window.getSelection
+    let activeElement = document.body
+    const focusSpy = vi.fn(() => {
+      activeElement = cmdInput
+    })
+    cmdInput.focus = focusSpy
+    Object.defineProperty(document, 'activeElement', {
+      configurable: true,
+      get: () => activeElement,
+    })
+    Object.defineProperty(window, 'getSelection', {
+      configurable: true,
+      value: () => ({ toString: () => 'highlighted output' }),
+    })
+
+    try {
+      cmdInput.value = 'ping darklab.sh'
+      setComposerState({
+        value: 'ping darklab.sh',
+        selectionStart: 'ping darklab.sh'.length,
+        selectionEnd: 'ping darklab.sh'.length,
+        activeInput: 'desktop',
+      })
+      const ev = new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...keydown })
+      const handled = _replayPromptShortcutAfterSelection(ev)
+
+      expect(handled).toBe(true)
+      expect(ev.defaultPrevented).toBe(true)
+      expect(focusSpy).toHaveBeenCalled()
+      expectAction({ navigateCmdHistory, enterHistSearch, submitComposerCommand })
+    } finally {
+      Object.defineProperty(window, 'getSelection', { configurable: true, value: originalGetSelection })
+    }
   })
 
   it('updates the visible cursor when the selection changes without typing', async () => {
@@ -757,6 +1127,21 @@ describe('app helpers', () => {
     expect(shellPromptText.textContent).toContain('curl')
     expect(shellPromptText.textContent).toContain('darklab.sh')
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent || '').toBe(' ')
+  })
+
+  it('moves the cursor from composer state instead of stale DOM selection', async () => {
+    const { moveCmdCaret, setComposerState } = await loadAppFns()
+    const cmdInput = document.getElementById('cmd')
+
+    cmdInput.value = 'abc'
+    cmdInput.setSelectionRange(3, 3)
+    setComposerState({ value: 'abc', selectionStart: 1, selectionEnd: 1, activeInput: 'desktop' })
+
+    moveCmdCaret(1)
+
+    expect(cmdInput.selectionStart).toBe(2)
+    expect(cmdInput.selectionEnd).toBe(2)
+    expect(cmdInput.value).toBe('abc')
   })
 
   it('tracks mobile keyboard state and keeps the prompt visible while typing', async () => {
@@ -837,6 +1222,91 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
+  it('keeps the simplified mobile shell node structure intact while the keyboard is open', async () => {
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+    })
+    try {
+      const header = document.querySelector('header')
+      const status = document.getElementById('status')
+      const runTimer = document.getElementById('run-timer')
+      const histRow = document.getElementById('history-row')
+      const terminalBar = document.querySelector('.terminal-bar')
+      const searchBar = document.getElementById('search-bar')
+      const tabPanels = document.getElementById('tab-panels')
+      const historyPanel = document.getElementById('history-panel')
+      const faqOverlay = document.getElementById('faq-overlay')
+      const optionsOverlay = document.getElementById('options-overlay')
+      const mobileShell = document.getElementById('mobile-shell')
+      const mobileShellChrome = document.getElementById('mobile-shell-chrome')
+      const mobileShellTranscript = document.getElementById('mobile-shell-transcript')
+      const mobileShellComposer = document.getElementById('mobile-shell-composer')
+      const mobileShellOverlays = document.getElementById('mobile-shell-overlays')
+      const mobileComposerHost = document.getElementById('mobile-composer-host')
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+
+      document.body.classList.add('mobile-terminal-mode')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => mobileCmdInput,
+      })
+      window.visualViewport.height = 500
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+
+      expect(header.contains(status)).toBe(true)
+      expect(header.contains(runTimer)).toBe(true)
+      expect(mobileShell.contains(mobileShellChrome)).toBe(true)
+      expect(mobileShell.contains(mobileShellTranscript)).toBe(true)
+      expect(mobileShell.contains(mobileShellComposer)).toBe(true)
+      expect(mobileShell.contains(mobileShellOverlays)).toBe(true)
+      expect(mobileShellChrome.contains(histRow)).toBe(true)
+      expect(mobileShellChrome.contains(terminalBar)).toBe(true)
+      expect(mobileShellChrome.contains(searchBar)).toBe(true)
+      expect(mobileShellTranscript.contains(tabPanels)).toBe(true)
+      expect(mobileShellComposer.contains(mobileComposerHost)).toBe(true)
+      expect(mobileShellOverlays.contains(historyPanel)).toBe(true)
+      expect(mobileShellOverlays.contains(faqOverlay)).toBe(true)
+      expect(mobileShellOverlays.contains(optionsOverlay)).toBe(true)
+    } finally {
+      restoreViewport()
+    }
+  })
+
+  it('keeps the active output pinned to the bottom when the mobile keyboard opens', async () => {
+    const output = document.createElement('div')
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: value => { scrollTop = value },
+    })
+    Object.defineProperty(output, 'scrollHeight', {
+      configurable: true,
+      get: () => 300,
+    })
+    const { restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 768, offsetTop: 0 },
+      tabs: [{ id: 'tab-1', followOutput: true, suppressOutputScrollTracking: false, _outputFollowToken: 0 }],
+      getOutput: () => output,
+    })
+    try {
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      document.body.classList.add('mobile-terminal-mode')
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => mobileCmdInput,
+      })
+
+      scrollTop = 12
+      window.visualViewport.height = 500
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+
+      expect(scrollTop).toBe(300)
+    } finally {
+      restoreViewport()
+    }
+  })
+
   it('keeps the mobile keyboard helper row visible when the viewport resize lands before focus', async () => {
     const { syncMobileComposerKeyboardState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
@@ -876,37 +1346,41 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
-  it('focuses the mobile composer with preventScroll when the user taps the input', async () => {
+  it('does not programmatically refocus the mobile composer when the user taps the input', async () => {
     const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const visibleInput = getVisibleComposerInput()
-    document.body.classList.add('mobile-terminal-mode')
+    try {
+      const visibleInput = getVisibleComposerInput()
+      document.body.classList.add('mobile-terminal-mode')
 
-    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
-    Object.assign(ev, { pointerType: 'touch' })
-    visibleInput.dispatchEvent(ev)
+      const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+      Object.assign(ev, { pointerType: 'touch' })
+      visibleInput.dispatchEvent(ev)
 
-    expect(visibleInput.focus).toHaveBeenCalledWith({ preventScroll: true })
-
-    restoreViewport()
+      expect(visibleInput.focus).not.toHaveBeenCalled()
+    } finally {
+      restoreViewport()
+    }
   })
 
-  it('focuses the mobile composer host with preventScroll when the user taps the lower composer area', async () => {
+  it('does not programmatically focus the mobile composer when the user taps the lower composer area', async () => {
     const { restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
-    const mobileComposerHost = document.getElementById('mobile-composer-host')
-    const mobileCmdInput = document.getElementById('mobile-cmd')
-    document.body.classList.add('mobile-terminal-mode')
+    try {
+      const mobileComposerHost = document.getElementById('mobile-composer-host')
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      document.body.classList.add('mobile-terminal-mode')
 
-    const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
-    Object.assign(ev, { pointerType: 'touch' })
-    mobileComposerHost.dispatchEvent(ev)
+      const ev = new Event('pointerdown', { bubbles: true, cancelable: true })
+      Object.assign(ev, { pointerType: 'touch' })
+      mobileComposerHost.dispatchEvent(ev)
 
-    expect(mobileCmdInput.focus).toHaveBeenCalledWith({ preventScroll: true })
-
-    restoreViewport()
+      expect(mobileCmdInput.focus).not.toHaveBeenCalled()
+    } finally {
+      restoreViewport()
+    }
   })
 
   it('prefers the mobile composer as the visible input while mobile mode is active', async () => {
@@ -941,6 +1415,7 @@ describe('app helpers', () => {
   it('focuses the desktop composer through the shared visible helper', async () => {
     const { focusVisibleComposerInput } = await loadAppFns()
     const cmdInput = document.getElementById('cmd')
+    document.body.classList.remove('mobile-terminal-mode')
 
     expect(focusVisibleComposerInput({ preventScroll: true })).toBe(true)
     expect(cmdInput.focus).toHaveBeenCalled()
@@ -973,13 +1448,14 @@ describe('app helpers', () => {
   })
 
   it('reads the visible mobile composer value through the shared accessor', async () => {
-    const { getComposerValue, restoreViewport } = await loadAppFns({
+    const { getComposerValue, setComposerState, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const mobileCmdInput = document.getElementById('mobile-cmd')
     document.body.classList.add('mobile-terminal-mode')
 
     mobileCmdInput.value = 'curl darklab.sh'
+    setComposerState({ value: 'curl darklab.sh', selectionStart: 15, selectionEnd: 15, activeInput: 'mobile' })
 
     expect(getComposerValue()).toBe('curl darklab.sh')
 
@@ -1000,7 +1476,8 @@ describe('app helpers', () => {
     mobileCmdInput.value = 'curl'
     mobileCmdInput.dispatchEvent(new Event('input', { bubbles: true }))
 
-    expect(cmdInput.value).toBe('curl')
+    expect(mobileCmdInput.value).toBe('curl')
+    expect(cmdInput.value).toBe('')
     expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
 
     restoreViewport()
@@ -1020,10 +1497,42 @@ describe('app helpers', () => {
     mobileCmdInput.value = 'curl'
     handleComposerInputChange(mobileCmdInput)
 
-    expect(cmdInput.value).toBe('curl')
+    expect(mobileCmdInput.value).toBe('curl')
+    expect(cmdInput.value).toBe('')
     expect(acShow).toHaveBeenCalledWith(['curl http://localhost:5001/health'])
 
     restoreViewport()
+  })
+
+  it('publishes mobile focus and selection changes into composer state without mirroring the hidden input', async () => {
+    const { getComposerState, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    try {
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      const cmdInput = document.getElementById('cmd')
+      document.body.classList.add('mobile-terminal-mode')
+
+      mobileCmdInput.value = 'curl'
+      mobileCmdInput.setSelectionRange(4, 4)
+      Object.defineProperty(document, 'activeElement', {
+        configurable: true,
+        get: () => mobileCmdInput,
+      })
+
+      mobileCmdInput.dispatchEvent(new Event('focus'))
+      document.dispatchEvent(new Event('selectionchange'))
+
+      expect(getComposerState()).toEqual({
+        value: 'curl',
+        selectionStart: 4,
+        selectionEnd: 4,
+        activeInput: 'mobile',
+      })
+      expect(cmdInput.value).toBe('')
+    } finally {
+      restoreViewport()
+    }
   })
 
   it('does not enter mobile mode on a narrow desktop viewport without touch support', async () => {
@@ -1040,12 +1549,27 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
-  it('populates the version label from the server config', async () => {
+  it('sets the document title from the server config', async () => {
     await loadAppFns()
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(document.getElementById('version-label').textContent).toBe('v9.9 · real-time')
+    expect(document.title).toBe('darklab shell')
+  })
+
+  it('updates existing terminal-wordmark elements with app name and version after config loads', async () => {
+    // loadAppFns resets document.body.innerHTML internally, so the wordmark must be
+    // injected after setup but before the async config handler drains.
+    await loadAppFns()
+    const wordmark = document.createElement('a')
+    wordmark.className = 'terminal-wordmark'
+    wordmark.href = '#'
+    document.body.appendChild(wordmark)
+
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(wordmark.textContent).toBe('darklab shell v9.9')
+    expect(wordmark.getAttribute('href')).toBe('https://gitlab.com/darklab.sh/darklab-shell#darklab-shell')
   })
 
   it('keeps the mobile run button visible after the keyboard closes', async () => {
@@ -1098,6 +1622,7 @@ describe('app helpers', () => {
 
     mobileCmdInput.dispatchEvent(new Event('focus'))
     mobileCmdInput.value = 'curl darklab.sh'
+    mobileCmdInput.dispatchEvent(new Event('input'))
     mobileRunBtn.click()
 
     expect(submitVisibleComposerCommand).toHaveBeenCalledWith({ dismissKeyboard: true, focusAfterSubmit: false })
@@ -1118,6 +1643,78 @@ describe('app helpers', () => {
     setRunButtonDisabled(false)
     expect(runBtn.disabled).toBe(false)
     expect(mobileRunBtn.disabled).toBe(false)
+  })
+
+  it('keeps the mobile composer host free of keyboard-height spacing in the simplified shell', () => {
+    const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
+    const match = css.match(/body\.mobile-terminal-mode #mobile-composer-host\s*\{([\s\S]*?)\}/)
+
+    expect(match).not.toBeNull()
+    expect(match[1]).not.toMatch(/margin-bottom\s*:/)
+  })
+
+  it('keeps the themed mobile composer surfaces free of hard-coded dark colors', () => {
+    const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
+    const shellMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer\s*\{([\s\S]*?)\}/)
+    const composerMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer #mobile-composer\s*\{([\s\S]*?)\}/)
+
+    expect(shellMatch).not.toBeNull()
+    expect(shellMatch[1]).toMatch(/background:\s*var\(--theme-mobile-composer-host-bg\)/)
+    expect(shellMatch[1]).not.toMatch(/rgba\(13,13,13/)
+
+    expect(composerMatch).not.toBeNull()
+    expect(composerMatch[1]).toMatch(/background:\s*var\(--theme-panel-bg\)/)
+    expect(composerMatch[1]).toMatch(/border:\s*1px solid var\(--theme-panel-border\)/)
+    expect(composerMatch[1]).toMatch(/box-shadow:\s*0 10px 30px var\(--theme-panel-shadow\)/)
+    expect(composerMatch[1]).not.toMatch(/rgba\(13,13,13/)
+  })
+
+  it('disables both run buttons for an empty command and enables them once input is present', async () => {
+    const { handleComposerInputChange, restoreViewport } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    try {
+      const runBtn = document.getElementById('run-btn')
+      const mobileRunBtn = document.getElementById('mobile-run-btn')
+      const mobileCmdInput = document.getElementById('mobile-cmd')
+      document.body.classList.add('mobile-terminal-mode')
+
+      expect(runBtn.disabled).toBe(true)
+      expect(mobileRunBtn.disabled).toBe(true)
+
+      mobileCmdInput.value = 'ping darklab.sh'
+      mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
+      handleComposerInputChange(mobileCmdInput)
+
+      expect(runBtn.disabled).toBe(false)
+      expect(mobileRunBtn.disabled).toBe(false)
+
+      mobileCmdInput.value = '   '
+      mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
+      handleComposerInputChange(mobileCmdInput)
+
+      expect(runBtn.disabled).toBe(true)
+      expect(mobileRunBtn.disabled).toBe(true)
+    } finally {
+      restoreViewport()
+    }
+  })
+
+  it('keeps both run buttons in sync for programmatic composer value changes', async () => {
+    const { setComposerValue } = await loadAppFns()
+    const runBtn = document.getElementById('run-btn')
+    const mobileRunBtn = document.getElementById('mobile-run-btn')
+
+    expect(runBtn.disabled).toBe(true)
+    expect(mobileRunBtn.disabled).toBe(true)
+
+    setComposerValue('ping darklab.sh', 15, 15, { dispatch: false })
+    expect(runBtn.disabled).toBe(false)
+    expect(mobileRunBtn.disabled).toBe(false)
+
+    setComposerValue('   ', 3, 3, { dispatch: false })
+    expect(runBtn.disabled).toBe(true)
+    expect(mobileRunBtn.disabled).toBe(true)
   })
 
   it('closes transient ui while the mobile keyboard is open', async () => {
@@ -1157,9 +1754,10 @@ describe('app helpers', () => {
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
-          app_name: 'shell.darklab.sh',
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
-          default_theme: 'dark',
+          default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 0,
             max_output_lines: 0,
@@ -1191,38 +1789,68 @@ describe('app helpers', () => {
     expect(acShow).toHaveBeenCalledWith(['man curl'])
   })
 
-  it('renders cursor and selection state from the hidden input', async () => {
-    const { cmdInput } = await loadAppFns()
+  it('hides autocomplete when the typed command exactly matches a suggestion', async () => {
+    const acHide = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      acSuggestions: ['man curl', 'curl http://localhost:5001/health'],
+      acHide,
+    })
+
+    cmdInput.value = 'man curl'
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(acHide).toHaveBeenCalled()
+    expect(document.getElementById('ac-dropdown').style.display).toBe('none')
+  })
+
+  it('renders cursor and selection state from composer state', async () => {
+    const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
     const shellPromptWrap = document.getElementById('shell-prompt-wrap')
 
-    cmdInput.value = 'nothing'
-    cmdInput.setSelectionRange(3, 3)
-    cmdInput.dispatchEvent(new Event('keyup'))
+    cmdInput.value = 'stale'
+    cmdInput.setSelectionRange(0, 0)
+    setComposerState({
+      value: 'nothing',
+      selectionStart: 3,
+      selectionEnd: 3,
+      activeInput: 'desktop',
+    })
+    syncShellPrompt()
     expect(shellPromptText.querySelector('.shell-caret-char')?.textContent).toBe('h')
     expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(false)
 
-    cmdInput.setSelectionRange(1, 4)
-    cmdInput.dispatchEvent(new Event('select'))
+    setComposerState({
+      selectionStart: 1,
+      selectionEnd: 4,
+    })
+    syncShellPrompt()
     expect(shellPromptText.querySelector('.shell-prompt-selection')?.textContent).toBe('oth')
     expect(shellPromptWrap.classList.contains('shell-prompt-has-selection')).toBe(true)
   })
 
   it('supports ctrl+w to delete one word to the left', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'w', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('dig darklab.sh ')
   })
 
   it('supports ctrl+u to delete to the beginning of the line', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(12, 12)
+    setComposerState({ value: 'dig darklab.sh A', selectionStart: 12, selectionEnd: 12, activeInput: 'desktop' })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('sh A')
@@ -1242,10 +1870,11 @@ describe('app helpers', () => {
   })
 
   it('supports ctrl+k to delete to the end of the line', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(4, 4)
+    setComposerState({ value: 'dig darklab.sh A', selectionStart: 4, selectionEnd: 4, activeInput: 'desktop' })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('dig ')
@@ -1254,10 +1883,16 @@ describe('app helpers', () => {
   })
 
   it('supports ctrl+e to move to the end of the line', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(4, 4)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: 4,
+      selectionEnd: 4,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'e', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.selectionStart).toBe(cmdInput.value.length)
@@ -1265,10 +1900,16 @@ describe('app helpers', () => {
   })
 
   it('supports Alt+B and Alt+F to move by word', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'b', altKey: true, bubbles: true }))
     expect(cmdInput.selectionStart).toBe(15)
     expect(cmdInput.selectionEnd).toBe(15)
@@ -1283,10 +1924,16 @@ describe('app helpers', () => {
   })
 
   it('supports macOS Option+B and Option+F word movement via physical key codes', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, setComposerState } = await loadAppFns()
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: cmdInput.value.length,
+      selectionEnd: cmdInput.value.length,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
       key: '∫',
       code: 'KeyB',
@@ -1305,18 +1952,27 @@ describe('app helpers', () => {
   })
 
   it('supports the mobile edit bar actions', async () => {
-    const { getVisibleComposerInput } = await loadAppFns()
+    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
     const press = (selector) => {
       document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }
 
-    const visibleInput = getVisibleComposerInput()
+    document.body.classList.add('mobile-terminal-mode')
     const cmdInput = document.getElementById('cmd')
     const mobileCmdInput = document.getElementById('mobile-cmd')
     cmdInput.value = 'ping -c 4 example.com'
     mobileCmdInput.value = 'ping -c 4 example.com'
     cmdInput.setSelectionRange(cmdInput.value.length, cmdInput.value.length)
     mobileCmdInput.setSelectionRange(mobileCmdInput.value.length, mobileCmdInput.value.length)
+    setComposerState({
+      value: mobileCmdInput.value,
+      selectionStart: mobileCmdInput.value.length,
+      selectionEnd: mobileCmdInput.value.length,
+      activeInput: 'mobile',
+    })
+    const visibleInput = getVisibleComposerInput()
 
     press('[data-edit-action="left"]')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length - 1)
@@ -1608,21 +2264,58 @@ describe('app helpers', () => {
     expect(clearTab).not.toHaveBeenCalled()
   })
 
-  it('moves autocomplete selection in visual screen order when the list is above the prompt', async () => {
+  it('ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt', async () => {
     const acFiltered = ['alpha', 'bravo', 'charlie']
     const { cmdInput, _getAcIndex, acDropdown } = await loadAppFns({
       acFiltered,
-      acIndex: 2,
+      acIndex: -1,
     })
 
     acDropdown.style.display = 'block'
     acDropdown.classList.add('ac-up')
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
-    expect(_getAcIndex()).toBe(1)
-
+    // ArrowUp from no selection (-1) wraps to the last item
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
     expect(_getAcIndex()).toBe(2)
+
+    // ArrowUp from last wraps to first... actually moves up
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(_getAcIndex()).toBe(1)
+
+    // ArrowDown always moves toward higher index (toward 'charlie'), regardless of ac-up
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(_getAcIndex()).toBe(2)
+
+    // ArrowDown at the last item wraps to the first
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true }))
+    expect(_getAcIndex()).toBe(0)
+
+    // ArrowUp at the first item wraps to the last
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
+    expect(_getAcIndex()).toBe(2)
+  })
+
+  it('Tab key with a modifier does not trigger autocomplete accept or selection', async () => {
+    const { cmdInput, _getAcIndex } = await loadAppFns({
+      acFiltered: ['alpha', 'bravo'],
+      acIndex: -1,
+    })
+
+    // Alt+Tab (the app tab-cycle shortcut) must not trigger autocomplete
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', altKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(-1)
+
+    // Ctrl+Tab must not trigger autocomplete
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(-1)
+
+    // Meta+Tab must not trigger autocomplete
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', metaKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(-1)
+
+    // Plain Tab (no modifier) still triggers autocomplete selection
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    expect(_getAcIndex()).toBe(0)
   })
 
   it('wires the history delete modal buttons and backdrop correctly', async () => {
@@ -1764,6 +2457,36 @@ describe('app helpers', () => {
     expect(faqOverlay.classList.contains('open')).toBe(false)
   })
 
+  it('closes the theme overlay and refocuses the terminal on Escape', async () => {
+    await loadAppFns({
+      mobileTouch: false,
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+        ],
+      },
+    })
+    const themeOverlay = document.getElementById('theme-overlay')
+
+    document.getElementById('theme-btn').click()
+    expect(themeOverlay.classList.contains('open')).toBe(true)
+
+    document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(themeOverlay.classList.contains('open')).toBe(false)
+  })
+
   it('does not refocus the mobile composer when closing options', async () => {
     const { getVisibleComposerInput } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
@@ -1803,21 +2526,45 @@ describe('app helpers', () => {
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
-    await loadAppFns()
+    await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
 
+    document.getElementById('theme-btn').click()
+    document.getElementById('theme-select').querySelector('[data-theme-name="theme_light_olive"]').click()
+    document.getElementById('theme-overlay').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     document.getElementById('options-btn').click()
-    document.querySelector('input[name="theme-pref"][value="light"]').click()
     document.getElementById('options-ts-select').value = 'elapsed'
     document.getElementById('options-ts-select').dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-ln-toggle').checked = true
     document.getElementById('options-ln-toggle').dispatchEvent(new Event('change', { bubbles: true }))
 
-    expect(document.body.classList.contains('light')).toBe(true)
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
-    expect(document.cookie).toContain('pref_theme=light')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
     expect(document.cookie).toContain('pref_timestamps=elapsed')
     expect(document.cookie).toContain('pref_line_numbers=on')
   })
@@ -1827,9 +2574,10 @@ describe('app helpers', () => {
     if (url === '/config') {
       return Promise.resolve({
         json: () => Promise.resolve({
-          app_name: 'shell.darklab.sh',
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
-          default_theme: 'dark',
+          default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 120,
             max_output_lines: 5000,
@@ -1875,10 +2623,11 @@ describe('app helpers', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            app_name: 'shell.darklab.sh',
-            version: '9.9',
-            default_theme: 'dark',
+        json: () => Promise.resolve({
+          app_name: 'darklab shell',
+          prompt_prefix: 'anon@darklab:~$',
+          version: '9.9',
+            default_theme: 'darklab_obsidian.yaml',
             motd: '',
             command_timeout_seconds: 120,
             max_output_lines: 5000,
@@ -1928,9 +2677,10 @@ describe('app helpers', () => {
       if (url === '/config') {
         return Promise.resolve({
           json: () => Promise.resolve({
-            app_name: 'shell.darklab.sh',
+            app_name: 'darklab shell',
+            prompt_prefix: 'anon@darklab:~$',
             version: '9.9',
-            default_theme: 'dark',
+            default_theme: 'darklab_obsidian.yaml',
             motd: '',
             command_timeout_seconds: 120,
             max_output_lines: 5000,

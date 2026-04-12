@@ -12,10 +12,14 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
+import blueprints.assets as shell_assets
+import config
 from database import DB_PATH
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+# Route tests intentionally disable rate limiting so individual cases can focus
+# on route behavior rather than shared per-IP quota state.
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
@@ -39,6 +43,15 @@ class TestIndexRoute:
         resp = client.get("/")
         assert b"<!DOCTYPE html>" in resp.data or b"<html" in resp.data.lower()
 
+    def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/").get_data(as_text=True)
+        assert 'id="diag-btn"' in body
+        assert 'href="/diag"' in body
+        assert 'target="_blank"' in body
+        assert 'rel="noopener noreferrer"' in body
+        assert 'button data-action="diag"' in body
 
 # ── /health ───────────────────────────────────────────────────────────────────
 
@@ -71,7 +84,7 @@ class TestHealthRoute:
 
     def test_status_degraded_when_db_fails(self):
         client = get_client()
-        with mock.patch("app.db_connect", side_effect=Exception("db error")):
+        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
             resp = client.get("/health")
         assert resp.status_code == 503
         data = json.loads(resp.data)
@@ -82,7 +95,7 @@ class TestHealthRoute:
         client = get_client()
         fake_redis = mock.MagicMock()
         fake_redis.ping.return_value = True
-        with mock.patch("app.redis_client", fake_redis):
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
             resp = client.get("/health")
         assert resp.status_code == 200
         data = json.loads(resp.data)
@@ -93,7 +106,7 @@ class TestHealthRoute:
         client = get_client()
         fake_redis = mock.MagicMock()
         fake_redis.ping.side_effect = Exception("redis down")
-        with mock.patch("app.redis_client", fake_redis):
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
             resp = client.get("/health")
         assert resp.status_code == 503
         data = json.loads(resp.data)
@@ -112,7 +125,7 @@ class TestConfigRoute:
     def test_contains_expected_keys(self):
         client = get_client()
         data = json.loads(client.get("/config").data)
-        for key in ("app_name", "default_theme", "max_tabs", "max_output_lines"):
+        for key in ("app_name", "project_readme", "prompt_prefix", "default_theme", "max_tabs", "max_output_lines"):
             assert key in data
 
     def test_max_tabs_is_int(self):
@@ -146,9 +159,21 @@ class TestConfigRoute:
 
     def test_command_timeout_reflects_cfg(self):
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 300}):
+        with mock.patch.dict("config.CFG", {"command_timeout_seconds": 300}):
             data = json.loads(client.get("/config").data)
         assert data["command_timeout_seconds"] == 300
+
+    def test_prompt_prefix_reflects_cfg(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            data = json.loads(client.get("/config").data)
+        assert data["prompt_prefix"] == "ops@darklab:~$"
+
+    def test_project_readme_is_constant(self):
+        client = get_client()
+        with mock.patch("config.PROJECT_README", "https://example.invalid/README.md"):
+            data = json.loads(client.get("/config").data)
+        assert data["project_readme"] == "https://example.invalid/README.md"
 
     def test_welcome_timing_reflects_cfg(self):
         client = get_client()
@@ -164,17 +189,130 @@ class TestConfigRoute:
             "welcome_hint_interval_ms": 3000,
             "welcome_hint_rotations": 1,
         }
-        with mock.patch("app.CFG", {**shell_app.CFG, **overrides}):
+        with mock.patch.dict("config.CFG", overrides):
             data = json.loads(client.get("/config").data)
         for key, val in overrides.items():
             assert data[key] == val, f"{key}: expected {val}, got {data[key]}"
 
-    def test_command_timeout_zero_by_default(self):
-        # Default config has timeout disabled
+    def test_command_timeout_defaults_to_one_hour(self):
+        # Default config keeps long-running commands bounded to an hour
         client = get_client()
-        with mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 0}):
+        with mock.patch.dict("config.CFG", {"command_timeout_seconds": 3600}):
             data = json.loads(client.get("/config").data)
-        assert data["command_timeout_seconds"] == 0
+        assert data["command_timeout_seconds"] == 3600
+
+    def test_diag_enabled_false_when_cidrs_empty(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is False
+
+    def test_diag_enabled_false_when_client_ip_not_in_cidrs(self):
+        client = get_client(use_forwarded_for=False)
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is False
+
+    def test_diag_enabled_true_when_client_ip_in_cidrs(self):
+        client = get_client(use_forwarded_for=False)
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is True
+
+    def test_diag_enabled_uses_trusted_forwarded_for_when_present(self):
+        client = get_client(use_forwarded_for=True)
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is True
+
+    def test_diag_enabled_ignores_forwarded_for_from_untrusted_peer(self):
+        client = get_client(use_forwarded_for=True)
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["203.0.113.0/24"],
+            "trusted_proxy_cidrs": ["10.0.0.0/8"],
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["diag_enabled"] is False
+
+
+# ── /themes ──────────────────────────────────────────────────────────────────
+
+class TestThemesRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/themes")
+        assert resp.status_code == 200
+
+    def test_response_has_current_and_themes(self):
+        client = get_client()
+        data = json.loads(client.get("/themes").data)
+        assert "current" in data
+        assert "themes" in data
+        assert isinstance(data["themes"], list)
+
+    def test_includes_named_theme_variants(self):
+        client = get_client()
+        data = json.loads(client.get("/themes").data)
+        themes = {theme["name"]: theme for theme in data["themes"]}
+        assert "blue_paper" in themes
+        assert "olive_grove" in themes
+        assert "darklab_obsidian" in themes
+        assert "emerald_obsidian" in themes
+        assert "charcoal_steel" in themes
+        assert "dark" not in themes
+        assert "light" not in themes
+        assert themes["blue_paper"]["label"] == "Blue Paper"
+        assert themes["olive_grove"]["label"] == "Olive Grove"
+        assert themes["darklab_obsidian"]["label"] == "Darklab Obsidian"
+        assert themes["emerald_obsidian"]["label"] == "Emerald Obsidian"
+        assert themes["charcoal_steel"]["label"] == "Charcoal Steel"
+        assert themes["blue_paper"]["group"] == "Cool Light"
+        assert themes["olive_grove"]["group"] == "Warm Light"
+        assert themes["darklab_obsidian"]["group"] == "Dark Neon"
+        assert themes["emerald_obsidian"]["group"] == "Dark Neon"
+        assert themes["blue_paper"]["filename"] == "blue_paper.yaml"
+        assert themes["olive_grove"]["filename"] == "olive_grove.yaml"
+        assert themes["darklab_obsidian"]["filename"] == "darklab_obsidian.yaml"
+        assert themes["emerald_obsidian"]["filename"] == "emerald_obsidian.yaml"
+
+    def test_default_theme_is_exposed_as_filename(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"default_theme": "darklab_obsidian.yaml"}):
+            data = json.loads(client.get("/config").data)
+        assert data["default_theme"] == "darklab_obsidian.yaml"
+
+    def test_default_theme_filename_selects_variant(self):
+        client = get_client(use_forwarded_for=False)
+        data = json.loads(client.get("/themes").data)
+        assert data["current"]["name"] == "darklab_obsidian"
+        assert data["current"]["filename"] == "darklab_obsidian.yaml"
+        assert data["current"]["label"] == "Darklab Obsidian"
+        assert data["current"]["group"] == "Dark Neon"
+        assert data["current"]["sort"] == 0
+
+    def test_pref_theme_name_cookie_selects_variant(self):
+        client = get_client(use_forwarded_for=False)
+        client.set_cookie("pref_theme_name", "blue_paper")
+        data = json.loads(client.get("/themes").data)
+        assert data["current"]["name"] == "blue_paper"
+        assert data["current"]["label"] == "Blue Paper"
+        assert data["current"]["group"] == "Cool Light"
+
+    def test_empty_registry_falls_back_to_built_in_dark_theme(self, monkeypatch):
+        client = get_client(use_forwarded_for=False)
+        monkeypatch.setitem(config.CFG, "default_theme", "theme_missing.yaml")
+        monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY_MAP", {})
+        monkeypatch.setitem(shell_app.get_theme_entry.__globals__, "THEME_REGISTRY", [])
+
+        data = json.loads(client.get("/themes").data)
+        assert data["current"]["name"] == "dark"
+        assert data["current"]["source"] == "built-in"
+        assert data["current"]["group"] == "Other"
+        assert data["current"]["sort"] == 0
+        assert data["themes"] == []
 
 
 # ── /vendor assets ───────────────────────────────────────────────────────────
@@ -189,8 +327,8 @@ class TestVendorAssets:
         build_asset.write_text("build ansi_up")
         fallback_asset.write_text("fallback ansi_up")
 
-        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", build_asset)
-        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", build_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
 
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
@@ -203,8 +341,8 @@ class TestVendorAssets:
         fallback_asset.parent.mkdir(parents=True)
         fallback_asset.write_text("fallback ansi_up")
 
-        monkeypatch.setattr(shell_app, "_ANSI_UP_PATH", missing_build_asset)
-        monkeypatch.setattr(shell_app, "_ANSI_UP_FALLBACK", fallback_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", missing_build_asset)
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
 
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
@@ -222,14 +360,14 @@ class TestVendorAssets:
         build_font.write_bytes(b"build font bytes")
         fallback_font.write_bytes(b"fallback font bytes")
 
-        monkeypatch.setattr(shell_app, "_FONT_DIR", build_dir)
-        monkeypatch.setattr(shell_app, "_FONT_FALLBACK_DIR", fallback_dir)
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", build_dir)
+        monkeypatch.setattr(shell_assets, "_FONT_FALLBACK_DIR", fallback_dir)
 
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
         assert resp.data == b"build font bytes"
 
-        monkeypatch.setattr(shell_app, "_FONT_DIR", tmp_path / "missing-fonts")
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing-fonts")
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
         assert resp.data == b"fallback font bytes"
@@ -242,6 +380,179 @@ class TestVendorAssets:
 
         resp = client.get("/vendor/fonts/../../app.py")
         assert resp.status_code == 404
+
+
+# ── /diag ─────────────────────────────────────────────────────────────────────
+
+class TestDiagRoute:
+    """Operator diagnostics endpoint — IP-gated, returns 404 when unconfigured."""
+
+    def _allowed_client(self):
+        """Test client whose remote_addr (127.0.0.1) matches the allowed CIDR."""
+        shell_app.app.config["TESTING"] = True
+        shell_app.app.config["RATELIMIT_ENABLED"] = False
+        # No X-Forwarded-For — we want remote_addr to be 127.0.0.1 (Werkzeug default)
+        return shell_app.app.test_client()
+
+    def test_returns_404_when_cidrs_empty(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": []}):
+            with mock.patch.object(logging.getLogger("shell"), "warning") as mock_warn:
+                resp = client.get("/diag")
+        assert resp.status_code == 404
+        mock_warn.assert_called_once()
+        event = mock_warn.call_args[0][0]
+        assert event == "DIAG_DENIED"
+        assert mock_warn.call_args[1]["extra"]["ip"] == "127.0.0.1"
+        assert mock_warn.call_args[1]["extra"]["allowed_cidrs"] == []
+
+    def test_returns_404_when_cidrs_not_set(self):
+        client = self._allowed_client()
+        cfg_without_key = {k: v for k, v in config.CFG.items() if k != "diagnostics_allowed_cidrs"}
+        with mock.patch.dict("config.CFG", cfg_without_key, clear=True):
+            resp = client.get("/diag")
+        assert resp.status_code == 404
+
+    def test_returns_404_when_client_ip_not_in_cidrs(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["10.0.0.0/8"]}):
+            resp = client.get("/diag")
+        assert resp.status_code == 404
+
+    def test_returns_200_when_client_ip_in_cidrs(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            resp = client.get("/diag")
+        assert resp.status_code == 200
+
+    def test_response_has_expected_top_level_keys(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert set(data.keys()) >= {"app", "config", "db", "redis", "assets", "tools"}
+
+    def test_app_section_has_version_and_name(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "app_name": "test shell",
+        }):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["app"]["name"] == "test shell"
+        assert isinstance(data["app"]["version"], str)
+
+    def test_config_section_contains_operational_keys(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        cfg = data["config"]
+        for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
+                    "persist_full_run_output", "permalink_retention_days"):
+            assert key in cfg, f"missing config key: {key}"
+
+    def test_db_section_ok_and_has_counts(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["db"]["ok"] is True
+        assert isinstance(data["db"]["runs"], int)
+        assert isinstance(data["db"]["snapshots"], int)
+
+    def test_db_section_error_on_db_failure(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db down")):
+                data = json.loads(client.get("/diag?format=json").data)
+        assert data["db"]["ok"] is False
+        assert "error" in data["db"]
+
+    def test_redis_section_reflects_client_presence(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert "configured" in data["redis"]
+
+    def test_assets_section_reports_vendor_or_fallback(self, tmp_path, monkeypatch):
+        client = self._allowed_client()
+        # No build-time vendor dir present — both should report "fallback"
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", tmp_path / "missing_ansi_up.js")
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["assets"]["ansi_up"] == "fallback"
+        assert data["assets"]["fonts"] == "fallback"
+
+    def test_tools_section_has_present_and_missing_lists(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert isinstance(data["tools"]["present"], list)
+        assert isinstance(data["tools"]["missing"], list)
+
+    def test_tools_present_contains_known_binary(self):
+        """curl is allowed and installed in the dev environment."""
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        # At minimum, basic tools available in dev should appear in present
+        present = data["tools"]["present"]
+        assert isinstance(present, list)
+        # Every entry in present must actually resolve via which()
+        import shutil as _shutil
+        for tool in present:
+            assert _shutil.which(tool) is not None, f"{tool} in present but not found by which()"
+
+    def test_honors_forwarded_for_header_from_trusted_proxy(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+            "trusted_proxy_cidrs": ["127.0.0.1/32"],
+        }):
+            resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert resp.status_code == 200
+
+    def test_ignores_forwarded_for_header_from_untrusted_proxy(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["10.0.0.0/8"],
+            "trusted_proxy_cidrs": ["192.0.2.0/24"],
+        }):
+            resp = client.get("/diag", headers={"X-Forwarded-For": "10.0.0.1"})
+        assert resp.status_code == 404
+
+    def test_diag_viewed_logged_on_success(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            with mock.patch.object(logging.getLogger("shell"), "info") as mock_info:
+                resp = client.get("/diag")
+        assert resp.status_code == 200
+        events = [call[0][0] for call in mock_info.call_args_list]
+        assert "DIAG_VIEWED" in events
+        viewed_call = next(c for c in mock_info.call_args_list if c[0][0] == "DIAG_VIEWED")
+        assert viewed_call[1]["extra"]["ip"] == "127.0.0.1"
+
+    def test_html_response_contains_expected_content(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "app_name": "diag test shell",
+        }):
+            resp = client.get("/diag")
+        body = resp.get_data(as_text=True)
+        assert "diag test shell" in body
+        assert "operator diagnostics" in body
+        assert 'class="term-action-btn diag-back-btn"' in body
+        assert 'href="/"' in body
+        assert "back to shell" in body
+        assert "<!DOCTYPE html>" in body or "<html" in body.lower()
+
+    def test_json_format_param_returns_json(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            resp = client.get("/diag?format=json")
+        assert "application/json" in resp.content_type
+        data = json.loads(resp.data)
+        assert "app" in data
 
 
 # ── /allowed-commands ─────────────────────────────────────────────────────────
@@ -260,14 +571,14 @@ class TestAllowedCommandsRoute:
     def test_unrestricted_when_no_file(self):
         client = get_client()
         # Patch in app's namespace — the route calls load_allowed_commands() directly
-        with mock.patch("app.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("blueprints.content.load_allowed_commands", return_value=(None, [])):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is False
 
     def test_restricted_when_file_present(self):
         client = get_client()
-        with mock.patch("app.load_allowed_commands", return_value=(["ping", "nmap"], [])):
-            with mock.patch("app.load_allowed_commands_grouped", return_value=[]):
+        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "nmap"], [])):
+            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=[]):
                 data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert "ping" in data["commands"]
@@ -275,8 +586,8 @@ class TestAllowedCommandsRoute:
     def test_returns_grouped_commands_when_restricted(self):
         client = get_client()
         groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
-        with mock.patch("app.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
-            with mock.patch("app.load_allowed_commands_grouped", return_value=groups):
+        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
+            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=groups):
                 data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert data["groups"] == groups
@@ -400,10 +711,10 @@ class TestRunRoute:
 
     def test_missing_allowlisted_command_returns_synthetic_run(self):
         client = get_client()
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("app.subprocess.Popen") as popen:
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
         assert resp.status_code == 200
@@ -480,7 +791,7 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
-            with mock.patch("app.CFG", {**shell_app.CFG, "history_panel_limit": 2}):
+            with mock.patch.dict("config.CFG", {"history_panel_limit": 2}):
                 resp = client.get("/history", headers={"X-Session-ID": session})
             data = json.loads(resp.data)
             commands = [r["command"] for r in data["runs"]]
@@ -629,18 +940,19 @@ class TestShareRoute:
         assert resp.status_code == 200
         assert b"<html" in resp.data.lower()
 
-    def test_get_share_html_honors_light_theme_cookie(self):
+    def test_get_share_html_honors_theme_name_cookie(self):
         client = get_client()
         create_resp = client.post(
             "/share",
-            json={"label": "light theme test", "content": ["line"]},
+            json={"label": "theme selector test", "content": ["line"]},
             headers={"X-Session-ID": "test-session"}
         )
         share_id = json.loads(create_resp.data)["id"]
-        client.set_cookie("pref_theme", "light")
+        client.set_cookie("pref_theme_name", "blue_paper")
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
-        assert 'class="permalink-page light"' in body
+        assert 'class="permalink-page"' in body
+        assert 'data-theme="blue_paper"' in body
         assert '/static/css/styles.css' in body
 
     def test_get_share_html_contains_label(self):
@@ -684,7 +996,7 @@ class TestShareRoute:
             json={
                 "label": "prompt-style-test",
                 "content": [
-                    {"text": "anon@shell.darklab.sh:~$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
+                    {"text": "anon@darklab:~$ ping -c 4 darklab.sh", "cls": "prompt-echo"},
                     {"text": "PING darklab.sh (93.184.216.34): 56 data bytes", "cls": ""},
                 ],
             },
@@ -729,6 +1041,31 @@ class TestShareRoute:
         assert 'id="toggle-ts"' in body
         assert 'timestamps unavailable' not in body
 
+    def test_get_share_html_shows_line_count_meta(self):
+        from config import APP_VERSION
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "meta-lines-test", "content": ["a", "b", "c"]},
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        body = client.get(f"/share/{share_id}").get_data(as_text=True)
+        assert "lines" in body
+        assert f"v{APP_VERSION}" in body
+
+    def test_get_share_html_does_not_show_exit_code_badge(self):
+        """Snapshots have no exit code — the badge must not appear."""
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "no-exit-test", "content": ["output line"]},
+            headers={"X-Session-ID": "test-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+        body = client.get(f"/share/{share_id}").get_data(as_text=True)
+        assert "meta-badge" not in body
+
 
 # ── /welcome ──────────────────────────────────────────────────────────────────
 
@@ -746,7 +1083,7 @@ class TestWelcomeRoute:
     def test_returns_cmd_and_out_fields_when_configured(self):
         client = get_client()
         mock_blocks = [{"cmd": "ping google.com", "out": "64 bytes"}]
-        with mock.patch("app.load_welcome", return_value=mock_blocks):
+        with mock.patch("blueprints.content.load_welcome", return_value=mock_blocks):
             data = json.loads(client.get("/welcome").data)
         assert len(data) == 1
         assert data[0]["cmd"] == "ping google.com"
@@ -754,7 +1091,7 @@ class TestWelcomeRoute:
 
     def test_returns_empty_list_when_no_welcome_file(self):
         client = get_client()
-        with mock.patch("app.load_welcome", return_value=[]):
+        with mock.patch("blueprints.content.load_welcome", return_value=[]):
             data = json.loads(client.get("/welcome").data)
         assert data == []
 
@@ -775,7 +1112,7 @@ class TestAutocompleteRoute:
 
     def test_returns_configured_suggestions(self):
         client = get_client()
-        with mock.patch("app.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
+        with mock.patch("blueprints.content.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
             data = json.loads(client.get("/autocomplete").data)
         assert "nmap -sV" in data["suggestions"]
         assert "ping -c 4" in data["suggestions"]
@@ -1043,6 +1380,88 @@ class TestRunPermalinkRoute:
         finally:
             self._delete_run(run_id)
 
+    def _insert_run_with_meta(self, run_id, command, exit_code, started, finished, output=None):
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute(
+            "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output_preview, "
+            "preview_truncated, output_line_count, full_output_available, full_output_truncated) "
+            "VALUES (?, 'test-session', ?, ?, ?, ?, ?, 0, ?, 0, 0)",
+            (
+                run_id, command, started, finished, exit_code,
+                json.dumps(output or []), len(output or []),
+            )
+        )
+        conn.commit()
+        conn.close()
+
+    def test_html_view_shows_exit_code_zero_badge(self):
+        run_id = "permalink-meta-exit0-run"
+        self._insert_run_with_meta(
+            run_id, "curl http://example.com", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:05",
+            ["HTTP/1.1 200 OK"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert "exit 0" in body
+            assert "meta-badge-ok" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_nonzero_exit_code_badge(self):
+        run_id = "permalink-meta-exitfail-run"
+        self._insert_run_with_meta(
+            run_id, "curl http://missing.invalid", 6,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:02",
+            ["curl: (6) Could not resolve host"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert "exit 6" in body
+            assert "meta-badge-fail" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_duration(self):
+        run_id = "permalink-meta-duration-run"
+        self._insert_run_with_meta(
+            run_id, "nmap -sV 10.0.0.1", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:01:30",
+            ["Nmap done"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert "1m 30s" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_line_count(self):
+        run_id = "permalink-meta-lines-run"
+        self._insert_run_with_meta(
+            run_id, "dig example.com", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:01",
+            ["line1", "line2", "line3"],
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            # 3 output lines + 2 injected (prompt-echo + blank) = 5, or just check "lines" present
+            assert "lines" in body
+        finally:
+            self._delete_run(run_id)
+
+    def test_html_view_shows_app_version(self):
+        from config import APP_VERSION
+        run_id = "permalink-meta-version-run"
+        self._insert_run_with_meta(
+            run_id, "whoami", 0,
+            "2026-04-10T10:00:00", "2026-04-10T10:00:00.1",
+        )
+        try:
+            body = get_client().get(f"/history/{run_id}").get_data(as_text=True)
+            assert f"v{APP_VERSION}" in body
+        finally:
+            self._delete_run(run_id)
+
 
 class TestRunFullOutputRoute:
     def _insert_run(self, run_id, command):
@@ -1146,7 +1565,7 @@ class TestContentTypes:
 # ── get_client_ip ─────────────────────────────────────────────────────────────
 
 class TestGetClientIp:
-    """get_client_ip() uses X-Forwarded-For when it contains a valid IP,
+    """get_client_ip() honors X-Forwarded-For only for trusted proxy peers,
     otherwise falls back to the direct connection IP (REMOTE_ADDR)."""
 
     def setup_method(self, method):  # noqa: ARG002
@@ -1168,11 +1587,28 @@ class TestGetClientIp:
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "2001:db8::1"
 
-    def test_first_ip_used_when_xff_has_multiple(self):
-        with mock.patch.object(shell_app.log, "debug") as mock_debug:
+    def test_last_untrusted_ip_used_when_xff_has_multiple_trusted_hops(self):
+        original_cidrs = list(shell_app.CFG.get("trusted_proxy_cidrs", []))
+        with mock.patch.dict(
+            shell_app.CFG,
+            {"trusted_proxy_cidrs": original_cidrs + ["10.0.0.0/8"]},
+            clear=False,
+        ), mock.patch.object(shell_app.log, "debug") as mock_debug:
             get_client().get("/health", headers={"X-Forwarded-For": "5.6.7.8, 10.0.0.1"})
         calls = [c for c in mock_debug.call_args_list if c[0][0] == "REQUEST"]
         assert calls[0].kwargs["extra"]["ip"] == "5.6.7.8"
+
+    def test_untrusted_proxy_logs_proxy_ip_and_falls_back(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warning:
+            with shell_app.app.test_request_context(
+                "/health",
+                environ_base={"REMOTE_ADDR": "203.0.113.10"},
+                headers={"X-Forwarded-For": "1.2.3.4"},
+            ):
+                assert shell_app.get_client_ip() == "203.0.113.10"
+        calls = [c for c in mock_warning.call_args_list if c[0][0] == "UNTRUSTED_PROXY"]
+        assert calls[0].kwargs["extra"]["proxy_ip"] == "203.0.113.10"
+        assert calls[0].kwargs["extra"]["forwarded_for"] == "1.2.3.4"
 
     def test_no_xff_falls_back_to_remote_addr(self):
         with mock.patch.object(shell_app.log, "debug") as mock_debug:

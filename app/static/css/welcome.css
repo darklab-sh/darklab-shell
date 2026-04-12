@@ -1,0 +1,314 @@
+/* darklab shell CSS module: welcome
+   Welcome animation, operator notice, and onboarding-specific presentation. */
+
+/* ── Welcome typeout cursor ── */
+.welcome-banner {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  align-items: flex-start;
+  margin: 0 0 4px;
+  padding: 0;
+}
+.welcome-banner > * {
+  opacity: 0;
+  transform: translateY(-1px);
+}
+.welcome-banner-visible > * {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 220ms ease, transform 220ms ease;
+}
+.welcome-operator-notice {
+  align-self: center;
+  width: min(100%, 72ch);
+  margin: 0 0 8px;
+  padding: 8px 14px 10px;
+  border: 1px solid color-mix(in srgb, var(--blue) 28%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--surface) 92%, color-mix(in srgb, var(--blue) 8%, transparent));
+  text-align: center;
+  animation: welcome-operator-pulse 2.2s ease-in-out infinite;
+}
+.welcome-operator-label {
+  color: color-mix(in srgb, var(--blue) 86%, var(--text));
+  font-size: 10px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  opacity: 0.92;
+  margin-bottom: 4px;
+}
+.welcome-operator-body {
+  color: color-mix(in srgb, var(--text) 94%, var(--blue));
+  font-size: 13px;
+  line-height: 1.45;
+}
+.welcome-operator-body a {
+  color: var(--blue);
+}
+.welcome-operator-body code {
+  font-family: var(--font-mono);
+  color: var(--green);
+}
+.welcome-operator-body strong {
+  color: var(--text);
+}
+.welcome-ascii-art {
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: clamp(8px, 0.72vw + 3px, 12px);
+  line-height: 1.04;
+  letter-spacing: -0.12px;
+  white-space: pre;
+  text-shadow: var(--theme-welcome-ascii-text-shadow);
+  margin: 2px 0 4px;
+  transition: opacity 220ms ease, filter 220ms ease, transform 220ms ease;
+  filter: var(--theme-welcome-ascii-filter);
+}
+.welcome-banner-settled .welcome-ascii-art {
+  transform: translateY(-1px);
+}
+.welcome-banner-settled {
+  margin-bottom: 8px;
+}
+.welcome-status-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  margin-top: 2px;
+  align-self: stretch;
+}
+.welcome-status-line {
+  color: var(--blue);
+  white-space: pre;
+  line-height: 1.08;
+  display: grid;
+  grid-template-columns: 18ch auto;
+  column-gap: 1.5ch;
+  justify-content: start;
+  width: fit-content;
+  text-align: left;
+  opacity: 0;
+  transform: translateY(-1px);
+  position: relative;
+}
+.welcome-status-label {
+  color: var(--blue);
+  text-transform: uppercase;
+  min-width: 18ch;
+  letter-spacing: 0.08em;
+}
+.welcome-status-label::before {
+  content: '[';
+  color: color-mix(in srgb, var(--blue) 55%, transparent);
+  margin-right: 0.2ch;
+}
+.welcome-status-label::after {
+  content: ']';
+  color: color-mix(in srgb, var(--blue) 55%, transparent);
+  margin-left: 0.2ch;
+}
+.welcome-status-loading {
+  color: var(--muted);
+  font-weight: 400;
+  animation: welcome-soft-wait 1.35s ease-in-out infinite;
+}
+.welcome-status-loaded {
+  color: color-mix(in srgb, var(--green) 82%, var(--text));
+  font-weight: 700;
+  animation: welcome-soft-pulse 1.8s ease-in-out infinite;
+  text-shadow: 0 0 8px color-mix(in srgb, var(--green) 14%, transparent);
+}
+body .welcome-status-label {
+  color: var(--blue);
+}
+body .welcome-status-label::before,
+body .welcome-status-label::after {
+  color: color-mix(in srgb, var(--blue) 45%, transparent);
+}
+body .welcome-status-loading {
+  color: var(--muted);
+}
+body .welcome-status-loaded {
+  color: color-mix(in srgb, var(--green) 76%, var(--text));
+  text-shadow: 0 0 8px color-mix(in srgb, var(--green) 10%, transparent);
+}
+.welcome-status-line-visible {
+  opacity: 1;
+  transform: translateY(0);
+  transition: opacity 180ms ease, transform 180ms ease;
+}
+.wlc-prompt {
+  color: var(--blue);
+  font-weight: 700;
+  margin-right: 8px;
+  font-size: 14px;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.welcome-command {
+  margin-top: 1px;
+  display: flex;
+  align-items: baseline;
+  white-space: pre;
+  color: var(--text);
+  font-size: 14px;
+}
+.welcome-command-loadable {
+  display: inline-block;
+  cursor: pointer;
+  border-radius: 4px;
+  padding: 1px 2px;
+  transition: background 120ms ease, box-shadow 120ms ease;
+}
+.welcome-command-loadable:hover,
+.welcome-command-loadable:focus-visible {
+  background: var(--theme-welcome-command-hover-bg);
+  box-shadow: var(--theme-welcome-command-hover-shadow);
+  outline: none;
+}
+.welcome-command-static .welcome-command-text {
+  cursor: default;
+}
+.welcome-command-text,
+.wlc-command-text {
+  color: var(--green);
+  white-space: pre;
+}
+.welcome-output {
+  color: var(--muted);
+  margin-top: 1px;
+}
+.welcome-comment {
+  color: var(--muted);
+  white-space: pre-wrap;
+  margin-top: 1px;
+}
+.welcome-command-comment {
+  color: var(--muted);
+  white-space: pre;
+  margin-left: 10px;
+}
+.welcome-command-badge {
+  color: var(--blue);
+  border: 1px solid color-mix(in srgb, var(--blue) 35%, transparent);
+  border-radius: 999px;
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 2px 7px;
+  margin-left: 10px;
+  vertical-align: middle;
+  white-space: nowrap;
+  flex: 0 0 auto;
+}
+.line.wlc-live {
+  opacity: 1;
+}
+.line.welcome-system {
+  color: var(--green);
+  font-weight: 700;
+  margin-top: 4px;
+}
+.line.welcome-section-header {
+  color: color-mix(in srgb, var(--green) 74%, var(--muted));
+  font-size: 11px;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  margin-top: 8px;
+  opacity: 0.78;
+}
+.line.welcome-hint {
+  color: var(--muted);
+  font-style: italic;
+  margin-top: 7px;
+  margin-bottom: 9px;
+  opacity: 0.92;
+}
+.line.welcome-hint + .shell-prompt-wrap {
+  margin-top: 9px;
+}
+.welcome-hint-feed {
+  opacity: 0;
+  transition: opacity 220ms ease;
+}
+.welcome-hint-feed.welcome-hint-visible {
+  opacity: 1;
+}
+.wlc-cursor {
+  display: inline-block;
+  width: 7px;
+  height: 1em;
+  background: var(--green);
+  vertical-align: text-bottom;
+  margin-left: 1px;
+  animation: wlc-blink 0.65s step-end infinite;
+}
+@keyframes wlc-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
+@keyframes welcome-soft-pulse {
+  0%, 100% { opacity: 0.88; }
+  50% { opacity: 1; }
+}
+@keyframes welcome-operator-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--blue) 0%, transparent);
+    border-color: color-mix(in srgb, var(--blue) 26%, var(--border));
+  }
+  50% {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--blue) 16%, transparent),
+      0 0 18px color-mix(in srgb, var(--blue) 10%, transparent);
+    border-color: color-mix(in srgb, var(--blue) 36%, var(--border));
+  }
+}
+@keyframes welcome-soft-wait {
+  0%, 100% { opacity: 0.68; }
+  50% { opacity: 0.82; }
+}
+@keyframes prompt-load-flash {
+  0% { border-color: var(--border-bright); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 0%, transparent); }
+  25% { border-color: var(--green); box-shadow: 0 0 0 3px color-mix(in srgb, var(--green) 16%, transparent); }
+  100% { border-color: var(--border-bright); box-shadow: 0 0 0 0 color-mix(in srgb, var(--green) 0%, transparent); }
+}
+
+@media (max-width: 900px) {
+  .welcome-banner {
+    gap: 1px;
+  }
+  .welcome-operator-notice {
+    width: 100%;
+    margin: 0 0 6px;
+    padding: 8px 10px 9px;
+  }
+  .welcome-operator-label {
+    font-size: 9px;
+    letter-spacing: 0.14em;
+  }
+  .welcome-operator-body {
+    font-size: 12px;
+    line-height: 1.4;
+  }
+  .welcome-ascii-art {
+    font-size: clamp(7px, 1.6vw + 2px, 9px);
+    margin-bottom: 4px;
+  }
+  .welcome-command {
+    white-space: normal;
+    flex-wrap: wrap;
+    row-gap: 4px;
+  }
+  .welcome-command-text,
+  .wlc-command-text {
+    white-space: nowrap;
+    flex: 0 1 auto;
+  }
+  .welcome-command-comment {
+    display: block;
+    margin-left: 0;
+    flex: 1 0 100%;
+    white-space: normal;
+  }
+  .welcome-command-badge {
+    margin-left: 8px;
+    align-self: flex-start;
+  }
+}

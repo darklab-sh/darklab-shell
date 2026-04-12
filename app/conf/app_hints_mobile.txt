@@ -4,5 +4,4 @@
 Tap the prompt to open the mobile keyboard quickly.
 Use the mobile menu for search, history, and theme.
 The helper row appears only while the keyboard is open.
-Rotate the device if the prompt feels cramped.
 Long runs stay in the history panel after the tab settles.

@@ -21,6 +21,9 @@ function _toggleStar(cmd) {
 function resetCmdHistoryNav() {
   _cmdHistoryNavIndex = -1;
   _cmdHistoryNavDraft = '';
+  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
+    exitHistSearch(false);
+  }
 }
 
 function navigateCmdHistory(delta) {
@@ -28,7 +31,9 @@ function navigateCmdHistory(delta) {
 
   if (delta > 0) {
     if (_cmdHistoryNavIndex === -1) {
-      _cmdHistoryNavDraft = cmdInput.value;
+      _cmdHistoryNavDraft = (typeof getComposerValue === 'function')
+        ? getComposerValue()
+        : (cmdInput ? cmdInput.value : '');
       _cmdHistoryNavIndex = 0;
     } else if (_cmdHistoryNavIndex < cmdHistory.length - 1) {
       _cmdHistoryNavIndex++;
@@ -78,6 +83,54 @@ function hydrateCmdHistory(runs) {
   renderHistory();
 }
 
+function _makeOverflowChip(_count) {
+  const chip = document.createElement('button');
+  chip.className = 'hist-chip hist-chip-overflow';
+  chip.textContent = '+ more';
+  chip.title = 'Open history panel';
+  chip.addEventListener('click', () => {
+    if (!historyPanel) return;
+    showHistoryPanel();
+    if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
+  });
+  return chip;
+}
+
+function _applyDesktopChipOverflow() {
+  const chips = Array.from(histRow.querySelectorAll('.hist-chip:not(.hist-chip-overflow)'));
+  if (!chips.length) return;
+
+  // getBoundingClientRect forces a synchronous layout so positions are accurate.
+  // In jsdom all rects are zero so the guard below falls through cleanly.
+  const firstTop = chips[0].getBoundingClientRect().top;
+
+  // Find the first chip that has wrapped to a second row.
+  let overflowIdx = chips.length;
+  for (let i = 1; i < chips.length; i++) {
+    if (chips[i].getBoundingClientRect().top > firstTop + 2) {
+      overflowIdx = i;
+      break;
+    }
+  }
+  if (overflowIdx === chips.length) return; // all chips fit on one row
+
+  // Remove overflowing chips and add the history shortcut chip.
+  for (let i = chips.length - 1; i >= overflowIdx; i--) {
+    histRow.removeChild(chips[i]);
+  }
+  const overflowChip = _makeOverflowChip();
+  histRow.appendChild(overflowChip);
+
+  // If the overflow chip itself wrapped (getBoundingClientRect forces another reflow),
+  // keep pulling regular chips until the overflow chip sits on the first row.
+  while (overflowChip.getBoundingClientRect().top > firstTop + 2) {
+    const regularChips = Array.from(histRow.querySelectorAll('.hist-chip:not(.hist-chip-overflow)'));
+    const lastRegularChip = regularChips[regularChips.length - 1];
+    if (!lastRegularChip) break;
+    histRow.removeChild(lastRegularChip);
+  }
+}
+
 function renderHistory() {
   while (histRow.children.length > 1) histRow.removeChild(histRow.lastChild);
   if (!cmdHistory.length) { hideHistoryRow(); return; }
@@ -89,9 +142,9 @@ function renderHistory() {
     ...cmdHistory.filter(c => starred.has(c)),
     ...cmdHistory.filter(c => !starred.has(c)),
   ];
-  const visible = (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
-    ? sorted.slice(0, 3)
-    : sorted;
+
+  const isMobile = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  const visible = isMobile ? sorted.slice(0, 3) : sorted;
 
   visible.forEach(cmd => {
     const isStarred = starred.has(cmd);
@@ -99,22 +152,25 @@ function renderHistory() {
     chip.className = 'hist-chip' + (isStarred ? ' starred' : '');
     chip.title = cmd;
 
-    const starEl = document.createElement('span');
-    starEl.className = 'chip-star';
-    starEl.textContent = isStarred ? '★' : '☆';
-    starEl.title = isStarred ? 'Unstar' : 'Star';
-    starEl.addEventListener('click', e => {
-      e.stopPropagation();
-      _toggleStar(cmd);
-      renderHistory();
-    });
-
     const textEl = document.createElement('span');
     textEl.textContent = cmd;
 
-    chip.appendChild(starEl);
+    if (!isMobile) {
+      const starEl = document.createElement('span');
+      starEl.className = 'chip-star';
+      starEl.textContent = isStarred ? '★' : '☆';
+      starEl.title = isStarred ? 'Unstar' : 'Star';
+      starEl.addEventListener('click', e => {
+        e.stopPropagation();
+        _toggleStar(cmd);
+        renderHistory();
+      });
+      chip.appendChild(starEl);
+    }
+
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
+      chip.blur();
       setComposerValue(cmd, cmd.length, cmd.length);
       if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
       resetCmdHistoryNav();
@@ -122,18 +178,86 @@ function renderHistory() {
     histRow.appendChild(chip);
   });
 
-  if (visible.length < sorted.length) {
-    const overflowChip = document.createElement('button');
-    overflowChip.className = 'hist-chip hist-chip-overflow';
-    overflowChip.textContent = `+${sorted.length - visible.length} more`;
-    overflowChip.title = 'Open history panel';
-    overflowChip.addEventListener('click', () => {
-      if (!historyPanel) return;
-      showHistoryPanel();
-      if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
-    });
-    histRow.appendChild(overflowChip);
+  if (isMobile && visible.length < sorted.length) {
+    histRow.appendChild(_makeOverflowChip());
+  } else if (!isMobile) {
+    _applyDesktopChipOverflow();
   }
+}
+
+// Re-measure chip overflow when the window is resized on desktop.
+if (typeof window !== 'undefined' && typeof window.addEventListener === 'function') {
+  window.addEventListener('resize', () => {
+    if (typeof useMobileTerminalViewportMode === 'function' && !useMobileTerminalViewportMode()) {
+      renderHistory();
+    }
+  });
+}
+
+
+function _setHistoryDeleteMessage(title, detail) {
+  const msg = histDelMsg;
+  if (!msg) return;
+  msg.replaceChildren();
+  msg.appendChild(document.createTextNode(title));
+  msg.appendChild(document.createElement('br'));
+  const note = document.createElement('span');
+  note.className = 'history-delete-note';
+  note.textContent = detail;
+  msg.appendChild(note);
+}
+
+function _createHistoryEntry(run, isStarred) {
+  const entry = document.createElement('div');
+  entry.className = 'history-entry' + (isStarred ? ' starred' : '');
+  const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
+  const time = new Date(run.started).toLocaleTimeString();
+
+  const cmd = document.createElement('div');
+  cmd.className = 'history-entry-cmd';
+  cmd.textContent = run.command || '';
+  entry.appendChild(cmd);
+
+  const meta = document.createElement('div');
+  meta.className = 'history-entry-meta';
+  const timeEl = document.createElement('span');
+  timeEl.textContent = time;
+  meta.appendChild(timeEl);
+  const exitEl = document.createElement('span');
+  exitEl.className = exitCls;
+  exitEl.textContent = `exit ${run.exit_code}`;
+  meta.appendChild(exitEl);
+  entry.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-actions';
+
+  const starBtn = document.createElement('button');
+  starBtn.className = 'history-action-btn star-btn' + (isStarred ? ' starred' : '');
+  starBtn.dataset.action = 'star';
+  starBtn.textContent = isStarred ? '★ starred' : '☆ star';
+  actions.appendChild(starBtn);
+
+  const copyBtn = document.createElement('button');
+  copyBtn.className = 'history-action-btn';
+  copyBtn.dataset.action = 'copy';
+  copyBtn.textContent = 'copy command';
+  actions.appendChild(copyBtn);
+
+  const permalinkBtn = document.createElement('button');
+  permalinkBtn.className = 'history-action-btn';
+  permalinkBtn.dataset.action = 'permalink';
+  permalinkBtn.textContent = 'permalink';
+  actions.appendChild(permalinkBtn);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'history-action-btn';
+  deleteBtn.dataset.action = 'delete';
+  deleteBtn.textContent = 'delete';
+  actions.appendChild(deleteBtn);
+
+  entry.appendChild(actions);
+  return entry;
 }
 
 
@@ -145,11 +269,11 @@ function confirmHistAction(type, id, command) {
   const msg      = histDelMsg;
   const confirm  = histDelConfirmBtn;
   if (type === 'clear') {
-    msg.innerHTML = 'Clear run history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    _setHistoryDeleteMessage('Clear run history?', 'This cannot be undone.');
     showHistoryDeleteNonfav();
     confirm.textContent   = 'Delete all';
   } else {
-    msg.innerHTML = 'Remove this run from history?<br><span style="color:var(--muted);font-size:11px">This cannot be undone.</span>';
+    _setHistoryDeleteMessage('Remove this run from history?', 'This cannot be undone.');
     hideHistoryDeleteNonfav();
     confirm.textContent   = 'Delete';
   }
@@ -203,10 +327,15 @@ function _setHistoryLoadState(loading) {
 }
 
 function refreshHistoryPanel() {
+  // The panel is populated on demand so we always fetch the latest persisted
+  // history instead of assuming the in-memory tab state is authoritative.
   apiFetch('/history').then(r => r.json()).then(data => {
-    historyList.innerHTML = '';
+    historyList.replaceChildren();
     if (!data.runs.length) {
-      historyList.innerHTML = '<div style="padding:16px;color:var(--muted);font-size:12px">No runs yet.</div>';
+      const empty = document.createElement('div');
+      empty.className = 'history-empty-state';
+      empty.textContent = 'No runs yet.';
+      historyList.appendChild(empty);
       return;
     }
 
@@ -219,22 +348,7 @@ function refreshHistoryPanel() {
 
     sorted.forEach(run => {
       const isStarred = starred.has(run.command);
-      const entry = document.createElement('div');
-      entry.className = 'history-entry' + (isStarred ? ' starred' : '');
-      const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
-      const time = new Date(run.started).toLocaleTimeString();
-      entry.innerHTML = `
-        <div class="history-entry-cmd">${escapeHtml(run.command)}</div>
-        <div class="history-entry-meta">
-          <span>${time}</span>
-          <span class="${exitCls}">exit ${run.exit_code}</span>
-        </div>
-        <div class="history-actions">
-          <button class="history-action-btn star-btn${isStarred ? ' starred' : ''}" data-action="star">${isStarred ? '★ starred' : '☆ star'}</button>
-          <button class="history-action-btn" data-action="copy">copy command</button>
-          <button class="history-action-btn" data-action="permalink">permalink</button>
-          <button class="history-action-btn" data-action="delete">delete</button>
-        </div>`;
+      const entry = _createHistoryEntry(run, isStarred);
 
       // Click anywhere on the entry (except buttons) to load into a new tab,
       // or switch to the existing tab if this command is already loaded there.
@@ -328,4 +442,224 @@ function refreshHistoryPanel() {
       historyList.appendChild(entry);
     });
   });
+}
+
+
+// ── Ctrl+R reverse-history search ──
+
+let _histSearchMode = false;
+let _histSearchQuery = '';
+let _histSearchIndex = -1;
+let _histSearchPreDraft = '';
+
+function isHistSearchMode() { return _histSearchMode; }
+
+function _histSearchMatches() {
+  if (!cmdHistory.length) return [];
+  const q = _histSearchQuery.toLowerCase();
+  if (!q) return cmdHistory.slice(0, 20);
+  return cmdHistory.filter(c => c.toLowerCase().includes(q)).slice(0, 20);
+}
+
+function _hideHistSearchDropdown() {
+  if (histSearchDropdown) histSearchDropdown.classList.add('u-hidden');
+}
+
+function _renderHistSearch() {
+  // Reverse-i-search intentionally mirrors shell behavior: current query at the
+  // top, most relevant match preselected, and wraparound keyboard navigation.
+  if (!histSearchDropdown) return;
+  const matches = _histSearchMatches();
+  histSearchDropdown.replaceChildren();
+
+  const header = document.createElement('div');
+  header.className = 'hist-search-header';
+  const label = document.createElement('span');
+  label.className = 'hist-search-label';
+  label.textContent = 'reverse-i-search: ';
+  const querySpan = document.createElement('span');
+  querySpan.className = 'hist-search-query';
+  querySpan.textContent = _histSearchQuery || '';
+  header.appendChild(label);
+  header.appendChild(querySpan);
+  histSearchDropdown.appendChild(header);
+
+  if (!matches.length) {
+    const empty = document.createElement('div');
+    empty.className = 'hist-search-empty';
+    empty.textContent = '(no matches)';
+    histSearchDropdown.appendChild(empty);
+  } else {
+    matches.forEach((cmd, i) => {
+      const item = document.createElement('div');
+      item.className = 'hist-search-item' + (i === _histSearchIndex ? ' active' : '');
+      if (_histSearchQuery) {
+        const lower = cmd.toLowerCase();
+        const qi = lower.indexOf(_histSearchQuery.toLowerCase());
+        if (qi >= 0) {
+          item.appendChild(document.createTextNode(cmd.slice(0, qi)));
+          const mark = document.createElement('mark');
+          mark.className = 'hist-search-match';
+          mark.textContent = cmd.slice(qi, qi + _histSearchQuery.length);
+          item.appendChild(mark);
+          item.appendChild(document.createTextNode(cmd.slice(qi + _histSearchQuery.length)));
+        } else {
+          item.textContent = cmd;
+        }
+      } else {
+        item.textContent = cmd;
+      }
+      item.addEventListener('mousedown', e => {
+        e.preventDefault();
+        _histSearchIndex = i;
+        exitHistSearch(true);
+      });
+      histSearchDropdown.appendChild(item);
+    });
+  }
+
+  // Position above the prompt line, like the ac-dropdown does
+  histSearchDropdown.classList.remove('u-hidden');
+  if (shellPromptWrap) {
+    const rect = shellPromptWrap.getBoundingClientRect();
+    histSearchDropdown.style.position = 'fixed';
+    histSearchDropdown.style.left = rect.left + 'px';
+    histSearchDropdown.style.width = rect.width + 'px';
+    const dropH = histSearchDropdown.offsetHeight;
+    histSearchDropdown.style.top = (rect.top - dropH - 4) + 'px';
+  }
+}
+
+function enterHistSearch() {
+  if (_histSearchMode) {
+    // Ctrl+R again: cycle to next match
+    const matches = _histSearchMatches();
+    if (matches.length > 0) {
+      _histSearchIndex = (_histSearchIndex + 1) % matches.length;
+      if (typeof setComposerValue === 'function') {
+        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
+      }
+      _renderHistSearch();
+    }
+    return;
+  }
+  _histSearchMode = true;
+  _histSearchQuery = '';
+  _histSearchIndex = -1;
+  _histSearchPreDraft = (typeof getComposerValue === 'function') ? getComposerValue() : (cmdInput ? cmdInput.value : '');
+  // Clear the input so the user types a fresh query rather than appending to the draft.
+  // The draft is preserved in _histSearchPreDraft and restored on Escape / Ctrl+G.
+  if (typeof setComposerValue === 'function') {
+    setComposerValue('', 0, 0, { dispatch: false });
+  }
+  if (typeof acHide === 'function') acHide();
+  _renderHistSearch();
+}
+
+function exitHistSearch(accept, { keepCurrent = false } = {}) {
+  if (!_histSearchMode) return;
+  _histSearchMode = false;
+  _hideHistSearchDropdown();
+  if (accept) {
+    const matches = _histSearchMatches();
+    const chosen = _histSearchIndex >= 0 ? matches[_histSearchIndex] : (matches[0] || _histSearchPreDraft);
+    if (typeof setComposerValue === 'function') {
+      setComposerValue(chosen, chosen.length, chosen.length);
+    }
+  } else if (!keepCurrent) {
+    if (typeof setComposerValue === 'function') {
+      setComposerValue(_histSearchPreDraft, _histSearchPreDraft.length, _histSearchPreDraft.length);
+    }
+  }
+  _histSearchQuery = '';
+  _histSearchIndex = -1;
+  _histSearchPreDraft = '';
+  if (typeof acHide === 'function') acHide();
+}
+
+function handleHistSearchInput(value) {
+  _histSearchQuery = value;
+  _histSearchIndex = -1;
+  const matches = _histSearchMatches();
+  if (matches.length > 0) {
+    _histSearchIndex = 0;
+  }
+  _renderHistSearch();
+}
+
+function handleHistSearchKey(e) {
+  if (!_histSearchMode) return false;
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    exitHistSearch(false);
+    return true;
+  }
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    // Accept the selected match (if any) then run it. If nothing matched, keep
+    // the typed query in the input and run that instead of restoring the pre-draft.
+    if (_histSearchIndex >= 0) {
+      exitHistSearch(true);
+    } else {
+      exitHistSearch(false, { keepCurrent: true });
+    }
+    const currentValue = (typeof getComposerValue === 'function') ? getComposerValue() : '';
+    if (typeof submitComposerCommand === 'function') {
+      submitComposerCommand(currentValue, { dismissKeyboard: true });
+    } else if (typeof runCommand === 'function') {
+      runCommand();
+    }
+    return true;
+  }
+  if (e.key === 'Tab') {
+    e.preventDefault();
+    // Accept the selected match without running; fall back to keeping the query.
+    if (_histSearchIndex >= 0) {
+      exitHistSearch(true);
+    } else {
+      exitHistSearch(false, { keepCurrent: true });
+    }
+    return true;
+  }
+  if (e.key === 'ArrowDown') {
+    e.preventDefault();
+    const matches = _histSearchMatches();
+    if (matches.length > 0) {
+      _histSearchIndex = (_histSearchIndex + 1) % matches.length;
+      if (typeof setComposerValue === 'function') {
+        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
+      }
+      _renderHistSearch();
+    }
+    return true;
+  }
+  if (e.key === 'ArrowUp') {
+    e.preventDefault();
+    const matches = _histSearchMatches();
+    if (matches.length > 0) {
+      _histSearchIndex = _histSearchIndex <= 0 ? matches.length - 1 : _histSearchIndex - 1;
+      if (typeof setComposerValue === 'function') {
+        setComposerValue(matches[_histSearchIndex], matches[_histSearchIndex].length, matches[_histSearchIndex].length, { dispatch: false });
+      }
+      _renderHistSearch();
+    }
+    return true;
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R')) {
+    e.preventDefault();
+    enterHistSearch(); // cycle
+    return true;
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'g' || e.key === 'G')) {
+    e.preventDefault();
+    exitHistSearch(false);
+    return true;
+  }
+  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
+    e.preventDefault();
+    exitHistSearch(false, { keepCurrent: true });
+    return true;
+  }
+  // Let printable characters and backspace fall through to the input event
+  return false;
 }

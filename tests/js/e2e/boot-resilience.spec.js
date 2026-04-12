@@ -11,10 +11,12 @@ test.describe('boot resilience', () => {
   })
 
   test('the app still boots and core controls still work when startup fetches fail', async ({ page }) => {
-    await expect(page.locator('header h1')).toHaveText(/shell\.darklab\.sh/)
+    await expect(page.locator('header h1')).toHaveText(/darklab shell/)
 
     await page.locator('#theme-btn').click()
-    await expect(page.locator('body')).toHaveClass(/\blight\b/)
+    await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
+    await expect(page.locator('#theme-select .theme-card-active')).toBeFocused()
+    await page.locator('.theme-close').click()
 
     await page.locator('#search-toggle-btn').click()
     await expect(page.locator('#search-bar')).toBeVisible()

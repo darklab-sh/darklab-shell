@@ -1,5 +1,78 @@
 // ── Shared search logic ──
 
+function _collectSearchTextNodes(root) {
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  const parts = [];
+  let offset = 0;
+  let node;
+  while ((node = walker.nextNode())) {
+    const text = node.nodeValue || '';
+    parts.push({ node, text, start: offset, end: offset + text.length });
+    offset += text.length;
+  }
+  return parts;
+}
+
+function _highlightSearchLine(line, re) {
+  // Search highlighting operates on a cloned line so the live transcript keeps
+  // its original DOM structure until a match has actually been confirmed.
+  const clone = line.cloneNode(true);
+  const parts = _collectSearchTextNodes(clone);
+  const text = parts.map(part => part.text).join('');
+  if (!text) return false;
+
+  const matches = [];
+  re.lastIndex = 0;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    if (!match[0]) {
+      re.lastIndex++;
+      continue;
+    }
+    matches.push({ start: match.index, end: match.index + match[0].length });
+  }
+  if (!matches.length) return false;
+
+  let matchIdx = 0;
+  for (const part of parts) {
+    const { node, text: partText, start: partStart, end: partEnd } = part;
+    let cursor = partStart;
+    let localStart = 0;
+    const frag = document.createDocumentFragment();
+
+    while (cursor < partEnd) {
+      while (matchIdx < matches.length && matches[matchIdx].end <= cursor) matchIdx++;
+      const current = matches[matchIdx];
+      if (!current || current.start >= partEnd) {
+        frag.appendChild(document.createTextNode(partText.slice(localStart)));
+        break;
+      }
+
+      if (cursor < current.start) {
+        const plainEnd = Math.min(partEnd, current.start);
+        const slice = partText.slice(localStart, localStart + (plainEnd - cursor));
+        if (slice) frag.appendChild(document.createTextNode(slice));
+        localStart += plainEnd - cursor;
+        cursor = plainEnd;
+        continue;
+      }
+
+      const markEnd = Math.min(partEnd, current.end);
+      const mark = document.createElement('mark');
+      mark.className = 'search-hl';
+      mark.textContent = partText.slice(localStart, localStart + (markEnd - cursor));
+      frag.appendChild(mark);
+      localStart += markEnd - cursor;
+      cursor = markEnd;
+    }
+
+    node.replaceWith(frag);
+  }
+
+  line.replaceWith(clone);
+  return true;
+}
+
 function runSearch() {
   clearHighlights();
   searchMatches = [];
@@ -19,20 +92,7 @@ function runSearch() {
     return;
   }
   lines.forEach(line => {
-    const tmp = document.createElement('div');
-    tmp.innerHTML = line.innerHTML;
-    if (re.test(tmp.textContent)) {
-      re.lastIndex = 0;
-      line.innerHTML = line.innerHTML.replace(/<[^>]+>|[^<]+/g, seg => {
-        if (seg.startsWith('<')) return seg;
-        return seg.replace(re, match => {
-          const mark = document.createElement('mark');
-          mark.className = 'search-hl';
-          mark.textContent = match;
-          return mark.outerHTML;
-        });
-      });
-    }
+    _highlightSearchLine(line, re);
   });
   searchMatches = Array.from(out.querySelectorAll('mark.search-hl'));
   searchCount.textContent = searchMatches.length ? `1 / ${searchMatches.length}` : 'no matches';

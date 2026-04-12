@@ -17,9 +17,12 @@ import pytest
 
 import app as shell_app
 import database as shell_db
+from config import PROJECT_README
 from database import db_connect
 from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 
+# These tests lean toward end-to-end backend behavior and intentionally exercise
+# the real SQLite/artifact flow rather than heavy mocking.
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
@@ -85,12 +88,12 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", "world\n", ""])
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("echo hello", "rewritten for safety")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("echo hello", "rewritten for safety")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
@@ -109,8 +112,8 @@ class TestRunStreaming:
     def test_run_returns_500_when_spawn_fails(self):
         client = get_client()
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", side_effect=OSError("boom")):
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", side_effect=OSError("boom")):
             resp = client.post("/run", json={"command": "echo hi"})
 
         assert resp.status_code == 500
@@ -123,15 +126,15 @@ class TestRunStreaming:
         fake_proc = _FakeProc(lines=[""])
 
         # First select() timeout => heartbeat, second => EOF break
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([], [], []),                  # heartbeat branch
                  ([fake_proc.stdout], [], []),  # then EOF
              ]), \
-             mock.patch("app.CFG", {**shell_app.CFG, "heartbeat_interval_seconds": 0}):
+             mock.patch.dict("config.CFG", {"heartbeat_interval_seconds": 0}):
             resp = client.post("/run", json={"command": "sleep 1"})
             body = resp.get_data(as_text=True)
 
@@ -144,11 +147,11 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]):
@@ -177,14 +180,14 @@ class TestRunStreaming:
             def fromisoformat(value):
                 return datetime.fromisoformat(value)
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.datetime", _FakeDateTime), \
-             mock.patch("app.os.getpgid", return_value=4321), \
-             mock.patch("app.os.killpg") as killpg, \
-             mock.patch("app.CFG", {**shell_app.CFG, "command_timeout_seconds": 1}):
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.datetime", _FakeDateTime), \
+             mock.patch("blueprints.run.os.getpgid", return_value=4321), \
+             mock.patch("blueprints.run.os.killpg") as killpg, \
+             mock.patch.dict("config.CFG", {"command_timeout_seconds": 1}):
             resp = client.post("/run", json={"command": "sleep forever"})
             body = resp.get_data(as_text=True)
 
@@ -198,15 +201,15 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=["saved line\n", ""])
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.subprocess.Popen", return_value=fake_proc), \
-             mock.patch("app.pid_register"), \
-             mock.patch("app.pid_pop"), \
-             mock.patch("app.select.select", side_effect=[
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.select.select", side_effect=[
                  ([fake_proc.stdout], [], []),
                  ([fake_proc.stdout], [], []),
              ]), \
-             mock.patch("app.db_connect", side_effect=Exception("db write failed")):
+             mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
             resp = client.post("/run", json={"command": "echo saved"})
             body = resp.get_data(as_text=True)
 
@@ -258,9 +261,9 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "APP_NAME=shell.darklab.sh\\n" in body
+        assert f"APP_NAME={shell_app.CFG['app_name']}\\n" in body
         assert "SESSION_ID=sess-env\\n" in body
-        assert "SHELL=/app/shell.darklab.sh/bin/bash\\n" in body
+        assert "SHELL=/bin/bash\\n" in body
         assert "TERM=xterm-256color\\n" in body
         assert '"type": "exit"' in body
 
@@ -395,13 +398,13 @@ class TestRunStreaming:
         version_body = version_resp.get_data(as_text=True)
 
         assert who_resp.status_code == 200
-        assert "shell.darklab.sh  pts/web  sess-who\\n" in who_body
+        assert f"{shell_app.CFG['app_name']}  pts/web  sess-who\\n" in who_body
         assert tty_resp.status_code == 200
         assert "/dev/pts/web\\n" in tty_body
         assert groups_resp.status_code == 200
-        assert "shell.darklab.sh operators\\n" in groups_body
+        assert f"{shell_app.CFG['app_name']} operators\\n" in groups_body
         assert version_resp.status_code == 200
-        assert "shell.darklab.sh web shell\\n" in version_body
+        assert f"{shell_app.CFG['app_name']} web shell\\n" in version_body
         assert f"App {shell_app.APP_VERSION}\\n" in version_body
         assert "Flask " in version_body
         assert "Python " in version_body
@@ -433,7 +436,7 @@ class TestRunStreaming:
             **shell_app.CFG,
             "permalink_retention_days": 365,
             "persist_full_run_output": True,
-            "full_output_max_bytes": 5242880,
+            "full_output_max_mb": 5,
         }):
             resp = client.post("/run", json={"command": "retention"})
             body = resp.get_data(as_text=True)
@@ -442,7 +445,7 @@ class TestRunStreaming:
         assert "Retention policy:\\n" in body
         assert "run preview retention  365 days\\n" in body
         assert "full output save       yes\\n" in body
-        assert "full output max        5242880 bytes\\n" in body
+        assert "full output max        5 MB\\n" in body
 
     def test_fake_fortune_returns_configured_line(self):
         client = get_client()
@@ -534,7 +537,7 @@ class TestRunStreaming:
         assert date_resp.status_code == 200
         assert '"type": "output"' in date_body
         assert host_resp.status_code == 200
-        assert "shell.darklab.sh\\n" in host_body
+        assert f"{shell_app.CFG['app_name']}\\n" in host_body
         assert uptime_resp.status_code == 200
         assert "up " in uptime_body
 
@@ -655,7 +658,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "/app/shell.darklab.sh/bin\\n" in body
+        assert f"/app/{shell_app.CFG['app_name']}/bin\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_uname_a_returns_web_shell_environment(self):
@@ -665,7 +668,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "shell.darklab.sh Linux web-terminal x86_64 app-runtime\\n" in body
+        assert f"{shell_app.CFG['app_name']} Linux web-terminal x86_64 app-runtime\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_id_returns_synthetic_identity(self):
@@ -675,7 +678,10 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "uid=1000(shell.darklab.sh) gid=1000(shell.darklab.sh) groups=1000(shell.darklab.sh)\\n" in body
+        assert (
+            f"uid=1000({shell_app.CFG['app_name']}) gid=1000({shell_app.CFG['app_name']}) "
+            f"groups=1000({shell_app.CFG['app_name']})\\n"
+        ) in body
         assert '"type": "exit"' in body
 
     def test_fake_whoami_streams_project_description(self):
@@ -685,8 +691,8 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "shell.darklab.sh\\n" in body
-        assert "README: https://gitlab.com/darklab.sh/shell.darklab.sh\\n" in body
+        assert f"{shell_app.CFG['app_name']}\\n" in body
+        assert f"README: see the project README at {PROJECT_README}\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_ps_lists_recent_session_commands(self):
@@ -723,10 +729,10 @@ class TestRunStreaming:
     def test_run_reports_missing_allowlisted_command_without_spawning(self):
         client = get_client()
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
-             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("app.subprocess.Popen") as popen:
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"}, headers={"X-Session-ID": "sess-missing"})
             body = resp.get_data(as_text=True)
 
@@ -744,10 +750,10 @@ class TestRunStreaming:
         client = get_client()
         client.environ_base["HTTP_X_FORWARDED_FOR"] = "2001:db8:ffff:eeee:dddd:cccc:bbbb:aaaa"
 
-        with mock.patch("app.is_command_allowed", return_value=(True, "")), \
-             mock.patch("app.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
-             mock.patch("app.runtime_missing_command_name", return_value="nmap"), \
-             mock.patch("app.subprocess.Popen") as popen:
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.rewrite_command", return_value=("nmap --privileged -sV darklab.sh", None)), \
+             mock.patch("blueprints.run.runtime_missing_command_name", return_value="nmap"), \
+             mock.patch("blueprints.run.subprocess.Popen") as popen:
             resp = client.post("/run", json={"command": "nmap -sV darklab.sh"})
             body = resp.get_data(as_text=True)
 

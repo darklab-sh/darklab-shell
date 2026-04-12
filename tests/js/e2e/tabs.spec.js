@@ -163,7 +163,13 @@ test.describe('tab command recall', () => {
   })
 
   test('pressing Enter on a blank prompt appends a fresh prompt line', async ({ page }) => {
-    await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15000 })
+    // Wait for welcome blocks to finish rendering (_welcomeDone is set just before
+    // the hint feed starts). Checking _welcomeDone rather than a visible hint element
+    // avoids a race where the welcome animation (5 sampled commands + inter-block
+    // delays) can take close to 15 s, making a toBeVisible timeout unreliable.
+    await page.waitForFunction(() => {
+      return typeof _welcomeDone !== 'undefined' && _welcomeDone === true
+    }, { timeout: 30000 })
     const beforeCount = await page.locator('.tab-panel.active .output .line.prompt-echo').count()
 
     await page.evaluate(() => {

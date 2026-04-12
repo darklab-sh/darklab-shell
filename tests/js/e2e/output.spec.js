@@ -131,3 +131,84 @@ test.describe('output actions with no exportable output', () => {
     await expect(page.locator('#permalink-toast')).toContainText('No output to export')
   })
 })
+
+test.describe('output follow helper', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+    await page.evaluate(() => {
+      cancelWelcome()
+      clearTab(activeTabId)
+      for (let i = 0; i < 600; i += 1) appendLine(`line ${i} ${'x'.repeat(60)}`, '', activeTabId)
+    })
+  })
+
+  test('shows only when scrolled off tail and swaps from live to bottom state', async ({ page }) => {
+    const followBtn = page.locator('.tab-panel.active .output-follow-btn')
+
+    await expect(followBtn).toBeHidden()
+    await page.waitForFunction(() => {
+      const out = getOutput(activeTabId)
+      const tab = getTab(activeTabId)
+      const pending = typeof _pendingOutputBatches !== 'undefined'
+        ? _pendingOutputBatches.get(activeTabId)
+        : null
+      return !!out
+        && !!tab
+        && Array.isArray(tab.rawLines)
+        && tab.rawLines.length === 600
+        && (!pending || (!pending.scheduled && pending.items.length === 0))
+        && out.scrollHeight > out.clientHeight + 50
+    })
+
+    await page.evaluate(() => {
+      const out = getOutput(activeTabId)
+      const tab = getTab(activeTabId)
+      setTabStatus(activeTabId, 'running')
+      out.scrollTop = 0
+      tab.followOutput = false
+      updateOutputFollowButton(activeTabId)
+    })
+
+    await page.waitForFunction(() => {
+      const tab = getTab(activeTabId)
+      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+      return !!tab
+        && tab.st === 'running'
+        && !!btn
+        && !btn.hidden
+        && btn.textContent === 'jump to live'
+    })
+    await expect(followBtn).toBeVisible()
+    await expect(followBtn).toHaveText('jump to live')
+
+    await page.evaluate(() => {
+      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+      if (!(btn instanceof HTMLButtonElement)) throw new Error('follow button missing')
+      btn.click()
+    })
+    await expect(followBtn).toBeHidden()
+
+    await page.evaluate(() => {
+      const out = getOutput(activeTabId)
+      const tab = getTab(activeTabId)
+      setTabStatus(activeTabId, 'idle')
+      out.scrollTop = 0
+      tab.followOutput = false
+      updateOutputFollowButton(activeTabId)
+    })
+
+    await page.waitForFunction(() => {
+      const tab = getTab(activeTabId)
+      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+      return !!tab
+        && tab.st === 'idle'
+        && !!btn
+        && !btn.hidden
+        && btn.textContent === 'jump to bottom'
+    })
+    await expect(followBtn).toBeVisible()
+    await expect(followBtn).toHaveText('jump to bottom')
+  })
+})

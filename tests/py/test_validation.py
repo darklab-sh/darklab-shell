@@ -93,6 +93,43 @@ class TestPathBlocking:
         assert ok
 
 
+# ── Loopback address blocking ─────────────────────────────────────────────────
+
+class TestLoopbackBlocking:
+    def test_localhost_bare(self):
+        ok, _ = _check("curl localhost:8888/diag")
+        assert not ok
+
+    def test_localhost_url(self):
+        ok, _ = _check("curl http://localhost:8888/faq")
+        assert not ok
+
+    def test_loopback_ip_with_port(self):
+        ok, _ = _check("curl 127.0.0.1:8888/health")
+        assert not ok
+
+    def test_loopback_ip_url(self):
+        ok, _ = _check("curl http://127.0.0.1:8888/health")
+        assert not ok
+
+    def test_zero_addr(self):
+        ok, _ = _check("curl 0.0.0.0")
+        assert not ok
+
+    def test_ipv6_loopback(self):
+        ok, _ = _check("curl http://[::1]:8888/diag")
+        assert not ok
+
+    def test_nc_localhost(self):
+        ok, _ = _check("nc localhost 8888", allow=["nc"])
+        assert not ok
+
+    def test_no_false_positive_on_hostname(self):
+        # "notlocalhost.com" must not be caught by the \blocalhost\b boundary
+        ok, _ = _check("curl https://notlocalhost.com/page")
+        assert ok
+
+
 # ── Allowlist prefix matching ─────────────────────────────────────────────────
 
 class TestAllowlist:
@@ -127,16 +164,15 @@ class TestAllowlist:
 
 class TestDenyPrefix:
     def test_deny_takes_priority(self):
-        # load_allowed_commands lowercases entries; pass pre-lowercased values in mock
-        ok, _ = _check("nmap -sU 10.0.0.1", allow=["nmap"], deny=["nmap -su"])
+        ok, _ = _check("nmap -sU 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert not ok
 
     def test_allow_still_works_without_denied_flag(self):
-        ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -su"])
+        ok, _ = _check("nmap -sT 10.0.0.1", allow=["nmap"], deny=["nmap -sU"])
         assert ok
 
     def test_deny_exact_match(self):
-        ok, _ = _check("nmap -sU", allow=["nmap"], deny=["nmap -su"])
+        ok, _ = _check("nmap -sU", allow=["nmap"], deny=["nmap -sU"])
         assert not ok
 
     def test_deny_prefix_with_more_args(self):
@@ -155,6 +191,18 @@ class TestDenyPrefix:
 
     def test_deny_flag_at_end(self):
         ok, _ = _check("nmap -sT 10.0.0.1 --script", allow=["nmap"], deny=["nmap --script"])
+        assert not ok
+
+    def test_deny_flag_matches_exact_case(self):
+        ok, _ = _check("curl -K config.txt", allow=["curl"], deny=["curl -K"])
+        assert not ok
+
+    def test_deny_flag_does_not_cross_case_boundary(self):
+        ok, _ = _check("curl -k https://darklab.sh", allow=["curl"], deny=["curl -K"])
+        assert ok
+
+    def test_deny_tool_prefix_still_case_insensitive(self):
+        ok, _ = _check("CURL -K config.txt", allow=["curl"], deny=["curl -K"])
         assert not ok
 
     def test_deny_single_char_matches_combined_group(self):
@@ -207,7 +255,7 @@ class TestDenyPrefix:
 
     def test_deny_single_char_flag_unrelated_combined_allowed(self):
         # -zv does not contain -e or -c, should be allowed
-        ok, _ = _check("nc -zv 127.0.0.1 80", allow=["nc"], deny=["nc -e", "nc -c"])
+        ok, _ = _check("nc -zv example.com 80", allow=["nc"], deny=["nc -e", "nc -c"])
         assert ok
 
     def test_deny_single_char_does_not_affect_multi_char_matching(self):

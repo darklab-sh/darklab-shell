@@ -3,6 +3,7 @@ import { runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const TEST_IP = makeTestIp(70)
+const HIST_SEARCH_IP = makeTestIp(71)
 
 async function dispatchMacOptionKey(page, selector, init) {
   await page.locator(selector).evaluate((el, eventInit) => {
@@ -182,5 +183,119 @@ test.describe('keyboard shortcuts', () => {
       await page.evaluate(() => document.dispatchEvent(new Event('selectionchange')))
       await expect(promptCaret).toHaveText(ch)
     }
+  })
+
+  test('history and submit shortcuts still work after transcript text is selected', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    const lineCountBefore = await page.locator('.tab-panel.active .output .line').count()
+
+    await page.evaluate(() => {
+      const firstLine = document.querySelector('.tab-panel.active .output .line')
+      const searchBtn = document.getElementById('search-toggle-btn')
+      if (!firstLine || !searchBtn) throw new Error('selection setup failed')
+      const selection = window.getSelection()
+      const range = document.createRange()
+      range.selectNodeContents(firstLine)
+      selection.removeAllRanges()
+      selection.addRange(range)
+      searchBtn.focus()
+    })
+
+    await page.keyboard.press('ArrowUp')
+    await expect(page.locator('#cmd')).toHaveValue('hostname')
+
+    await page.keyboard.press('Enter')
+    await page.waitForFunction(
+      (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
+      lineCountBefore,
+      { timeout: 15_000 }
+    )
+  })
+})
+
+test.describe('Ctrl+R reverse-history search', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': HIST_SEARCH_IP })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('Ctrl+R opens the hist-search dropdown after a command has been run', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    await page.locator('#cmd').press('Control+r')
+    await expect(page.locator('#hist-search-dropdown')).not.toHaveClass(/u-hidden/)
+  })
+
+  test('typing while hist-search is open filters matches in the dropdown', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    await page.locator('#cmd').press('Control+r')
+    await page.locator('#cmd').type('host')
+    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toHaveCount(1)
+    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toContainText('hostname')
+  })
+
+  test('Enter in hist-search accepts the match and runs the command', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    const linesBefore = await page.locator('.tab-panel.active .output .line').count()
+    await page.locator('#cmd').press('Control+r')
+    await page.locator('#cmd').type('host')
+    await page.locator('#cmd').press('Enter')
+    // dropdown should close and new output lines should appear from the second run
+    await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
+    await page.waitForFunction(
+      (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
+      linesBefore,
+      { timeout: 15_000 }
+    )
+  })
+
+  test('Tab in hist-search accepts the match into the input without running the command', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    const linesBefore = await page.locator('.tab-panel.active .output .line').count()
+    await page.locator('#cmd').press('Control+r')
+    await page.locator('#cmd').type('host')
+    await page.locator('#cmd').press('Tab')
+    // dropdown should close, input should have the accepted value
+    await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
+    await expect(page.locator('#cmd')).toHaveValue('hostname')
+    // command should not have run — line count stays the same
+    const linesAfter = await page.locator('.tab-panel.active .output .line').count()
+    expect(linesAfter).toBe(linesBefore)
+  })
+
+  test('ArrowDown in hist-search navigates to the next match and fills the input', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    await runCommand(page, 'dig darklab.sh A')
+    await page.locator('#cmd').press('Control+r')
+    // 'host' only matches 'hostname', not 'dig darklab.sh A'
+    await page.locator('#cmd').type('host')
+    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toHaveCount(1)
+
+    // Before ArrowDown, input has the typed query
+    await expect(page.locator('#cmd')).toHaveValue('host')
+    await page.locator('#cmd').press('ArrowDown')
+    // Only one match, so ArrowDown clamps — input stays as the current match
+    await expect(page.locator('#cmd')).toHaveValue('hostname')
+  })
+
+  test('Escape in hist-search closes the dropdown and restores the pre-search draft', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    await page.locator('#cmd').fill('my draft')
+    await page.locator('#cmd').press('Control+r')
+    await page.locator('#cmd').type('host')
+    await page.locator('#cmd').press('Escape')
+    await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
+    await expect(page.locator('#cmd')).toHaveValue('my draft')
+  })
+
+  test('Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input', async ({ page }) => {
+    await runCommand(page, 'hostname')
+    await page.locator('#cmd').fill('my draft')
+    await page.locator('#cmd').press('Control+r')
+    await page.locator('#cmd').type('host')
+    await page.locator('#cmd').press('Control+c')
+    await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
+    // keepCurrent: typed query stays, pre-draft is NOT restored
+    await expect(page.locator('#cmd')).toHaveValue('host')
   })
 })

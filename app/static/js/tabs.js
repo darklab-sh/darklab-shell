@@ -4,6 +4,7 @@ let _draggedTabId = null;
 let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
+let _tabSeq = 0;
 
 function _getTabEl(id) {
   return tabsBar ? tabsBar.querySelector(`.tab[data-id="${id}"]`) : null;
@@ -139,6 +140,8 @@ function _touchDragAutoScroll(clientX) {
 }
 
 function _cleanupTouchDrag() {
+  // Touch drag state spans document-level listeners, so cleanup has to fully
+  // unwind everything even when the gesture is cancelled mid-drag.
   if (!_touchDragState) return;
   document.removeEventListener('pointermove', _onTouchDragMove);
   document.removeEventListener('pointerup', _onTouchDragEnd);
@@ -266,6 +269,8 @@ function unmountShellPrompt() {
 }
 
 function mountShellPrompt(tabId, force = false) {
+  // Only the active tab owns the live prompt node. Moving that one node keeps
+  // prompt state continuous when switching tabs instead of cloning inputs.
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const mobileMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
   if (!force && !mobileMode && _welcomeBootPending) {
@@ -313,17 +318,144 @@ function updateNewTabBtn() {
   btn.title = atLimit ? `Tab limit reached (max ${APP_CONFIG.max_tabs})` : '';
 }
 
+function _createTabHeader(id, label) {
+  const tab = document.createElement('div');
+  tab.className = 'tab';
+  tab.dataset.id = id;
+
+  const status = document.createElement('span');
+  status.className = 'tab-status idle';
+  tab.appendChild(status);
+
+  const labelEl = document.createElement('span');
+  labelEl.className = 'tab-label';
+  labelEl.textContent = label;
+  tab.appendChild(labelEl);
+
+  const closeBtn = document.createElement('button');
+  closeBtn.className = 'tab-close';
+  closeBtn.type = 'button';
+  closeBtn.setAttribute('aria-label', 'Close tab');
+  closeBtn.textContent = '✕';
+  tab.appendChild(closeBtn);
+
+  return { tab, labelEl };
+}
+
+function _createTabActionButton(id, action, label, { hidden = false, danger = false } = {}) {
+  const btn = document.createElement('button');
+  btn.type = 'button';
+  btn.className = 'term-action-btn' + (action === 'kill' ? ' tab-kill-btn' : '') + (danger ? ' tab-kill-btn-danger' : '');
+  btn.dataset.action = action;
+  btn.dataset.tab = id;
+  if (hidden) btn.hidden = true;
+  btn.textContent = label;
+  return btn;
+}
+
+function _getOutputFollowButton(id) {
+  return _getTabPanelEl(id)?.querySelector('.output-follow-btn') || null;
+}
+
+function _isOutputAtTail(out) {
+  if (!out) return true;
+  const scrollTop = Number(out.scrollTop || 0);
+  const clientHeight = Number(out.clientHeight || 0);
+  const scrollHeight = Number(out.scrollHeight || 0);
+  if (!Number.isFinite(scrollTop) || !Number.isFinite(clientHeight) || !Number.isFinite(scrollHeight)) return true;
+  if (scrollHeight <= clientHeight + 2) return true;
+  return Math.max(0, scrollHeight - (scrollTop + clientHeight)) <= 16;
+}
+
+function updateOutputFollowButton(id) {
+  const tab = getTab(id);
+  const out = getOutput(id);
+  const btn = _getOutputFollowButton(id);
+  if (!tab || !btn || !out) return;
+
+  const hasOutput = Array.isArray(tab.rawLines) && tab.rawLines.length > 0;
+  const atTail = _isOutputAtTail(out);
+  if (atTail && tab.followOutput === false) tab.followOutput = true;
+  const show = hasOutput && !atTail && tab.followOutput === false;
+  const isLive = show && tab.st === 'running';
+  const label = isLive ? 'jump to live' : 'jump to bottom';
+
+  btn.hidden = !show;
+  btn.textContent = label;
+  btn.title = isLive ? 'Jump to the live output tail' : 'Jump to the bottom of the output';
+  btn.setAttribute('aria-label', label);
+  btn.classList.toggle('is-live', isLive);
+  btn.classList.toggle('is-bottom', show && !isLive);
+}
+
+function _createTabPanel(id) {
+  // Each tab panel contains both transcript output and its own action row so a
+  // tab can be restored/shared without depending on global footer controls.
+  const panel = document.createElement('div');
+  panel.className = 'tab-panel';
+  panel.dataset.id = id;
+
+  const terminalBody = document.createElement('div');
+  terminalBody.className = 'terminal-body';
+
+  const output = document.createElement('div');
+  output.className = 'output';
+  output.id = `output-${id}`;
+  terminalBody.appendChild(output);
+
+  const followBtn = document.createElement('button');
+  followBtn.type = 'button';
+  followBtn.className = 'output-follow-btn';
+  followBtn.hidden = true;
+  followBtn.textContent = 'jump to live';
+  followBtn.title = 'Jump to the live output tail';
+  followBtn.setAttribute('aria-label', 'Jump to the live output tail');
+  followBtn.addEventListener('click', () => {
+    const tab = getTab(id);
+    const out = getOutput(id);
+    if (!tab || !out) return;
+    tab.followOutput = true;
+    if (typeof _stickOutputToBottom === 'function') {
+      _stickOutputToBottom(out, tab);
+    } else {
+      out.scrollTop = out.scrollHeight;
+    }
+    updateOutputFollowButton(id);
+  });
+  terminalBody.appendChild(followBtn);
+
+  const terminalActions = document.createElement('div');
+  terminalActions.className = 'terminal-actions';
+  const wordmark = document.createElement('a');
+  wordmark.className = 'terminal-wordmark';
+  wordmark.href = APP_CONFIG.project_readme || '#';
+  wordmark.target = '_blank';
+  wordmark.rel = 'noopener noreferrer';
+  const wmVersion = APP_CONFIG.version ? ` v${APP_CONFIG.version}` : '';
+  wordmark.textContent = `${APP_CONFIG.app_name || 'darklab shell'}${wmVersion}`;
+  terminalActions.appendChild(wordmark);
+  terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
+  terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'permalink'));
+  terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
+  terminalActions.appendChild(_createTabActionButton(id, 'save', 'save txt'));
+  terminalActions.appendChild(_createTabActionButton(id, 'html', 'save html'));
+  terminalActions.appendChild(_createTabActionButton(id, 'clear', 'clear'));
+  terminalBody.appendChild(terminalActions);
+
+  panel.appendChild(terminalBody);
+  return { panel, output, terminalBody };
+}
+
 function createTab(label) {
+  // Tabs are created fully client-side; history restore and shortcut flows all
+  // funnel through this one constructor so the DOM/state shape stays uniform.
   if (APP_CONFIG.max_tabs > 0 && tabs.length >= APP_CONFIG.max_tabs) {
     showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
     return null;
   }
-  const id = 'tab-' + Date.now();
+  const id = 'tab-' + (++_tabSeq);
 
-  const tab = document.createElement('div');
-  tab.className = 'tab';
-  tab.dataset.id = id;
-  tab.innerHTML = `<span class="tab-status idle"></span><span class="tab-label">${escapeHtml(label)}</span><button class="tab-close" type="button" aria-label="Close tab">✕</button>`;
+  const { tab, labelEl } = _createTabHeader(id, label);
   tab.addEventListener('click', e => {
     if (Date.now() < _tabDragSuppressClickUntil) return;
     if (e.target.classList.contains('tab-close')) {
@@ -335,7 +467,6 @@ function createTab(label) {
   });
 
   // Double-click tab label to rename
-  const labelEl = tab.querySelector('.tab-label');
   labelEl.addEventListener('dblclick', e => {
     e.stopPropagation();
     startTabRename(id, labelEl);
@@ -349,34 +480,21 @@ function createTab(label) {
     tabsBar.appendChild(tab);
   }
 
-  const panel = document.createElement('div');
-  panel.className = 'tab-panel';
-  panel.dataset.id = id;
-  panel.innerHTML = `
-    <div class="terminal-body">
-      <div class="output" id="output-${id}"></div>
-      <div class="terminal-actions">
-        <button class="term-action-btn tab-kill-btn" data-action="kill" data-tab="${id}" style="display:none;color:var(--red);border-color:var(--red)">■ Kill</button>
-        <button class="term-action-btn" data-action="permalink" data-tab="${id}">permalink</button>
-        <button class="term-action-btn" data-action="copy"      data-tab="${id}">copy</button>
-        <button class="term-action-btn" data-action="save"      data-tab="${id}">save txt</button>
-        <button class="term-action-btn" data-action="html"      data-tab="${id}">save html</button>
-        <button class="term-action-btn" data-action="clear"     data-tab="${id}">clear</button>
-      </div>
-    </div>`;
-  const outputEl = panel.querySelector('.output');
+  const { panel, output: outputEl, terminalBody } = _createTabPanel(id);
   if (outputEl) {
     outputEl.addEventListener('scroll', () => {
       const t = getTab(id);
       if (!t || t.suppressOutputScrollTracking) return;
-      const nearBottom = outputEl.scrollTop + outputEl.clientHeight >= outputEl.scrollHeight - 8;
-      t.followOutput = nearBottom;
+      t.followOutput = _isOutputAtTail(outputEl);
+      updateOutputFollowButton(id);
     }, { passive: true });
   }
-  panel.querySelector('.terminal-body')?.addEventListener('click', e => {
+  terminalBody?.addEventListener('click', e => {
     if (id !== activeTabId) return;
     if (e.target.closest('.term-action-btn')) return;
     if (e.target.closest('.welcome-command-loadable')) return;
+    // Don't steal focus while the user has text selected — they may be about to copy.
+    if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;
     if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
   });
   panel.querySelectorAll('[data-action]').forEach(btn => {
@@ -423,7 +541,9 @@ function createTab(label) {
     pendingKill: false,
     st: 'idle',
     renamed: false,
+    draftInput: '',
   });
+  updateOutputFollowButton(id);
   activateTab(id);
   updateNewTabBtn();
   updateTabScrollButtons();
@@ -431,6 +551,22 @@ function createTab(label) {
 }
 
 function activateTab(id, { focusComposer = true } = {}) {
+  // Activation swaps the live prompt, the status pill, output-follow helpers,
+  // and the visible transcript. Keep it centralized here to avoid drift.
+  // Exit hist-search mode cleanly before switching tabs
+  if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
+    if (typeof exitHistSearch === 'function') exitHistSearch(false);
+  }
+  // Flush the current composer value into the leaving tab's draftInput before switching.
+  const prevId = activeTabId;
+  if (prevId && prevId !== id) {
+    const prevTab = getTab(prevId);
+    if (prevTab && prevTab.st === 'running') {
+      prevTab.draftInput = '';
+    } else if (prevTab) {
+      prevTab.draftInput = (typeof getComposerValue === 'function') ? getComposerValue() : (cmdInput ? cmdInput.value : '');
+    }
+  }
   setActiveTabId(id);
   tabsBar?.querySelectorAll('.tab').forEach(t => t.classList.toggle('active', t.dataset.id === id));
   tabPanels?.querySelectorAll('.tab-panel').forEach(p => p.classList.toggle('active', p.dataset.id === id));
@@ -440,18 +576,23 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
+  // Hide the autocomplete dropdown and clear the filtered list so stale
+  // suggestions from the previous tab's typing session don't persist.
+  if (typeof acHide === 'function') acHide();
+  if (typeof acFiltered !== 'undefined') acFiltered = [];
+  const draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
   if (typeof setComposerValue === 'function') {
-    setComposerValue('', 0, 0);
-  } else if (cmdInput) {
-    cmdInput.value = '';
-    cmdInput.dispatchEvent(new Event('input'));
+    setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   }
   resetCmdHistoryNav();
   if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  updateOutputFollowButton(id);
 }
 
 function closeTab(id) {
+  // Closing a tab may need to preserve run state until the kill flow or output
+  // persistence finishes, so final removal is sometimes deferred.
   cancelWelcome(id);
   const idx = tabs.findIndex(t => t.id === id);
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);
@@ -526,6 +667,7 @@ function setTabStatus(id, st) {
     else mountShellPrompt(id);
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   }
+  updateOutputFollowButton(id);
 }
 
 function setTabLabel(id, label) {
@@ -579,6 +721,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     setTabStatus(id, 'idle');
     if (id === activeTabId) { setStatus('idle'); clearSearch(); }
   }
+  updateOutputFollowButton(id);
   if (typeof document !== 'undefined'
     && document.body
     && document.body.classList
@@ -686,9 +829,8 @@ async function exportTabHtml(id) {
   }
 
   try {
-    const appName = APP_CONFIG.app_name || 'shell.darklab.sh';
+    const appName = APP_CONFIG.app_name || 'darklab shell';
     const exportedAt = new Date().toLocaleString();
-    const themeClass = document.body.classList.contains('light') ? 'light' : '';
 
     const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {
       const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
@@ -709,7 +851,6 @@ async function exportTabHtml(id) {
       title: t.label,
       metaHtml: `exported ${ExportHtmlUtils.escapeExportHtml(exportedAt)}`,
       linesHtml,
-      themeClass,
       fontFacesCss,
     });
 

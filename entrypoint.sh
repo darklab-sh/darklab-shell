@@ -15,4 +15,11 @@ mkdir -p /tmp/.config/nuclei /tmp/.config/uncover /tmp/.cache
 chown -R scanner:scanner /tmp/.config /tmp/.cache
 chmod -R 755 /tmp/.config /tmp/.cache
 
-exec gosu appuser gunicorn --bind 0.0.0.0:8888 --workers 4 --threads 4 --timeout 3600 --control-socket /tmp/.gunicorn app:app
+# Block the scanner user from making outbound TCP connections to the app port.
+# This prevents commands run via the web shell from curling internal endpoints
+# like /diag, /config, or /history directly. The rule runs as root before the
+# gosu drop, so iptables is available. The || true keeps startup safe if the
+# kernel module is absent in unusual environments.
+iptables -A OUTPUT -m owner --uid-owner scanner -p tcp --dport "${APP_PORT:-8888}" -j REJECT --reject-with tcp-reset 2>/dev/null || true
+
+exec gosu appuser gunicorn --bind "0.0.0.0:${APP_PORT:-8888}" --workers "${WEB_CONCURRENCY:-4}" --threads "${WEB_THREADS:-4}" --timeout 3600 --control-socket /tmp/.gunicorn app:app

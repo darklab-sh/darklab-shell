@@ -1,6 +1,7 @@
 // ── Shared utility module ──
 // Declared here once so all subsequent modules can reference them as globals.
-// All elements exist in the DOM by the time these scripts are parsed at the end of <body>.
+// All elements exist in the DOM by the time these scripts are parsed at the end of <body>,
+// which lets the rest of the codebase stay framework-free and query-free.
 const cmdInput    = document.getElementById('cmd');
 const runBtn      = document.getElementById('run-btn');
 const shellPromptWrap = document.getElementById('shell-prompt-wrap');
@@ -12,9 +13,11 @@ const terminalWrap = document.querySelector('.terminal-wrap');
 const terminalBar = document.querySelector('.terminal-bar');
 const hamburgerBtn = document.getElementById('hamburger-btn');
 const faqBtn = document.getElementById('faq-btn');
+const diagBtn = document.getElementById('diag-btn');
 const faqCloseBtn = document.querySelector('.faq-close');
 const optionsBtn = document.getElementById('options-btn');
 const optionsCloseBtn = document.querySelector('.options-close');
+const themeCloseBtn = document.querySelector('.theme-close');
 const newTabBtn = document.getElementById('new-tab-btn');
 const searchToggleBtn = document.getElementById('search-toggle-btn');
 const histBtn = document.getElementById('hist-btn');
@@ -30,13 +33,14 @@ const tabsScrollLeftBtn = document.getElementById('tabs-scroll-left');
 const tabsScrollRightBtn = document.getElementById('tabs-scroll-right');
 const searchPrevBtn = document.getElementById('search-prev');
 const searchNextBtn = document.getElementById('search-next');
+const searchCloseBtn = document.getElementById('search-close-btn');
 const optionsTsSelect = document.getElementById('options-ts-select');
 const optionsLnToggle = document.getElementById('options-ln-toggle');
+const themeSelect = document.getElementById('theme-select');
 const tsBtn = document.getElementById('ts-btn');
 const lnBtn = document.getElementById('ln-btn');
 const themeBtn = document.getElementById('theme-btn');
-const headerTitle = document.querySelector('header h1');
-const themePrefInputs = document.querySelectorAll('input[name="theme-pref"]');
+const headerTitle = document.getElementById('header-title');
 const faqBody = document.querySelector('.faq-body');
 const faqLimitsText = document.getElementById('faq-limits-text');
 const faqAllowedText = document.getElementById('faq-allowed-text');
@@ -62,14 +66,13 @@ const historyPanel = document.getElementById('history-panel');
 const historyList  = document.getElementById('history-list');
 const historyLoadOverlay = document.getElementById('history-load-overlay');
 const acDropdown   = document.getElementById('ac-dropdown');
+const histSearchDropdown = document.getElementById('hist-search-dropdown');
 const killOverlay    = document.getElementById('kill-overlay');
 const histDelOverlay = document.getElementById('hist-del-overlay');
 const faqOverlay = document.getElementById('faq-overlay');
+const themeOverlay = document.getElementById('theme-overlay');
 const optionsOverlay = document.getElementById('options-overlay');
 const permalinkToast = document.getElementById('permalink-toast');
 const runTimer       = document.getElementById('run-timer');
 const searchCaseBtn  = document.getElementById('search-case-btn');
 const searchRegexBtn = document.getElementById('search-regex-btn');
-const versionLabel = document.getElementById('version-label');
-const motd = document.getElementById('motd');
-const motdWrap = document.getElementById('motd-wrap');

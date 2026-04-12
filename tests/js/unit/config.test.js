@@ -9,6 +9,8 @@ describe('frontend config defaults', () => {
     )
 
     expect(APP_CONFIG).toMatchObject({
+      app_name: expect.any(String),
+      prompt_prefix: expect.any(String),
       welcome_char_ms: expect.any(Number),
       welcome_jitter_ms: expect.any(Number),
       welcome_post_cmd_ms: expect.any(Number),

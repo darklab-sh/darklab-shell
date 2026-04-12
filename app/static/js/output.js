@@ -1,5 +1,7 @@
 // ── Shared output logic ──
 function createAnsiUpRenderer() {
+  // ANSI rendering is optional. If the vendored parser fails to load, fall back
+  // to escaped plain text rather than breaking transcript rendering entirely.
   if (typeof AnsiUp === 'function') {
     try {
       const instance = new AnsiUp();
@@ -57,6 +59,8 @@ function _isWelcomeLine(line) {
 }
 
 function _getPendingOutputBatch(tabId) {
+  // Output can arrive very quickly from SSE. Batch DOM writes per tab so large
+  // scans do not thrash layout on every single line.
   let state = _pendingOutputBatches.get(tabId);
   if (!state) {
     state = {
@@ -191,6 +195,7 @@ function _flushPendingOutputBatch(tabId) {
   if (shouldStickToBottom) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
 
   if (state.items.length > 0) {
     _schedulePendingOutputFlush(tabId);
@@ -337,6 +342,7 @@ function appendLine(text, cls, tabId) {
   if (tab?.followOutput !== false) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
 
   _syncTabRawLines(tab, rawLine);
 }

@@ -1,12 +1,21 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
 
-const CMD = 'curl http://localhost:5001/health'
+const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
 
+// Browser specs share the same backend rate limiter, so derive a stable test-
+// scoped IP from the file/title instead of reusing one bucket for the suite.
+function testScopedIp(testInfo, baseOffset = 0) {
+  const key = `${testInfo.file}:${testInfo.title}`
+  let sum = 0
+  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
+  return makeTestIp(baseOffset + sum)
+}
+
 test.describe('permalink / share', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(61) })
+  test.beforeEach(async ({ page }, testInfo) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 61) })
     // Mock clipboard so writeText() resolves in headless Chromium without
     // requiring the clipboard-write permission grant.
     await page.addInitScript(() => {
@@ -52,10 +61,10 @@ test.describe('permalink / share', () => {
     await page.goto(data.url)
 
     // The permalink page should display the command that was run
-    await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
+    await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
   })
 
-  test('permalink page honors the light theme cookie for the live view and export', async ({ page }) => {
+  test('permalink page honors the theme cookie for the live view and export', async ({ page }) => {
     await runCommand(page, CMD)
 
     const [shareResp] = await Promise.all([
@@ -65,12 +74,12 @@ test.describe('permalink / share', () => {
     const data = await shareResp.json()
 
     await page.context().addCookies([
-      { name: 'pref_theme', value: 'light', url: 'http://localhost:5001' },
+      { name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' },
     ])
     await page.goto(data.url)
 
-    await expect(page.locator('body')).toHaveClass(/light/)
-    await expect(page.locator('body')).toContainText('curl http://localhost:5001/health', { timeout: 10_000 })
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
 
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
@@ -80,8 +89,8 @@ test.describe('permalink / share', () => {
     const htmlChunks = []
     for await (const chunk of htmlStream) htmlChunks.push(chunk)
     const html = Buffer.concat(htmlChunks).toString('utf8')
-    expect(html).toContain('body class="light"')
-    expect(html).toContain('--bg: #e7e6e1')
+    expect(html).toContain('<body')
+    expect(html).toContain('--theme-bg: #eef4fa')
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {
@@ -128,7 +137,7 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toContainText(CMD, { timeout: 10_000 })
 
     await page.goto(`${copied}?json`)
-    await expect(page.locator('body')).toContainText('"command":"curl http://localhost:5001/health"')
+    await expect(page.locator('body')).toContainText('"command":"hostname"')
     await expect(page.locator('body')).toContainText('"exit_code":0')
   })
 
@@ -220,13 +229,13 @@ test.describe('permalink / share', () => {
       page.waitForEvent('download'),
       page.locator('button:has-text("save .txt")').click(),
     ])
-    expect(txtDownload.suggestedFilename()).toMatch(/^shell\.darklab\.sh-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
+    expect(txtDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
 
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
       page.locator('button:has-text("save .html")').click(),
     ])
-    expect(htmlDownload.suggestedFilename()).toMatch(/^shell\.darklab\.sh-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
+    expect(htmlDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
   })
 
   test('permalink exports include prompt echo and current prefix display state', async ({ page }) => {
@@ -251,8 +260,8 @@ test.describe('permalink / share', () => {
     for await (const chunk of txtStream) txtChunks.push(chunk)
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
-    expect(txt).toContain('anon@shell.darklab.sh:~$ curl http://localhost:5001/health')
-    expect(txt).toMatch(/1\s+anon@shell\.darklab\.sh:~\$ curl http:\/\/localhost:5001\/health/)
+    expect(txt).toContain('anon@darklab:~$ hostname')
+    expect(txt).toMatch(/1\s+anon@darklab:~\$ hostname/)
     expect(txt).toContain('+')
 
     const [htmlDownload] = await Promise.all([
@@ -265,7 +274,7 @@ test.describe('permalink / share', () => {
     const html = Buffer.concat(htmlChunks).toString('utf8')
 
     expect(html).toContain('prompt-prefix')
-    expect(html).toContain('curl http://localhost:5001/health')
+    expect(html).toContain('hostname')
     expect(html).toContain('perm-prefix')
     expect(html).toContain('+')
     expect(html).toContain('data:font/ttf;base64,')

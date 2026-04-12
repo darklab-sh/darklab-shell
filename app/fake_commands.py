@@ -24,29 +24,30 @@ from commands import (
     runtime_missing_command_name,
     split_command_argv,
 )
-from config import APP_VERSION, CFG
+from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
 
 
-README_URL = "https://gitlab.com/darklab.sh/shell.darklab.sh"
 _STARTED_AT = datetime.now(timezone.utc)
 _CURRENT_SHORTCUTS = [
+    ("Welcome:", "type / Enter / Escape to settle the welcome animation immediately"),
+    ("Kill dialog:", "Enter to confirm / Escape to cancel"),
     ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
     ("Enter on blank prompt", "append a new empty prompt line"),
     ("Up / Down on blank prompt", "cycle recent command history"),
-    ("Autocomplete: Up / Down", "move through suggestions"),
+    ("Autocomplete: Up / Down", "move through suggestions (wraps around)"),
     ("Autocomplete: Tab", "accept the highlighted suggestion"),
     ("Autocomplete: Enter", "accept highlighted suggestion or run command"),
     ("Autocomplete: Escape", "dismiss suggestions"),
-    ("Welcome: type / Enter / Escape", "settle the welcome animation immediately"),
+    ("Ctrl+R", "reverse-i-search history; Up/Down/Ctrl+R cycle; Enter runs; Tab accepts; Escape restores draft"),
     ("Option+T / Alt+T", "open a new tab"),
     ("Option+W / Alt+W", "close the current tab"),
     ("Option+Left/Right", "switch to previous / next tab"),
+    ("Option+Tab / Alt+Tab", "cycle to next tab (add Shift to reverse)"),
     ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
     ("Option+P / Alt+P", "create a permalink for the active tab"),
     ("Option+Shift+C", "copy active-tab output"),
     ("Ctrl+L", "clear the active tab"),
-    ("Kill dialog: Enter / Escape", "confirm / cancel kill"),
     ("Ctrl+W", "delete one word to the left"),
     ("Ctrl+U", "delete to the beginning of the line"),
     ("Ctrl+A", "move to the beginning of the line"),
@@ -134,6 +135,8 @@ _FAKE_COMMAND_HELP = [
 
 
 def _split_command(command: str) -> list[str]:
+    # Fake-command routing keys off the first token only so "history --help"
+    # resolves to the same synthetic implementation as plain "history".
     return split_command_argv(command)
 
 
@@ -148,74 +151,54 @@ def resolve_fake_command(command: str) -> str | None:
     return root if root in _FAKE_COMMANDS else None
 
 
+_FAKE_COMMAND_DISPATCH = {
+    "banner":    lambda cmd, sid: _run_fake_banner(),
+    "clear":     lambda cmd, sid: _run_fake_clear(),
+    "date":      lambda cmd, sid: _run_fake_date(),
+    "env":       lambda cmd, sid: _run_fake_env(sid),
+    "faq":       lambda cmd, sid: _run_fake_faq(),
+    "fortune":   lambda cmd, sid: _run_fake_fortune(),
+    "groups":    lambda cmd, sid: _run_fake_groups(),
+    "help":      lambda cmd, sid: _run_fake_help(),
+    "history":   lambda cmd, sid: _run_fake_history(sid),
+    "hostname":  lambda cmd, sid: _run_fake_hostname(),
+    "id":        lambda cmd, sid: _run_fake_id(),
+    "last":      lambda cmd, sid: _run_fake_last(sid),
+    "limits":    lambda cmd, sid: _run_fake_limits(),
+    "ls":        lambda cmd, sid: _run_fake_ls(cmd),
+    "man":       lambda cmd, sid: _run_fake_man(cmd),
+    "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
+    "pwd":       lambda cmd, sid: _run_fake_pwd(),
+    "reboot":    lambda cmd, sid: _run_fake_reboot(),
+    "retention": lambda cmd, sid: _run_fake_retention(),
+    "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
+    "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
+    "status":    lambda cmd, sid: _run_fake_status(sid),
+    "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
+    "tty":       lambda cmd, sid: _run_fake_tty(),
+    "type":      lambda cmd, sid: _run_fake_type(cmd),
+    "uname":     lambda cmd, sid: _run_fake_uname(cmd),
+    "uptime":    lambda cmd, sid: _run_fake_uptime(),
+    "version":   lambda cmd, sid: _run_fake_version(),
+    "which":     lambda cmd, sid: _run_fake_which(cmd),
+    "who":       lambda cmd, sid: _run_fake_who(sid),
+    "whoami":    lambda cmd, sid: _run_fake_whoami(),
+}
+
+
 def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
+    # Fake commands still return the same [{text, class}, ...], exit_code shape
+    # as real runs so the frontend path is identical.
     root = resolve_fake_command(command)
-    if root == "banner":
-        return _run_fake_banner(), 0
-    if root == "clear":
-        return _run_fake_clear(), 0
-    if root == "date":
-        return _run_fake_date(), 0
-    if root == "env":
-        return _run_fake_env(session_id), 0
-    if root == "faq":
-        return _run_fake_faq(), 0
-    if root == "fortune":
-        return _run_fake_fortune(), 0
-    if root == "groups":
-        return _run_fake_groups(), 0
-    if root == "help":
-        return _run_fake_help(), 0
-    if root == "history":
-        return _run_fake_history(session_id), 0
-    if root == "hostname":
-        return _run_fake_hostname(), 0
-    if root == "id":
-        return _run_fake_id(), 0
-    if root == "shortcuts":
-        return _run_fake_shortcuts(), 0
-    if root == "last":
-        return _run_fake_last(session_id), 0
-    if root == "limits":
-        return _run_fake_limits(), 0
-    if root == "ls":
-        return _run_fake_ls(command), 0
-    if root == "man":
-        return _run_fake_man(command), 0
-    if root == "ps":
-        return _run_fake_ps(session_id, command), 0
-    if root == "pwd":
-        return _run_fake_pwd(), 0
-    if root == "reboot":
-        return _run_fake_reboot(), 0
-    if root == "retention":
-        return _run_fake_retention(), 0
-    if root == "rm_root":
-        return _run_fake_rm_root(), 0
-    if root == "status":
-        return _run_fake_status(session_id), 0
-    if root == "sudo":
-        return _run_fake_sudo(command), 0
-    if root == "tty":
-        return _run_fake_tty(), 0
-    if root == "type":
-        return _run_fake_type(command), 0
-    if root == "uname":
-        return _run_fake_uname(command), 0
-    if root == "uptime":
-        return _run_fake_uptime(), 0
-    if root == "version":
-        return _run_fake_version(), 0
-    if root == "which":
-        return _run_fake_which(command), 0
-    if root == "who":
-        return _run_fake_who(session_id), 0
-    if root == "whoami":
-        return _run_fake_whoami(), 0
-    return [{"type": "output", "text": f"Unsupported fake command: {command.strip()}"}], 1
+    handler = _FAKE_COMMAND_DISPATCH.get(root) if root is not None else None
+    if handler is None:
+        return [{"type": "output", "text": f"Unsupported fake command: {command.strip()}"}], 1
+    return handler(command, session_id), 0
 
 
 def _recent_runs(session_id: str, limit: int = 8):
+    # Synthetic status/history helpers stay session-scoped to match the rest of
+    # the shell rather than exposing global activity.
     with db_connect() as conn:
         return conn.execute(
             "SELECT id, command, started, finished, exit_code FROM runs "
@@ -337,18 +320,18 @@ def _run_fake_env(session_id: str) -> list[dict[str, str]]:
     lines = [
         f"APP_NAME={CFG['app_name']}",
         f"SESSION_ID={session_id or 'anonymous'}",
-        "SHELL=/app/shell.darklab.sh/bin/bash",
+        "SHELL=/bin/bash",
         "TERM=xterm-256color",
     ]
     return _text_lines(lines)
 
 
 def _run_fake_faq() -> list[dict[str, str]]:
-    entries = load_all_faq()
+    entries = load_all_faq(CFG["app_name"], PROJECT_README)
     if not entries:
         return _text_lines([
             "No configured FAQ entries are available in the web shell.",
-            f"README: {README_URL}",
+            f"README: see the project README at {PROJECT_README}",
         ])
 
     lines = ["Configured FAQ entries:"]
@@ -442,7 +425,7 @@ def _run_fake_ls(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     lines: list[str] = []
     if len(parts) > 1:
-        lines.append("ls in shell.darklab.sh shows the allowed command catalog; flags and paths are ignored here.")
+        lines.append(f"ls in {CFG['app_name']} shows the allowed command catalog; flags and paths are ignored here.")
 
     grouped = load_allowed_commands_grouped()
     if grouped:
@@ -523,7 +506,7 @@ def _run_fake_whoami() -> list[dict[str, str]]:
     return _text_lines([
         CFG["app_name"],
         "A web terminal for remote diagnostics and security tooling against allowed commands.",
-        f"README: {README_URL}",
+        f"README: see the project README at {PROJECT_README}",
     ])
 
 
@@ -568,7 +551,7 @@ def _run_fake_limits() -> list[dict[str, str]]:
         f"  command timeout      {CFG['command_timeout_seconds'] or 0}s (0 = unlimited)",
         f"  live preview lines   {CFG['max_output_lines']}",
         f"  full output save     {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"  full output max      {CFG.get('full_output_max_bytes', 0)} bytes (0 = unlimited)",
+        f"  full output max      {CFG.get('full_output_max_mb', 0)} MB (0 = unlimited)",
         f"  history panel limit  {CFG['history_panel_limit']}",
         f"  recent commands      {CFG['recent_commands_limit']}",
         f"  tab limit            {CFG['max_tabs'] or 0} (0 = unlimited)",
@@ -582,7 +565,7 @@ def _run_fake_retention() -> list[dict[str, str]]:
         "Retention policy:",
         f"  run preview retention  {_format_limit_value(CFG['permalink_retention_days'])} days",
         f"  full output save       {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"  full output max        {_format_limit_value(CFG.get('full_output_max_bytes'))} bytes",
+        f"  full output max        {_format_limit_value(CFG.get('full_output_max_mb'))} MB",
     ])
 
 
@@ -658,7 +641,7 @@ def _run_fake_type(command: str) -> list[dict[str, str]]:
 def _run_fake_uname(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if "-a" in parts[1:]:
-        return [{"type": "output", "text": "shell.darklab.sh Linux web-terminal x86_64 app-runtime"}]
+        return [{"type": "output", "text": f"{CFG['app_name']} Linux web-terminal x86_64 app-runtime"}]
     return [{"type": "output", "text": "Linux"}]
 
 

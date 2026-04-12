@@ -1,12 +1,23 @@
 // ── Desktop UI module ──
-// Keyboard shortcuts, overlays, mobile-layout glue, and app bootstrap wiring.
+// Shared helpers for keyboard shortcuts, overlays, and mobile-layout glue.
 
 function syncShellPrompt() {
-  if (typeof shellPromptText === 'undefined' || !shellPromptText || !cmdInput) return;
-  const value = cmdInput.value || '';
+  // The visible prompt is rendered from shared composer state instead of from
+  // the hidden input directly, so selection/caret state stays correct across
+  // desktop/mobile and while welcome owns the tab.
+  if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
+  const composer = typeof getComposerState === 'function' ? getComposerState() : null;
+  const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
+  const value = composer && typeof composer.value === 'string'
+    ? composer.value
+    : (fallbackInput ? fallbackInput.value || '' : '');
   const len = value.length;
-  let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : len;
-  let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : len;
+  let start = composer && typeof composer.selectionStart === 'number'
+    ? composer.selectionStart
+    : (fallbackInput && typeof fallbackInput.selectionStart === 'number' ? fallbackInput.selectionStart : len);
+  let end = composer && typeof composer.selectionEnd === 'number'
+    ? composer.selectionEnd
+    : (fallbackInput && typeof fallbackInput.selectionEnd === 'number' ? fallbackInput.selectionEnd : len);
   start = Math.max(0, Math.min(start, len));
   end = Math.max(0, Math.min(end, len));
   if (start > end) [start, end] = [end, start];
@@ -54,19 +65,23 @@ function refocusTerminalInput() {
   }, 0);
 }
 
-function focusCommandInputFromGesture() {
+function focusCommandInputFromGesture({ preventScroll = true } = {}) {
   if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
     const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
     if (mobileInput && typeof focusComposerInput === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      focusComposerInput(mobileInput, { preventScroll: true });
+      focusComposerInput(mobileInput, { preventScroll });
       return;
     }
     if (mobileInput && typeof mobileInput.focus === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      try {
-        mobileInput.focus({ preventScroll: true });
-      } catch (_) {
+      if (preventScroll) {
+        try {
+          mobileInput.focus({ preventScroll: true });
+        } catch (_) {
+          mobileInput.focus();
+        }
+      } else {
         mobileInput.focus();
       }
     }
@@ -76,6 +91,8 @@ function focusCommandInputFromGesture() {
 }
 
 function useMobileTerminalViewportMode() {
+  // Mobile mode depends on both width and input modality. A narrow desktop
+  // browser window should not automatically switch into the mobile shell.
   if (typeof window === 'undefined') return false;
   const touchPoints = typeof navigator !== 'undefined' ? (navigator.maxTouchPoints || 0) : 0;
   const hasTouch = touchPoints > 0
@@ -96,6 +113,7 @@ const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && perma
 const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay ? killOverlay.parentElement : null;
 const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
+const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
 const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
@@ -155,11 +173,14 @@ function _getMobileUiLayoutRefs() {
   };
 }
 
+// These refs let the same DOM nodes move between the desktop document flow and
+// the simplified mobile shell without duplicating markup or event handlers.
 const _mobileUiLayoutRefs = _getMobileUiLayoutRefs();
 const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
+  themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
   killOverlay: typeof killOverlay !== 'undefined' && killOverlay ? killOverlay : null,
@@ -169,48 +190,32 @@ const _uiOverlayRefs = {
 function _bindMobileComposerInteractions(uiRefs) {
   const composerRefs = uiRefs && uiRefs.composer;
   if (!composerRefs || !composerRefs.host || !cmdInput) return;
-  composerRefs.host.addEventListener('click', e => {
-    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
-      focusCommandInputFromGesture();
-    }
-  });
-  composerRefs.host.addEventListener('pointerdown', e => {
-    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
-      e.preventDefault();
-      e.stopPropagation();
-      focusCommandInputFromGesture();
-    }
-  });
-  composerRefs.host.addEventListener('touchstart', e => {
-    if (useMobileTerminalViewportMode() && e.target === composerRefs.host) {
-      e.preventDefault();
-      e.stopPropagation();
-      focusCommandInputFromGesture();
-    }
-  }, { passive: false });
-  if (composerRefs.row) {
-    composerRefs.row.addEventListener('pointerdown', e => {
-      if (useMobileTerminalViewportMode() && e.target !== runBtn) {
-        focusCommandInputFromGesture();
-      }
-    });
-    composerRefs.row.addEventListener('touchstart', e => {
-      if (useMobileTerminalViewportMode() && e.target !== runBtn) {
-        focusCommandInputFromGesture();
-      }
-    }, { passive: false });
-  }
 }
 
 function _bindMobileEditBarInteractions(editBar) {
   if (!editBar || !cmdInput) return;
   editBar.querySelectorAll('button[data-edit-action]').forEach(btn => {
+    const action = btn.dataset.editAction;
+    const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
+    let _repeatDelay = null;
+    let _repeatInterval = null;
+    const _clearRepeat = () => {
+      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
+      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
+    };
     const handler = (e) => {
       e.preventDefault();
       e.stopPropagation();
-      performMobileEditAction(btn.dataset.editAction);
+      performMobileEditAction(action);
+      if (repeating) {
+        _clearRepeat();
+        _repeatDelay = setTimeout(() => {
+          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
+        }, 400);
+      }
     };
+    const stopRepeat = () => _clearRepeat();
     if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
       btn.addEventListener('pointerdown', e => {
         handledPointerDown = true;
@@ -224,9 +229,19 @@ function _bindMobileEditBarInteractions(editBar) {
         }
         handler(e);
       });
+      if (repeating) {
+        btn.addEventListener('pointerup',     stopRepeat);
+        btn.addEventListener('pointercancel', stopRepeat);
+        btn.addEventListener('pointerleave',  stopRepeat);
+      }
     } else {
-      btn.addEventListener('mousedown', handler);
+      btn.addEventListener('mousedown',  handler);
       btn.addEventListener('touchstart', handler, { passive: false });
+      if (repeating) {
+        btn.addEventListener('mouseup',     stopRepeat);
+        btn.addEventListener('touchend',    stopRepeat);
+        btn.addEventListener('touchcancel', stopRepeat);
+      }
     }
   });
 }
@@ -244,7 +259,8 @@ const _mobileShellOverlayNodes = [
   { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: killOverlay || null },
   { node: killOverlay, homeParent: _killOverlayHomeParent, desktopAnchor: histDelOverlay || null },
   { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: faqOverlay || null },
-  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: optionsOverlay || null },
+  { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
+  { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: null },
 ];
 
@@ -261,6 +277,8 @@ function syncMobileShellOverlayLayout(useMobile, mobileShellOverlaysMount) {
 }
 
 function syncMobileShellLayout(mobileMode) {
+  // The mobile shell is mostly a re-parenting operation: move the same chrome,
+  // transcript, and overlays into mobile mounts instead of rendering variants.
   if (typeof document === 'undefined') return;
   const useMobile = !!mobileMode;
   const mobileShellRefs = _mobileUiLayoutRefs && _mobileUiLayoutRefs.shell;
@@ -320,7 +338,16 @@ function isChromeIOS() {
 
 function getMobileKeyboardOffset() {
   if (!useMobileTerminalViewportMode() || !window.visualViewport) return 0;
-  return Math.max(0, Math.round(window.innerHeight - window.visualViewport.height - window.visualViewport.offsetTop));
+  const liveInnerHeight = Math.round(window.innerHeight || 0);
+  const visualHeight = Math.round(window.visualViewport.height || 0);
+  const offsetTop = Math.round(window.visualViewport.offsetTop || 0);
+  const closedHeight = typeof getMobileViewportClosedHeight === 'function'
+    ? getMobileViewportClosedHeight()
+    : null;
+  const baselineHeight = typeof closedHeight === 'number' && closedHeight > 0
+    ? Math.max(closedHeight, liveInnerHeight)
+    : liveInnerHeight;
+  return Math.max(0, baselineHeight - visualHeight - offsetTop);
 }
 
 function isMobileKeyboardOpen(offset = null) {
@@ -328,6 +355,13 @@ function isMobileKeyboardOpen(offset = null) {
   const mobileInputEl = (typeof getVisibleComposerInput === 'function' && getVisibleComposerInput()) || null;
   const mobileInputFocused = !!(mobileInputEl && typeof document !== 'undefined' && document.activeElement === mobileInputEl);
   if (!mobileInputFocused) return false;
+  const keyboardMarkedOpen = !!(
+    typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-keyboard-open')
+  );
+  if (keyboardMarkedOpen) return true;
   const keyboardBaseline = typeof getMobileKeyboardOffsetBaseline === 'function'
     ? getMobileKeyboardOffsetBaseline()
     : null;
@@ -347,11 +381,23 @@ function syncMobileViewportState() {
   if (!hasMobileShell) return;
   document.body.classList.toggle('mobile-terminal-mode', activeMobileMode);
   document.body.classList.toggle('mobile-chrome-ios', activeMobileMode && isChromeIOS());
-  if (typeof syncMobileComposerKeyboardState === 'function') syncMobileComposerKeyboardState(keyboardOffset, { active: activeMobileMode });
+  if (typeof syncMobileComposerKeyboardState === 'function') {
+    syncMobileComposerKeyboardState(keyboardOffset, {
+      active: activeMobileMode,
+      open: activeMobileMode && keyboardOpen,
+    });
+  }
   else document.body.classList.toggle('mobile-keyboard-open', activeMobileMode && keyboardOpen);
   syncMobileShellLayout(activeMobileMode);
   syncMobileComposerLayout(activeMobileMode);
-  if (activeMobileMode) syncMobileViewportHeight();
+  if (activeMobileMode) syncMobileViewportHeight({ keyboardOpen });
+  if (activeMobileMode && keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
+    setTimeout(() => {
+      if (!useMobileTerminalViewportMode()) return;
+      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
+      _refreshFollowingOutputsAfterLayout();
+    }, 0);
+  }
   if (activeMobileMode && keyboardOpen) {
     hideMobileMenu();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -386,10 +432,6 @@ function getPreference(name) {
 }
 
 function syncOptionsControls() {
-  const themeValue = document.body.classList.contains('light') ? 'light' : 'dark';
-  themePrefInputs.forEach(input => {
-    input.checked = input.value === themeValue;
-  });
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
   const lnToggle = optionsLnToggle;
@@ -397,13 +439,7 @@ function syncOptionsControls() {
 }
 
 function applyThemePreference(theme, persist = true) {
-  const nextTheme = theme === 'light' ? 'light' : 'dark';
-  document.body.classList.toggle('light', nextTheme === 'light');
-  if (persist) {
-    setPreferenceCookie('pref_theme', nextTheme);
-    localStorage.setItem('theme', nextTheme);
-  }
-  syncOptionsControls();
+  applyThemeSelection(theme, persist);
 }
 
 function applyTimestampPreference(mode, persist = true) {
@@ -423,10 +459,13 @@ function applyLineNumberPreference(mode, persist = true) {
 function _closeMajorOverlays() {
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (isFaqOverlayOpen()) hideFaqOverlay();
+  if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
 }
 
 function openOptions() {
+  // Opening one major overlay should implicitly close the others so mobile and
+  // desktop never stack multiple drawers/modals on top of each other.
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   syncOptionsControls();
@@ -435,6 +474,38 @@ function openOptions() {
 
 function closeOptions() {
   hideOptionsOverlay();
+  refocusTerminalInput();
+}
+
+function openThemeSelector() {
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  renderThemeSelectionOptions();
+  syncThemeSelectionControls();
+  showThemeOverlay();
+  setTimeout(() => {
+    const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
+    const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
+    if (target && typeof target.focus === 'function') {
+      try {
+        target.focus({ preventScroll: true });
+      } catch (_) {
+        target.focus();
+      }
+      return;
+    }
+    if (themeSelect && typeof themeSelect.focus === 'function') {
+      try {
+        themeSelect.focus({ preventScroll: true });
+      } catch (_) {
+        themeSelect.focus();
+      }
+    }
+  }, 0);
+}
+
+function closeThemeSelector() {
+  hideThemeOverlay();
   refocusTerminalInput();
 }
 
@@ -537,6 +608,11 @@ function handleTabShortcut(e) {
     e.preventDefault();
     return true;
   }
+  if (e.key === 'Tab') {
+    activateRelativeTab(e.shiftKey ? -1 : 1);
+    e.preventDefault();
+    return true;
+  }
   const matchedDigit = [1, 2, 3, 4, 5, 6, 7, 8, 9].find(digit => eventMatchesDigit(e, digit));
   if (matchedDigit) {
     const tabIndex = matchedDigit - 1;
@@ -567,9 +643,27 @@ function handleActionShortcut(e) {
   return false;
 }
 
-function getCmdSelection(value = cmdInput.value || '') {
-  let start = typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : value.length;
-  let end = typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : value.length;
+function getComposerStateSnapshot() {
+  if (typeof getComposerState === 'function') {
+    const composer = getComposerState();
+    if (composer) return composer;
+  }
+  return null;
+}
+
+function getCmdSelection(value = null) {
+  const composer = getComposerStateSnapshot();
+  const sourceValue = typeof value === 'string'
+    ? value
+    : (composer && typeof composer.value === 'string'
+      ? composer.value
+      : (cmdInput.value || ''));
+  let start = composer && typeof composer.selectionStart === 'number'
+    ? composer.selectionStart
+    : (typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : sourceValue.length);
+  let end = composer && typeof composer.selectionEnd === 'number'
+    ? composer.selectionEnd
+    : (typeof cmdInput.selectionEnd === 'number' ? cmdInput.selectionEnd : sourceValue.length);
   if (start > end) [start, end] = [end, start];
   return { start, end };
 }
@@ -581,32 +675,30 @@ function getInputSelection(input, value = input && input.value ? input.value : '
   return { start, end };
 }
 
-function syncHiddenCommandInputFromVisible(value, start = null, end = null) {
-  setComposerValue(value, start, end);
-}
-
 function replaceCmdRange(value, start, end, replacement = '') {
   const nextPos = start + replacement.length;
   setComposerValue(value.slice(0, start) + replacement + value.slice(end), nextPos, nextPos);
 }
 
 function moveCmdCaret(delta) {
-  const value = cmdInput.value || '';
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
   const { start, end } = getCmdSelection(value);
   const next = Math.max(0, Math.min(value.length, (delta < 0 ? start : end) + delta));
-  cmdInput.setSelectionRange(next, next);
+  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
+  else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
   syncShellPrompt();
 }
 
 function setCmdCaret(position) {
-  const value = cmdInput.value || '';
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
   const next = Math.max(0, Math.min(value.length, position));
-  cmdInput.setSelectionRange(next, next);
+  if (typeof syncComposerSelection === 'function') syncComposerSelection(next, next, { input: getVisibleComposerInput() });
+  else if (cmdInput && typeof cmdInput.setSelectionRange === 'function') cmdInput.setSelectionRange(next, next);
   syncShellPrompt();
 }
 
 function deleteCmdWordLeft() {
-  const value = cmdInput.value || '';
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
   const { start, end } = getCmdSelection(value);
   if (start !== end) {
     replaceCmdRange(value, start, end);
@@ -628,8 +720,13 @@ function performMobileEditAction(action) {
   if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
   if (typeof acHide === 'function') acHide();
 
-  const value = input.value || '';
-  const { start, end } = getInputSelection(input, value);
+  const composer = getComposerStateSnapshot();
+  const value = composer && typeof composer.value === 'string'
+    ? composer.value
+    : (input.value || '');
+  const { start, end } = composer
+    ? getCmdSelection(value)
+    : getInputSelection(input, value);
   let nextValue = value;
   let nextStart = start;
   let nextEnd = end;
@@ -661,22 +758,49 @@ function performMobileEditAction(action) {
     }
   }
 
-  setComposerValue(nextValue, nextStart, nextEnd);
+  if (action === 'left' || action === 'right' || action === 'home' || action === 'end') {
+    if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
+    else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
+  } else {
+    setComposerValue(nextValue, nextStart, nextEnd);
+  }
 
   if (typeof focusAnyComposerInput === 'function') setTimeout(() => focusAnyComposerInput({ preventScroll: true }), 0);
 }
 
-function syncMobileViewportHeight() {
+function syncMobileViewportHeight({ keyboardOpen = null } = {}) {
   if (typeof document === 'undefined' || typeof window === 'undefined') return;
-  const h = window.visualViewport ? Math.round(window.visualViewport.height) : window.innerHeight;
+  const visualHeight = window.visualViewport ? Math.round(window.visualViewport.height) : 0;
+  const innerHeight = Math.round(window.innerHeight || 0);
+  const useKeyboardOpen = typeof keyboardOpen === 'boolean'
+    ? keyboardOpen
+    : !!(typeof document !== 'undefined'
+      && document.body
+      && document.body.classList
+      && document.body.classList.contains('mobile-keyboard-open'));
+  if (!useKeyboardOpen && innerHeight > 0 && typeof setMobileViewportClosedHeight === 'function') {
+    setMobileViewportClosedHeight(innerHeight);
+  }
+  const h = useKeyboardOpen
+    ? (visualHeight || innerHeight)
+    : Math.max(innerHeight, visualHeight);
+  if (!(h > 0)) return;
   document.documentElement.style.setProperty('--mobile-viewport-height', `${h}px`);
 }
 
-function syncMobileComposerKeyboard() {
+function syncMobileComposerKeyboard({ open = null } = {}) {
   if (typeof window === 'undefined') return;
   const offset = getMobileKeyboardOffset();
-  if (typeof syncMobileComposerKeyboardState === 'function') syncMobileComposerKeyboardState(offset);
-  syncMobileViewportHeight();
+  const keyboardOpen = typeof syncMobileComposerKeyboardState === 'function'
+    ? syncMobileComposerKeyboardState(offset, { open })
+    : !!open;
+  syncMobileViewportHeight({ keyboardOpen });
+  if (keyboardOpen && typeof _refreshFollowingOutputsAfterLayout === 'function') {
+    setTimeout(() => {
+      if (!document.body || !document.body.classList.contains('mobile-keyboard-open')) return;
+      _refreshFollowingOutputsAfterLayout();
+    }, 0);
+  }
 }
 
 let _mobileComposerKeyboardSyncTimer = null;
@@ -694,17 +818,35 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
   const closeMobileKeyboard = (delay = 120) => {
     if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay });
   };
+  const resetClosedMobileKeyboardLayout = () => {
+    if (typeof syncMobileComposerKeyboardState === 'function') {
+      syncMobileComposerKeyboardState(0, { open: false });
+    }
+    syncMobileViewportHeight({ keyboardOpen: false });
+  };
+  const queueMobileViewportRecovery = (delays = [50, 180]) => {
+    delays.forEach(delay => {
+      setTimeout(() => {
+        syncMobileComposerKeyboard();
+        syncMobileViewportState();
+      }, delay);
+    });
+  };
   if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
     window.visualViewport.addEventListener('resize', () => {
       syncMobileComposerKeyboard();
       queueMobileComposerKeyboardSync();
     });
-    window.visualViewport.addEventListener('scroll', () => {
-      syncMobileComposerKeyboard();
-      queueMobileComposerKeyboardSync();
-    });
   }
   mobileInput.addEventListener('focus', () => {
+    if (typeof setComposerState === 'function') {
+      setComposerState({
+        value: mobileInput.value || '',
+        selectionStart: typeof mobileInput.selectionStart === 'number' ? mobileInput.selectionStart : (mobileInput.value || '').length,
+        selectionEnd: typeof mobileInput.selectionEnd === 'number' ? mobileInput.selectionEnd : (mobileInput.value || '').length,
+        activeInput: 'mobile',
+      });
+    }
     if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
     syncMobileComposerKeyboard();
     queueMobileComposerKeyboardSync();
@@ -714,40 +856,32 @@ function bindMobileComposerKeyboardListeners(mobileInput) {
     syncMobileComposerKeyboard();
     queueMobileComposerKeyboardSync();
   });
+
+  // When the user returns to the browser from another app, the OS may have
+  // closed the keyboard without firing a visualViewport resize event, leaving
+  // the stale mobile-keyboard-open class and --mobile-keyboard-offset on the
+  // page.  Re-run a full viewport state sync after a short settle delay.
+  if (typeof document !== 'undefined') {
+    document.addEventListener('visibilitychange', () => {
+      if (document.hidden) {
+        closeMobileKeyboard(0);
+        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+        resetClosedMobileKeyboardLayout();
+        return;
+      }
+      queueMobileViewportRecovery();
+    });
+  }
+  window.addEventListener('focus', () => {
+    queueMobileViewportRecovery([80, 220]);
+  });
+  window.addEventListener('pageshow', () => {
+    queueMobileViewportRecovery([0, 120]);
+  });
 }
 
 function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   if (!mobileInput || !mobileRunBtn) return;
-  mobileInput.addEventListener('pointerdown', e => {
-    if (!useMobileTerminalViewportMode()) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-    if (typeof focusComposerInput === 'function') {
-      focusComposerInput(mobileInput, { preventScroll: true });
-    } else if (typeof mobileInput.focus === 'function') {
-      try {
-        mobileInput.focus({ preventScroll: true });
-      } catch (_) {
-        mobileInput.focus();
-      }
-    }
-  });
-  mobileInput.addEventListener('touchstart', e => {
-    if (!useMobileTerminalViewportMode()) return;
-    e.preventDefault();
-    e.stopPropagation();
-    if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-    if (typeof focusComposerInput === 'function') {
-      focusComposerInput(mobileInput, { preventScroll: true });
-    } else if (typeof mobileInput.focus === 'function') {
-      try {
-        mobileInput.focus({ preventScroll: true });
-      } catch (_) {
-        mobileInput.focus();
-      }
-    }
-  }, { passive: false });
   // Submit handler — read the visible composer input and submit through the
   // shared command engine.
   function _mobileSubmit() {
@@ -757,7 +891,7 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   mobileRunBtn.addEventListener('click', _mobileSubmit);
 
   // Sync mobile input through the shared composer handler so autocomplete and
-  // hidden-desktop mirroring stay on the same path.
+  // shared composer state stay on the same path.
   mobileInput.addEventListener('input', () => {
     handleComposerInputChange(mobileInput);
   });
@@ -768,16 +902,72 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
       _mobileSubmit();
     }
   });
+
+  // Guard against something resetting the cursor to end synchronously after a
+  // tap repositions it. Capture the cursor position at click time (iOS has
+  // already placed it by then) and restore it on the next tick if it moved
+  // specifically to end — the symptom of a spurious focus() or setSelectionRange
+  // call clobbering the tap-to-reposition result.
+  mobileInput.addEventListener('click', () => {
+    if (!useMobileTerminalViewportMode()) return;
+    if (typeof document === 'undefined' || document.activeElement !== mobileInput) return;
+    const savedStart = mobileInput.selectionStart;
+    const savedEnd   = mobileInput.selectionEnd;
+    const valueLen   = (mobileInput.value || '').length;
+    if (typeof savedStart !== 'number' || savedStart >= valueLen) return;
+    setTimeout(() => {
+      if (typeof document === 'undefined' || document.activeElement !== mobileInput) return;
+      if (mobileInput.selectionStart >= (mobileInput.value || '').length) {
+        mobileInput.setSelectionRange(savedStart, savedEnd);
+      }
+      if (typeof setComposerState === 'function') {
+        setComposerState({
+          value: mobileInput.value || '',
+          selectionStart: typeof mobileInput.selectionStart === 'number' ? mobileInput.selectionStart : (mobileInput.value || '').length,
+          selectionEnd: typeof mobileInput.selectionEnd === 'number' ? mobileInput.selectionEnd : (mobileInput.value || '').length,
+          activeInput: 'mobile',
+        });
+      }
+      syncShellPrompt();
+    }, 0);
+  });
 }
 
 function bindMobileEditBarListeners(editBar) {
   if (!editBar) return;
   editBar.querySelectorAll('button[data-mobile-edit]').forEach(btn => {
+    const action = btn.dataset.mobileEdit;
+    const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
+    let _repeatDelay = null;
+    let _repeatInterval = null;
+    const _clearRepeat = () => {
+      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
+      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('pointerup',     stopRepeat);
+        document.removeEventListener('pointercancel', stopRepeat);
+        document.removeEventListener('touchend',      stopRepeat);
+        document.removeEventListener('touchcancel',   stopRepeat);
+      }
+    };
+    const stopRepeat = () => _clearRepeat();
     const handler = e => {
       e.preventDefault();
       e.stopPropagation();
-      performMobileEditAction(btn.dataset.mobileEdit);
+      performMobileEditAction(action);
+      if (repeating) {
+        _clearRepeat();
+        _repeatDelay = setTimeout(() => {
+          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
+        }, 400);
+        if (typeof document !== 'undefined') {
+          document.addEventListener('pointerup',     stopRepeat);
+          document.addEventListener('pointercancel', stopRepeat);
+          document.addEventListener('touchend',      stopRepeat);
+          document.addEventListener('touchcancel',   stopRepeat);
+        }
+      }
     };
     if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
       btn.addEventListener('pointerdown', e => {
@@ -792,9 +982,19 @@ function bindMobileEditBarListeners(editBar) {
         }
         handler(e);
       });
+      if (repeating) {
+        btn.addEventListener('pointerup',     stopRepeat);
+        btn.addEventListener('pointercancel', stopRepeat);
+        btn.addEventListener('pointerleave',  stopRepeat);
+      }
     } else {
-      btn.addEventListener('mousedown', handler);
+      btn.addEventListener('mousedown',  handler);
       btn.addEventListener('touchstart', handler, { passive: false });
+      if (repeating) {
+        btn.addEventListener('mouseup',     stopRepeat);
+        btn.addEventListener('touchend',    stopRepeat);
+        btn.addEventListener('touchcancel', stopRepeat);
+      }
     }
   });
 }
@@ -814,15 +1014,266 @@ function findWordBoundaryRight(value, index) {
 }
 
 // ── Theme ──
-const savedTheme = getPreference('pref_theme') || localStorage.getItem('theme');
-if (!getPreference('pref_theme') && savedTheme) setPreferenceCookie('pref_theme', savedTheme);
-if (savedTheme === 'light') document.body.classList.add('light');
+function _getThemeRegistry() {
+  // Prefer the runtime /themes payload when present, then fall back to the
+  // bootstrapped globals so the selector still works during partial failures.
+  if (typeof window !== 'undefined' && window.ThemeRegistry && typeof window.ThemeRegistry === 'object') {
+    return window.ThemeRegistry;
+  }
+  const currentThemeName = (document.body && document.body.dataset && document.body.dataset.theme) || _savedThemeName() || '';
+  const currentThemeVars = typeof window !== 'undefined' && window.ThemeCssVars && window.ThemeCssVars.current
+    && typeof window.ThemeCssVars.current === 'object'
+    ? window.ThemeCssVars.current
+    : {};
+  return {
+    current: currentThemeName
+      ? { name: currentThemeName, label: currentThemeName, source: 'fallback', vars: currentThemeVars }
+      : null,
+    themes: [],
+  };
+}
+
+function _getThemeThemes() {
+  const registry = _getThemeRegistry();
+  return Array.isArray(registry.themes) ? registry.themes : [];
+}
+
+function _normalizeThemeName(name) {
+  const value = typeof name === 'string' ? name.trim() : '';
+  return value.endsWith('.yaml') ? value.slice(0, -5) : value;
+}
+
+function _themeEntryMatches(entry, name) {
+  const needle = _normalizeThemeName(name);
+  if (!needle) return false;
+  return _normalizeThemeName(entry?.name) === needle || _normalizeThemeName(entry?.filename) === needle;
+}
+
+function _themeEntryGroup(entry) {
+  const group = typeof entry?.group === 'string' ? entry.group.trim() : '';
+  return group || 'Other';
+}
+
+function _themeEntrySortValue(entry) {
+  const value = Number(entry?.sort);
+  return Number.isFinite(value) ? value : Number.POSITIVE_INFINITY;
+}
+
+function _compareThemeEntries(a, b) {
+  const sortA = _themeEntrySortValue(a);
+  const sortB = _themeEntrySortValue(b);
+  if (sortA !== sortB) return sortA - sortB;
+  const groupA = _themeEntryGroup(a).toLowerCase();
+  const groupB = _themeEntryGroup(b).toLowerCase();
+  if (groupA !== groupB) return groupA.localeCompare(groupB);
+  const labelA = String(a?.label || a?.name || '').toLowerCase();
+  const labelB = String(b?.label || b?.name || '').toLowerCase();
+  if (labelA !== labelB) return labelA.localeCompare(labelB);
+  return String(a?.name || '').localeCompare(String(b?.name || ''));
+}
+
+function _findThemeEntry(name) {
+  const needle = _normalizeThemeName(name);
+  if (!needle) return null;
+  const registry = _getThemeRegistry();
+  if (registry.current && _themeEntryMatches(registry.current, needle)) return registry.current;
+  return _getThemeThemes().find(theme => theme && _themeEntryMatches(theme, needle)) || null;
+}
+
+function _defaultThemeEntry() {
+  const registry = _getThemeRegistry();
+  return registry.current || _findThemeEntry(APP_CONFIG?.default_theme || '') || {
+    name: 'dark',
+    label: 'Dark',
+    source: 'built-in',
+    vars: (window.ThemeCssVars && window.ThemeCssVars.fallback) || {},
+    theme_vars: (window.ThemeCssVars && window.ThemeCssVars.fallback) || {},
+  };
+}
+
+function _applyThemeVars(entry) {
+  if (!entry || !entry.vars || !document.documentElement) return;
+  Object.entries(entry.vars).forEach(([name, value]) => {
+    document.documentElement.style.setProperty(name, value);
+  });
+  document.documentElement.style.colorScheme = entry.color_scheme || 'light dark';
+  const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+  if (colorSchemeMeta) colorSchemeMeta.setAttribute('content', entry.color_scheme || 'light dark');
+}
+
+function _applyThemePreviewVars(target, vars) {
+  if (!target || !vars || !target.style) return;
+  Object.entries(vars).forEach(([name, value]) => {
+    target.style.setProperty(name, value);
+  });
+}
+
+function _persistThemeEntry(entry) {
+  if (!entry) return;
+  setPreferenceCookie('pref_theme_name', entry.name);
+  localStorage.setItem('theme', entry.name);
+}
+
+function _savedThemeName() {
+  return getPreference('pref_theme_name')
+    || localStorage.getItem('theme')
+    || getPreference('pref_theme')
+    || '';
+}
+
+function _resolveThemeEntry(name) {
+  return _findThemeEntry(name) || _defaultThemeEntry();
+}
+
+function _buildThemePreviewCard(theme) {
+  const card = document.createElement('button');
+  const themeName = theme?.name || '';
+  const themeLabel = theme?.label || themeName;
+  card.type = 'button';
+  card.className = 'theme-card';
+  card.dataset.themeName = themeName;
+  card.dataset.themeLabel = themeLabel;
+  card.setAttribute('aria-label', `${themeLabel} theme`);
+  card.setAttribute('aria-pressed', 'false');
+  _applyThemePreviewVars(card, theme?.vars || {});
+  const preview = document.createElement('span');
+  preview.className = 'theme-card-preview';
+  preview.setAttribute('aria-hidden', 'true');
+
+  const bar = document.createElement('span');
+  bar.className = 'theme-card-preview-bar';
+  ['dot-r', 'dot-y', 'dot-g'].forEach(dotClass => {
+    const dot = document.createElement('span');
+    dot.className = `dot ${dotClass}`;
+    bar.appendChild(dot);
+  });
+  const pill = document.createElement('span');
+  pill.className = 'theme-card-preview-pill';
+  bar.appendChild(pill);
+
+  const panel = document.createElement('span');
+  panel.className = 'theme-card-preview-panel';
+  const prompt = document.createElement('span');
+  prompt.className = 'theme-card-preview-prompt';
+  const prefix = document.createElement('span');
+  prefix.className = 'theme-card-preview-prefix';
+  prefix.textContent = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
+  prompt.appendChild(prefix);
+
+  const line1 = document.createElement('span');
+  line1.className = 'theme-card-preview-line';
+  const line2 = document.createElement('span');
+  line2.className = 'theme-card-preview-line theme-card-preview-line-short';
+  const chipRow = document.createElement('span');
+  chipRow.className = 'theme-card-preview-chip-row';
+  for (let i = 0; i < 2; i += 1) {
+    const chip = document.createElement('span');
+    chip.className = 'theme-card-preview-chip';
+    chipRow.appendChild(chip);
+  }
+
+  panel.appendChild(prompt);
+  panel.appendChild(line1);
+  panel.appendChild(line2);
+  panel.appendChild(chipRow);
+  preview.appendChild(bar);
+  preview.appendChild(panel);
+
+  const label = document.createElement('span');
+  label.className = 'theme-card-label';
+  label.textContent = themeLabel;
+  card.appendChild(preview);
+  card.appendChild(label);
+  card.addEventListener('click', () => {
+    applyThemeSelection(themeName);
+  });
+  return card;
+}
+
+function renderThemeSelectionOptions() {
+  if (!themeSelect || themeSelect.dataset.wired === '1') return;
+  const themes = [..._getThemeThemes()].sort(_compareThemeEntries);
+  themeSelect.innerHTML = '';
+  if (!themes.length) {
+    const empty = document.createElement('div');
+    empty.className = 'theme-picker-empty';
+    empty.textContent = 'No themes available';
+    themeSelect.appendChild(empty);
+    themeSelect.dataset.wired = '1';
+    return;
+  }
+  const groupCounts = themes.reduce((counts, theme) => {
+    const themeGroup = _themeEntryGroup(theme);
+    counts[themeGroup] = (counts[themeGroup] || 0) + 1;
+    return counts;
+  }, {});
+  const maxColumns = Math.max(1, ...Object.values(groupCounts));
+  const desktopColumns = Math.max(1, Math.min(maxColumns, 2));
+  themeSelect.style.setProperty('--theme-picker-columns', String(desktopColumns));
+  const mobileColumns = Math.max(1, Math.min(maxColumns, 2));
+  themeSelect.style.setProperty('--theme-picker-columns-mobile', String(mobileColumns));
+  let currentGroup = null;
+  let groupSection = null;
+  let groupGrid = null;
+  themes.forEach(theme => {
+    const themeGroup = _themeEntryGroup(theme);
+    if (themeGroup !== currentGroup) {
+      currentGroup = themeGroup;
+      groupSection = document.createElement('section');
+      groupSection.className = 'theme-picker-group';
+      groupSection.dataset.themeGroup = themeGroup;
+      const groupTitle = document.createElement('div');
+      groupTitle.className = 'theme-picker-group-title';
+      groupTitle.textContent = themeGroup;
+      groupGrid = document.createElement('div');
+      groupGrid.className = 'theme-picker-group-grid';
+      groupSection.appendChild(groupTitle);
+      groupSection.appendChild(groupGrid);
+      themeSelect.appendChild(groupSection);
+    }
+    if (groupGrid) groupGrid.appendChild(_buildThemePreviewCard(theme));
+  });
+  themeSelect.dataset.wired = '1';
+}
+
+function syncThemeSelectionControls() {
+  const current = _resolveThemeEntry(document.body?.dataset?.theme || _savedThemeName());
+  const themeName = current?.name || '';
+  if (!themeSelect) return;
+  themeSelect.dataset.theme = themeName;
+  themeSelect.querySelectorAll('[data-theme-name]').forEach(card => {
+    const active = card.dataset.themeName === themeName;
+    card.classList.toggle('theme-card-active', active);
+    card.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function applyThemeSelection(themeName, persist = true) {
+  // Theme preview uses the same resolved-entry path as persisted selection, so
+  // the drawer/modal never shows a palette the runtime cannot actually apply.
+  const entry = _resolveThemeEntry(themeName);
+  if (!entry) return;
+  if (document.body) document.body.dataset.theme = entry.name;
+  _applyThemeVars(entry);
+  if (typeof window !== 'undefined') {
+    const registry = _getThemeRegistry();
+    registry.current = entry;
+    window.ThemeRegistry = registry;
+    if (window.ThemeCssVars && typeof window.ThemeCssVars === 'object') {
+      window.ThemeCssVars.current = entry.vars || {};
+    }
+  }
+  if (persist) _persistThemeEntry(entry);
+  syncThemeSelectionControls();
+}
 
 // ── Timestamps ──
 const _tsModes  = ['off', 'elapsed', 'clock'];
 const _tsLabels = { off: 'timestamps: off', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
 
 function _setTsMode(mode) {
+  // Timestamp mode is expressed via body classes so both active transcript
+  // rendering and exported/permalink views can share the same styling model.
   tsMode = mode;
   document.body.classList.remove('ts-elapsed', 'ts-clock');
   if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
@@ -835,24 +1286,9 @@ function _setTsMode(mode) {
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
 }
 
-tsBtn.addEventListener('click', () => {
-  applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-  refocusTerminalInput();
-});
-
-lnBtn.addEventListener('click', () => {
-  applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-  refocusTerminalInput();
-});
-
-themeBtn.addEventListener('click', () => {
-  applyThemePreference(document.body.classList.contains('light') ? 'dark' : 'light');
-  refocusTerminalInput();
-});
-
 let allowedCommandsFaqData = null;
 
-function formatFaqLimits(cfg) {
+function _buildFaqLimitsContent(cfg) {
   if (!cfg) return '';
   function _fmtDuration(s) {
     if (s >= 3600 && s % 3600 === 0) return (s / 3600) + (s / 3600 === 1 ? ' hour' : ' hours');
@@ -884,19 +1320,34 @@ function formatFaqLimits(cfg) {
     },
   ];
 
-  const tableRows = rows.map(r =>
-    `<tr><td style="padding:2px 12px 2px 0;white-space:nowrap;color:var(--muted)">${r.label}</td>` +
-    `<td style="padding:2px 0">${r.value}</td></tr>`
-  ).join('');
+  const frag = document.createDocumentFragment();
+  const table = document.createElement('table');
+  table.className = 'faq-limits-table';
+  rows.forEach(r => {
+    const tr = document.createElement('tr');
+    const labelCell = document.createElement('td');
+    labelCell.className = 'faq-limits-label';
+    labelCell.textContent = r.label;
+    const valueCell = document.createElement('td');
+    valueCell.className = 'faq-limits-value';
+    valueCell.innerHTML = r.value;
+    tr.appendChild(labelCell);
+    tr.appendChild(valueCell);
+    table.appendChild(tr);
+  });
+  frag.appendChild(table);
 
-  return `<table style="border-collapse:collapse;margin-bottom:6px">${tableRows}</table>` +
-    '<span style="color:var(--muted);font-size:11px">These limits are configured by the operator of this instance.</span>';
+  const note = document.createElement('span');
+  note.className = 'faq-limits-note';
+  note.textContent = 'These limits are configured by the operator of this instance.';
+  frag.appendChild(note);
+  return frag;
 }
 
 function renderFaqLimits(cfg) {
   const limitsEl = document.getElementById('faq-limits-text') || faqLimitsText;
   if (!limitsEl || !cfg) return;
-  limitsEl.innerHTML = formatFaqLimits(cfg);
+  limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
 
 function activateFaqCommandChip(cmd) {
@@ -938,7 +1389,11 @@ function renderAllowedCommandsFaq(data) {
     return;
   }
 
-  el.innerHTML = 'Click any command to load it into the prompt:';
+  el.replaceChildren();
+  const intro = document.createElement('div');
+  intro.className = 'allowed-intro';
+  intro.textContent = 'Click any command to load it into the prompt:';
+  el.appendChild(intro);
   if (data.groups && data.groups.length > 0) {
     data.groups.forEach(group => {
       const groupEl = document.createElement('div');
@@ -967,6 +1422,8 @@ function renderAllowedCommandsFaq(data) {
 }
 
 function renderFaqItems(items) {
+  // FAQ content is backend-driven so operators can extend it, but chips and
+  // special UI sections are still wired client-side after the HTML is inserted.
   if (!faqBody) return;
   faqBody.innerHTML = '';
   (items || []).forEach(item => {
@@ -1000,613 +1457,3 @@ function renderFaqItems(items) {
   renderFaqLimits(APP_CONFIG);
   wireFaqCommandChips(faqBody);
 }
-
-// ── Load config from server ──
-apiFetch('/config').then(r => r.json()).then(cfg => {
-  APP_CONFIG = cfg;
-  document.title = cfg.app_name;
-  if (headerTitle) headerTitle.textContent = cfg.app_name;
-  const verEl = versionLabel;
-  if (verEl) verEl.textContent = cfg.version ? `v${cfg.version} · real-time` : 'real-time';
-  // Only apply server default theme if the user hasn't saved a local preference
-  if (!getPreference('pref_theme') && !localStorage.getItem('theme') && cfg.default_theme === 'light') {
-    applyThemePreference('light', false);
-  }
-  if (cfg.motd) {
-    if (motd && motdWrap) { motd.innerHTML = renderMotd(cfg.motd); showMotdWrap(); }
-  }
-  updateNewTabBtn();
-  renderFaqLimits(cfg);
-}).catch(err => {
-  logClientError('failed to load /config', err);
-});
-
-// ── Hamburger menu (mobile) ──
-_uiOverlayRefs.hamburgerBtn.addEventListener('click', e => {
-  e.stopPropagation();
-  if (isMobileMenuOpen()) hideMobileMenu();
-  else showMobileMenu();
-});
-
-_uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn => {
-  btn.addEventListener('click', () => {
-    hideMobileMenu();
-    const action = btn.dataset.action;
-    if (action === 'search') {
-      const visible = isSearchBarOpen();
-      if (visible) {
-        hideSearchBar();
-        clearSearch();
-      } else {
-        showSearchBar();
-        searchInput.focus();
-        runSearch();
-      }
-    }
-    if (action === 'history') {
-      _closeMajorOverlays();
-      const isOpen = togglePanelOverlay(historyPanel);
-      if (isOpen) {
-        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-        refreshHistoryPanel();
-      }
-    }
-    if (action === 'ts') {
-      applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-      refocusTerminalInput();
-    }
-    if (action === 'ln') {
-      applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-      refocusTerminalInput();
-    }
-    if (action === 'options') openOptions();
-    if (action === 'theme') {
-      applyThemePreference(document.body.classList.contains('light') ? 'dark' : 'light');
-      refocusTerminalInput();
-    }
-    if (action === 'faq') openFaq();
-  });
-});
-
-// ── FAQ ──
-function openFaq() {
-  _closeMajorOverlays();
-  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-  showFaqOverlay();
-}
-function closeFaq() {
-  hideFaqOverlay();
-  refocusTerminalInput();
-}
-
-faqBtn.addEventListener('click', openFaq);
-_uiOverlayRefs.faqOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.faqOverlay) closeFaq();
-});
-faqCloseBtn.addEventListener('click', closeFaq);
-optionsBtn?.addEventListener('click', openOptions);
-_uiOverlayRefs.optionsOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.optionsOverlay) closeOptions();
-});
-optionsCloseBtn?.addEventListener('click', closeOptions);
-themePrefInputs.forEach(input => {
-  input.addEventListener('change', () => applyThemePreference(input.value));
-});
-optionsTsSelect?.addEventListener('change', e => {
-  applyTimestampPreference(e.target.value);
-});
-optionsLnToggle?.addEventListener('change', e => {
-  applyLineNumberPreference(e.target.checked ? 'on' : 'off');
-});
-
-apiFetch('/allowed-commands').then(r => r.json()).then(data => {
-  allowedCommandsFaqData = data;
-  renderAllowedCommandsFaq(data);
-}).catch(err => {
-  logClientError('failed to load /allowed-commands', err);
-});
-
-apiFetch('/faq').then(r => r.json()).then(data => {
-  renderFaqItems(data.items || []);
-}).catch(err => {
-  logClientError('failed to load /faq', err);
-});
-
-apiFetch('/history').then(r => r.json()).then(data => {
-  hydrateCmdHistory(data.runs || []);
-}).catch(err => {
-  logClientError('failed to load /history', err);
-});
-
-// ── Tabs ──
-setupTabScrollControls();
-applyTimestampPreference(getPreference('pref_timestamps') || 'off', false);
-applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
-createTab('tab 1');
-runWelcome();
-setTimeout(() => {
-  if (!cmdInput) return;
-  if (useMobileTerminalViewportMode()) {
-    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-      try {
-        window.scrollTo({ top: 0, behavior: 'auto' });
-      } catch (_) {
-        // jsdom does not implement scrollTo; browsers do.
-      }
-    }
-    return;
-  }
-  refocusTerminalInput();
-}, 0);
-syncMobileViewportState();
-
-newTabBtn.addEventListener('click', () => {
-  createShortcutTab();
-});
-
-// ── Search ──
-searchToggleBtn.addEventListener('click', () => {
-  const visible = isSearchBarOpen();
-  if (visible) {
-    hideSearchBar();
-    clearSearch();
-  } else {
-    showSearchBar();
-    searchInput.focus();
-    runSearch();
-  }
-});
-
-searchInput.addEventListener('input', runSearch);
-searchPrevBtn.addEventListener('click', () => navigateSearch(-1));
-searchNextBtn.addEventListener('click', () => navigateSearch(1));
-searchInput.addEventListener('keydown', e => {
-  if (e.key === 'Enter') navigateSearch(e.shiftKey ? -1 : 1);
-  if (e.key === 'Escape') {
-    hideSearchBar();
-    clearSearch();
-    refocusTerminalInput();
-  }
-});
-
-searchCaseBtn.addEventListener('click', () => {
-  searchCaseSensitive = !searchCaseSensitive;
-  searchCaseBtn.classList.toggle('active', searchCaseSensitive);
-  runSearch();
-});
-
-searchRegexBtn.addEventListener('click', () => {
-  searchRegexMode = !searchRegexMode;
-  searchRegexBtn.classList.toggle('active', searchRegexMode);
-  runSearch();
-});
-
-// ── Run history panel ──
-histBtn.addEventListener('click', () => {
-  _closeMajorOverlays();
-  const isOpen = togglePanelOverlay(historyPanel);
-  if (isOpen) {
-    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-    refreshHistoryPanel();
-  } else {
-    refocusTerminalInput();
-  }
-});
-historyCloseBtn.addEventListener('click', () => {
-  hideHistoryPanel();
-});
-
-// ── History delete modal ──
-histClearAllBtn.addEventListener('click', () => {
-  confirmHistAction('clear');
-});
-histDelCancelBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  pendingHistAction = null;
-});
-histDelNonfavBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  executeHistAction('clear-nonfav');
-});
-histDelConfirmBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  executeHistAction();
-});
-histDelOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.histDelOverlay) { hideHistoryDeleteOverlay(); pendingHistAction = null; }
-});
-
-// ── Kill modal ──
-killCancelBtn.addEventListener('click', () => {
-  closeKillOverlay();
-});
-killConfirmBtn.addEventListener('click', () => {
-  confirmPendingKill();
-});
-_uiOverlayRefs.killOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.killOverlay) closeKillOverlay();
-});
-
-// ── Global keyboard shortcuts ──
-// Current bindings intentionally stay narrow:
-// - Ctrl+C: running => kill confirm, idle => fresh prompt line
-// - welcome settle: printable typing, Enter, Escape
-// - Escape: close FAQ/options and search UI
-//
-// App-safe key bindings stay narrow:
-// - Alt+T / Alt+W for new/close tab
-// - Alt+ArrowLeft / Alt+ArrowRight for tab cycling
-// - Alt+P for permalink, Alt+Shift+C for copy
-// - Enter / Escape for kill-confirm accept / cancel
-// Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
-document.addEventListener('keydown', e => {
-  if (isKillOverlayOpen()) {
-    if (e.key === 'Enter') {
-      confirmPendingKill();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === 'Escape') {
-      closeKillOverlay();
-      e.preventDefault();
-      return;
-    }
-  }
-  if (isHistoryDeleteOverlayOpen()) {
-    if (e.key === 'Escape') {
-      hideHistoryDeleteOverlay();
-      pendingHistAction = null;
-      e.preventDefault();
-      return;
-    }
-  }
-  if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
-    const isCtrlC = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C');
-    const isSpace = e.key === ' ' || e.code === 'Space';
-    const isPrintable = !e.metaKey && !e.ctrlKey && !e.altKey && !isEditableTarget(e.target) && e.key.length === 1;
-    if (isCtrlC) {
-      _welcomePromptAfterSettle = true;
-      requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === 'Escape' || e.key === 'Enter' || isSpace) {
-      requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
-      e.preventDefault();
-      return;
-    }
-    if (isPrintable) {
-      requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
-      setComposerValue((cmdInput.value || '') + e.key);
-      e.preventDefault();
-      return;
-    }
-  }
-  if (handleTabShortcut(e)) return;
-  if (handleActionShortcut(e)) return;
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
-    if (e.target === cmdInput) return;
-    const editable = isEditableTarget(e.target);
-    if (editable) return;
-    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
-      _welcomePromptAfterSettle = true;
-      requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
-      e.preventDefault();
-      return;
-    }
-    const activeTab = getActiveTab();
-    if (activeTab && activeTab.st === 'running') {
-      confirmKill(activeTabId);
-    } else {
-      interruptPromptLine(activeTabId);
-    }
-    e.preventDefault();
-    return;
-  }
-  if (
-    _welcomeActive && welcomeOwnsTab(activeTabId)
-    && cmdInput
-    && !e.metaKey && !e.ctrlKey && !e.altKey
-    && !isEditableTarget(e.target)
-    && e.key.length === 1
-  ) {
-    requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
-    setComposerValue((cmdInput.value || '') + e.key);
-    e.preventDefault();
-    return;
-  }
-  if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
-    if (cmdInput && cmdInput.value.trim()) return;
-    requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
-    e.preventDefault();
-    return;
-  }
-  if (e.key === 'Escape' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
-    requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
-    e.preventDefault();
-    return;
-  }
-  if (e.key === 'Escape') {
-    closeFaq();
-    closeOptions();
-    hideSearchBar();
-    clearSearch();
-    if (isHistoryPanelOpen()) hideHistoryPanel();
-  }
-});
-
-// ── Global click: dismiss mobile menu and autocomplete ──
-document.addEventListener('click', e => {
-  if (_uiOverlayRefs.mobileMenu && !_uiOverlayRefs.mobileMenu.contains(e.target) && e.target !== _uiOverlayRefs.hamburgerBtn) {
-    hideMobileMenu();
-  }
-  if (historyPanel && isHistoryPanelOpen() && e.target !== histBtn && !historyPanel.contains(e.target)) {
-    if (e.target.closest?.('.hist-chip-overflow') || e.target.closest?.('[data-action="history"]')) {
-      return;
-    }
-    hideHistoryPanel();
-  }
-  if (!(e.target && e.target.closest &&
-        (e.target.closest('.prompt-wrap') || e.target.closest('.ac-dropdown') || e.target.closest('#mobile-composer')))) acHide();
-});
-
-if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
-  shellPromptWrap.addEventListener('pointerdown', e => {
-    if (useMobileTerminalViewportMode()) {
-      e.preventDefault();
-      focusCommandInputFromGesture();
-    }
-  });
-  shellPromptWrap.addEventListener('touchstart', e => {
-    if (useMobileTerminalViewportMode()) {
-      e.preventDefault();
-      focusCommandInputFromGesture();
-    }
-  }, { passive: false });
-  shellPromptWrap.addEventListener('click', e => {
-    if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
-    focusCommandInputFromGesture();
-  });
-}
-
-_bindMobileComposerInteractions(_mobileUiLayoutRefs);
-_bindMobileEditBarInteractions(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer && _mobileUiLayoutRefs.composer.editBar);
-
-if (cmdInput) {
-  cmdInput.addEventListener('focus', () => {
-    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
-    syncShellPrompt();
-    syncMobileViewportState();
-  });
-  cmdInput.addEventListener('blur', () => {
-    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.remove('shell-prompt-focused');
-    syncShellPrompt();
-    syncMobileViewportState();
-  });
-  cmdInput.addEventListener('select', syncShellPrompt);
-  cmdInput.addEventListener('keyup', syncShellPrompt);
-}
-
-if (typeof document !== 'undefined') {
-  document.addEventListener('selectionchange', () => {
-    if (!cmdInput || document.activeElement !== cmdInput) return;
-    syncShellPrompt();
-  });
-}
-
-// ── Autocomplete ──
-apiFetch('/autocomplete').then(r => r.json()).then(data => {
-  acSuggestions = data.suggestions || [];
-}).catch(err => {
-  logClientError('failed to load /autocomplete', err);
-});
-
-cmdInput.addEventListener('input', () => {
-  handleComposerInputChange(cmdInput);
-});
-
-cmdInput.addEventListener('keydown', e => {
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
-    e.preventDefault();
-    if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
-      _welcomePromptAfterSettle = true;
-      requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
-      return;
-    }
-    const activeTab = getActiveTab();
-    if (activeTab && activeTab.st === 'running') {
-      confirmKill(activeTabId);
-      return;
-    }
-    interruptPromptLine(activeTabId);
-    return;
-  }
-
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'w' || e.key === 'W')) {
-    e.preventDefault();
-    const value = cmdInput.value;
-    const { start, end } = getCmdSelection(value);
-
-    if (start !== end) {
-      replaceCmdRange(value, start, end);
-      return;
-    }
-
-    if (start === 0) return;
-
-    const cut = findWordBoundaryLeft(value, start);
-    replaceCmdRange(value, cut, start);
-    return;
-  }
-
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'u' || e.key === 'U')) {
-    e.preventDefault();
-    const value = cmdInput.value;
-    const { start, end } = getCmdSelection(value);
-    if (start !== end) {
-      replaceCmdRange(value, start, end);
-      return;
-    }
-    if (start === 0) return;
-    replaceCmdRange(value, 0, start);
-    return;
-  }
-
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'a' || e.key === 'A')) {
-    e.preventDefault();
-    cmdInput.setSelectionRange(0, 0);
-    syncShellPrompt();
-    return;
-  }
-
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'k' || e.key === 'K')) {
-    e.preventDefault();
-    const value = cmdInput.value;
-    const { start, end } = getCmdSelection(value);
-    if (start !== end) {
-      replaceCmdRange(value, start, end);
-      return;
-    }
-    if (start >= value.length) return;
-    replaceCmdRange(value, start, value.length);
-    return;
-  }
-
-  if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'e' || e.key === 'E')) {
-    e.preventDefault();
-    const value = cmdInput.value;
-    const end = value.length;
-    cmdInput.setSelectionRange(end, end);
-    syncShellPrompt();
-    return;
-  }
-
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'b')) {
-    e.preventDefault();
-    const value = cmdInput.value;
-    const { start } = getCmdSelection(value);
-    const next = findWordBoundaryLeft(value, start);
-    cmdInput.setSelectionRange(next, next);
-    syncShellPrompt();
-    return;
-  }
-
-  if (e.altKey && !e.ctrlKey && !e.metaKey && eventMatchesLetter(e, 'f')) {
-    e.preventDefault();
-    const value = cmdInput.value;
-    const { end } = getCmdSelection(value);
-    const next = findWordBoundaryRight(value, end);
-    cmdInput.setSelectionRange(next, next);
-    syncShellPrompt();
-    return;
-  }
-
-  if (e.key === 'Enter') {
-    if (_welcomeActive && welcomeOwnsTab(activeTabId) && !cmdInput.value.trim()) {
-      e.preventDefault();
-      requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
-      return;
-    }
-    if (acIndex >= 0 && acFiltered[acIndex]) {
-      e.preventDefault();
-      acAccept(acFiltered[acIndex]);
-    } else {
-      e.preventDefault();
-      acHide();
-      if (typeof submitComposerCommand === 'function') {
-        submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
-      } else {
-        runCommand();
-      }
-    }
-    return;
-  }
-  if (e.key === 'Tab') {
-    e.preventDefault();
-    if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
-    else if (acIndex >= 0 && acFiltered[acIndex]) { acAccept(acFiltered[acIndex]); }
-    else if (acFiltered.length > 0) { acIndex = 0; acShow(acFiltered); }
-    return;
-  }
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    const acOpen = isAcDropdownOpen();
-    if (acOpen && acFiltered.length) {
-      const acAbove = acDropdown.classList.contains('ac-up');
-      acIndex = acAbove
-        ? Math.max(acIndex - 1, 0)
-        : Math.min(acIndex + 1, acFiltered.length - 1);
-      acShow(acFiltered);
-      return;
-    }
-    if (navigateCmdHistory(-1)) acHide();
-    return;
-  }
-  if (e.key === 'ArrowUp') {
-    e.preventDefault();
-    const acOpen = isAcDropdownOpen();
-    if (acOpen && acFiltered.length) {
-      const acAbove = acDropdown.classList.contains('ac-up');
-      acIndex = acAbove
-        ? Math.min(acIndex + 1, acFiltered.length - 1)
-        : Math.max(acIndex - 1, -1);
-      acShow(acFiltered);
-      return;
-    }
-    if (navigateCmdHistory(1)) acHide();
-    return;
-  }
-  if (e.key === 'Escape')    { acHide(); return; }
-});
-
-if (typeof window !== 'undefined') {
-  window.addEventListener('resize', syncMobileViewportState);
-  if (window.visualViewport && typeof window.visualViewport.addEventListener === 'function') {
-    // Mobile keyboards resize the visual viewport after focus; keep the prompt pinned above it.
-    window.visualViewport.addEventListener('resize', syncMobileViewportState);
-    window.visualViewport.addEventListener('scroll', syncMobileViewportState);
-  }
-}
-
-// ── Run button ──
-runBtn.addEventListener('click', runCommand);
-
-syncShellPrompt();
-
-// ── Mobile composer ──
-// A dedicated native input for narrow screens, separate from the desktop shell prompt.
-// Uses CSS @media (max-width: 600px) to show/hide — no JS class needed for display.
-// Only keyboard detection requires JS (to float composer above keyboard when open).
-
-function setupMobileComposer() {
-  const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
-  const mobileInput = composerInputs.mobile || null;
-  if (!mobileInput || !mobileRunBtn) return;
-  bindMobileComposerSubmitAndInputListeners(mobileInput);
-  bindMobileEditBarListeners(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer ? _mobileUiLayoutRefs.composer.editBar : null);
-  bindMobileComposerKeyboardListeners(mobileInput);
-  if (mobileShellTranscript) {
-    const closeKeyboardFromTranscript = e => {
-      const interactiveTarget = e && e.target && e.target.closest
-        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
-      if (interactiveTarget) return;
-      if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
-        if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay: 120 });
-        blurVisibleComposerInputIfMobile();
-      }
-    };
-    mobileShellTranscript.addEventListener('click', closeKeyboardFromTranscript);
-  }
-}
-
-setupMobileComposer();

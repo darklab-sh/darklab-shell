@@ -51,6 +51,7 @@ function loadRunnerFns({
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
   dismissMobileKeyboardAfterSubmit = () => {},
+  maybeMountDeferredPrompt = vi.fn(),
 } = {}) {
   const normalizedTabs = tabs.map(tab => ({
     rawLines: [],
@@ -143,7 +144,8 @@ function loadRunnerFns({
     refreshHistoryPanel: () => {},
     showToast,
     dismissMobileKeyboardAfterSubmit,
-    ...(getComposerValueOverride ? { getComposerValue: getComposerValueOverride } : {}),
+    _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
+    getComposerValue: getComposerValueOverride || (() => cmdValue),
     ...(getVisibleComposerInputOverride ? { getVisibleComposerInput: getVisibleComposerInputOverride } : {}),
     describeFetchError: (err, context = 'server') => {
       const message = err && err.message ? err.message : 'unknown network error'
@@ -178,6 +180,7 @@ function loadRunnerFns({
     cancelWelcome,
     showToast,
     interruptPromptLine: fns.interruptPromptLine,
+    maybeMountDeferredPrompt,
   }
 }
 
@@ -193,9 +196,11 @@ describe('runner helpers', () => {
 
   it('doKill sends /kill immediately when runId is already known', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
+    const maybeMountDeferredPrompt = vi.fn()
     const { doKill, tabs, runBtn, status } = loadRunnerFns({
       tabs: [{ id: 'tab-1', st: 'running', runId: 'run-123', killed: false, pendingKill: false }],
       apiFetch,
+      maybeMountDeferredPrompt,
     })
 
     doKill('tab-1')
@@ -210,6 +215,7 @@ describe('runner helpers', () => {
     expect(document.querySelector('.tab-kill-btn').style.display).toBe('none')
     expect(status.className).toBe('status-pill killed')
     expect(runBtn.disabled).toBe(false)
+    expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
   })
 
   it('doKill marks pendingKill when runId is not yet available', () => {
@@ -260,6 +266,22 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('', 'prompt-echo', 'tab-1')
     expect(cmdInput.value).toBe('')
     expect(status.className).toBe('status-pill idle')
+  })
+
+  it('runCommand on blank input while a command is running does not append a prompt line', () => {
+    const apiFetch = vi.fn(() => Promise.resolve())
+    const appendLine = vi.fn()
+    const { runCommand, cmdInput, status } = loadRunnerFns({
+      cmdValue: '',
+      tabs: [{ id: 'tab-1', st: 'running', runId: 'r1', killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalled()
   })
 
   it('runCommand blocks direct /tmp and /data paths client-side before calling the API', () => {

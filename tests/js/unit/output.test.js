@@ -34,7 +34,7 @@ describe('appendLine', () => {
     document.body.innerHTML = `
       <div id="out">
         <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
-          <span class="prompt-prefix">anon@shell.darklab.sh:~$</span>
+          <span class="prompt-prefix">anon@darklab:~$</span>
           <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
             <span class="shell-prompt-text" id="shell-prompt-text"></span>
           </div>

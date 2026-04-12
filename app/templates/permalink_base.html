@@ -3,15 +3,18 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ page_title }}</title>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+{% include "theme_vars_style.html" %}
+{% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
 <script src="/static/js/export_html.js"></script>
 {% block extra_head %}{% endblock %}
 </head>
-<body class="permalink-page{% if theme_class == 'light' %} light{% endif %}">
+<body class="permalink-page" data-theme="{{ current_theme.name }}">
 <header class="permalink-header">
   <div class="permalink-header-copy">
     <h1 class="permalink-title">{{ app_name }}</h1>

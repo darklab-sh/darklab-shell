@@ -1,6 +1,8 @@
 import { vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
+// The tabs module owns a large amount of DOM state, so these tests build a
+// minimal but realistic shell scaffold rather than mocking every interaction.
 function touchPointerEvent(type, init) {
   const event = new Event(type, { bubbles: true, cancelable: true })
   Object.assign(event, init)
@@ -10,10 +12,14 @@ function touchPointerEvent(type, init) {
 function loadTabsFns({
   maxTabs = 3,
   maxOutputLines = 100,
+  version = undefined,
+  projectReadme = undefined,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
   doKill = vi.fn(),
+  acFiltered: acFilteredOverride = [],
+  acHide: acHideOverride = () => {},
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -58,7 +64,7 @@ function loadTabsFns({
     newTabBtn,
     resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'shell.darklab.sh' },
+    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell', ...(version !== undefined && { version }), ...(projectReadme !== undefined && { project_readme: projectReadme }) },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
@@ -74,9 +80,19 @@ function loadTabsFns({
     Blob,
     ansi_up: { ansi_to_html: (s) => `<em>${s}</em>` },
     shellPromptWrap,
+    setComposerValue: (val, start = null, end = null, opts = {}) => {
+      cmdInput.value = String(val ?? '')
+      if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
+    },
+    getComposerValue: () => cmdInput.value,
+    isHistSearchMode: () => false,
+    exitHistSearch: () => {},
+    acHide: acHideOverride,
+    acFiltered: acFilteredOverride,
   }, `{
     updateNewTabBtn,
     updateTabScrollButtons,
+    updateOutputFollowButton,
     createTab,
     activateTab,
     startTabRename,
@@ -91,6 +107,7 @@ function loadTabsFns({
     permalinkTab,
     _getTabs: () => getTabs(),
     _getActiveTabId: () => getActiveTabId(),
+    _getAcFiltered: () => acFiltered,
   }`)
 
   return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap, doKill }
@@ -148,7 +165,7 @@ function loadTabsAndOutputFns({
     mobileComposerRow,
     newTabBtn,
     resetCmdHistoryNav: () => {},
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'shell.darklab.sh' },
+    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell' },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
@@ -218,6 +235,29 @@ describe('tabs helpers', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe('Tab limit reached (max 1)')
   })
 
+  it('createTab renders a terminal-wordmark anchor with app name and version', () => {
+    const { createTab } = loadTabsFns({ version: '2.0', projectReadme: 'https://example.invalid/readme' })
+
+    createTab('tab 1')
+
+    const wordmark = document.querySelector('.terminal-wordmark')
+    expect(wordmark).not.toBeNull()
+    expect(wordmark.tagName).toBe('A')
+    expect(wordmark.textContent).toBe('darklab shell v2.0')
+    expect(wordmark.getAttribute('href')).toBe('https://example.invalid/readme')
+  })
+
+  it('createTab renders wordmark with just the app name when version is absent', () => {
+    const { createTab } = loadTabsFns()
+
+    createTab('tab 1')
+
+    const wordmark = document.querySelector('.terminal-wordmark')
+    expect(wordmark).not.toBeNull()
+    expect(wordmark.textContent).toBe('darklab shell')
+    expect(wordmark.getAttribute('href')).toBe('#')
+  })
+
   it('activateTab resets the command input instead of repopulating from tab state', () => {
     const { createTab, activateTab, _getTabs } = loadTabsFns()
     const id = createTab('tab 1')
@@ -228,6 +268,69 @@ describe('tabs helpers', () => {
     activateTab(id)
 
     expect(input.value).toBe('')
+  })
+
+  it('draftInput is initialized to empty string on new tab', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    createTab('tab 1')
+    expect(_getTabs()[0].draftInput).toBe('')
+  })
+
+  it('activateTab saves the draft of the previous tab when switching', () => {
+    const { createTab, activateTab, _getTabs } = loadTabsFns()
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+    const input = document.getElementById('cmd')
+
+    activateTab(id1)
+    input.value = 'nmap -sV darklab.sh'
+    activateTab(id2)
+
+    expect(_getTabs().find(t => t.id === id1).draftInput).toBe('nmap -sV darklab.sh')
+  })
+
+  it('activateTab restores the draft of the new tab when switching back', () => {
+    const { createTab, activateTab, _getTabs } = loadTabsFns()
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+    const input = document.getElementById('cmd')
+
+    activateTab(id1)
+    input.value = 'dig darklab.sh A'
+    activateTab(id2)
+    input.value = 'curl -I https://darklab.sh'
+    activateTab(id1)
+
+    expect(input.value).toBe('dig darklab.sh A')
+  })
+
+  it('activateTab does not save draft for a running tab', () => {
+    const { createTab, activateTab, _getTabs } = loadTabsFns()
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+    const input = document.getElementById('cmd')
+
+    _getTabs().find(t => t.id === id1).st = 'running'
+    activateTab(id1)
+    input.value = 'should-not-be-saved'
+    activateTab(id2)
+
+    expect(_getTabs().find(t => t.id === id1).draftInput).toBe('')
+  })
+
+  it('activateTab clears acFiltered so stale suggestions from a previous tab do not persist', () => {
+    const acHide = vi.fn()
+    const { createTab, activateTab, _getAcFiltered } = loadTabsFns({
+      acFiltered: ['whoami', 'whoami --help'],
+      acHide,
+    })
+    const id1 = createTab('tab 1')
+    const id2 = createTab('tab 2')
+
+    activateTab(id1)
+
+    expect(_getAcFiltered()).toEqual([])
+    expect(acHide).toHaveBeenCalled()
   })
 
   it('closeTab resets the last remaining tab instead of removing it', () => {
@@ -388,6 +491,71 @@ describe('tabs helpers', () => {
     scrollTop = 200
     output.dispatchEvent(new Event('scroll'))
     expect(tab.followOutput).toBe(true)
+  })
+
+  it('shows a live jump button while output is streaming off the live tail', () => {
+    const { createTab, _getTabs, setTabStatus, updateOutputFollowButton } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const button = document.querySelector(`.tab-panel[data-id="${id}"] .output-follow-btn`)
+
+    Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', { configurable: true, get: () => 0 })
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+    tab.followOutput = false
+    setTabStatus(id, 'running')
+    updateOutputFollowButton(id)
+
+    expect(button.hidden).toBe(false)
+    expect(button.textContent).toBe('jump to live')
+    expect(button.classList.contains('is-live')).toBe(true)
+    expect(button.title).toBe('Jump to the live output tail')
+  })
+
+  it('hides the jump button when the output is already pinned to the bottom', () => {
+    const { createTab, _getTabs, updateOutputFollowButton } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const button = document.querySelector(`.tab-panel[data-id="${id}"] .output-follow-btn`)
+
+    Object.defineProperty(output, 'clientHeight', { configurable: true, get: () => 100 })
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', { configurable: true, get: () => 200 })
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+    tab.followOutput = false
+
+    updateOutputFollowButton(id)
+
+    expect(button.hidden).toBe(true)
+    expect(tab.followOutput).toBe(true)
+  })
+
+  it('returns the output to the tail when the jump button is clicked', () => {
+    const { createTab, _getTabs, updateOutputFollowButton } = loadTabsFns()
+    const id = createTab('tab 1')
+    const tab = _getTabs()[0]
+    const output = document.getElementById(`output-${id}`)
+    const button = document.querySelector(`.tab-panel[data-id="${id}"] .output-follow-btn`)
+
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 300 })
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: value => { scrollTop = value },
+    })
+    tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+    tab.followOutput = false
+    updateOutputFollowButton(id)
+
+    button.click()
+
+    expect(tab.followOutput).toBe(true)
+    expect(scrollTop).toBe(300)
+    expect(button.hidden).toBe(true)
   })
 
   it('keeps follow-output enabled when the terminal scrolls itself to the bottom', () => {
@@ -591,6 +759,75 @@ describe('tabs helpers', () => {
     await exportTabHtml(id)
     expect(cmdInput.focus).toHaveBeenCalled()
     delete window.ExportHtmlUtils
+  })
+
+  it('builds exported HTML styles from the injected theme vars object', () => {
+    window.ThemeCssVars = {
+      fallback: {
+        '--bg': '#b8c4d0',
+        '--surface': '#eef2f6',
+        '--text': '#101820',
+        '--green': '#2a5d18',
+        '--theme-panel-bg': '#edf4fb',
+        '--theme-panel-border': '#b7c7d6',
+        '--theme-terminal-bar-bg': '#d9e5f1',
+      },
+    }
+
+    const { buildTerminalExportStyles } = fromDomScripts([
+      'app/static/js/export_html.js',
+    ], {
+      document,
+    }, `ExportHtmlUtils`)
+
+    const css = buildTerminalExportStyles('theme_light_blue')
+    expect(css).toContain('--bg: #b8c4d0;')
+    expect(css).toContain('--surface: #eef2f6;')
+    expect(css).toContain('--text: #101820;')
+    expect(css).toContain('--green: #2a5d18;')
+    expect(css).toContain('--theme-panel-bg: #edf4fb;')
+    expect(css).toContain('--theme-panel-border: #b7c7d6;')
+    expect(css).toContain('--theme-terminal-bar-bg: #d9e5f1;')
+
+    delete window.ThemeCssVars
+  })
+
+  it('builds exported HTML with color-scheme metadata and themed shell surfaces', () => {
+    window.ThemeRegistry = {
+      current: {
+        color_scheme: 'light',
+        vars: {
+          '--bg': '#eef4fa',
+          '--text': '#1a2732',
+          '--theme-panel-bg': '#edf4fb',
+          '--theme-panel-border': '#c1d2e1',
+          '--theme-terminal-bar-bg': '#d9e5f1',
+          '--theme-terminal-bar-border': '#b8cad9',
+          '--theme-panel-shadow': 'rgba(20, 36, 52, 0.18)',
+        },
+      },
+    }
+
+    const { buildTerminalExportHtml } = fromDomScripts([
+      'app/static/js/export_html.js',
+    ], {
+      document,
+      window,
+    }, `ExportHtmlUtils`)
+
+    const html = buildTerminalExportHtml({
+      appName: 'darklab shell',
+      title: 'share export',
+      metaHtml: '<span>meta</span>',
+      linesHtml: '<span class="line">hello</span>',
+    })
+
+    expect(html).toContain('<meta name="color-scheme" content="light">')
+    expect(html).toContain('background: var(--theme-terminal-bar-bg, var(--bg));')
+    expect(html).toContain('background: var(--theme-panel-bg, var(--surface));')
+    expect(html).toContain('border: 1px solid var(--theme-panel-border, var(--border));')
+
+    delete window.ThemeRegistry
   })
 
   it('saveTab shows a toast when there is only welcome output', () => {

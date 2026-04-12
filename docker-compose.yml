@@ -1,8 +1,8 @@
 services:
   redis:
     image: redis:7-alpine
-    container_name: shell.darklab.sh-redis
-    restart: always
+    container_name: redis-darklab
+    restart: unless-stopped
     read_only: true
     tmpfs:
       - /tmp
@@ -13,31 +13,30 @@ services:
       retries: 3
       start_period: 5s
 
-  shell.darklab.sh:
-    build: .
-    container_name: shell.darklab.sh
-    read_only: true
-    restart: always
-    expose:
-      - "8888"
+  shell:
+    build:
+      context: .
+      args:
+        APP_PORT: ${APP_PORT:-8888}
+    container_name: darklab-shell
+    init: true
+    ports:
+      - "${APP_PORT:-8888}:${APP_PORT:-8888}"
     volumes:
-      - ./app:/app:ro # Mount the app directory as read-only
-      - ./data:/data  # Writable volume for persistent SQLite run history
+      - ./app:/app:ro
+      - ./data:/data
     tmpfs:
       - /tmp
     cap_add:
       - NET_RAW
       - NET_ADMIN
+    read_only: true
+    restart: unless-stopped
     environment:
       - REDIS_URL=redis://redis:6379/0
-      - VIRTUAL_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
-      - LETSENCRYPT_HOST=sh.darklab.sh,shell.darklab.sh,sh.0g.gg,shell.0g.gg
-      # Keep SSE connections alive through nginx-proxy for long-running commands
-      - PROXY_READ_TIMEOUT=3600
-      - PROXY_SEND_TIMEOUT=3600
-      - PROXY_CONNECT_TIMEOUT=3600
+      - APP_PORT=${APP_PORT:-8888}
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8888/health"]
+      test: ["CMD", "sh", "-c", "curl -f http://localhost:${APP_PORT:-8888}/health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -45,11 +44,3 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-    logging:
-      driver: "gelf"
-      options:
-        gelf-address: "udp://loghost.darklab.sh:12201/"
-networks:
-  default:
-    external: true
-    name: darklab-net

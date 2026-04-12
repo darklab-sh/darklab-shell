@@ -55,13 +55,11 @@ man help
 man history
 man host
 man hostname
-man hping3
 man id
 man last
 man limits
 man ls
 man man
-man masscan
 man mtr
 man nc
 man nmap
@@ -93,173 +91,158 @@ ping -c 10 darklab.sh
 ping -i 0.5 -c 20 darklab.sh
 
 # nc
-nc -zv darklab.sh 80
-nc -zv darklab.sh 443 80
-nc -zv 8.8.8.8 53 80
+nc -zv ip.darklab.sh 80
+nc -zv ip.darklab.sh 443 80
+nc -zv 1.1.1.1 53 80
 
 # dig
 dig -h
-dig A darklab.sh
-dig MX darklab.sh
-dig TXT darklab.sh
-dig NS darklab.sh
-dig AAAA darklab.sh
-dig ANY darklab.sh
-dig +short A darklab.sh
-dig +short MX darklab.sh
-dig @8.8.8.8 A darklab.sh
-dig +trace A darklab.sh
-dig AXFR darklab.sh @ns1.darklab.sh
+dig A ip.darklab.sh
+dig MX ip.darklab.sh
+dig TXT ip.darklab.sh
+dig NS ip.darklab.sh
+dig AAAA ip.darklab.sh
+dig ANY ip.darklab.sh
+dig +short A ip.darklab.sh
+dig +short MX ip.darklab.sh
+dig @8.8.8.8 A ip.darklab.sh
+dig +trace A ip.darklab.sh
+dig AXFR ip.darklab.sh @ns1.ip.darklab.sh
 
 # nslookup
-nslookup -help
-nslookup -type=A darklab.sh
-nslookup -type=MX darklab.sh
-nslookup -type=TXT darklab.sh
-nslookup -type=NS darklab.sh
+nslookup -type=A ip.darklab.sh
+nslookup -type=MX ip.darklab.sh
+nslookup -type=TXT ip.darklab.sh
+nslookup -type=NS ip.darklab.sh
 
 # host
-host --help
-host -t A darklab.sh
+host -t A ip.darklab.sh
 host -t MX darklab.sh
-host -t TXT darklab.sh
-host -t NS darklab.sh
+host -t TXT ip.darklab.sh
+host -t NS ip.darklab.sh
 
 # whois
-whois darklab.sh
+whois 8.8.8.8
 
 # traceroute
 traceroute --help
-traceroute darklab.sh
-traceroute -n darklab.sh
-traceroute -m 30 darklab.sh
+traceroute ip.darklab.sh
+traceroute -n ip.darklab.sh
+traceroute -m 30 ip.darklab.sh
 
 # tcptraceroute
-tcptraceroute darklab.sh
-tcptraceroute -n darklab.sh
+tcptraceroute ip.darklab.sh
+tcptraceroute -n ip.darklab.sh
 
 # mtr (auto-rewritten to --report-wide if no report flag given)
 mtr --help
-mtr darklab.sh
-mtr -c 20 darklab.sh
-mtr -n darklab.sh
-mtr -n -c 20 darklab.sh
+mtr ip.darklab.sh
+mtr -c 20 ip.darklab.sh
+mtr -n ip.darklab.sh
+mtr -n -c 20 ip.darklab.sh
 
 # curl
 curl -h
-curl -I https://darklab.sh
-curl -v https://darklab.sh
-curl -L https://darklab.sh
-curl -o /dev/null -s -w "%{http_code}" https://darklab.sh
-curl -H "User-Agent: Mozilla/5.0" https://darklab.sh
-curl -k https://darklab.sh
-curl --max-time 10 https://darklab.sh
+curl -I https://ip.darklab.sh
+curl -v https://ip.darklab.sh
+curl -L https://ip.darklab.sh
+curl -o /dev/null -s -w "%{http_code}" https://ip.darklab.sh
+curl -H "User-Agent: Mozilla/5.0" https://ip.darklab.sh
+curl -k https://ip.darklab.sh
+curl --max-time 10 https://ip.darklab.sh
 
 # wget
 wget --help
-wget -q -O /dev/null --server-response https://darklab.sh
-wget --spider https://darklab.sh
+wget -q -O /dev/null --server-response https://ip.darklab.sh
+wget --spider https://ip.darklab.sh
 
 # nmap
 nmap -h
-nmap -sT darklab.sh
-nmap -sT -p 80,443 darklab.sh
-nmap -sT -p 1-1000 darklab.sh
-nmap -sT -p- darklab.sh
-nmap -sV -sT darklab.sh
-nmap -A -sT darklab.sh
-nmap -sT --script http-headers darklab.sh
-nmap -sT --script ssl-cert darklab.sh
-nmap -sT --script ssl-enum-ciphers darklab.sh
-nmap -sT --script vuln darklab.sh
-nmap -sT --script http-title darklab.sh
-nmap -Pn -sT darklab.sh
-nmap -6 -sT darklab.sh
+nmap -sT ip.darklab.sh
+nmap -sT -p 80,443 ip.darklab.sh
+nmap -sT -p 1-1000 ip.darklab.sh
+nmap -sV -sT ip.darklab.sh
+nmap -A -sT ip.darklab.sh
+nmap -sT --script http-headers ip.darklab.sh
+nmap -sT --script ssl-cert ip.darklab.sh
+nmap -sT --script ssl-enum-ciphers ip.darklab.sh
+nmap -sT --script vuln ip.darklab.sh
+nmap -sT --script http-title ip.darklab.sh
+nmap -Pn -sT ip.darklab.sh
 
 # testssl
-testssl -h
-testssl https://darklab.sh
-testssl --fast https://darklab.sh
-testssl --severity HIGH https://darklab.sh
-testssl --full https://darklab.sh
-testssl --sneaky https://darklab.sh
-testssl -p https://darklab.sh
-testssl --heartbleed https://darklab.sh
-testssl --poodle https://darklab.sh
-testssl --beast https://darklab.sh
+testssl --help
+testssl https://ip.darklab.sh
+testssl --fast https://ip.darklab.sh
+testssl --severity HIGH https://ip.darklab.sh
+testssl --full https://ip.darklab.sh
+testssl --sneaky https://ip.darklab.sh
+testssl -p https://ip.darklab.sh
+testssl --heartbleed https://ip.darklab.sh
+testssl --poodle https://ip.darklab.sh
+testssl --beast https://ip.darklab.sh
 
 # dnsrecon
 dnsrecon -h
-dnsrecon -d darklab.sh
-dnsrecon -d darklab.sh -t std
-dnsrecon -d darklab.sh -t axfr
-dnsrecon -d darklab.sh -t brt
-dnsrecon -d darklab.sh -t srv
-dnsrecon -d darklab.sh -t zonewalk
-dnsrecon -d darklab.sh -t mx
+dnsrecon -d ip.darklab.sh
+dnsrecon -d ip.darklab.sh -t std
+dnsrecon -d ip.darklab.sh -t axfr
+dnsrecon -d ip.darklab.sh -t brt
+dnsrecon -d ip.darklab.sh -t srv
+dnsrecon -d ip.darklab.sh -t zonewalk
+dnsrecon -d ip.darklab.sh -t crt
 
 # nikto
 nikto -Help
-nikto -h darklab.sh
-nikto -h darklab.sh -p 443 -ssl
-nikto -h darklab.sh -p 8080
-nikto -h darklab.sh -Tuning 1
-nikto -h darklab.sh -Tuning 4
-nikto -h darklab.sh -maxtime 120
-
-# wapiti (report automatically sent to terminal — no file needed)
-wapiti --help
-wapiti -u https://darklab.sh
-wapiti -u https://darklab.sh --scope url
-wapiti -u https://darklab.sh --scope domain
-wapiti -u https://darklab.sh -m xss,sql
-wapiti -u https://darklab.sh --max-scan-time 120
-wapiti -u https://darklab.sh -v 1
+nikto -h ip.darklab.sh
+nikto -h ip.darklab.sh -p 443 -ssl
+nikto -h ip.darklab.sh -p 8080
+nikto -h ip.darklab.sh -Tuning 1
+nikto -h ip.darklab.sh -Tuning 4
+nikto -h ip.darklab.sh -maxtime 120
 
 # wpscan
 wpscan --help
-wpscan --url https://darklab.sh
-wpscan --url https://darklab.sh --enumerate p
-wpscan --url https://darklab.sh --enumerate u
-wpscan --url https://darklab.sh --enumerate t
-wpscan --url https://darklab.sh --enumerate vp
-wpscan --url https://darklab.sh --enumerate ap
-wpscan --url https://darklab.sh --detection-mode aggressive
-wpscan --url https://darklab.sh --force
+wpscan --url https://ip.darklab.sh
+wpscan --url https://ip.darklab.sh --enumerate p
+wpscan --url https://ip.darklab.sh --enumerate u
+wpscan --url https://ip.darklab.sh --enumerate t
+wpscan --url https://ip.darklab.sh --enumerate vp
+wpscan --url https://ip.darklab.sh --enumerate ap
+wpscan --url https://ip.darklab.sh --detection-mode aggressive
+wpscan --url https://ip.darklab.sh --force
 
 # nuclei (auto-uses /tmp/nuclei-templates via -ud flag)
 nuclei -h
-nuclei -u https://darklab.sh
-nuclei -u https://darklab.sh -t http/
-nuclei -u https://darklab.sh -t ssl/
-nuclei -u https://darklab.sh -t dns/
-nuclei -u https://darklab.sh -t network/
-nuclei -u https://darklab.sh -severity low,medium,high,critical
-nuclei -u https://darklab.sh -severity high,critical
-nuclei -u https://darklab.sh -as
-nuclei -list
+nuclei -u https://ip.darklab.sh
+nuclei -u https://ip.darklab.sh -t http/
+nuclei -u https://ip.darklab.sh -t ssl/
+nuclei -u https://ip.darklab.sh -t dns/
+nuclei -u https://ip.darklab.sh -t network/
+nuclei -u https://ip.darklab.sh -severity low,medium,high,critical
+nuclei -u https://ip.darklab.sh -severity high,critical
+nuclei -u https://ip.darklab.sh -as
 
 # subfinder
 subfinder -h
-subfinder -d darklab.sh
-subfinder -d darklab.sh -silent
-subfinder -d darklab.sh -o /dev/stdout
-subfinder -d darklab.sh -recursive
+subfinder -d ip.darklab.sh
+subfinder -d ip.darklab.sh -silent
+subfinder -d ip.darklab.sh -recursive
 
 # pd-httpx (ProjectDiscovery httpx — renamed to avoid Python httpx conflict)
 pd-httpx -h
-pd-httpx -u https://darklab.sh
-pd-httpx -u https://darklab.sh -title -status-code -tech-detect
-pd-httpx -u https://darklab.sh -status-code
-pd-httpx -u https://darklab.sh -follow-redirects
+pd-httpx -u https://ip.darklab.sh
+pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect
+pd-httpx -u https://ip.darklab.sh -status-code
+pd-httpx -u https://ip.darklab.sh -follow-redirects
 
 # dnsx
 dnsx -h
-dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
-dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp
-dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp
-dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -cname -resp
-dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -mx -resp
+dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp
+dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp
+dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -cname -resp
+dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -mx -resp
 
 # fping
 fping -h
@@ -267,35 +250,12 @@ fping darklab.sh
 fping -c 4 darklab.sh
 fping -s darklab.sh
 fping -e darklab.sh
-fping -a -g 192.168.1.0/24
-
-# hping3
-hping3 --help
-hping3 darklab.sh
-hping3 -S -p 80 darklab.sh
-hping3 -S -p 443 darklab.sh
-hping3 -c 4 darklab.sh
-hping3 --traceroute -V -S -p 80 darklab.sh
-
-# masscan
-masscan --help
-masscan darklab.sh -p 80,443
-masscan darklab.sh -p 1-1000
-masscan darklab.sh -p 80,443,8080,8443 --rate 500
-masscan darklab.sh -p 0-65535 --rate 1000
 
 # amass
 amass -h
-amass enum -d darklab.sh
-amass enum -passive -d darklab.sh
-amass enum -active -d darklab.sh
-amass enum -d darklab.sh -brute
-amass intel -d darklab.sh
 
 # assetfinder
 assetfinder --help
-assetfinder darklab.sh
-assetfinder --subs-only darklab.sh
 
 # fierce
 fierce --help
@@ -305,24 +265,22 @@ fierce --domain darklab.sh --traverse 5
 
 # dnsenum
 dnsenum --help
-dnsenum darklab.sh
-dnsenum --noreverse darklab.sh
-dnsenum --enum darklab.sh
-dnsenum --dnsserver 8.8.8.8 darklab.sh
+dnsenum ip.darklab.sh
+dnsenum --noreverse ip.darklab.sh
+dnsenum --enum ip.darklab.sh
+dnsenum --dnsserver 8.8.8.8 ip.darklab.sh
 
 # ffuf
 ffuf -h
-ffuf -u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
-ffuf -u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
-ffuf -u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt -mc 200,301,302
-ffuf -u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -e .php,.html,.txt
-ffuf -u https://FUZZ.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H "Host: FUZZ.darklab.sh"
+ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
+ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt -mc 200,301,302
+ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -e .php,.html,.txt
+ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H "Host: FUZZ.ip.darklab.sh"
 
 # gobuster
 gobuster -h
-gobuster dir -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
-gobuster dir -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
-gobuster dir -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt
-gobuster dns -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
-gobuster dns -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-20000.txt
-gobuster vhost -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt
+gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt
+gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt

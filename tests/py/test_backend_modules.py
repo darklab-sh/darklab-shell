@@ -13,16 +13,19 @@ Run with: pytest tests/ (from the repo root)
 """
 
 import gzip
+import importlib.util
 import os
 import sqlite3
 import tempfile
 import textwrap
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import process
 import database
 import app as shell_app
+import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
@@ -33,6 +36,8 @@ from commands import (
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -89,9 +94,48 @@ class TestSplitChainedCommands:
 
 # ── load_allowed_commands ─────────────────────────────────────────────────────
 
+class TestLoadConfig:
+    def test_local_config_overrides_base_config_without_replacing_defaults(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "config.yaml")
+            local_path = os.path.join(tmp, "config.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    app_name: base-shell
+                    prompt_prefix: base@local:~$
+                    default_theme: base-theme.yaml
+                    full_output_max_mb: 7MB
+                    rate_limit_per_minute: 30
+                    """
+                ))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent(
+                    """
+                    app_name: local-shell
+                    prompt_prefix: local@local:~$
+                    rate_limit_per_minute: 99
+                    """
+                ))
+            cfg = app_config.load_config(tmp)
+
+        assert cfg["app_name"] == "local-shell"
+        assert cfg["prompt_prefix"] == "local@local:~$"
+        assert cfg["default_theme"] == "base-theme.yaml"
+        assert cfg["full_output_max_mb"] == 7
+        assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
+        assert cfg["rate_limit_per_minute"] == 99
+        assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
+
 class TestLoadAllowedCommands:
     def _write(self, content, tmp_dir):
         path = os.path.join(tmp_dir, "allowed_commands.txt")
+        with open(path, "w") as f:
+            f.write(textwrap.dedent(content))
+        return path
+
+    def _write_local(self, content, tmp_dir):
+        path = os.path.join(tmp_dir, "allowed_commands.local.txt")
         with open(path, "w") as f:
             f.write(textwrap.dedent(content))
         return path
@@ -110,14 +154,14 @@ class TestLoadAllowedCommands:
         assert allow == ["ping", "nmap", "dig"]
         assert deny == []
 
-    def test_deny_entries_stripped_of_bang_and_lowercased(self):
+    def test_deny_entries_stripped_of_bang_and_preserve_case(self):
         with tempfile.TemporaryDirectory() as tmp:
             path = self._write("ping\n!NMAP -SU\n!curl -o\n", tmp)
             with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
                 allow, deny = load_allowed_commands()
         assert allow is not None
         assert "ping" in allow
-        assert "nmap -su" in deny
+        assert "NMAP -SU" in deny
         assert "curl -o" in deny
 
     def test_comments_and_blank_lines_ignored(self):
@@ -152,6 +196,35 @@ class TestLoadAllowedCommands:
                 allow, deny = load_allowed_commands()
         assert allow is None
         assert deny == []
+
+    def test_local_overlay_appends_and_dedupes_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = self._write("ping\nnmap\n!curl -o\n", tmp)
+            self._write_local("nmap\ncurl\n!curl -o\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
+                allow, deny = load_allowed_commands()
+        assert allow == ["ping", "nmap", "curl"]
+        assert deny == ["curl -o"]
+
+    def test_local_overlay_preserves_case_in_denies(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = self._write("ping\n!curl -K\n", tmp)
+            self._write_local("!curl -k\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
+                allow, deny = load_allowed_commands()
+        assert allow == ["ping"]
+        assert deny == ["curl -K", "curl -k"]
+
+    def test_local_overlay_merges_group_headers(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = self._write("## Network\nping\n", tmp)
+            self._write_local("## Network\ncurl\n## Scanning\nnmap\n", tmp)
+            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
+                groups = load_allowed_commands_grouped()
+        assert groups is not None
+        assert [group["name"] for group in groups] == ["Network", "Scanning"]
+        assert groups[0]["commands"] == ["ping", "curl"]
+        assert groups[1]["commands"] == ["nmap"]
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
@@ -217,6 +290,170 @@ class TestLoadFaq:
         assert len(result) == 1
         assert result[0]["question"] == "Has both."
 
+    def test_local_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "faq.yaml")
+            local_path = os.path.join(tmp, "faq.local.yaml")
+            with open(base_path, "w") as f:
+                f.write("- question: Base?\n  answer: Base answer.\n")
+            with open(local_path, "w") as f:
+                f.write("- question: Local?\n  answer: Local answer.\n")
+            with mock.patch("commands.FAQ_FILE", base_path):
+                result = load_faq()
+        assert [item["question"] for item in result] == ["Base?", "Local?"]
+
+
+# ── load_theme_registry / load_theme ─────────────────────────────────────────
+
+class TestThemeRegistry:
+    def _write_theme(self, root, name, content):
+        theme_dir = root / "themes"
+        theme_dir.mkdir(parents=True, exist_ok=True)
+        path = theme_dir / f"{name}.yaml"
+        path.write_text(textwrap.dedent(content))
+        return theme_dir, path
+
+    def test_missing_label_falls_back_to_humanized_filename(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "custom_simple_theme",
+            """
+            bg: "#123456"
+            surface: "#234567"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        assert len(themes) == 1
+        entry = themes[0]
+        assert entry["name"] == "custom_simple_theme"
+        assert entry["filename"] == "custom_simple_theme.yaml"
+        assert entry["label"] == "Custom Simple Theme"
+
+    def test_unknown_keys_are_ignored_but_valid_css_values_survive(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "custom_theme",
+            """
+            label: "Custom Theme"
+            bg: "not-a-real-color"
+            surface: "linear-gradient(180deg, #111, #222)"
+            extra_key: "should be ignored"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        theme = app_config.load_theme("custom_theme")
+        assert theme["bg"] == "not-a-real-color"
+        assert theme["surface"] == "linear-gradient(180deg, #111, #222)"
+        assert "extra_key" not in theme
+
+    def test_malformed_yaml_falls_back_to_defaults_without_crashing(self, tmp_path, monkeypatch):
+        theme_dir = tmp_path / "themes"
+        theme_dir.mkdir(parents=True, exist_ok=True)
+        (theme_dir / "broken_theme.yaml").write_text(
+            "label: Broken Theme\nbg: [\n"
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        themes_map = {theme["name"]: theme for theme in themes}
+        assert "broken_theme" in themes_map
+        assert themes_map["broken_theme"]["label"] == "Broken Theme"
+        assert app_config.load_theme("broken_theme")["bg"] == app_config._THEME_DEFAULTS["dark"]["bg"]
+
+    def test_single_theme_registry_loads_and_can_be_selected(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "only_theme",
+            """
+            label: "Only Theme"
+            bg: "#101010"
+            surface: "#1a1a1a"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        assert len(themes) == 1
+        assert themes[0]["name"] == "only_theme"
+        assert themes[0]["label"] == "Only Theme"
+        assert app_config.load_theme("only_theme")["bg"] == "#101010"
+        assert themes[0]["color_scheme"] == "only dark"
+
+    def test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "base_theme",
+            """
+            label: "Base Theme"
+            bg: "#101010"
+            surface: "#1a1a1a"
+            """,
+        )
+        (theme_dir / "base_theme.local.yaml").write_text(textwrap.dedent(
+            """
+            label: "Base Theme Local"
+            bg: "#202020"
+            """
+        ))
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        themes = app_config.load_theme_registry()
+        assert [theme["name"] for theme in themes] == ["base_theme"]
+        assert themes[0]["label"] == "Base Theme Local"
+        assert app_config.load_theme("base_theme")["bg"] == "#202020"
+        assert app_config.load_theme("base_theme")["surface"] == "#1a1a1a"
+
+    def test_light_theme_uses_light_defaults_for_missing_keys(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "light_theme",
+            """
+            label: "Light Theme"
+            color_scheme: light
+            bg: "#eef4fa"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        theme = app_config.load_theme("light_theme")
+        assert theme["bg"] == "#eef4fa"
+        assert theme["terminal_bar_bg"] == app_config._THEME_DEFAULTS["light"]["terminal_bar_bg"]
+        assert theme["toolbar_button_text"] == app_config._THEME_DEFAULTS["light"]["toolbar_button_text"]
+
+    def test_missing_color_scheme_still_falls_back_to_dark_defaults(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "implicit_dark_theme",
+            """
+            label: "Implicit Dark"
+            bg: "#101010"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        theme = app_config.load_theme("implicit_dark_theme")
+        assert theme["bg"] == "#101010"
+        assert theme["terminal_bar_bg"] == app_config._THEME_DEFAULTS["dark"]["terminal_bar_bg"]
+        assert theme["toolbar_button_text"] == app_config._THEME_DEFAULTS["dark"]["toolbar_button_text"]
+
+    def test_theme_example_files_match_generated_defaults(self):
+        script_path = REPO_ROOT / "scripts" / "generate_theme_examples.py"
+        spec = importlib.util.spec_from_file_location("generate_theme_examples", script_path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        dark_expected = module.generate_theme_example_text("dark")
+        light_expected = module.generate_theme_example_text("light")
+        dark_actual = (REPO_ROOT / "app" / "conf" / "theme_dark.yaml.example").read_text()
+        light_actual = (REPO_ROOT / "app" / "conf" / "theme_light.yaml.example").read_text()
+
+        assert dark_actual == dark_expected, "theme_dark.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
+        assert light_actual == light_expected, "theme_light.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
+
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -242,6 +479,15 @@ class TestLoadFaq:
             os.unlink(path)
         assert result == []
 
+    def test_theme_color_scheme_marks_light_backgrounds_as_only_light(self):
+        assert app_config.theme_color_scheme({"bg": "#eef4fa"}) == "only light"
+
+    def test_theme_color_scheme_marks_dark_backgrounds_as_only_dark(self):
+        assert app_config.theme_color_scheme({"bg": "#0d0d0d"}) == "only dark"
+
+    def test_theme_color_scheme_falls_back_when_color_is_not_parseable(self):
+        assert app_config.theme_color_scheme({"bg": "linear-gradient(180deg, #111, #222)"}) == "light dark"
+
     def test_empty_yaml_returns_empty(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")
@@ -260,12 +506,23 @@ class TestLoadFaq:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq()
+                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         assert result[0]["question"] == "What is this?"
         assert result[-1]["question"] == "Custom question?"
         assert result[-1]["answer"] == "Custom answer."
+
+    def test_load_all_faq_uses_project_readme_in_builtin_answer(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        assert "https://example.invalid/README.md" in result[0]["answer_html"]
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
@@ -506,6 +763,18 @@ class TestWelcomeLoading:
             os.unlink(path)
         assert result == []
 
+    def test_local_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "welcome.yaml")
+            local_path = os.path.join(tmp, "welcome.local.yaml")
+            with open(base_path, "w") as f:
+                f.write("- cmd: ping\n  out: base\n")
+            with open(local_path, "w") as f:
+                f.write("- cmd: curl\n  out: local\n")
+            with mock.patch("commands.WELCOME_FILE", base_path):
+                result = load_welcome()
+        assert [item["cmd"] for item in result] == ["ping", "curl"]
+
 
 # ── load_ascii_art / load_ascii_mobile_art / load_welcome_hints ──────────────
 
@@ -537,6 +806,50 @@ class TestWelcomeAssetLoading:
                 assert load_ascii_mobile_art() == "  mobile banner"
         finally:
             os.unlink(path)
+
+    def test_ascii_art_local_overlay_replaces_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "ascii.txt")
+            local_path = os.path.join(tmp, "ascii.local.txt")
+            with open(base_path, "w") as f:
+                f.write("base art")
+            with open(local_path, "w") as f:
+                f.write("local art")
+            with mock.patch("commands.ASCII_FILE", base_path):
+                assert load_ascii_art() == "local art"
+
+    def test_mobile_ascii_art_local_overlay_replaces_base(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "ascii_mobile.txt")
+            local_path = os.path.join(tmp, "ascii_mobile.local.txt")
+            with open(base_path, "w") as f:
+                f.write("base mobile art")
+            with open(local_path, "w") as f:
+                f.write("local mobile art")
+            with mock.patch("commands.ASCII_MOBILE_FILE", base_path):
+                assert load_ascii_mobile_art() == "local mobile art"
+
+    def test_local_hints_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "app_hints.txt")
+            local_path = os.path.join(tmp, "app_hints.local.txt")
+            with open(base_path, "w") as f:
+                f.write("Use the history panel.\n")
+            with open(local_path, "w") as f:
+                f.write("Press Enter to run.\n")
+            with mock.patch("commands.APP_HINTS_FILE", base_path):
+                assert load_welcome_hints() == ["Use the history panel.", "Press Enter to run."]
+
+    def test_mobile_hints_overlay_appends_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "app_hints_mobile.txt")
+            local_path = os.path.join(tmp, "app_hints_mobile.local.txt")
+            with open(base_path, "w") as f:
+                f.write("Tap the prompt.\n")
+            with open(local_path, "w") as f:
+                f.write("Use the mobile menu.\n")
+            with mock.patch("commands.APP_HINTS_MOBILE_FILE", base_path):
+                assert load_mobile_welcome_hints() == ["Tap the prompt.", "Use the mobile menu."]
 
 
 # ── run_output_store ──────────────────────────────────────────────────────────
@@ -672,6 +985,18 @@ class TestAutocompleteLoading:
         finally:
             os.unlink(path)
         assert result == ["ping -c 4", "dig google.com"]
+
+    def test_local_overlay_appends_unique_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "auto_complete.txt")
+            local_path = os.path.join(tmp, "auto_complete.local.txt")
+            with open(base_path, "w") as f:
+                f.write("nmap -sV\nping -c 4\n")
+            with open(local_path, "w") as f:
+                f.write("ping -c 4\ncurl http://localhost:5001/health\n")
+            with mock.patch("commands.AUTOCOMPLETE_FILE", base_path):
+                result = load_autocomplete()
+        assert result == ["nmap -sV", "ping -c 4", "curl http://localhost:5001/health"]
 
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────

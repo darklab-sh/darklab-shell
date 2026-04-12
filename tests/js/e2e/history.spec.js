@@ -1,18 +1,18 @@
 import { test, expect } from '@playwright/test'
 import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory, makeTestIp } from './helpers.js'
 
-// Use allowed commands that complete quickly and exit 0.
-// curl against the local test server is ideal — always available and fast.
-const CMD_A = 'curl http://localhost:5001/health'
-const CMD_B = 'curl http://localhost:5001/config'
+// Use fake shell commands — they bypass the allowlist and complete instantly.
+const CMD_A = 'hostname'
+const CMD_B = 'date'
 
 test.describe('history drawer', () => {
   test.beforeEach(async ({ page }) => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(62) })
     await page.goto('/')
-    await page.locator('#cmd').waitFor()
-    // Clear any localStorage state left over from a previous test run
+    // Clear any localStorage state left over from a previous test run and reload
     await page.evaluate(() => localStorage.clear())
+    await page.reload()
+    await page.locator('#cmd').waitFor()
   })
 
   test('loading a run from history opens output in a tab without repopulating command input', async ({ page }) => {
@@ -69,6 +69,7 @@ test.describe('history drawer', () => {
 
   test('clear all history removes all chips including starred ones', async ({ page }) => {
     await runCommand(page, CMD_A)
+    await page.waitForTimeout(1200)
     await runCommand(page, CMD_B)
     await waitForHistoryRuns(page, 2)
 
@@ -119,6 +120,7 @@ test.describe('history drawer', () => {
 
   test('Delete Non-Favorites keeps starred runs and removes the rest', async ({ page }) => {
     await runCommand(page, CMD_A)
+    await page.waitForTimeout(1200)
     await runCommand(page, CMD_B)
     await waitForHistoryRuns(page, 2)
 

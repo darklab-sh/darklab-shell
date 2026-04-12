@@ -1,9 +1,8 @@
 // ── Shared UI state ──
 // The browser scripts still read/write these names directly, but the actual
 // storage lives here so the app can move away from prompt-specific globals in
-// a controlled way.
+// a controlled way without changing every module at once.
 (function initSharedState(global) {
-  let _mobileKeyboardVisibilityTimer = null;
   const defaults = {
     tabs: [],
     activeTabId: null,
@@ -32,21 +31,19 @@
     _welcomeSettleRequested: false,
     _welcomePromptAfterSettle: false,
     _welcomeBootPending: true,
+    _composerValue: '',
+    _composerSelectionStart: 0,
+    _composerSelectionEnd: 0,
+    _composerActiveInput: 'desktop',
     _mobileKeyboardOffsetBaseline: null,
+    _mobileViewportClosedHeight: null,
+    _mobileKeyboardLastOpenOffset: 0,
     timerInterval: null,
     timerStart: null,
     pendingKillTabId: null,
   };
   const state = global.APP_STATE || (global.APP_STATE = {});
   Object.assign(state, defaults);
-  const getMobileMenuEl = () => mobileMenu || null;
-  const isMobileTerminalViewportActive = () => !!(
-    typeof useMobileTerminalViewportMode === 'function'
-    && useMobileTerminalViewportMode()
-    && document.body
-    && document.body.classList
-    && document.body.classList.contains('mobile-terminal-mode')
-  );
 
   const bindings = [
     'tabs',
@@ -76,7 +73,13 @@
     '_welcomeSettleRequested',
     '_welcomePromptAfterSettle',
     '_welcomeBootPending',
+    '_composerValue',
+    '_composerSelectionStart',
+    '_composerSelectionEnd',
+    '_composerActiveInput',
     '_mobileKeyboardOffsetBaseline',
+    '_mobileViewportClosedHeight',
+    '_mobileKeyboardLastOpenOffset',
     'timerInterval',
     'timerStart',
     'pendingKillTabId',
@@ -97,6 +100,47 @@
 
   global.getAppState = () => state;
   global.resetAppState = () => Object.assign(state, defaults);
+  global.getComposerState = () => ({
+    value: state._composerValue,
+    selectionStart: state._composerSelectionStart,
+    selectionEnd: state._composerSelectionEnd,
+    activeInput: state._composerActiveInput,
+  });
+  global.setComposerState = (next = {}) => {
+    if (Object.prototype.hasOwnProperty.call(next, 'value')) {
+      state._composerValue = String(next.value ?? '');
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'selectionStart')) {
+      state._composerSelectionStart = Math.max(0, Number(next.selectionStart) || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'selectionEnd')) {
+      state._composerSelectionEnd = Math.max(0, Number(next.selectionEnd) || 0);
+    }
+    if (Object.prototype.hasOwnProperty.call(next, 'activeInput')) {
+      state._composerActiveInput = next.activeInput === 'mobile' ? 'mobile' : 'desktop';
+    }
+    return global.getComposerState();
+  };
+  global.resetComposerState = () => {
+    state._composerValue = defaults._composerValue;
+    state._composerSelectionStart = defaults._composerSelectionStart;
+    state._composerSelectionEnd = defaults._composerSelectionEnd;
+    state._composerActiveInput = defaults._composerActiveInput;
+    return global.getComposerState();
+  };
+  global.APP_STATE_API = {
+    getState: () => state,
+    reset: () => Object.assign(state, defaults),
+    getTabs: () => state.tabs,
+    setTabs: (v) => { state.tabs = v; },
+    getActiveTabId: () => state.activeTabId,
+    setActiveTabId: (v) => { state.activeTabId = v; },
+    getActiveTab: () => state.tabs.find(t => t.id === state.activeTabId),
+    getTab: (id) => state.tabs.find(t => t.id === id),
+    getComposerState: () => global.getComposerState(),
+    setComposerState: (next) => global.setComposerState(next),
+    resetComposerState: () => global.resetComposerState(),
+  };
 
   // ── Tab accessors ──
   // Use these instead of reading/writing tabs and activeTabId directly.
@@ -110,329 +154,4 @@
   global.getActiveTab = () => state.tabs.find(t => t.id === state.activeTabId);
   global.getTab = (id) => state.tabs.find(t => t.id === id);
 
-  global.getComposerInputs = () => ({
-    desktop: (typeof cmdInput !== 'undefined' && cmdInput) || null,
-    mobile: (typeof mobileCmdInput !== 'undefined' && mobileCmdInput) || null,
-  });
-  global.getVisibleComposerInput = () => {
-    const { desktop, mobile } = global.getComposerInputs();
-    const mobileShellActive = !!(typeof document !== 'undefined'
-      && document.body
-      && document.body.classList
-      && document.body.classList.contains('mobile-terminal-mode'));
-    if (mobileShellActive && mobile) return mobile;
-    return desktop;
-  };
-  global.getComposerValue = () => {
-    const input = global.getVisibleComposerInput();
-    return input ? input.value : '';
-  };
-  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
-    const target = input || global.getVisibleComposerInput();
-    if (!target || typeof target.focus !== 'function') return false;
-    try {
-      if (preventScroll) target.focus({ preventScroll: true });
-      else target.focus();
-    } catch (_) {
-      target.focus();
-    }
-    return true;
-  };
-  global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
-    if (isMobileTerminalViewportActive()) return false;
-    const target = (typeof getVisibleComposerInput === 'function')
-      ? getVisibleComposerInput()
-      : global.getVisibleComposerInput();
-    return global.focusComposerInput(target, { preventScroll });
-  };
-  global.getMobileKeyboardOffsetBaseline = () => state._mobileKeyboardOffsetBaseline;
-  global.setMobileKeyboardOffsetBaseline = (value) => {
-    state._mobileKeyboardOffsetBaseline = typeof value === 'number' ? value : null;
-    return state._mobileKeyboardOffsetBaseline;
-  };
-  global.blurVisibleComposerInput = () => {
-    const target = (typeof getVisibleComposerInput === 'function')
-      ? getVisibleComposerInput()
-      : global.getVisibleComposerInput();
-    if (!target || typeof target.blur !== 'function') return false;
-    target.blur();
-    return true;
-  };
-  global.blurVisibleComposerInputIfMobile = () => {
-    if (typeof useMobileTerminalViewportMode !== 'function' || !useMobileTerminalViewportMode()) return false;
-    return global.blurVisibleComposerInput();
-  };
-  global.focusAnyComposerInput = ({ preventScroll = false } = {}) => {
-    return global.focusVisibleComposerInput({ preventScroll });
-  };
-  global.syncMobileComposerKeyboardState = (offset = null, { active = true } = {}) => {
-    if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
-    const nextOffset = typeof offset === 'number' ? offset : 0;
-    document.documentElement?.style?.setProperty('--mobile-keyboard-offset', `${nextOffset}px`);
-    if (!active) {
-      state._mobileKeyboardOffsetBaseline = nextOffset;
-      if (_mobileKeyboardVisibilityTimer) {
-        clearTimeout(_mobileKeyboardVisibilityTimer);
-        _mobileKeyboardVisibilityTimer = null;
-      }
-      document.body.classList.remove('mobile-keyboard-open');
-      return false;
-    }
-    if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
-      state._mobileKeyboardOffsetBaseline = nextOffset;
-    }
-    return document.body.classList.contains('mobile-keyboard-open');
-  };
-  global.setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
-    if (typeof document === 'undefined' || !document.body || !document.body.classList) return false;
-    if (_mobileKeyboardVisibilityTimer) {
-      clearTimeout(_mobileKeyboardVisibilityTimer);
-      _mobileKeyboardVisibilityTimer = null;
-    }
-
-    const applyOpen = () => {
-      const wasKeyboardOpen = document.body.classList.contains('mobile-keyboard-open');
-      document.body.classList.toggle('mobile-keyboard-open', !!open);
-      if (open && !wasKeyboardOpen) {
-        if (typeof hideMobileMenu === 'function') hideMobileMenu();
-        if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen() && typeof hideHistoryPanel === 'function') {
-          hideHistoryPanel();
-        }
-        if (typeof acHide === 'function') acHide();
-      }
-      return !!open;
-    };
-
-    if (open) {
-      return applyOpen();
-    }
-
-    const closeDelay = Math.max(0, Number(delay) || 0);
-    if (closeDelay === 0) {
-      return applyOpen();
-    }
-
-    _mobileKeyboardVisibilityTimer = setTimeout(() => {
-      _mobileKeyboardVisibilityTimer = null;
-      const mobileInput = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-      if (mobileInput && document.activeElement === mobileInput) return;
-      document.body.classList.remove('mobile-keyboard-open');
-    }, closeDelay);
-    return false;
-  };
-  global.setComposerValue = (value, start = null, end = null, { dispatch = true } = {}) => {
-    const nextValue = String(value ?? '');
-    const { desktop, mobile } = global.getComposerInputs();
-    const inputs = [];
-    if (desktop) inputs.push(desktop);
-    if (mobile && mobile !== desktop) inputs.push(mobile);
-    for (const input of inputs) {
-      input.value = nextValue;
-      if (typeof input.setSelectionRange === 'function') {
-        const nextStart = typeof start === 'number' ? start : nextValue.length;
-        const nextEnd = typeof end === 'number' ? end : nextStart;
-        input.setSelectionRange(nextStart, nextEnd);
-      }
-    }
-    if (dispatch) {
-      const dispatchTarget = desktop || mobile;
-      if (dispatchTarget) dispatchTarget.dispatchEvent(new Event('input'));
-    }
-    return nextValue;
-  };
-  global.handleComposerInputChange = (sourceInput) => {
-    if (!sourceInput) return;
-    if (typeof syncShellPrompt === 'function') syncShellPrompt();
-    if (typeof syncMobileViewportState === 'function') syncMobileViewportState();
-    const value = sourceInput.value;
-    const start = typeof sourceInput.selectionStart === 'number' ? sourceInput.selectionStart : value.length;
-    const end = typeof sourceInput.selectionEnd === 'number' ? sourceInput.selectionEnd : value.length;
-    global.setComposerValue(value, start, end, { dispatch: false });
-    const keepHistoryNav = typeof _suspendCmdHistoryNavReset !== 'undefined' && _suspendCmdHistoryNavReset;
-    if (keepHistoryNav) _suspendCmdHistoryNavReset = false;
-    else if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
-    if (value.length > 0 && typeof requestWelcomeSettle === 'function') {
-      requestWelcomeSettle(activeTabId);
-    }
-    if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
-      acSuppressInputOnce = false;
-      if (typeof acHide === 'function') acHide();
-      return;
-    }
-    acIndex = -1;
-    if (!value.trim()) {
-      if (typeof acHide === 'function') acHide();
-      return;
-    }
-    const q = value.toLowerCase();
-    acFiltered = (typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
-      .filter(s => s.toLowerCase().startsWith(q))
-      .slice(0, 12);
-    if (typeof acShow === 'function') acShow(acFiltered);
-  };
-  global.showPanelOverlay = (el) => {
-    if (el && el.classList) el.classList.add('open');
-  };
-  global.hidePanelOverlay = (el) => {
-    if (el && el.classList) el.classList.remove('open');
-  };
-  global.refocusComposerAfterAction = ({ preventScroll = true } = {}) => {
-    const isMobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
-    const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-    if (!isMobileMode && target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
-      return true;
-    }
-    if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll })) return true;
-    if (typeof refocusTerminalInput === 'function') {
-      refocusTerminalInput();
-      return false;
-    }
-    return false;
-  };
-  global.togglePanelOverlay = (el, force = null) => {
-    if (!el || !el.classList) return false;
-    const next = force === null ? !el.classList.contains('open') : !!force;
-    el.classList.toggle('open', next);
-    return next;
-  };
-  global.isPanelOverlayOpen = (el) => !!(el && el.classList && el.classList.contains('open'));
-  global.showModalOverlay = (el, display = 'flex') => {
-    if (el && el.style) el.style.display = display;
-  };
-  global.hideModalOverlay = (el) => {
-    if (el && el.style) el.style.display = 'none';
-  };
-  global.toggleModalOverlay = (el, force = null, display = 'flex') => {
-    if (!el || !el.style) return false;
-    const next = force === null ? el.style.display !== display : !!force;
-    el.style.display = next ? display : 'none';
-    return next;
-  };
-  global.isModalOverlayOpen = (el, display = 'flex') => !!(el && el.style && el.style.display === display);
-  global.showKillOverlay = () => showModalOverlay(killOverlay, 'flex');
-  global.hideKillOverlay = () => hideModalOverlay(killOverlay);
-  global.isKillOverlayOpen = () => isModalOverlayOpen(killOverlay, 'flex');
-  global.showHistoryPanel = () => showPanelOverlay(historyPanel);
-  global.hideHistoryPanel = () => {
-    hidePanelOverlay(historyPanel);
-    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
-  };
-  global.isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanel);
-  global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
-  global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
-  global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
-  global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
-  global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
-  global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
-  global.showHistoryDeleteOverlay = () => showModalOverlay(histDelOverlay, 'flex');
-  global.hideHistoryDeleteOverlay = () => hideModalOverlay(histDelOverlay);
-  global.isHistoryDeleteOverlayOpen = () => isModalOverlayOpen(histDelOverlay, 'flex');
-  global.showHistoryLoadOverlay = () => {
-    if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.add('open');
-    if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'false');
-  };
-  global.hideHistoryLoadOverlay = () => {
-    if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.remove('open');
-    if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'true');
-  };
-  global.isHistoryLoadOverlayOpen = () => !!(historyLoadOverlay && historyLoadOverlay.classList && historyLoadOverlay.classList.contains('open'));
-  global.showHistoryDeleteNonfav = () => {
-    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
-    if (btn && btn.style) btn.style.display = 'inline-block';
-  };
-  global.hideHistoryDeleteNonfav = () => {
-    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
-    if (btn && btn.style) btn.style.display = 'none';
-  };
-  global.showSearchBar = () => {
-    if (searchBar && searchBar.style) searchBar.style.display = 'flex';
-  };
-  global.hideSearchBar = () => {
-    if (searchBar && searchBar.style) searchBar.style.display = 'none';
-    const refocused = typeof refocusComposerAfterAction === 'function'
-      ? refocusComposerAfterAction({ preventScroll: true })
-      : false;
-    if (!refocused && !(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
-      && typeof cmdInput !== 'undefined' && cmdInput && typeof cmdInput.focus === 'function') {
-      cmdInput.focus();
-    }
-  };
-  global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display !== 'none');
-  global.showHistoryRow = () => {
-    if (histRow && histRow.style) histRow.style.display = 'flex';
-  };
-  global.hideHistoryRow = () => {
-    if (histRow && histRow.style) histRow.style.display = 'none';
-  };
-  global.isHistoryRowVisible = () => !!(histRow && histRow.style && histRow.style.display !== 'none');
-  global.showRunTimer = () => {
-    if (runTimer && runTimer.style) runTimer.style.display = 'inline';
-  };
-  global.hideRunTimer = () => {
-    if (runTimer && runTimer.style) runTimer.style.display = 'none';
-    if (runTimer) runTimer.textContent = '';
-  };
-  global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
-  global.setRunButtonDisabled = (disabled) => {
-    const next = !!disabled;
-    if (runBtn) runBtn.disabled = next;
-    if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = next;
-  };
-  global.syncRunButtonDisabled = () => {
-    const active = typeof getActiveTab === 'function' ? getActiveTab() : null;
-    const disabled = !!(active && active.st === 'running');
-    if (runBtn) runBtn.disabled = disabled;
-    if (typeof mobileRunBtn !== 'undefined' && mobileRunBtn) mobileRunBtn.disabled = disabled;
-    return disabled;
-  };
-  global.isRunButtonDisabled = () => !!((runBtn && runBtn.disabled) || (typeof mobileRunBtn !== 'undefined' && mobileRunBtn && mobileRunBtn.disabled));
-  global.showTabKillBtn = (tabId) => {
-    const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-    if (btn && btn.style) btn.style.display = 'inline-block';
-  };
-  global.hideTabKillBtn = (tabId) => {
-    const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-    if (btn && btn.style) btn.style.display = 'none';
-  };
-  global.showMobileMenu = () => {
-    const mobileMenu = getMobileMenuEl();
-    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('open');
-  };
-  global.hideMobileMenu = () => {
-    const mobileMenu = getMobileMenuEl();
-    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('open');
-  };
-  global.isMobileMenuOpen = () => {
-    const mobileMenu = getMobileMenuEl();
-    return !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
-  };
-  global.showMotdWrap = () => {
-    if (typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style) motdWrap.style.display = 'block';
-  };
-  global.hideMotdWrap = () => {
-    if (typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style) motdWrap.style.display = 'none';
-  };
-  global.isMotdWrapVisible = () => !!(typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style && motdWrap.style.display !== 'none');
-  global.showAcDropdown = () => {
-    if (acDropdown && acDropdown.style) acDropdown.style.display = 'block';
-  };
-  global.hideAcDropdown = () => {
-    if (acDropdown && acDropdown.style) acDropdown.style.display = 'none';
-  };
-  global.isAcDropdownOpen = () => !!(acDropdown && acDropdown.style && acDropdown.style.display !== 'none');
-  global.setVisibilityState = (el, hidden, ariaHidden = null) => {
-    if (!el) return;
-    el.hidden = !!hidden;
-    if (typeof el.setAttribute === 'function') {
-      if (ariaHidden === null || typeof ariaHidden === 'undefined') {
-        if (typeof el.removeAttribute === 'function') el.removeAttribute('aria-hidden');
-      } else {
-        el.setAttribute('aria-hidden', String(ariaHidden));
-      }
-    }
-  };
-  global.setDisplayState = (el, visible, display = 'block') => {
-    if (!el || !el.style) return;
-    el.style.display = visible ? display : 'none';
-  };
 })(globalThis);

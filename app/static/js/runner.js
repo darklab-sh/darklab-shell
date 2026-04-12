@@ -194,6 +194,9 @@ function doKill(tabId) {
     setStatus('killed');
     _setRunButtonDisabled(false);
   }
+  if (typeof _maybeMountDeferredPrompt === 'function') {
+    _maybeMountDeferredPrompt(tabId);
+  }
 }
 
 // ── Run command ──
@@ -206,12 +209,16 @@ function doKill(tabId) {
 //   true      — command submitted; caller should clear input and focus
 //   false     — rejected or blocked; caller should leave input as-is
 function submitCommand(rawCmd) {
+  // This is the main run path: validate local state, open the SSE stream, then
+  // feed output into the active tab while mirroring completion into persistence.
   const cmd = (rawCmd || '').trim();
   if (!cmd) {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       requestWelcomeSettle(activeTabId);
       return 'settle';
     }
+    const _activeTab = getActiveTab();
+    if (_activeTab && _activeTab.st === 'running') return true;
     appendPromptNewline(activeTabId);
     setStatus('idle');
     return true;
@@ -376,6 +383,9 @@ function submitCommand(rawCmd) {
                     if (isHistoryPanelOpen()) refreshHistoryPanel();
                   }
                   if (isHistoryPanelOpen()) refreshHistoryPanel();
+                  if (!(t && t.closing) && typeof _maybeMountDeferredPrompt === 'function') {
+                    _maybeMountDeferredPrompt(tabId);
+                  }
                   return;
                 }
                 const dur = msg.elapsed ? ` in ${msg.elapsed}s` : '';
@@ -445,5 +455,6 @@ function submitVisibleComposerCommand({ rawCmd = null, dismissKeyboard = false, 
 
 function runCommand() {
   if (typeof isRunButtonDisabled === 'function' && isRunButtonDisabled()) return;
-  submitComposerCommand(cmdInput.value, { dismissKeyboard: true });
+  const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput ? cmdInput.value : '');
+  submitComposerCommand(value, { dismissKeyboard: true });
 }
