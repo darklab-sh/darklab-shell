@@ -1,6 +1,8 @@
 import { vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
+// The tabs module owns a large amount of DOM state, so these tests build a
+// minimal but realistic shell scaffold rather than mocking every interaction.
 function touchPointerEvent(type, init) {
   const event = new Event(type, { bubbles: true, cancelable: true })
   Object.assign(event, init)
@@ -10,6 +12,8 @@ function touchPointerEvent(type, init) {
 function loadTabsFns({
   maxTabs = 3,
   maxOutputLines = 100,
+  version = undefined,
+  projectReadme = undefined,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
@@ -60,7 +64,7 @@ function loadTabsFns({
     newTabBtn,
     resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell' },
+    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell', ...(version !== undefined && { version }), ...(projectReadme !== undefined && { project_readme: projectReadme }) },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
@@ -229,6 +233,29 @@ describe('tabs helpers', () => {
     expect(createTab('tab 1')).not.toBeNull()
     expect(createTab('tab 2')).toBeNull()
     expect(document.getElementById('permalink-toast').textContent).toBe('Tab limit reached (max 1)')
+  })
+
+  it('createTab renders a terminal-wordmark anchor with app name and version', () => {
+    const { createTab } = loadTabsFns({ version: '2.0', projectReadme: 'https://example.invalid/readme' })
+
+    createTab('tab 1')
+
+    const wordmark = document.querySelector('.terminal-wordmark')
+    expect(wordmark).not.toBeNull()
+    expect(wordmark.tagName).toBe('A')
+    expect(wordmark.textContent).toBe('darklab shell v2.0')
+    expect(wordmark.getAttribute('href')).toBe('https://example.invalid/readme')
+  })
+
+  it('createTab renders wordmark with just the app name when version is absent', () => {
+    const { createTab } = loadTabsFns()
+
+    createTab('tab 1')
+
+    const wordmark = document.querySelector('.terminal-wordmark')
+    expect(wordmark).not.toBeNull()
+    expect(wordmark.textContent).toBe('darklab shell')
+    expect(wordmark.getAttribute('href')).toBe('#')
   })
 
   it('activateTab resets the command input instead of repopulating from tab state', () => {
@@ -741,6 +768,9 @@ describe('tabs helpers', () => {
         '--surface': '#eef2f6',
         '--text': '#101820',
         '--green': '#2a5d18',
+        '--theme-panel-bg': '#edf4fb',
+        '--theme-panel-border': '#b7c7d6',
+        '--theme-terminal-bar-bg': '#d9e5f1',
       },
     }
 
@@ -755,8 +785,49 @@ describe('tabs helpers', () => {
     expect(css).toContain('--surface: #eef2f6;')
     expect(css).toContain('--text: #101820;')
     expect(css).toContain('--green: #2a5d18;')
+    expect(css).toContain('--theme-panel-bg: #edf4fb;')
+    expect(css).toContain('--theme-panel-border: #b7c7d6;')
+    expect(css).toContain('--theme-terminal-bar-bg: #d9e5f1;')
 
     delete window.ThemeCssVars
+  })
+
+  it('builds exported HTML with color-scheme metadata and themed shell surfaces', () => {
+    window.ThemeRegistry = {
+      current: {
+        color_scheme: 'light',
+        vars: {
+          '--bg': '#eef4fa',
+          '--text': '#1a2732',
+          '--theme-panel-bg': '#edf4fb',
+          '--theme-panel-border': '#c1d2e1',
+          '--theme-terminal-bar-bg': '#d9e5f1',
+          '--theme-terminal-bar-border': '#b8cad9',
+          '--theme-panel-shadow': 'rgba(20, 36, 52, 0.18)',
+        },
+      },
+    }
+
+    const { buildTerminalExportHtml } = fromDomScripts([
+      'app/static/js/export_html.js',
+    ], {
+      document,
+      window,
+    }, `ExportHtmlUtils`)
+
+    const html = buildTerminalExportHtml({
+      appName: 'darklab shell',
+      title: 'share export',
+      metaHtml: '<span>meta</span>',
+      linesHtml: '<span class="line">hello</span>',
+    })
+
+    expect(html).toContain('<meta name="color-scheme" content="light">')
+    expect(html).toContain('background: var(--theme-terminal-bar-bg, var(--bg));')
+    expect(html).toContain('background: var(--theme-panel-bg, var(--surface));')
+    expect(html).toContain('border: 1px solid var(--theme-panel-border, var(--border));')
+
+    delete window.ThemeRegistry
   })
 
   it('saveTab shows a toast when there is only welcome output', () => {

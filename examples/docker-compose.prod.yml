@@ -18,7 +18,7 @@ services:
       options:
         gelf-address: "${DOCKER_GELF_ADDRESS:-udp://loghost.darklab.sh:12201/}"
   redis:
-    container_name: redis-shell.darklab.sh
+    container_name: shell.darklab.sh-redis
     logging:
       driver: gelf
       options:

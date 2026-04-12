@@ -11,7 +11,7 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 ## Table of Contents
 - [Project Overview](#project-overview)
 - [System Overview](#system-overview)
-- [Logical Components](#logical-components)
+- [Logical Runtime Layers](#logical-runtime-layers)
 - [Runtime Topology](#runtime-topology)
 - [Primary Request Flows](#primary-request-flows)
 - [Frontend Composition](#frontend-composition)
@@ -33,52 +33,55 @@ At a mid to high level, darklab shell works like this:
 - The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
 
-## Logical Components
+## Logical Runtime Layers
 
 ```mermaid
 flowchart TB
-  Browser["Browser"]
+  User["Browser User"]
 
-  subgraph Frontend["Frontend"]
-    ShellUI["Terminal UI"]
-    Composer["composerState"]
-    ClientModules["client modules"]
+  subgraph Client["Browser Runtime"]
+    Templates["HTML templates + CSS theme vars"]
+    JS["Vanilla JavaScript UI/state"]
+    BrowserApis["Cookies · localStorage · fetch · SSE"]
   end
 
-  subgraph Docker["Docker Runtime"]
-    subgraph Backend["Backend"]
-      Flask["Flask + Gunicorn"]
-      Content["blueprints"]
-      CommandLayer["command layer"]
-    end
-
-    subgraph Services["Runtime Services"]
-      Redis["Redis"]
-      SQLite["SQLite"]
-      Artifacts["Artifact files"]
-      Scanner["Scanner subprocesses"]
-    end
+  subgraph App["Python Web Application"]
+    Flask["Flask + Gunicorn"]
+    Routing["HTTP routes + template rendering"]
+    Orchestration["Validation + fake-command handling + run orchestration"]
   end
 
-  Browser --> Frontend
-  Frontend --> Flask
-  Flask --> Content
-  Content --> CommandLayer
+  subgraph Runtime["Execution + Persistence Services"]
+    Redis["Redis"]
+    SQLite["SQLite"]
+    Artifacts["Full-output artifacts"]
+    Subprocesses["Scanner subprocesses"]
+    Config["YAML config + theme files"]
+  end
+
+  User --> Client
+  Client -->|HTTP + SSE| Flask
+  Templates --> JS
+  JS --> BrowserApis
+  Flask --> Routing
+  Routing --> Orchestration
   Flask <--> Redis
   Flask <--> SQLite
   Flask <--> Artifacts
-  Flask --> Scanner
+  Flask --> Subprocesses
+  Flask <--> Config
 ```
 
-This diagram is meant to answer the “what talks to what?” question quickly:
+This diagram is intentionally framework- and runtime-oriented rather than app-module-oriented. It is meant to answer the “which layer owns which responsibility?” question without duplicating the more detailed app diagrams later in the document.
 
-- the browser hosts the terminal UI and shared composer state
-- the Flask/Gunicorn app is the backend entry point
-- the blueprints split content reads, run/kill, history/share, and asset/diagnostic concerns
-- the command layer decides what can run and what should be handled as a fake shell helper
-- Redis handles cross-worker coordination
-- SQLite and artifact files hold durable history/share state
-- Docker is the operational boundary that packages all of those pieces together in the default deployment model
+- the browser runtime owns rendering, local interaction state, and web-platform APIs such as cookies, `localStorage`, `fetch`, and SSE consumption
+- the Python web application owns routing, template rendering, config/theme loading, request validation, fake-command handling, and orchestration of real command execution
+- Redis owns the cross-worker coordination that cannot safely live inside one Gunicorn worker process
+- SQLite and artifact files own the durable run/share state that must survive reloads and restarts
+- scanner subprocesses are a distinct execution boundary rather than an in-process extension of the Flask app
+- YAML config and theme files are shown as a separate logical dependency because they shape both backend behavior and frontend presentation, even though they are loaded from the local filesystem rather than over the network
+
+The goal is for this section to stay stable even when app-specific modules, blueprints, or frontend files are refactored. The more detailed sections below cover those app-level components directly.
 
 ## Runtime Topology
 
@@ -91,18 +94,23 @@ flowchart TB
   Artifacts["Artifacts"]
   Scanner["Scanner subprocesses"]
 
-  Browser -->|bootstrap reads| Flask
-  Browser -->|/run SSE| Flask
-  Browser -->|POST /kill| Flask
-  Browser -->|history/share/diag| Flask
+  Browser -->|HTTP bootstrap reads| Flask
+  Browser -->|HTTP POST /run + SSE stream| Flask
+  Browser -->|HTTP POST /kill| Flask
+  Browser -->|HTTP history/share/diag reads| Flask
 
-  Flask <--> Redis
-  Flask <--> SQLite
-  Flask <--> Artifacts
-  Flask --> Scanner
+  Flask <--> |Redis protocol| Redis
+  Flask <--> |SQL reads/writes| SQLite
+  Flask <--> |filesystem artifact I/O| Artifacts
+  Flask -->|spawn / signal process groups| Scanner
 ```
 
-This is the stable runtime boundary of the app. Browser concerns stay in the client, worker-coordination concerns stay in Redis, durable history/share state stays in SQLite plus artifacts, and actual command execution happens in isolated subprocesses rather than inside the web worker process itself.
+This is the transport/boundary view of the app. It focuses on the stable communication paths rather than the internal modules that implement them.
+
+- browser traffic is plain HTTP plus one-way SSE streaming for live command output
+- Redis is only used for shared worker coordination, not as a general application datastore
+- SQLite and artifact files are the durable history/share boundary
+- command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
 
 ## Primary Request Flows
 
@@ -149,18 +157,14 @@ flowchart TD
   subgraph Foundations["Foundations"]
     Session["session.js"]
     State["state.js"]
-    Utils["utils.js"]
-    Config["config.js"]
-    DOM["dom.js"]
-    UI["ui_helpers.js"]
-    App["app.js"]
+    DOM["dom.js + ui_helpers.js"]
+    Bootstrap["config.js + app.js"]
   end
 
   subgraph Features["Feature Modules"]
     Tabs["tabs.js"]
     Output["output.js"]
-    Search["search.js"]
-    Auto["autocomplete.js"]
+    Search["search.js + autocomplete.js"]
     History["history.js"]
     Welcome["welcome.js"]
     Runner["runner.js"]
@@ -169,18 +173,14 @@ flowchart TD
   Controller["controller.js"]
 
   Session --> State
-  State --> UI
-  Utils --> UI
-  DOM --> UI
-  Config --> Controller
-  App --> Controller
-  UI --> Tabs
-  UI --> History
-  UI --> Runner
+  State --> DOM
+  DOM --> Tabs
+  DOM --> History
+  DOM --> Runner
+  Bootstrap --> Controller
   Tabs --> Controller
   Output --> Controller
   Search --> Controller
-  Auto --> Controller
   History --> Controller
   Welcome --> Controller
   Runner --> Controller
@@ -191,7 +191,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 - `state.js` owns shared state
 - `ui_helpers.js` owns DOM-facing setters/getters
 - domain scripts own tab/output/search/history/welcome/runner logic
-- `controller.js` is the composition root and last loader
+- `config.js` and `app.js` handle bootstrap concerns, while `controller.js` is the composition root and last loader
 
 The important recent architectural change is that prompt ownership now lives in `composerState`, not in whichever DOM input happened to update last.
 
@@ -204,9 +204,9 @@ flowchart TB
   ArtifactRows["artifact rows"]
   Files["gzip full-output files"]
 
-  Runs -->|history + restore| Hist["History UI"]
-  Runs -->|canonical permalink| RunPage["/history/:id"]
-  Snapshots -->|snapshot permalink| SharePage["/share/:id"]
+  Runs -->|interactive history + restore queries| Hist["History consumers"]
+  Runs -->|canonical run retrieval| RunPage["Run permalink consumers"]
+  Snapshots -->|snapshot retrieval| SharePage["Snapshot permalink consumers"]
   ArtifactRows --> Files
   ArtifactRows -->|full-output lookup| RunPage
 ```
@@ -240,7 +240,7 @@ flowchart TB
     FakeCommands["fake_commands.py"]
   end
 
-  subgraph Blueprints["Blueprints"]
+  subgraph Http["HTTP Layer"]
     Assets["assets.py"]
     Content["content.py"]
     Run["run.py"]
@@ -255,22 +255,22 @@ flowchart TB
   Logging --> Process
   Logging --> Permalinks
   Logging --> OutputStore
-  Extensions --> Blueprints
-  Helpers --> Blueprints
-  Database --> Blueprints
-  Process --> Blueprints
-  Permalinks --> Blueprints
-  OutputStore --> Blueprints
+  Extensions --> Http
+  Helpers --> Http
+  Database --> Http
+  Process --> Http
+  Permalinks --> Http
+  OutputStore --> Http
   CommandRules --> Run
   FakeCommands --> Run
-  Blueprints --> App
+  Http --> App
 ```
 
 - `config.py` is the root configuration/theme layer and stays free of Flask app dependencies.
 - `logging_setup.py` must initialize before the rest of the app because module-import-time startup work, especially Redis setup, can log immediately.
 - The infrastructure/helper layer owns shared concerns like request metadata, persistence, process tracking, permalink shaping, artifact storage, and the Flask-Limiter singleton.
 - `commands.py` and `fake_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
-- The blueprint layer owns the actual HTTP surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
+- The HTTP layer owns the actual request/response surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
 `commands.py` is a pure-function module with no dependency on Flask or other app modules, making it straightforward to import and test in isolation. Each blueprint imports by name from the modules it depends on (`from commands import is_command_allowed`) so that mock patches in tests target the namespace where the function actually resolves its internal calls.
 
@@ -463,7 +463,7 @@ These happen in `rewrite_command()` silently (no user-visible notice unless spec
 
 ## Frontend Architecture
 
-Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. Styles live in `static/css/styles.css`; logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
+Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. CSS is now split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, and `mobile.css`. Logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
 
 Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built with direct DOM node creation instead of stitched HTML strings, and the template’s modal chrome now uses class-based wrappers for hidden state and dialog layout. That keeps the render paths more maintainable without changing the page composition model.
 
@@ -610,7 +610,7 @@ When starring a command from the history drawer, if the command is not already i
 
 `controller.js` routes `Ctrl+R` to `enterHistSearch()` and, while in search mode, sends all `keydown` events through `handleHistSearchKey` first and all `input` events through `handleHistSearchInput` before the normal handlers run.
 
-DOM: `#hist-search-dropdown` in `index.html`; `histSearchDropdown` reference in `dom.js`; CSS in `styles.css`.
+DOM: `#hist-search-dropdown` in `index.html`; `histSearchDropdown` reference in `dom.js`; CSS in the modular stylesheet set (loaded through `styles.css`).
 
 ### Autocomplete Dropdown Ordering and Navigation
 
@@ -630,18 +630,18 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 ### Config Loading
 
-The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `project_readme`, `prompt_prefix`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. Theme is only applied from config if no `localStorage` preference exists — user choice always wins. `project_readme` is used by the built-in FAQ and synthetic README-style helper output so those links can be branded per deployment without changing code.
+The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `prompt_prefix`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. The MOTD no longer renders as persistent shell chrome; when present, it is injected into the welcome banner as a centered operator notice so downtime/change announcements stay visible during the startup flow without taking permanent layout space. The same bootstrap payload also exposes the built-in `project_readme` constant for footer/help links, but it is no longer operator-configurable through YAML. Theme is only applied from config if no `localStorage` preference exists — user choice always wins. Keeping `project_readme` as a built-in constant ensures the shipped FAQ and synthetic README-style helper output stay aligned with the upstream documentation.
 
-Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. On mobile the selector opens as a full-screen chooser with a two-column preview layout on wider phones so the preview cards stay readable while keeping each grouped section the same width. Each YAML variant may provide an optional `label:` field; that label is what the selector preview card shows, `group:` controls the modal section header, and `sort:` controls the order inside the preview grid while the filename stem remains the persisted theme name. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are copyable templates only; they are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in dark fallback palette in `app/config.py`. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots, including the simplified mobile composer shell, which now uses the same injected theme variables as the desktop shell instead of hardcoded dark CSS. The same resolution step also infers a best-effort document `color-scheme` hint from the resolved theme background and pushes it into the templates and runtime theme switcher so browsers that honor standards-based scheme hints have less reason to auto-darken light themes. This completed theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
+Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. On desktop the selector now opens as a right-side drawer so most of the shell remains visible while you compare themes; on mobile it remains a full-screen chooser with a two-column preview layout on wider phones so the preview cards stay readable while keeping each grouped section the same width. Each YAML variant may provide optional `label:`, `group:`, `sort:`, and `color_scheme:` metadata. `label:` is what the selector preview card shows, `group:` controls the modal section header, `sort:` controls the order inside the preview grid, and `color_scheme:` selects whether missing keys inherit from the built-in dark or light default family. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are generated from `_THEME_DEFAULTS` in `app/config.py`; they are reference artifacts only and are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in default family in `app/config.py` if the theme is missing or malformed. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots, including the simplified mobile composer shell, the diagnostics/permalink pages, and the exported permalink HTML, which now all use the same injected panel/bar variables instead of hardcoded dark CSS or raw base-palette fallbacks. The same resolution step also infers a best-effort document `color-scheme` hint from the resolved theme background and pushes it into the templates and runtime theme switcher so browsers that honor standards-based scheme hints have less reason to auto-darken light themes. This completed theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
 
 ### Theme System
 
 The theme implementation is intentionally split so the operator-facing config, live UI, permalink pages, and exported HTML all read from the same resolved values:
 
 1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes.
-2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are copyable templates only and are not loaded into the runtime selector.
+2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated reference templates only and are not loaded into the runtime selector.
 3. `app/config.py` merges those YAML overrides with `_THEME_DEFAULTS`, exposes the current theme as runtime CSS vars, and builds the selectable theme registry. If a theme file has a `label:` field, that becomes the friendly selector label; otherwise the filename stem is humanized. The registry keeps the stem as the persisted theme name, but also exposes the filename so `default_theme` can be written as a full `*.yaml` path fragment in config. Theme values are passed through as literal CSS strings, so `var(--...)` references and other CSS functions survive the YAML load unchanged and resolve in the browser.
-4. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so `styles.css` can use `var(--name)` everywhere.
+4. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so the ordered stylesheet set (via `styles.css`) can use `var(--name)` everywhere.
 5. `app/templates/theme_vars_script.html` publishes the same resolved values plus the registry as `window.ThemeRegistry` and `window.ThemeCssVars` so browser-side theme selection and export helpers can build downloadable HTML without a duplicate hardcoded palette.
 6. `app/app.py` exposes `/themes` so the frontend and tests can inspect the available registry.
 7. `app/static/js/app.js` exposes the theme helpers and `app/static/js/controller.js` applies the selected theme on the fly via the dedicated theme selector modal preview cards, updates cookies/localStorage, and keeps the shell chrome consistent while switching.
@@ -711,10 +711,10 @@ Tests live in `tests/py/` at the repo root (not inside `app/`). `conftest.py` `c
 
 Current totals:
 
-- `pytest`: 785
-- `vitest`: 289
-- `playwright`: 138
-- total: 1,212
+- `pytest`: 789
+- `vitest`: 292
+- `playwright`: 139
+- total: 1,220
 
 ### Testing Architecture
 
@@ -751,7 +751,7 @@ Current totals:
 
 - A live output-tail helper regression in `tabs.test.js` now asserts that the per-tab jump-to-live / jump-to-bottom control appears when follow-output is paused, updates its label when the stream stops, and returns the output to the live tail when clicked. The helper button is styled with an explicit `[hidden] { display: none !important; }` rule so the author-defined `inline-flex` display never overrides its hidden state in browsers.
 - A desktop output-selection shortcut regression in `app.test.js` now asserts that `ArrowUp`, `ArrowDown`, `Enter`, and `Ctrl+R` are replayed through the prompt after transcript text is highlighted, so output selection no longer eats history, submit, or reverse-search shortcuts just because focus left the composer.
-- Playwright now carries browser-level checks for two high-risk surfaces that were previously only covered indirectly: the live output-tail helper (`output.spec.js`) and the transcript-selection shortcut replay path (`shortcuts.spec.js`). That keeps real scroll geometry, focus transfer, and keyboard dispatch in the regression net instead of relying only on jsdom.
+- Playwright now carries browser-level checks for three high-risk surfaces that were previously only covered indirectly: the live output-tail helper (`output.spec.js`), the transcript-selection shortcut replay path (`shortcuts.spec.js`), and the README hero screenshot capture (`readme-screenshot.spec.js`). That keeps real scroll geometry, focus transfer, keyboard dispatch, and the shipped documentation image in the regression net instead of relying only on jsdom or a manual screenshot step.
 - `CONTENT_VIEWED` now covers the main content/config read routes with route/session context, `PAGE_LOAD` now records the resolved theme on the home page, `THEME_SELECTED` adds a DEBUG breadcrumb for theme resolution, and `HISTORY_VIEWED` keeps the plain `/history` list read visible so access patterns on the history drawer and startup content reads have the same structured visibility as run and snapshot permalink reads without adding extra noise to the write paths.
 
 - Search highlighting now walks text nodes and clones the line structure instead of rewriting serialized `innerHTML`, which keeps mixed-content lines and helper markup intact while preserving plain-text search, regex search, case sensitivity, and current-match navigation. A related initialisation fix in `ui_helpers.js` sets the search bar's inline `display` style to `none` on load so the `.u-hidden` utility class correctly hides it regardless of the `.search-bar { display: flex }` rule that follows it at equal specificity; `isSearchBarOpen()` was also tightened to check `=== 'flex'` instead of `!== 'none'`.

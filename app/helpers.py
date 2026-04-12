@@ -23,6 +23,8 @@ _UNTRUSTED_PROXY_LOGGED_FLAG = "_untrusted_proxy_logged"
 
 @lru_cache(maxsize=8)
 def _trusted_proxy_networks(cidr_values):
+    # Trusted proxy CIDRs change rarely, so cache the parsed networks and reuse
+    # them across requests instead of reparsing the same strings every time.
     networks = []
     for cidr in cidr_values:
         if not cidr:
@@ -46,6 +48,8 @@ def _peer_ip_is_trusted(peer_ip):
 
 
 def _resolve_forwarded_client_ip(peer_ip, forwarded_for):
+    # Walk the forwarded chain from right to left and return the first hop that
+    # is not itself another trusted proxy.
     if not forwarded_for:
         return peer_ip
     trusted_networks = _trusted_proxy_networks(tuple(CFG.get("trusted_proxy_cidrs", ())))
@@ -97,6 +101,8 @@ def get_client_ip():
     Only honors X-Forwarded-For when the direct peer IP is in the configured
     trusted-proxy list; otherwise falls back to the direct connection IP.
     """
+    # Keep all IP resolution rules in one place so logging hooks, rate limiting,
+    # and route handlers agree on the same client identity.
     peer_ip = request.remote_addr or ""
     forwarded_for = request.headers.get("X-Forwarded-For", "").strip()
     if _peer_ip_is_trusted(peer_ip):

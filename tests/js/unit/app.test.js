@@ -2,6 +2,8 @@ import { readFileSync } from 'fs'
 import { resolve } from 'path'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
+// This harness recreates the browser-global environment expected by the classic
+// script bundle so app.js can be tested without loading the full page.
 async function loadAppFns({
   theme = null,
   themeRegistry = null,
@@ -56,9 +58,6 @@ async function loadAppFns({
     <button id="hist-del-confirm"></button>
     <button id="kill-cancel"></button>
     <button id="kill-confirm"></button>
-    <div id="version-label"></div>
-    <div id="motd"></div>
-    <div id="motd-wrap"></div>
     <div id="mobile-shell" aria-hidden="true">
       <div id="mobile-shell-chrome"></div>
       <div id="mobile-shell-transcript"></div>
@@ -126,6 +125,7 @@ async function loadAppFns({
           <button id="search-prev"></button>
           <button id="search-next"></button>
         </div>
+        <button id="search-close-btn"></button>
       </div>
       <div id="tab-panels"></div>
     <div id="faq-limits-text"></div>
@@ -171,6 +171,7 @@ async function loadAppFns({
           app_name: 'darklab shell',
           prompt_prefix: 'anon@darklab:~$',
           version: '9.9',
+          project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
           default_theme: 'darklab_obsidian.yaml',
           motd: '',
           command_timeout_seconds: 0,
@@ -213,6 +214,7 @@ async function loadAppFns({
     killConfirmBtn: document.getElementById('kill-confirm'),
     searchPrevBtn: document.getElementById('search-prev'),
     searchNextBtn: document.getElementById('search-next'),
+    searchCloseBtn: document.getElementById('search-close-btn'),
     optionsTsSelect: document.getElementById('options-ts-select'),
     optionsLnToggle: document.getElementById('options-ln-toggle'),
     themeSelect: document.getElementById('theme-select'),
@@ -223,9 +225,6 @@ async function loadAppFns({
     faqBody: document.querySelector('.faq-body'),
     faqLimitsText: document.getElementById('faq-limits-text'),
     faqAllowedText: document.getElementById('faq-allowed-text'),
-    versionLabel: document.getElementById('version-label'),
-    motd: document.getElementById('motd'),
-    motdWrap: document.getElementById('motd-wrap'),
     status: document.getElementById('status'),
     histRow: document.getElementById('history-row'),
     tabsBar: document.getElementById('tabs-bar'),
@@ -929,9 +928,6 @@ describe('app helpers', () => {
       <button id="hist-del-confirm"></button>
       <button id="kill-cancel"></button>
       <button id="kill-confirm"></button>
-      <div id="version-label"></div>
-      <div id="motd"></div>
-      <div id="motd-wrap"></div>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
       <div id="mobile-menu">
@@ -1553,12 +1549,27 @@ describe('app helpers', () => {
     restoreViewport()
   })
 
-  it('populates the version label from the server config', async () => {
+  it('sets the document title from the server config', async () => {
     await loadAppFns()
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(document.getElementById('version-label').textContent).toBe('v9.9 · real-time')
+    expect(document.title).toBe('darklab shell')
+  })
+
+  it('updates existing terminal-wordmark elements with app name and version after config loads', async () => {
+    // loadAppFns resets document.body.innerHTML internally, so the wordmark must be
+    // injected after setup but before the async config handler drains.
+    await loadAppFns()
+    const wordmark = document.createElement('a')
+    wordmark.className = 'terminal-wordmark'
+    wordmark.href = '#'
+    document.body.appendChild(wordmark)
+
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(wordmark.textContent).toBe('darklab shell v9.9')
+    expect(wordmark.getAttribute('href')).toBe('https://gitlab.com/darklab.sh/darklab-shell#darklab-shell')
   })
 
   it('keeps the mobile run button visible after the keyboard closes', async () => {
@@ -1635,7 +1646,7 @@ describe('app helpers', () => {
   })
 
   it('keeps the mobile composer host free of keyboard-height spacing in the simplified shell', () => {
-    const css = readFileSync(resolve(process.cwd(), 'app/static/css/styles.css'), 'utf8')
+    const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
     const match = css.match(/body\.mobile-terminal-mode #mobile-composer-host\s*\{([\s\S]*?)\}/)
 
     expect(match).not.toBeNull()
@@ -1643,7 +1654,7 @@ describe('app helpers', () => {
   })
 
   it('keeps the themed mobile composer surfaces free of hard-coded dark colors', () => {
-    const css = readFileSync(resolve(process.cwd(), 'app/static/css/styles.css'), 'utf8')
+    const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
     const shellMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer\s*\{([\s\S]*?)\}/)
     const composerMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer #mobile-composer\s*\{([\s\S]*?)\}/)
 

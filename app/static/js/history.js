@@ -327,6 +327,8 @@ function _setHistoryLoadState(loading) {
 }
 
 function refreshHistoryPanel() {
+  // The panel is populated on demand so we always fetch the latest persisted
+  // history instead of assuming the in-memory tab state is authoritative.
   apiFetch('/history').then(r => r.json()).then(data => {
     historyList.replaceChildren();
     if (!data.runs.length) {
@@ -464,6 +466,8 @@ function _hideHistSearchDropdown() {
 }
 
 function _renderHistSearch() {
+  // Reverse-i-search intentionally mirrors shell behavior: current query at the
+  // top, most relevant match preselected, and wraparound keyboard navigation.
   if (!histSearchDropdown) return;
   const matches = _histSearchMatches();
   histSearchDropdown.replaceChildren();

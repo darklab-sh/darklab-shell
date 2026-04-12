@@ -171,6 +171,15 @@ test.describe('output follow helper', () => {
       updateOutputFollowButton(activeTabId)
     })
 
+    await page.waitForFunction(() => {
+      const tab = getTab(activeTabId)
+      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+      return !!tab
+        && tab.st === 'running'
+        && !!btn
+        && !btn.hidden
+        && btn.textContent === 'jump to live'
+    })
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to live')
 
@@ -190,6 +199,15 @@ test.describe('output follow helper', () => {
       updateOutputFollowButton(activeTabId)
     })
 
+    await page.waitForFunction(() => {
+      const tab = getTab(activeTabId)
+      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+      return !!tab
+        && tab.st === 'idle'
+        && !!btn
+        && !btn.hidden
+        && btn.textContent === 'jump to bottom'
+    })
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to bottom')
   })

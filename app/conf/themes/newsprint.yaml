@@ -2,6 +2,7 @@
 # Neutral grayscale paper with restrained cool accents.
 
 label: "Newsprint"
+color_scheme: light
 group: "Neutral Light"
 sort: 100
 
@@ -29,7 +30,10 @@ terminal_bar_bg: "#dfdfd7"
 terminal_bar_border: "#c8c8bf"
 terminal_actions_bg: "rgba(66, 68, 70, 0.02)"
 terminal_wrap_border: "rgba(66, 68, 70, 0.22)"
-terminal_wrap_shadow: "rgba(66, 68, 70, 0.10)"
+terminal_wrap_shadow: "rgba(66, 68, 70, 0.17)"
+window_btn_close: "color-mix(in srgb, var(--red) 62%, var(--surface))"
+window_btn_minimize: "color-mix(in srgb, var(--amber) 62%, var(--surface))"
+window_btn_maximize: "color-mix(in srgb, var(--green) 62%, var(--surface))"
 
 toolbar_button_bg: "#e6e6de"
 toolbar_button_border: "#cecec5"
@@ -49,7 +53,6 @@ chip_hover_border: "#a4a8aa"
 chip_hover_text: "#171a1b"
 chip_overflow_text: "#4e6f91"
 
-tabs_bar_bg: "#d6d6cf"
 tabs_bar_scrollbar_track: "rgba(66, 68, 70, 0.08)"
 tabs_bar_scrollbar_thumb: "#989d9f"
 tabs_bar_scrollbar_thumb_hover: "#767c7f"
@@ -76,9 +79,11 @@ tab_touch_drag_text_shadow: "0 0 10px rgba(85,111,143,0.10)"
 tab_drop_shadow: "0 0 10px rgba(85,111,143,0.16)"
 
 history_panel_bg: "#e9e9e2"
+history_panel_shadow: "rgba(66, 68, 70, 0.18)"
 history_entry_hover_bg: "rgba(85, 111, 143, 0.06)"
 history_load_overlay_bg: "rgba(23, 24, 25, 0.72)"
 history_load_modal_bg: "#fbfbf8"
+history_load_modal_border: "rgba(66, 68, 70, 0.14)"
 history_load_modal_shadow: "rgba(66, 68, 70, 0.16)"
 
 faq_modal_bg: "#fbfbf8"
@@ -93,6 +98,7 @@ dropdown_up_bg: "#f0f0ec"
 dropdown_up_border: "rgba(85, 111, 143, 0.26)"
 dropdown_up_shadow: "rgba(66, 68, 70, 0.12)"
 dropdown_item_text: "#52585c"
+overlay_backdrop_bg: "rgba(23, 24, 25, 0.72)"
 
 faq_code_bg: "#ecece6"
 allowed_chip_bg: "#ecece6"

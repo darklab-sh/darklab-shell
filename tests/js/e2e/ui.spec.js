@@ -22,8 +22,8 @@ test.describe('theme selector', () => {
     await page.locator('#theme-select [data-theme-name="charcoal_steel"]').click()
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'charcoal_steel')
 
-    await page.locator('#theme-select [data-theme-name="obsidian_cobalt"]').click()
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'obsidian_cobalt')
+    await page.locator('#theme-select [data-theme-name="cobalt_obsidian"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'cobalt_obsidian')
   })
 
   test('falls back to the configured default theme when localStorage references a missing theme', async ({ page }) => {

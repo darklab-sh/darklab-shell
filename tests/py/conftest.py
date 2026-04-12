@@ -11,6 +11,8 @@ sys.path.insert(0, APP_DIR)
 
 
 def pytest_configure(config):
+    # The container smoke test writes its own XML report because it is usually
+    # run in isolation from the rest of the suite and benefits from a stable path.
     if getattr(config.option, "xmlpath", None):
         return
     if not any("test_container_smoke_test.py" in str(arg) for arg in getattr(config, "args", [])):

@@ -22,6 +22,8 @@ DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
 
 
 def db_connect():
+    # WAL mode lets history/permalink reads proceed while active runs are still
+    # being written, which keeps the UI responsive under load.
     conn = sqlite3.connect(DB_PATH, timeout=10)
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode=WAL")
@@ -116,6 +118,8 @@ def _migrate_schema(conn):
 
 
 def delete_run_artifacts(conn, run_ids):
+    # The database row is the source of truth; once it is gone, best-effort file
+    # cleanup can run without leaving dangling metadata behind.
     ids = [run_id for run_id in run_ids if run_id]
     if not ids:
         return

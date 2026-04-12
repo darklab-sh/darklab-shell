@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { makeTestIp, waitForHistoryRuns } from './helpers.js'
 
 const MOBILE = { width: 375, height: 812 }
 const LONG_CMD = 'ping -c 4 8.8.8.8'
@@ -6,6 +7,15 @@ const LONG_CMD = 'ping -c 4 8.8.8.8'
 // Use a full mobile-like emulation so the mobile shell code sees the same
 // viewport and touch signals as real mobile browsers.
 test.use({ hasTouch: true, isMobile: true })
+
+// Browser specs share the same backend rate limiter, so derive a stable test-
+// scoped IP from the file/title instead of reusing one bucket for the suite.
+function testScopedIp(testInfo, baseOffset = 0) {
+  const key = `${testInfo.file}:${testInfo.title}`
+  let sum = 0
+  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
+  return makeTestIp(baseOffset + sum)
+}
 
 async function runCommandMobile(page, cmd) {
   await page.locator('#mobile-cmd').fill(cmd)
@@ -29,7 +39,8 @@ async function openMobileKeyboard(page) {
 }
 
 test.describe('mobile menu', () => {
-  test.beforeEach(async ({ page }) => {
+  test.beforeEach(async ({ page }, testInfo) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 101) })
     await page.setViewportSize(MOBILE)
     await page.goto('/')
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
@@ -319,6 +330,7 @@ test.describe('mobile menu', () => {
     for (const command of commands) {
       await runCommandMobile(page, command)
     }
+    await waitForHistoryRuns(page, commands.length)
 
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')

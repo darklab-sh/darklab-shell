@@ -7,7 +7,8 @@ if (!SESSION_ID) {
   localStorage.setItem('session_id', SESSION_ID);
 }
 
-// Wrapper around fetch that always includes the session ID header
+// Wrapper around fetch that always includes the session ID header so every API
+// request stays scoped to the same anonymous browser session.
 function apiFetch(url, options = {}) {
   options.headers = Object.assign({}, options.headers || {}, {
     'X-Session-ID': SESSION_ID

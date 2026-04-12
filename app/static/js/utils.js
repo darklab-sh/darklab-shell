@@ -9,7 +9,8 @@ function escapeRegex(s) {
 }
 
 // Render a small Markdown subset for MOTD: **bold**, `code`, [text](url), newlines.
-// escapeHtml is applied first to prevent XSS, then patterns are applied.
+// escapeHtml is applied first to prevent XSS, then patterns are applied so the
+// operator notice stays useful without needing a full Markdown parser.
 function renderMotd(text) {
   return escapeHtml(text)
     .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
@@ -62,6 +63,8 @@ async function copyTextToClipboard(text) {
 }
 
 function showToast(msg, tone = 'success') {
+  // Toasts are transient UI feedback only; avoid stacking timers by resetting
+  // the hide timer whenever a new message reuses the same element.
   const toast = document.getElementById('permalink-toast');
   const isError = tone === 'error' || /^(failed|unable|error|\[.*error\])/i.test(String(msg || ''));
   toast.textContent = msg;

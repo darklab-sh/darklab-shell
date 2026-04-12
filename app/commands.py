@@ -298,11 +298,15 @@ def render_faq_markup(text):
 
 
 def _local_overlay_path(path):
+    # Every shipped config asset can be overridden by a sibling *.local.* file
+    # so operators can customize behavior without editing tracked defaults.
     root, ext = os.path.splitext(path)
     return f"{root}.local{ext}"
 
 
 def _load_text_lines(path):
+    # Treat these config files as simple line lists and discard comments/blanks
+    # before higher-level loaders consume them.
     lines = []
     for candidate in (path, _local_overlay_path(path)):
         if not os.path.exists(candidate):
@@ -358,6 +362,7 @@ def load_allowed_commands():
     priority over allow prefixes — use them to block specific flags on an allowed command.
     Allow prefixes are normalized to lowercase for case-insensitive matching; deny prefixes
     preserve their original flag casing so entries like !curl -K do not block curl -k."""
+    # Returning (None, []) is the app-wide sentinel for unrestricted mode.
     if not os.path.exists(ALLOWED_COMMANDS_FILE):
         return None, []
     prefixes = []
@@ -508,6 +513,8 @@ def load_autocomplete():
 
 def split_command_argv(command: str) -> list[str]:
     """Split a shell-like command string into argv tokens for simple root-command inspection."""
+    # Validation works on argv-style tokens only. The app never invokes a shell
+    # parser here because that would blur the security model.
     try:
         return shlex.split(command)
     except ValueError:
@@ -642,6 +649,8 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
 def rewrite_command(command: str) -> tuple[str, str | None]:
     """Rewrite commands that need a TTY or specific flags into a safe non-interactive equivalent.
     Returns (rewritten_command, notice_message_or_None)."""
+    # Runtime rewrites are kept explicit and side-effect free. The optional note
+    # explains to users/tests why the command was adjusted.
     stripped = command.strip()
 
     # mtr: force --report-wide mode if not already using a report flag

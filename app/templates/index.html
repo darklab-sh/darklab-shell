@@ -15,15 +15,24 @@
 </head>
 <body data-theme="{{ current_theme.name }}">
 
+<svg xmlns="http://www.w3.org/2000/svg" width="0" height="0" aria-hidden="true" style="position:absolute;pointer-events:none">
+  <defs>
+    <filter id="dot-crisp">
+      <feComponentTransfer>
+        <feFuncA type="discrete" tableValues="0 1"/>
+      </feComponentTransfer>
+    </filter>
+  </defs>
+</svg>
+
 <header>
-  <h1>{{ app_name }}</h1>
-  <span class="version" id="version-label">real-time</span>
+  <h1><span id="header-title">{{ app_name }}</span></h1>
   <div class="header-btns" id="header-btns">
     <button id="hist-btn" title="Run history">⧖ history</button>
     <button id="options-btn" title="Display and preference options">≡ options</button>
     <button id="theme-btn" title="Theme selector">◑ theme</button>
     <button id="faq-btn">? FAQ</button>
-    <a id="diag-btn" href="/diag" title="Operator diagnostics" class="u-hidden">⊕ diag</a>
+    <a id="diag-btn" href="/diag" title="Operator diagnostics" class="u-hidden" target="_blank" rel="noopener noreferrer">⊕ diag</a>
   </div>
   <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
 </header>
@@ -62,12 +71,11 @@
       <button data-action="theme">◑ theme</button>
       <button data-action="faq">? FAQ</button>
       <button data-action="diag" class="u-hidden">⊕ diag</button>
+      <a class="mobile-menu-wordmark" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">
+        GitLab: {{ app_name }}{% if version %} v{{ version }}{% endif %}
+      </a>
     </div>
   </div>
-</div>
-
-<div id="motd-wrap" class="u-hidden motd-wrap">
-  <span id="motd" class="motd-pill"></span>
 </div>
 
 <div id="history-row" class="history-row u-hidden">
@@ -86,7 +94,7 @@
     </div>
     <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
     <div class="terminal-bar-btns">
-      <button id="search-toggle-btn" title="Search output (Ctrl+F)">⌕ search</button>
+      <button id="search-toggle-btn" title="Search output (Ctrl+F)">search</button>
       <button id="ln-btn" title="Toggle line numbers">line numbers: off</button>
       <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
     </div>
@@ -104,6 +112,7 @@
       <button id="search-prev">↑</button>
       <button id="search-next">↓</button>
     </div>
+    <button id="search-close-btn" class="search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
   </div>
   <div id="tab-panels">
     <!-- panels injected here -->

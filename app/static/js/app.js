@@ -2,6 +2,9 @@
 // Shared helpers for keyboard shortcuts, overlays, and mobile-layout glue.
 
 function syncShellPrompt() {
+  // The visible prompt is rendered from shared composer state instead of from
+  // the hidden input directly, so selection/caret state stays correct across
+  // desktop/mobile and while welcome owns the tab.
   if (typeof shellPromptText === 'undefined' || !shellPromptText) return;
   const composer = typeof getComposerState === 'function' ? getComposerState() : null;
   const fallbackInput = typeof cmdInput !== 'undefined' && cmdInput ? cmdInput : null;
@@ -88,6 +91,8 @@ function focusCommandInputFromGesture({ preventScroll = true } = {}) {
 }
 
 function useMobileTerminalViewportMode() {
+  // Mobile mode depends on both width and input modality. A narrow desktop
+  // browser window should not automatically switch into the mobile shell.
   if (typeof window === 'undefined') return false;
   const touchPoints = typeof navigator !== 'undefined' ? (navigator.maxTouchPoints || 0) : 0;
   const hasTouch = touchPoints > 0
@@ -168,6 +173,8 @@ function _getMobileUiLayoutRefs() {
   };
 }
 
+// These refs let the same DOM nodes move between the desktop document flow and
+// the simplified mobile shell without duplicating markup or event handlers.
 const _mobileUiLayoutRefs = _getMobileUiLayoutRefs();
 const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
@@ -270,6 +277,8 @@ function syncMobileShellOverlayLayout(useMobile, mobileShellOverlaysMount) {
 }
 
 function syncMobileShellLayout(mobileMode) {
+  // The mobile shell is mostly a re-parenting operation: move the same chrome,
+  // transcript, and overlays into mobile mounts instead of rendering variants.
   if (typeof document === 'undefined') return;
   const useMobile = !!mobileMode;
   const mobileShellRefs = _mobileUiLayoutRefs && _mobileUiLayoutRefs.shell;
@@ -455,6 +464,8 @@ function _closeMajorOverlays() {
 }
 
 function openOptions() {
+  // Opening one major overlay should implicitly close the others so mobile and
+  // desktop never stack multiple drawers/modals on top of each other.
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   syncOptionsControls();
@@ -1004,6 +1015,8 @@ function findWordBoundaryRight(value, index) {
 
 // ── Theme ──
 function _getThemeRegistry() {
+  // Prefer the runtime /themes payload when present, then fall back to the
+  // bootstrapped globals so the selector still works during partial failures.
   if (typeof window !== 'undefined' && window.ThemeRegistry && typeof window.ThemeRegistry === 'object') {
     return window.ThemeRegistry;
   }
@@ -1195,7 +1208,8 @@ function renderThemeSelectionOptions() {
     return counts;
   }, {});
   const maxColumns = Math.max(1, ...Object.values(groupCounts));
-  themeSelect.style.setProperty('--theme-picker-columns', String(maxColumns));
+  const desktopColumns = Math.max(1, Math.min(maxColumns, 2));
+  themeSelect.style.setProperty('--theme-picker-columns', String(desktopColumns));
   const mobileColumns = Math.max(1, Math.min(maxColumns, 2));
   themeSelect.style.setProperty('--theme-picker-columns-mobile', String(mobileColumns));
   let currentGroup = null;
@@ -1235,6 +1249,8 @@ function syncThemeSelectionControls() {
 }
 
 function applyThemeSelection(themeName, persist = true) {
+  // Theme preview uses the same resolved-entry path as persisted selection, so
+  // the drawer/modal never shows a palette the runtime cannot actually apply.
   const entry = _resolveThemeEntry(themeName);
   if (!entry) return;
   if (document.body) document.body.dataset.theme = entry.name;
@@ -1256,6 +1272,8 @@ const _tsModes  = ['off', 'elapsed', 'clock'];
 const _tsLabels = { off: 'timestamps: off', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
 
 function _setTsMode(mode) {
+  // Timestamp mode is expressed via body classes so both active transcript
+  // rendering and exported/permalink views can share the same styling model.
   tsMode = mode;
   document.body.classList.remove('ts-elapsed', 'ts-clock');
   if (mode === 'elapsed') document.body.classList.add('ts-elapsed');
@@ -1404,6 +1422,8 @@ function renderAllowedCommandsFaq(data) {
 }
 
 function renderFaqItems(items) {
+  // FAQ content is backend-driven so operators can extend it, but chips and
+  // special UI sections are still wired client-side after the HTML is inserted.
   if (!faqBody) return;
   faqBody.innerHTML = '';
   (items || []).forEach(item => {

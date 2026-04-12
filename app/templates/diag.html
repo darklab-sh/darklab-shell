@@ -21,6 +21,57 @@ body.diag-page {
 }
 body.diag-page::before { display: none; }
 
+.diag-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+  padding: 16px 20px;
+}
+
+.diag-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diag-header-title {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  width: fit-content;
+  margin: 0;
+  padding: 0 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--green) 2%, transparent), color-mix(in srgb, var(--green) 0.6%, transparent));
+  border: 1px solid color-mix(in srgb, var(--green-dim) 22%, var(--border));
+  border-radius: 4px;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 1.5%, transparent);
+}
+
+.diag-header-meta {
+  padding-left: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.diag-back-btn {
+  display: none;
+  flex: 0 0 auto;
+}
+
+.diag-mobile-divider {
+  display: none;
+}
+
 .diag-main {
   display: grid;
   /* 4 equal columns for the top cards; Stats/Config/Tools break out full-width */
@@ -40,8 +91,8 @@ body.diag-page::before { display: none; }
 
 /* ── Section card ──────────────────────────────────────────────────────────── */
 .diag-section {
-  background: var(--surface);
-  border: 1px solid var(--border);
+  background: var(--theme-panel-bg);
+  border: 1px solid var(--theme-panel-border);
   border-radius: 4px;
   overflow: hidden;
   min-width: 0;
@@ -61,8 +112,8 @@ body.diag-page::before { display: none; }
   text-transform: uppercase;
   color: var(--muted);
   padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg);
+  border-bottom: 1px solid var(--theme-terminal-bar-border);
+  background: var(--theme-terminal-bar-bg);
   display: flex;
   align-items: baseline;
   gap: 8px;
@@ -79,7 +130,7 @@ body.diag-page::before { display: none; }
   border-collapse: collapse;
   font-size: 13px;
 }
-.diag-table tr + tr td { border-top: 1px solid var(--border); }
+.diag-table tr + tr td { border-top: 1px solid var(--theme-panel-border); }
 .diag-table td {
   padding: 8px 14px;
   vertical-align: middle;
@@ -124,7 +175,7 @@ body.diag-page::before { display: none; }
   grid-template-columns: 1fr 1fr;
 }
 .diag-config-grid .diag-table:first-child {
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--theme-panel-border);
 }
 
 /* ── Tools chip grid ────────────────────────────────────────────────────────── */
@@ -132,7 +183,7 @@ body.diag-page::before { display: none; }
   padding: 14px 14px 10px;
 }
 .diag-tools-block + .diag-tools-block {
-  border-top: 1px solid var(--border);
+  border-top: 1px solid var(--theme-panel-border);
   padding-top: 12px;
 }
 .diag-tools-sublabel {
@@ -177,14 +228,14 @@ body.diag-page::before { display: none; }
   display: grid;
   grid-template-columns: 1fr 1fr;
 }
-.diag-cmd-cols > * + * { border-left: 1px solid var(--border); }
+.diag-cmd-cols > * + * { border-left: 1px solid var(--theme-panel-border); }
 .diag-cmd-col-label {
   font-size: 9px;
   letter-spacing: 2px;
   text-transform: uppercase;
   color: var(--muted);
   padding: 8px 14px 6px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--theme-panel-border);
 }
 .diag-cmd-cell {
   max-width: 0;
@@ -206,6 +257,55 @@ body.diag-page::before { display: none; }
 
 /* ── Responsive collapse ────────────────────────────────────────────────────── */
 @media (max-width: 760px) {
+  body.diag-page .diag-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: start;
+    gap: 12px;
+    border-bottom: none;
+    padding: 14px 20px 8px;
+  }
+  body.diag-page .diag-header-copy {
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    flex: 1 1 auto;
+    gap: 6px;
+  }
+  body.diag-page .diag-header-title {
+    display: inline-flex;
+    align-items: center;
+    min-height: 34px;
+    width: fit-content;
+    padding: 0 12px;
+    font-size: 19px;
+    letter-spacing: 1.1px;
+  }
+  body.diag-page .diag-header-meta {
+    display: block;
+    padding: 0 0 0 2px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 1.6px;
+    line-height: 1.15;
+    text-transform: uppercase;
+    opacity: 0.72;
+    white-space: normal;
+  }
+  body.diag-page .diag-back-btn {
+    display: inline-flex;
+    align-self: start;
+    flex: 0 0 auto;
+  }
+  body.diag-page .diag-mobile-divider {
+    display: none;
+  }
+  body.diag-page .diag-main {
+    border-top: 1px solid color-mix(in srgb, var(--theme-terminal-bar-border) 82%, var(--text) 18%);
+    margin-top: 10px;
+    padding-top: 12px;
+  }
   .diag-main {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
@@ -217,23 +317,22 @@ body.diag-page::before { display: none; }
       "tools  tools";
   }
   .diag-config-grid { grid-template-columns: 1fr; }
-  .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--border); }
+  .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--theme-panel-border); }
   .diag-cmd-cols { grid-template-columns: 1fr; }
-  .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--border); }
+  .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--theme-panel-border); }
 }
 </style>
 </head>
 <body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
 
-<header class="permalink-header">
-  <div class="permalink-header-copy">
-    <h1 class="permalink-title">{{ app_name }}</h1>
-    <span class="permalink-meta">OPERATOR DIAGNOSTICS</span>
+<header class="permalink-header diag-header">
+  <div class="permalink-header-copy diag-header-copy">
+    <h1 class="diag-header-title">{{ app_name }}</h1>
+    <span class="diag-header-meta">operator diagnostics</span>
   </div>
-  <div class="permalink-actions">
-    <a href="/" class="term-action-btn">← shell</a>
-  </div>
+  <a href="/" class="term-action-btn diag-back-btn">back to shell</a>
 </header>
+<div class="diag-mobile-divider" aria-hidden="true"></div>
 
 <main class="diag-main">
 

@@ -33,7 +33,109 @@ function closeFaq() {
   refocusTerminalInput();
 }
 
+function ensureMobileSheetHandle(sheet) {
+  if (!sheet) return null;
+  let handle = sheet.querySelector(':scope > .mobile-sheet-handle');
+  if (handle) return handle;
+  handle = document.createElement('div');
+  handle.className = 'mobile-sheet-handle';
+  handle.setAttribute('aria-hidden', 'true');
+  sheet.insertBefore(handle, sheet.firstChild || null);
+  return handle;
+}
+
+function bindMobileSheetDragClose(sheet, onClose, { threshold = 72 } = {}) {
+  // Bottom sheets should only drag from the visible handle area; otherwise
+  // normal scrolling and button interaction inside the sheet would feel broken.
+  if (!sheet || typeof onClose !== 'function' || sheet.dataset.mobileSheetDragBound === '1') return;
+  sheet.dataset.mobileSheetDragBound = '1';
+  const handle = ensureMobileSheetHandle(sheet);
+  if (!handle) return;
+
+  let drag = null;
+
+  const clearSheetDragStyles = () => {
+    sheet.style.removeProperty('transform');
+    sheet.style.removeProperty('transition');
+    sheet.style.removeProperty('will-change');
+    sheet.style.removeProperty('opacity');
+  };
+
+  const finishDrag = (pointerId, shouldClose) => {
+    if (!drag || drag.pointerId !== pointerId) return;
+    const dy = drag.dy;
+    drag = null;
+    try {
+      sheet.releasePointerCapture(pointerId);
+    } catch (_) {}
+
+    if (!shouldClose) {
+      sheet.style.transition = 'transform 160ms ease';
+      sheet.style.transform = 'translateY(0)';
+      setTimeout(clearSheetDragStyles, 180);
+      return;
+    }
+
+    sheet.style.transition = 'transform 180ms ease, opacity 180ms ease';
+    sheet.style.transform = `translateY(${Math.max(sheet.getBoundingClientRect().height, dy)}px)`;
+    sheet.style.opacity = '0.98';
+    setTimeout(() => {
+      clearSheetDragStyles();
+      onClose();
+    }, 180);
+  };
+
+  handle.addEventListener('pointerdown', e => {
+    if (typeof useMobileTerminalViewportMode === 'function' && !useMobileTerminalViewportMode()) return;
+    if (typeof e.button === 'number' && e.button !== 0) return;
+    drag = { pointerId: e.pointerId, startY: e.clientY, dy: 0 };
+    sheet.style.willChange = 'transform';
+    sheet.style.transition = 'none';
+    try {
+      sheet.setPointerCapture(e.pointerId);
+    } catch (_) {}
+  });
+
+  sheet.addEventListener('pointermove', e => {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    const dy = Math.max(0, e.clientY - drag.startY);
+    drag.dy = dy;
+    if (dy <= 0) return;
+    e.preventDefault();
+    sheet.style.transform = `translateY(${dy}px)`;
+  });
+
+  sheet.addEventListener('pointerup', e => {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    finishDrag(e.pointerId, drag.dy >= threshold);
+  });
+
+  sheet.addEventListener('pointercancel', e => {
+    if (!drag || drag.pointerId !== e.pointerId) return;
+    finishDrag(e.pointerId, false);
+  });
+}
+
+function setupMobileSheetDragClose() {
+  const faqModal = document.getElementById('faq-modal');
+  const optionsModal = document.getElementById('options-modal');
+  const killModal = document.getElementById('kill-modal');
+  const histDelModal = document.getElementById('hist-del-modal');
+
+  bindMobileSheetDragClose(mobileMenu, () => hideMobileMenu());
+  bindMobileSheetDragClose(historyPanel, () => hideHistoryPanel());
+  bindMobileSheetDragClose(faqModal, () => closeFaq());
+  bindMobileSheetDragClose(optionsModal, () => closeOptions());
+  bindMobileSheetDragClose(killModal, () => closeKillOverlay());
+  bindMobileSheetDragClose(histDelModal, () => {
+    hideHistoryDeleteOverlay();
+    pendingHistAction = null;
+  });
+}
+
 function setupMobileComposer() {
+  // The mobile composer reuses the same shared input state as desktop, but its
+  // focus/keyboard handling has to be managed separately for mobile browsers.
   const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
   const mobileInput = composerInputs.mobile || null;
   if (!mobileInput || !mobileRunBtn) return;
@@ -59,11 +161,16 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   APP_CONFIG = cfg;
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
-  const verEl = versionLabel;
-  if (verEl) verEl.textContent = cfg.version ? `v${cfg.version} · real-time` : 'real-time';
-  if (cfg.motd) {
-    if (motd && motdWrap) { motd.innerHTML = renderMotd(cfg.motd); showMotdWrap(); }
-  }
+  const wmVersion = cfg.version ? ` v${cfg.version}` : '';
+  const wmText = `${cfg.app_name || 'darklab shell'}${wmVersion}`;
+  document.querySelectorAll('.terminal-wordmark').forEach(el => {
+    el.textContent = wmText;
+    if (cfg.project_readme) el.href = cfg.project_readme;
+  });
+  document.querySelectorAll('.mobile-menu-wordmark').forEach(el => {
+    el.textContent = `GitLab: ${wmText}`;
+    if (cfg.project_readme) el.href = cfg.project_readme;
+  });
   syncThemeSelectionControls();
   updateNewTabBtn();
   renderFaqLimits(cfg);
@@ -184,6 +291,7 @@ setTimeout(() => {
   refocusTerminalInput();
 }, 0);
 syncMobileViewportState();
+setupMobileSheetDragClose();
 
 newTabBtn.addEventListener('click', () => {
   createShortcutTab();
@@ -205,6 +313,10 @@ searchToggleBtn.addEventListener('click', () => {
 searchInput.addEventListener('input', runSearch);
 searchPrevBtn.addEventListener('click', () => navigateSearch(-1));
 searchNextBtn.addEventListener('click', () => navigateSearch(1));
+searchCloseBtn?.addEventListener('click', () => {
+  hideSearchBar();
+  clearSearch();
+});
 searchInput.addEventListener('keydown', e => {
   if (e.key === 'Enter') navigateSearch(e.shiftKey ? -1 : 1);
   if (e.key === 'Escape') {
@@ -413,6 +525,8 @@ document.addEventListener('keydown', e => {
 });
 
 function _replayPromptShortcutAfterSelection(e) {
+  // If the user has selected terminal output text, re-dispatch prompt-oriented
+  // shortcuts so shell navigation still works after copy/select interactions.
   if (!cmdInput || document.activeElement === cmdInput) return false;
   if (isEditableTarget(e.target)) return false;
   const isCtrlR = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'r' || e.key === 'R');

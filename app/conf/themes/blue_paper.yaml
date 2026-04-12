@@ -5,6 +5,7 @@
 # or merge them through the normal config loader path.
 
 label: "Blue Paper"
+color_scheme: light
 group: "Cool Light"
 sort: 50
 
@@ -32,7 +33,10 @@ terminal_bar_bg: "#d9e5f1"
 terminal_bar_border: "#bfd0e2"
 terminal_actions_bg: "rgba(34, 58, 88, 0.02)"
 terminal_wrap_border: "rgba(34, 58, 88, 0.22)"
-terminal_wrap_shadow: "rgba(34, 58, 88, 0.12)"
+terminal_wrap_shadow: "rgba(34, 58, 88, 0.18)"
+window_btn_close: "color-mix(in srgb, var(--red) 62%, var(--surface))"
+window_btn_minimize: "color-mix(in srgb, var(--amber) 62%, var(--surface))"
+window_btn_maximize: "color-mix(in srgb, var(--green) 62%, var(--surface))"
 
 toolbar_button_bg: "#dbe8f4"
 toolbar_button_border: "#bfd0e2"
@@ -52,7 +56,6 @@ chip_hover_border: "#96abc2"
 chip_hover_text: "#102133"
 chip_overflow_text: "#2f5f97"
 
-tabs_bar_bg: "#c9d8e8"
 tabs_bar_scrollbar_track: "rgba(34, 58, 88, 0.08)"
 tabs_bar_scrollbar_thumb: "#8da4ba"
 tabs_bar_scrollbar_thumb_hover: "#6f86a0"
@@ -79,9 +82,11 @@ tab_touch_drag_text_shadow: "0 0 10px rgba(55,102,79,0.10)"
 tab_drop_shadow: "0 0 10px rgba(55,102,79,0.20)"
 
 history_panel_bg: "#deebf7"
+history_panel_shadow: "rgba(34, 58, 88, 0.22)"
 history_entry_hover_bg: "rgba(36, 91, 153, 0.06)"
 history_load_overlay_bg: "rgba(14, 24, 38, 0.72)"
 history_load_modal_bg: "#f8fbff"
+history_load_modal_border: "rgba(34, 58, 88, 0.14)"
 history_load_modal_shadow: "rgba(34, 58, 88, 0.16)"
 
 faq_modal_bg: "#f8fbff"
@@ -96,6 +101,7 @@ dropdown_up_bg: "#edf4fb"
 dropdown_up_border: "rgba(36, 91, 153, 0.28)"
 dropdown_up_shadow: "rgba(34, 58, 88, 0.14)"
 dropdown_item_text: "#4d5b6c"
+overlay_backdrop_bg: "rgba(14, 24, 38, 0.72)"
 
 faq_code_bg: "#e6eff7"
 allowed_chip_bg: "#e6eff7"

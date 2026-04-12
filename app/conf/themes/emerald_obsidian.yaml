@@ -1,69 +1,69 @@
-# darklab shell — Dark Theme: Charcoal Amber
-# ----------------------------------------------
-# A dark gray theme with amber signals and restrained contrast.
-label: Charcoal Amber
+# darklab shell — Dark Theme: Emerald Obsidian
+# ------------------------------------------------
+# A deep black-green variant with a vivid emerald accent.
+label: Emerald Obsidian
 color_scheme: dark
-group: Dark Neutral
-sort: 5
-bg: '#0f1011'
-surface: '#18191c'
-border: rgba(214, 166, 86, 0.14)
-border_bright: rgba(214, 166, 86, 0.28)
-text: '#ece7de'
-muted: '#91887d'
-green: '#e0a44d'
-green_dim: '#a47639'
-green_glow: rgba(224, 164, 77, 0.10)
-amber: '#ffcb77'
-red: '#de7062'
-blue: '#9db8d6'
+group: Dark Neon
+sort: 1
+bg: '#050905'
+surface: '#0d1410'
+border: rgba(72, 161, 110, 0.22)
+border_bright: rgba(72, 161, 110, 0.36)
+text: '#ddeae3'
+muted: '#99aaa1'
+green: '#35d07f'
+green_dim: '#2a7b50'
+green_glow: rgba(53, 208, 127, 0.12)
+amber: '#c9a04c'
+red: '#dd5e57'
+blue: '#62a6ff'
 terminal_font_size: 14px
 terminal_line_height: '1.65'
-prompt_line_text: '#f8f3e9'
-panel_bg: '#18191c'
-panel_alt_bg: '#111214'
-panel_border: rgba(214, 166, 86, 0.14)
-panel_shadow: rgba(176,164,146,0.11)
-terminal_bar_bg: '#0f1011'
-terminal_bar_border: '#23231f'
+prompt_line_text: '#eef6f0'
+panel_bg: '#0d1410'
+panel_alt_bg: '#090f0b'
+panel_border: rgba(72, 161, 110, 0.22)
+panel_shadow: rgba(170,170,170,0.11)
+terminal_bar_bg: '#050905'
+terminal_bar_border: '#243029'
 terminal_actions_bg: transparent
-terminal_wrap_border: rgba(214, 166, 86, 0.26)
-terminal_wrap_shadow: rgba(176,164,146,0.18)
+terminal_wrap_border: rgba(72, 161, 110, 0.36)
+terminal_wrap_shadow: rgba(156,188,170,0.18)
 window_btn_close: color-mix(in srgb, var(--red) 78%, var(--surface))
 window_btn_minimize: color-mix(in srgb, var(--amber) 78%, var(--surface))
 window_btn_maximize: color-mix(in srgb, var(--green) 78%, var(--surface))
 toolbar_button_bg: transparent
-toolbar_button_border: '#2c2720'
-toolbar_button_text: '#9a9288'
+toolbar_button_border: '#334139'
+toolbar_button_text: '#99aaa1'
 toolbar_button_hover_bg: transparent
-toolbar_button_hover_border: '#a47639'
-toolbar_button_hover_text: '#e0a44d'
-toolbar_button_active_bg: rgba(224,164,77,0.06)
-toolbar_button_active_border: '#a47639'
-toolbar_button_active_text: '#e0a44d'
+toolbar_button_hover_border: '#2a7b50'
+toolbar_button_hover_text: '#35d07f'
+toolbar_button_active_bg: rgba(53,208,127,0.06)
+toolbar_button_active_border: '#2a7b50'
+toolbar_button_active_text: '#35d07f'
 chip_bg: transparent
-chip_border: '#2c2720'
-chip_text: '#9a9288'
-chip_hover_bg: rgba(224,164,77,0.12)
-chip_hover_border: '#a47639'
-chip_hover_text: '#ece7de'
-chip_overflow_text: '#e0a44d'
+chip_border: '#334139'
+chip_text: '#99aaa1'
+chip_hover_bg: rgba(53,208,127,0.12)
+chip_hover_border: '#2a7b50'
+chip_hover_text: '#ddeae3'
+chip_overflow_text: '#35d07f'
 tabs_bar_scrollbar_track: rgba(255,255,255,0.05)
-tabs_bar_scrollbar_thumb: '#4e4639'
-tabs_bar_scrollbar_thumb_hover: '#685c4a'
+tabs_bar_scrollbar_thumb: '#586a60'
+tabs_bar_scrollbar_thumb_hover: '#73867b'
 tabs_scroll_btn_bg: transparent
-tabs_scroll_btn_border: '#23231f'
-tabs_scroll_btn_text: '#9a9288'
+tabs_scroll_btn_border: '#243029'
+tabs_scroll_btn_text: '#99aaa1'
 tabs_scroll_btn_hover_bg: transparent
-tabs_scroll_btn_hover_border: '#2c2720'
-tabs_scroll_btn_hover_text: '#ece7de'
+tabs_scroll_btn_hover_border: '#334139'
+tabs_scroll_btn_hover_text: '#ddeae3'
 tab_bg: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))
-tab_border: '#2c2720'
-tab_text: '#9a9288'
-tab_hover_text: '#ece7de'
-tab_active_bg: rgba(224,164,77,0.05)
-tab_active_border: rgba(224,164,77,0.34)
-tab_active_text: '#e0a44d'
+tab_border: '#334139'
+tab_text: '#99aaa1'
+tab_hover_text: '#ddeae3'
+tab_active_bg: rgba(53,208,127,0.05)
+tab_active_border: rgba(53,208,127,0.36)
+tab_active_text: '#35d07f'
 tab_active_shadow: none
 tab_close_bg: rgba(255,255,255,0.02)
 tab_close_border: rgba(255,255,255,0.06)
@@ -73,11 +73,11 @@ tab_close_hover_text: inherit
 tab_touch_drag_text_shadow: 0 0 10px color-mix(in srgb, var(--green) 14%, transparent)
 tab_drop_shadow: 0 0 10px color-mix(in srgb, var(--green) 45%, transparent)
 history_panel_bg: '#000000'
-history_panel_shadow: rgba(176,164,146,0.18)
-history_entry_hover_bg: rgba(224,164,77,0.12)
+history_panel_shadow: rgba(156,188,170,0.18)
+history_entry_hover_bg: rgba(53,208,127,0.12)
 history_load_overlay_bg: rgba(0,0,0,0.76)
 history_load_modal_bg: 'color-mix(in srgb, var(--surface) 88%, #000)'
-history_load_modal_border: rgba(214, 166, 86, 0.14)
+history_load_modal_border: rgba(72, 161, 110, 0.22)
 history_load_modal_shadow: rgba(0,0,0,0.35)
 faq_modal_bg: '#141414'
 options_modal_bg: '#141414'

@@ -21,12 +21,14 @@
 # Leave a value commented out or omit it entirely to keep the app's built-in
 # fallback defaults from app/config.py.
 
+color_scheme: dark
+
 # ── Backgrounds ───────────────────────────────────────────────────────────────
 
-# Page background (body)
+# Page background (body) — shown around and behind the terminal window
 bg: "#000000"
 
-# Terminal window and surface background (panels, modals, dropdowns)
+# Surface background — used for modals, panels, and dropdowns
 surface: "#141414"
 
 # ── Borders ───────────────────────────────────────────────────────────────────
@@ -48,7 +50,7 @@ muted: "#9a9a9a"
 # ── Accent Colors ─────────────────────────────────────────────────────────────
 
 # Primary green — used for the terminal prompt, run button, highlights, and
-# success indicators. Works best as a bright, high-contrast color.
+# success indicators
 green: "#39ff14"
 
 # Dimmed green — used for borders, focus rings, and subtle highlights
@@ -84,12 +86,15 @@ prompt_line_text: "#e8e8e8"
 panel_bg: "#141414"
 panel_alt_bg: "#0c0c0c"
 panel_border: "#3c3c3c"
-panel_shadow: "rgba(0,0,0,0.7)"
+panel_shadow: "rgba(170,170,170,0.12)"
 terminal_bar_bg: "#000000"
 terminal_bar_border: "#2a2a2a"
 terminal_actions_bg: "transparent"
 terminal_wrap_border: "#3c3c3c"
-terminal_wrap_shadow: "rgba(0,0,0,0.7)"
+terminal_wrap_shadow: "rgba(210,210,210,0.24)"
+window_btn_close: "color-mix(in srgb, var(--red) 78%, var(--surface))"
+window_btn_minimize: "color-mix(in srgb, var(--amber) 78%, var(--surface))"
+window_btn_maximize: "color-mix(in srgb, var(--green) 78%, var(--surface))"
 
 # Header / toolbar buttons
 toolbar_button_bg: "transparent"
@@ -112,7 +117,6 @@ chip_hover_text: "#e0e0e0"
 chip_overflow_text: "#39ff14"
 
 # Tabs bar / tabs
-tabs_bar_bg: "#000000"
 tabs_bar_scrollbar_track: "rgba(255,255,255,0.06)"
 tabs_bar_scrollbar_thumb: "#6d6d6d"
 tabs_bar_scrollbar_thumb_hover: "#8a8a8a"
@@ -132,17 +136,19 @@ tab_active_text: "#39ff14"
 tab_active_shadow: "none"
 tab_close_bg: "rgba(255,255,255,0.02)"
 tab_close_border: "rgba(255,255,255,0.06)"
-tab_close_hover_bg: "color-mix(in srgb, var(--red) 18%, transparent)"
-tab_close_hover_border: "color-mix(in srgb, var(--red) 30%, transparent)"
+tab_close_hover_bg: "color-mix(in srgb, var(--green-dim) 18%, transparent)"
+tab_close_hover_border: "color-mix(in srgb, var(--green-dim) 30%, transparent)"
 tab_close_hover_text: "inherit"
 tab_touch_drag_text_shadow: "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)"
 tab_drop_shadow: "0 0 10px color-mix(in srgb, var(--green) 45%, transparent)"
 
 # History panel and restore overlay
 history_panel_bg: "#000000"
+history_panel_shadow: "rgba(0,0,0,0.6)"
 history_entry_hover_bg: "rgba(57,255,20,0.12)"
 history_load_overlay_bg: "rgba(0,0,0,0.76)"
 history_load_modal_bg: "color-mix(in srgb, var(--surface) 88%, #000)"
+history_load_modal_border: "#3c3c3c"
 history_load_modal_shadow: "rgba(0,0,0,0.35)"
 
 # Modals
@@ -159,6 +165,7 @@ dropdown_up_bg: "color-mix(in srgb, var(--surface) 98%, transparent)"
 dropdown_up_border: "color-mix(in srgb, var(--green) 28%, transparent)"
 dropdown_up_shadow: "rgba(0,0,0,0.45)"
 dropdown_item_text: "#9a9a9a"
+overlay_backdrop_bg: "rgba(0,0,0,0.76)"
 
 # FAQ / options controls
 faq_code_bg: "#141414"

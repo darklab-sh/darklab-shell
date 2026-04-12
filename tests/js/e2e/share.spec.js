@@ -4,9 +4,18 @@ import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
 const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
 
+// Browser specs share the same backend rate limiter, so derive a stable test-
+// scoped IP from the file/title instead of reusing one bucket for the suite.
+function testScopedIp(testInfo, baseOffset = 0) {
+  const key = `${testInfo.file}:${testInfo.title}`
+  let sum = 0
+  for (const ch of key) sum = (sum + ch.charCodeAt(0)) % 200
+  return makeTestIp(baseOffset + sum)
+}
+
 test.describe('permalink / share', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(61) })
+  test.beforeEach(async ({ page }, testInfo) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 61) })
     // Mock clipboard so writeText() resolves in headless Chromium without
     // requiring the clipboard-write permission grant.
     await page.addInitScript(() => {

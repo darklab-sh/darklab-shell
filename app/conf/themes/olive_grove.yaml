@@ -2,6 +2,7 @@
 # Soft natural greens with parchment neutrals.
 
 label: "Olive Grove"
+color_scheme: light
 group: "Warm Light"
 sort: 20
 
@@ -29,7 +30,10 @@ terminal_bar_bg: "#dde2d3"
 terminal_bar_border: "#bcc6b4"
 terminal_actions_bg: "rgba(70, 82, 58, 0.03)"
 terminal_wrap_border: "rgba(70, 82, 58, 0.22)"
-terminal_wrap_shadow: "rgba(70, 82, 58, 0.10)"
+terminal_wrap_shadow: "rgba(70, 82, 58, 0.17)"
+window_btn_close: "color-mix(in srgb, var(--red) 62%, var(--surface))"
+window_btn_minimize: "color-mix(in srgb, var(--amber) 62%, var(--surface))"
+window_btn_maximize: "color-mix(in srgb, var(--green) 62%, var(--surface))"
 
 toolbar_button_bg: "#e1e6d9"
 toolbar_button_border: "#c3ccbb"
@@ -49,7 +53,6 @@ chip_hover_border: "#99aa91"
 chip_hover_text: "#1f2c1f"
 chip_overflow_text: "#52714c"
 
-tabs_bar_bg: "#d6ddca"
 tabs_bar_scrollbar_track: "rgba(70, 82, 58, 0.08)"
 tabs_bar_scrollbar_thumb: "#95a48b"
 tabs_bar_scrollbar_thumb_hover: "#73836a"
@@ -76,9 +79,11 @@ tab_touch_drag_text_shadow: "0 0 10px rgba(79,107,63,0.10)"
 tab_drop_shadow: "0 0 10px rgba(79,107,63,0.18)"
 
 history_panel_bg: "#e7eddc"
+history_panel_shadow: "rgba(70, 82, 58, 0.18)"
 history_entry_hover_bg: "rgba(76, 108, 136, 0.06)"
 history_load_overlay_bg: "rgba(23, 29, 23, 0.72)"
 history_load_modal_bg: "#faf9f2"
+history_load_modal_border: "rgba(70, 82, 58, 0.14)"
 history_load_modal_shadow: "rgba(70, 82, 58, 0.16)"
 
 faq_modal_bg: "#faf9f2"
@@ -93,6 +98,7 @@ dropdown_up_bg: "#f0efe4"
 dropdown_up_border: "rgba(76, 108, 136, 0.26)"
 dropdown_up_shadow: "rgba(70, 82, 58, 0.12)"
 dropdown_item_text: "#546052"
+overlay_backdrop_bg: "rgba(23, 29, 23, 0.72)"
 
 faq_code_bg: "#e8ede0"
 allowed_chip_bg: "#e8ede0"

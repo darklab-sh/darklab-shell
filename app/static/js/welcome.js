@@ -9,7 +9,9 @@
 const _welcomeWaiters = new Set();
 const _welcomePrompt = (typeof APP_CONFIG !== 'undefined' && APP_CONFIG.prompt_prefix) || 'anon@darklab:~$';
 const _welcomeGroupOrder = ['basics', 'dns', 'web', 'recon', 'advanced'];
-const _welcomeStatusFrames = ['loading /', 'loading -', 'loading \\', 'loading |'];
+const _welcomeStatusFrames = ['initializing /', 'initializing -', 'initializing \\', 'initializing |'];
+const _welcomeStatusPendingText = 'initializing...';
+const _welcomeStatusReadyText = 'initialized';
 
 function _shouldUseMobileWelcomeSequence() {
   if (typeof useMobileTerminalViewportMode === 'function') {
@@ -75,7 +77,7 @@ function _setWelcomeStatus(index, value) {
   const node = _welcomeStatusNodes[index];
   if (!node) return;
   node.dataset.state = value;
-  node.textContent = value;
+  node.textContent = value === 'loaded' ? _welcomeStatusReadyText : value;
   node.classList.remove('welcome-status-loading', 'welcome-status-loaded');
   node.classList.add(value === 'loaded' ? 'welcome-status-loaded' : 'welcome-status-loading');
 }
@@ -91,7 +93,7 @@ async function _spinWelcomeStatus(node, stepMs = 140) {
   }
 }
 
-function _appendWelcomeStatusRow(label, value = 'loading....') {
+function _appendWelcomeStatusRow(label, value = _welcomeStatusPendingText) {
   const statusStack = _welcomeBanner.querySelector('.welcome-status-stack');
   if (!statusStack) return null;
 
@@ -103,16 +105,17 @@ function _appendWelcomeStatusRow(label, value = 'loading....') {
   labelSpan.textContent = `${label}:`;
 
   const valueSpan = document.createElement('span');
-  valueSpan.className = value === 'loaded'
+  const isReady = value === 'loaded' || value === _welcomeStatusReadyText;
+  valueSpan.className = isReady
     ? 'welcome-status-loaded'
     : 'welcome-status-loading';
   valueSpan.textContent = value;
-  valueSpan.dataset.state = value === 'loaded' ? 'loaded' : 'loading';
+  valueSpan.dataset.state = isReady ? 'loaded' : 'loading';
 
   statusLine.append(labelSpan, valueSpan);
   statusStack.appendChild(statusLine);
   _welcomeStatusNodes.push(valueSpan);
-  if (value !== 'loaded') void _spinWelcomeStatus(valueSpan);
+  if (!isReady) void _spinWelcomeStatus(valueSpan);
 
   requestAnimationFrame(() => {
     statusLine.classList.add('welcome-status-line-visible');
@@ -130,7 +133,7 @@ async function _runWelcomeStatusSequence(labels, intervalMs, staggerMs = null) {
 
   for (let i = 0; i < labels.length; i++) {
     if (!_welcomeActive) return;
-    _appendWelcomeStatusRow(labels[i], 'loading....');
+    _appendWelcomeStatusRow(labels[i], _welcomeStatusPendingText);
     settlePromises.push((async (index) => {
       await _sleep(intervalMs);
       if (_welcomeActive) _setWelcomeStatus(index, 'loaded');
@@ -323,6 +326,8 @@ async function _typeWelcomeCommand(tabId, cmd, { charMs, jitterMs, postMs, start
 }
 
 function _renderWelcomeAsciiStream(tabId, asciiArt) {
+  // The banner animates as streamed output so it feels like terminal output
+  // rather than a separately mounted hero component.
   const out = getOutput(tabId);
   if (!out) return;
 
@@ -339,11 +344,34 @@ function _renderWelcomeAsciiStream(tabId, asciiArt) {
   artBlock.setAttribute('aria-label', 'ASCII art banner');
   artBlock.textContent = artLines.join('\n');
 
+  const motdText = String(APP_CONFIG?.motd || '').trim();
+  let operatorNotice = null;
+  if (motdText) {
+    operatorNotice = document.createElement('div');
+    operatorNotice.className = 'welcome-operator-notice';
+    operatorNotice.setAttribute('aria-label', 'Operator message');
+
+    const operatorLabel = document.createElement('div');
+    operatorLabel.className = 'welcome-operator-label';
+    operatorLabel.textContent = 'Message From The Operator';
+
+    const operatorBody = document.createElement('div');
+    operatorBody.className = 'welcome-operator-body';
+    if (typeof renderMotd === 'function') {
+      operatorBody.innerHTML = renderMotd(motdText);
+    } else {
+      operatorBody.textContent = motdText;
+    }
+
+    operatorNotice.append(operatorLabel, operatorBody);
+  }
+
   const statusStack = document.createElement('div');
   statusStack.className = 'welcome-status-stack';
   statusStack.setAttribute('aria-label', 'System status');
   _welcomeStatusNodes = [];
 
+  if (operatorNotice) banner.appendChild(operatorNotice);
   banner.append(artBlock, statusStack);
   out.appendChild(banner);
   _welcomeBanner = banner;
@@ -679,6 +707,8 @@ function _ensureFeaturedWelcomeBadge(line, cmd) {
 }
 
 function _ensureWelcomeFinalHint(tabId, hints) {
+  // The final hint is anchored once at the end of the welcome flow so command
+  // entry starts from a stable transcript instead of a still-rotating footer.
   if (_welcomeHintNode) return;
   if (Array.isArray(hints) && hints.length) {
     const line = document.createElement('span');
@@ -694,6 +724,8 @@ function _ensureWelcomeFinalHint(tabId, hints) {
 }
 
 function settleWelcome(tabId = activeTabId) {
+  // Settling collapses all pending typing/rotation work into the final state so
+  // the user can start typing immediately without waiting for animation timers.
   if (!welcomeOwnsTab(tabId)) return false;
   const out = getOutput(tabId);
   if (!out) return false;
@@ -711,7 +743,7 @@ function settleWelcome(tabId = activeTabId) {
     : ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'];
   statusLabels.forEach((label, index) => {
     if (_welcomeStatusNodes[index]) _setWelcomeStatus(index, 'loaded');
-    else _appendWelcomeStatusRow(label, 'loaded');
+    else _appendWelcomeStatusRow(label, _welcomeStatusReadyText);
   });
   _setWelcomeBannerSettled(true);
 

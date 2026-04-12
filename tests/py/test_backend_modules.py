@@ -13,12 +13,14 @@ Run with: pytest tests/ (from the repo root)
 """
 
 import gzip
+import importlib.util
 import os
 import sqlite3
 import tempfile
 import textwrap
 import unittest.mock as mock
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 
 import process
 import database
@@ -34,6 +36,8 @@ from commands import (
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
+
+REPO_ROOT = Path(__file__).resolve().parents[2]
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -99,7 +103,6 @@ class TestLoadConfig:
                 f.write(textwrap.dedent(
                     """
                     app_name: base-shell
-                    project_readme: https://example.invalid/base.md
                     prompt_prefix: base@local:~$
                     default_theme: base-theme.yaml
                     full_output_max_mb: 7MB
@@ -111,7 +114,6 @@ class TestLoadConfig:
                     """
                     app_name: local-shell
                     prompt_prefix: local@local:~$
-                    project_readme: https://example.invalid/local.md
                     rate_limit_per_minute: 99
                     """
                 ))
@@ -119,7 +121,6 @@ class TestLoadConfig:
 
         assert cfg["app_name"] == "local-shell"
         assert cfg["prompt_prefix"] == "local@local:~$"
-        assert cfg["project_readme"] == "https://example.invalid/local.md"
         assert cfg["default_theme"] == "base-theme.yaml"
         assert cfg["full_output_max_mb"] == 7
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
@@ -404,6 +405,54 @@ class TestThemeRegistry:
         assert themes[0]["label"] == "Base Theme Local"
         assert app_config.load_theme("base_theme")["bg"] == "#202020"
         assert app_config.load_theme("base_theme")["surface"] == "#1a1a1a"
+
+    def test_light_theme_uses_light_defaults_for_missing_keys(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "light_theme",
+            """
+            label: "Light Theme"
+            color_scheme: light
+            bg: "#eef4fa"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        theme = app_config.load_theme("light_theme")
+        assert theme["bg"] == "#eef4fa"
+        assert theme["terminal_bar_bg"] == app_config._THEME_DEFAULTS["light"]["terminal_bar_bg"]
+        assert theme["toolbar_button_text"] == app_config._THEME_DEFAULTS["light"]["toolbar_button_text"]
+
+    def test_missing_color_scheme_still_falls_back_to_dark_defaults(self, tmp_path, monkeypatch):
+        theme_dir, _ = self._write_theme(
+            tmp_path,
+            "implicit_dark_theme",
+            """
+            label: "Implicit Dark"
+            bg: "#101010"
+            """,
+        )
+        monkeypatch.setattr(app_config, "_THEME_VARIANT_DIR", theme_dir)
+
+        theme = app_config.load_theme("implicit_dark_theme")
+        assert theme["bg"] == "#101010"
+        assert theme["terminal_bar_bg"] == app_config._THEME_DEFAULTS["dark"]["terminal_bar_bg"]
+        assert theme["toolbar_button_text"] == app_config._THEME_DEFAULTS["dark"]["toolbar_button_text"]
+
+    def test_theme_example_files_match_generated_defaults(self):
+        script_path = REPO_ROOT / "scripts" / "generate_theme_examples.py"
+        spec = importlib.util.spec_from_file_location("generate_theme_examples", script_path)
+        assert spec and spec.loader
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+
+        dark_expected = module.generate_theme_example_text("dark")
+        light_expected = module.generate_theme_example_text("light")
+        dark_actual = (REPO_ROOT / "app" / "conf" / "theme_dark.yaml.example").read_text()
+        light_actual = (REPO_ROOT / "app" / "conf" / "theme_light.yaml.example").read_text()
+
+        assert dark_actual == dark_expected, "theme_dark.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
+        assert light_actual == light_expected, "theme_light.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
 
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"

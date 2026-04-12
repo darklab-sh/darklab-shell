@@ -9,6 +9,7 @@ from pathlib import Path
 import yaml
 
 APP_VERSION = "1.4"
+PROJECT_README = "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"
 
 
 def _load_yaml_config(path):
@@ -27,6 +28,8 @@ def _load_yaml_config_optional(path):
 
 
 def _coerce_mb_value(value):
+    # Accept both numeric YAML scalars and human-edited strings like "25" or
+    # "25mb" so the config layer stays forgiving without leaking bad values.
     if value is None or isinstance(value, bool):
         return None
     if isinstance(value, (int, float)):
@@ -57,7 +60,6 @@ def load_config(conf_dir=None):
     """
     defaults = {
         "app_name":                   "darklab shell",
-        "project_readme":             "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell",
         "prompt_prefix":              "anon@darklab:~$",
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
@@ -112,6 +114,8 @@ CFG = load_config()
 
 
 _THEME_DEFAULTS = {
+    # These builtin families are the source of truth for generated example
+    # themes and for missing-key fallback when custom themes are partial.
     "dark": {
         "bg":                  "#000000",
         "surface":             "#141414",
@@ -131,12 +135,15 @@ _THEME_DEFAULTS = {
         "panel_bg":            "#141414",
         "panel_alt_bg":        "#0c0c0c",
         "panel_border":        "#3c3c3c",
-        "panel_shadow":        "rgba(0,0,0,0.7)",
+        "panel_shadow":        "rgba(170,170,170,0.12)",
         "terminal_bar_bg":     "#000000",
         "terminal_bar_border": "#2a2a2a",
         "terminal_actions_bg":  "transparent",
         "terminal_wrap_border": "#3c3c3c",
-        "terminal_wrap_shadow": "rgba(0,0,0,0.7)",
+        "terminal_wrap_shadow": "rgba(210,210,210,0.24)",
+        "window_btn_close":    "color-mix(in srgb, var(--red) 78%, var(--surface))",
+        "window_btn_minimize": "color-mix(in srgb, var(--amber) 78%, var(--surface))",
+        "window_btn_maximize": "color-mix(in srgb, var(--green) 78%, var(--surface))",
         "toolbar_button_bg":   "transparent",
         "toolbar_button_border": "#3c3c3c",
         "toolbar_button_text": "#9a9a9a",
@@ -153,7 +160,6 @@ _THEME_DEFAULTS = {
         "chip_hover_border":   "#1a7a08",
         "chip_hover_text":     "#e0e0e0",
         "chip_overflow_text":  "#39ff14",
-        "tabs_bar_bg":         "#000000",
         "tabs_bar_scrollbar_track": "rgba(255,255,255,0.06)",
         "tabs_bar_scrollbar_thumb": "#6d6d6d",
         "tabs_bar_scrollbar_thumb_hover": "#8a8a8a",
@@ -179,9 +185,11 @@ _THEME_DEFAULTS = {
         "tab_touch_drag_text_shadow": "0 0 10px color-mix(in srgb, var(--green) 14%, transparent)",
         "tab_drop_shadow":      "0 0 10px color-mix(in srgb, var(--green) 45%, transparent)",
         "history_panel_bg":     "#000000",
+        "history_panel_shadow": "rgba(0,0,0,0.6)",
         "history_entry_hover_bg": "rgba(57,255,20,0.12)",
         "history_load_overlay_bg": "rgba(0,0,0,0.76)",
         "history_load_modal_bg": "color-mix(in srgb, var(--surface) 88%, #000)",
+        "history_load_modal_border": "#3c3c3c",
         "history_load_modal_shadow": "rgba(0,0,0,0.35)",
         "faq_modal_bg":         "#141414",
         "options_modal_bg":     "#141414",
@@ -194,6 +202,7 @@ _THEME_DEFAULTS = {
         "dropdown_up_border":   "color-mix(in srgb, var(--green) 28%, transparent)",
         "dropdown_up_shadow":   "rgba(0,0,0,0.45)",
         "dropdown_item_text":   "#9a9a9a",
+        "overlay_backdrop_bg":  "rgba(0,0,0,0.76)",
         "faq_code_bg":          "#141414",
         "allowed_chip_bg":      "#141414",
         "options_select_bg":    "#141414",
@@ -245,7 +254,10 @@ _THEME_DEFAULTS = {
         "terminal_bar_border": "#8898b0",
         "terminal_actions_bg":  "rgba(0,0,0,0.025)",
         "terminal_wrap_border": "rgba(0,0,0,0.42)",
-        "terminal_wrap_shadow": "rgba(0,0,0,0.22)",
+        "terminal_wrap_shadow": "rgba(34,58,88,0.18)",
+        "window_btn_close":    "#c25b4d",
+        "window_btn_minimize": "#b77f22",
+        "window_btn_maximize": "#2f7a43",
         "toolbar_button_bg":   "#c8d4e0",
         "toolbar_button_border": "#8898b0",
         "toolbar_button_text": "#202838",
@@ -262,7 +274,6 @@ _THEME_DEFAULTS = {
         "chip_hover_border":   "#6880a0",
         "chip_hover_text":     "#101820",
         "chip_overflow_text":  "#274f17",
-        "tabs_bar_bg":         "#a0b0c4",
         "tabs_bar_scrollbar_track": "rgba(0,0,0,0.08)",
         "tabs_bar_scrollbar_thumb": "#7890a8",
         "tabs_bar_scrollbar_thumb_hover": "#5a6878",
@@ -282,15 +293,17 @@ _THEME_DEFAULTS = {
         "tab_active_shadow":    "inset 0 0 0 1px rgba(255,255,255,0.22)",
         "tab_close_bg":         "rgba(255,255,255,0.02)",
         "tab_close_border":     "rgba(255,255,255,0.06)",
-        "tab_close_hover_bg":   "color-mix(in srgb, var(--green-dim) 18%, transparent)",
-        "tab_close_hover_border": "color-mix(in srgb, var(--green-dim) 30%, transparent)",
+        "tab_close_hover_bg":   "color-mix(in srgb, var(--red) 18%, transparent)",
+        "tab_close_hover_border": "color-mix(in srgb, var(--red) 30%, transparent)",
         "tab_close_hover_text": "inherit",
         "tab_touch_drag_text_shadow": "0 0 10px rgba(42,93,24,0.08)",
         "tab_drop_shadow":      "0 0 10px rgba(42,93,24,0.18)",
         "history_panel_bg":     "#c8d8e8",
+        "history_panel_shadow": "rgba(34,58,88,0.20)",
         "history_entry_hover_bg": "rgba(26,90,170,0.06)",
         "history_load_overlay_bg": "rgba(0,0,0,0.76)",
         "history_load_modal_bg": "#e8eef6",
+        "history_load_modal_border": "rgba(0,0,0,0.28)",
         "history_load_modal_shadow": "rgba(0,0,0,0.35)",
         "faq_modal_bg":         "#e8eef6",
         "options_modal_bg":     "#e8eef6",
@@ -303,6 +316,7 @@ _THEME_DEFAULTS = {
         "dropdown_up_border":   "rgba(26,90,170,0.35)",
         "dropdown_up_shadow":   "rgba(0,0,0,0.14)",
         "dropdown_item_text":   "#4a5868",
+        "overlay_backdrop_bg":  "rgba(34,58,88,0.22)",
         "faq_code_bg":          "#dce6f0",
         "allowed_chip_bg":      "#dce6f0",
         "options_select_bg":    "#e0e8f4",
@@ -373,6 +387,9 @@ _THEME_CSS_ORDER = (
     "terminal_actions_bg",
     "terminal_wrap_border",
     "terminal_wrap_shadow",
+    "window_btn_close",
+    "window_btn_minimize",
+    "window_btn_maximize",
     "toolbar_button_bg",
     "toolbar_button_border",
     "toolbar_button_text",
@@ -389,7 +406,6 @@ _THEME_CSS_ORDER = (
     "chip_hover_border",
     "chip_hover_text",
     "chip_overflow_text",
-    "tabs_bar_bg",
     "tabs_bar_scrollbar_track",
     "tabs_bar_scrollbar_thumb",
     "tabs_bar_scrollbar_thumb_hover",
@@ -415,9 +431,11 @@ _THEME_CSS_ORDER = (
     "tab_touch_drag_text_shadow",
     "tab_drop_shadow",
     "history_panel_bg",
+    "history_panel_shadow",
     "history_entry_hover_bg",
     "history_load_overlay_bg",
     "history_load_modal_bg",
+    "history_load_modal_border",
     "history_load_modal_shadow",
     "faq_modal_bg",
     "options_modal_bg",
@@ -430,6 +448,7 @@ _THEME_CSS_ORDER = (
     "dropdown_up_border",
     "dropdown_up_shadow",
     "dropdown_item_text",
+    "overlay_backdrop_bg",
     "faq_code_bg",
     "allowed_chip_bg",
     "options_select_bg",
@@ -457,6 +476,7 @@ _THEME_CSS_ORDER = (
 
 def theme_css_vars(theme: dict) -> dict:
     """Return CSS custom property names for a theme dict."""
+    # Export only the ordered theme keys that CSS/templates are expected to read.
     css_vars = {}
     for key in _THEME_CSS_ORDER:
         if key in theme:
@@ -548,12 +568,24 @@ def _theme_sort_value(value):
         return None
 
 
+def _theme_default_family(theme_data: dict) -> str:
+    # color_scheme selects which builtin family fills any keys the theme omits.
+    raw = str(theme_data.get("color_scheme", "")).strip().lower()
+    if raw in ("light", "only light"):
+        return "light"
+    if raw in ("dark", "only dark"):
+        return "dark"
+    return "dark"
+
+
 def _theme_file_candidates(name):
     stem = _theme_name_stem(name)
     return (_THEME_VARIANT_DIR / f"{stem}.yaml",)
 
 
 def _load_theme_yaml(name):
+    # Support both exact filenames and stem-like names so operator config can be
+    # human friendly while the on-disk registry stays filename based.
     theme_data = {}
     for theme_path in _theme_file_candidates(name):
         if not os.path.exists(theme_path):
@@ -579,10 +611,12 @@ def _load_theme_yaml(name):
 
 
 def load_theme(name):
-    """Load a theme YAML file, falling back to built-in defaults for missing keys."""
+    """Load a theme YAML file, falling back to the matching built-in defaults for missing keys."""
+    # Partial or malformed themes should still resolve to a complete palette so
+    # the UI never renders with missing CSS variables.
     name = _theme_name_stem(name)
-    defaults = dict(_THEME_DEFAULTS["dark"])
     user_theme = _load_theme_yaml(name)
+    defaults = dict(_THEME_DEFAULTS[_theme_default_family(user_theme)])
     defaults.update({k: str(v) for k, v in user_theme.items() if k in defaults})
     return defaults
 
@@ -625,6 +659,8 @@ def _theme_entry(name, *, source="variant"):
 
 def load_theme_registry():
     """Return the full list of selectable themes."""
+    # Preserve selector metadata like label/group/sort/source; the frontend uses
+    # it to render the theme chooser declaratively.
     entries = []
     seen = set()
     if _THEME_VARIANT_DIR.exists():

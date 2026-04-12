@@ -21,6 +21,8 @@
 # Leave a value commented out or omit it entirely to keep the app's built-in
 # fallback defaults from app/config.py.
 
+color_scheme: light
+
 # ── Backgrounds ───────────────────────────────────────────────────────────────
 
 # Page background (body) — shown around and behind the terminal window
@@ -58,7 +60,7 @@ green_dim: "#355f24"
 green_glow: "rgba(42,93,24,0.08)"
 
 # Amber — used for warnings, the RUNNING status pill, starred items, and
-# denied-command messages. Should be dark enough to contrast on a light background.
+# denied-command messages
 amber: "#9a4200"
 
 # Red — used for errors, the FAIL/KILLED status, and the kill-task modal border
@@ -89,7 +91,10 @@ terminal_bar_bg: "#b8c4d0"
 terminal_bar_border: "#8898b0"
 terminal_actions_bg: "rgba(0,0,0,0.025)"
 terminal_wrap_border: "rgba(0,0,0,0.42)"
-terminal_wrap_shadow: "rgba(0,0,0,0.22)"
+terminal_wrap_shadow: "rgba(34,58,88,0.18)"
+window_btn_close: "#c25b4d"
+window_btn_minimize: "#b77f22"
+window_btn_maximize: "#2f7a43"
 
 # Header / toolbar buttons
 toolbar_button_bg: "#c8d4e0"
@@ -112,7 +117,6 @@ chip_hover_text: "#101820"
 chip_overflow_text: "#274f17"
 
 # Tabs bar / tabs
-tabs_bar_bg: "#a0b0c4"
 tabs_bar_scrollbar_track: "rgba(0,0,0,0.08)"
 tabs_bar_scrollbar_thumb: "#7890a8"
 tabs_bar_scrollbar_thumb_hover: "#5a6878"
@@ -140,9 +144,11 @@ tab_drop_shadow: "0 0 10px rgba(42,93,24,0.18)"
 
 # History panel and restore overlay
 history_panel_bg: "#c8d8e8"
+history_panel_shadow: "rgba(34,58,88,0.20)"
 history_entry_hover_bg: "rgba(26,90,170,0.06)"
 history_load_overlay_bg: "rgba(0,0,0,0.76)"
 history_load_modal_bg: "#e8eef6"
+history_load_modal_border: "rgba(0,0,0,0.28)"
 history_load_modal_shadow: "rgba(0,0,0,0.35)"
 
 # Modals
@@ -159,6 +165,7 @@ dropdown_up_bg: "#d4e0ec"
 dropdown_up_border: "rgba(26,90,170,0.35)"
 dropdown_up_shadow: "rgba(0,0,0,0.14)"
 dropdown_item_text: "#4a5868"
+overlay_backdrop_bg: "rgba(34,58,88,0.22)"
 
 # FAQ / options controls
 faq_code_bg: "#dce6f0"

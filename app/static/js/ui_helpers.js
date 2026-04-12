@@ -1,5 +1,7 @@
 // ── Shared UI helpers ──
 (function initSharedUiHelpers(global) {
+  // These helpers wrap the split desktop/mobile composer model so the rest of
+  // the code can ask for "the visible input" instead of branching everywhere.
   const state = getAppState();
   let _mobileKeyboardVisibilityTimer = null;
   const getMobileMenuEl = () => mobileMenu || null;
@@ -438,13 +440,6 @@
     const mobileMenu = getMobileMenuEl();
     return !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
   };
-  global.showMotdWrap = () => {
-    if (typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style) motdWrap.style.display = 'block';
-  };
-  global.hideMotdWrap = () => {
-    if (typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style) motdWrap.style.display = 'none';
-  };
-  global.isMotdWrapVisible = () => !!(typeof motdWrap !== 'undefined' && motdWrap && motdWrap.style && motdWrap.style.display !== 'none');
   global.showAcDropdown = () => {
     if (acDropdown && acDropdown.style) acDropdown.style.display = 'block';
   };

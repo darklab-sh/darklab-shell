@@ -42,6 +42,8 @@ KILL_BIN  = shutil.which("kill") or "/bin/kill"
 # ── Run output helpers ────────────────────────────────────────────────────────
 
 def _run_output_capture(run_id):
+    # Keep an inline preview for fast history reads, but spill large/full output
+    # into compressed artifacts once a run exceeds the preview window.
     return RunOutputCapture(
         run_id=run_id,
         preview_limit=CFG["max_output_lines"],
@@ -51,6 +53,8 @@ def _run_output_capture(run_id):
 
 
 def _save_completed_run(run_id, session_id, command, run_started, finished_iso, exit_code, capture):
+    # Persist preview text and artifact metadata together so history/permalink
+    # readers never observe half-written run state.
     capture.finalize()
     try:
         with db_connect() as conn:
@@ -98,6 +102,8 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
 
 
 def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0):
+    # Synthetic commands deliberately reuse the same persistence/logging path as
+    # real commands so the shell treats them as first-class runs.
     run_id      = str(uuid.uuid4())
     run_started = datetime.now(timezone.utc).isoformat()
     capture = _run_output_capture(run_id)
@@ -165,6 +171,8 @@ def _fake_run_response(original_command, session_id, client_ip):
     f"{CFG['rate_limit_per_minute']} per minute; {CFG['rate_limit_per_second']} per second"
 ))
 def run_command():
+    # Stream newline-delimited SSE events so the browser can render output in
+    # real time without waiting for the subprocess to finish.
     data             = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400

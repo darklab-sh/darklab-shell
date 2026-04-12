@@ -1,6 +1,8 @@
 import { vi } from 'vitest'
 import { fromDomScripts } from './helpers/extract.js'
 
+// Welcome tests use a synthetic DOM plus mocked fetch endpoints so the timing
+// logic can be exercised deterministically without a live backend.
 function loadWelcomeFns({
   welcomeData = [],
   asciiArt = 'ASCII ART',
@@ -62,6 +64,7 @@ function loadWelcomeFns({
       _welcomeSettleRequested: false,
       _welcomeBootPending: true,
       APP_CONFIG: {
+        motd: '',
         welcome_char_ms: 0,
         welcome_jitter_ms: 0,
         welcome_post_cmd_ms: 0,
@@ -77,6 +80,7 @@ function loadWelcomeFns({
       appendLine,
       mountShellPrompt,
       unmountShellPrompt: vi.fn(),
+      renderMotd: (text) => String(text).replace(/\n/g, '<br>'),
       logClientError: () => {},
       useMobileTerminalViewportMode: () => mobile,
       requestAnimationFrame: (fn) => fn(),
@@ -142,6 +146,19 @@ describe('welcome helpers', () => {
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Enter runs the command')
     expect(_isWelcomeActive()).toBe(false)
     expect(_isWelcomeDone()).toBe(true)
+  })
+
+  it('renders the operator message inside the welcome banner when motd is configured', async () => {
+    const { runWelcome, out } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
+      config: { motd: 'Downtime tonight\n**23:00 UTC**' },
+    })
+
+    await runWelcome()
+
+    expect(out.querySelector('.welcome-operator-label')?.textContent).toContain('Message From The Operator')
+    expect(out.querySelector('.welcome-operator-body')?.innerHTML).toContain('Downtime tonight<br>')
+    expect(out.querySelector('.welcome-operator-notice')).not.toBeNull()
   })
 
   it('runWelcome falls back to darklab shell banner text when /welcome/ascii fails', async () => {

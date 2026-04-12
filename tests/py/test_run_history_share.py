@@ -17,9 +17,12 @@ import pytest
 
 import app as shell_app
 import database as shell_db
+from config import PROJECT_README
 from database import db_connect
 from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
 
+# These tests lean toward end-to-end backend behavior and intentionally exercise
+# the real SQLite/artifact flow rather than heavy mocking.
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
@@ -689,7 +692,7 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert f"{shell_app.CFG['app_name']}\\n" in body
-        assert f"README: see the project README at {shell_app.CFG['project_readme']}\\n" in body
+        assert f"README: see the project README at {PROJECT_README}\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_ps_lists_recent_session_commands(self):

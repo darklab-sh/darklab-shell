@@ -24,7 +24,7 @@ from commands import (
     runtime_missing_command_name,
     split_command_argv,
 )
-from config import APP_VERSION, CFG
+from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
 
 
@@ -135,6 +135,8 @@ _FAKE_COMMAND_HELP = [
 
 
 def _split_command(command: str) -> list[str]:
+    # Fake-command routing keys off the first token only so "history --help"
+    # resolves to the same synthetic implementation as plain "history".
     return split_command_argv(command)
 
 
@@ -185,6 +187,8 @@ _FAKE_COMMAND_DISPATCH = {
 
 
 def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, str]], int]:
+    # Fake commands still return the same [{text, class}, ...], exit_code shape
+    # as real runs so the frontend path is identical.
     root = resolve_fake_command(command)
     handler = _FAKE_COMMAND_DISPATCH.get(root) if root is not None else None
     if handler is None:
@@ -193,6 +197,8 @@ def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, 
 
 
 def _recent_runs(session_id: str, limit: int = 8):
+    # Synthetic status/history helpers stay session-scoped to match the rest of
+    # the shell rather than exposing global activity.
     with db_connect() as conn:
         return conn.execute(
             "SELECT id, command, started, finished, exit_code FROM runs "
@@ -321,11 +327,11 @@ def _run_fake_env(session_id: str) -> list[dict[str, str]]:
 
 
 def _run_fake_faq() -> list[dict[str, str]]:
-    entries = load_all_faq(CFG["app_name"], CFG["project_readme"])
+    entries = load_all_faq(CFG["app_name"], PROJECT_README)
     if not entries:
         return _text_lines([
             "No configured FAQ entries are available in the web shell.",
-            f"README: see the project README at {CFG['project_readme']}",
+            f"README: see the project README at {PROJECT_README}",
         ])
 
     lines = ["Configured FAQ entries:"]
@@ -500,7 +506,7 @@ def _run_fake_whoami() -> list[dict[str, str]]:
     return _text_lines([
         CFG["app_name"],
         "A web terminal for remote diagnostics and security tooling against allowed commands.",
-        f"README: see the project README at {CFG['project_readme']}",
+        f"README: see the project README at {PROJECT_README}",
     ])
 
 

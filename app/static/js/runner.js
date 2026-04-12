@@ -209,6 +209,8 @@ function doKill(tabId) {
 //   true      — command submitted; caller should clear input and focus
 //   false     — rejected or blocked; caller should leave input as-is
 function submitCommand(rawCmd) {
+  // This is the main run path: validate local state, open the SSE stream, then
+  // feed output into the active tab while mirroring completion into persistence.
   const cmd = (rawCmd || '').trim();
   if (!cmd) {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {

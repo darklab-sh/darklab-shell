@@ -29,6 +29,8 @@ _FONT_FILES = [
 
 
 def _font_face_css(*, embed: bool = False) -> str:
+    # Downloaded HTML can either reference app-hosted font files or embed them
+    # directly so the export stays portable offline.
     rules = []
     for family, weight, filename in _FONT_FILES:
         font_path = _FONT_DIR / filename
@@ -54,6 +56,8 @@ def _font_face_css(*, embed: bool = False) -> str:
 
 def _current_theme() -> str:
     """Return the current session theme if available, otherwise default to dark."""
+    # Permalink pages and HTML exports should follow the same theme-selection
+    # rules as the main shell whenever a request context exists.
     if not has_request_context():
         return CFG.get("default_theme", "darklab_obsidian.yaml")
     try:
@@ -97,6 +101,8 @@ def _format_retention(days: int) -> str:
 
 
 def _normalize_permalink_lines(content_lines, label: str):
+    # History pages, share pages, and HTML exports feed slightly different line
+    # shapes into this layer; normalize them once for the shared template.
     content_items = list(content_lines or [])
     is_structured_snapshot = any(isinstance(entry, dict) for entry in content_items)
     normalized_lines = []
@@ -171,6 +177,8 @@ def _expiry_note(created: str) -> str:
 
 
 def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None, meta=None):
+    # Build one context shape for both live responses and downloadable HTML so
+    # metadata/actions stay in sync across both surfaces.
     app_name = CFG.get("app_name", "darklab shell")
     theme_entry = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)

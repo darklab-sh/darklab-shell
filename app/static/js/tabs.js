@@ -140,6 +140,8 @@ function _touchDragAutoScroll(clientX) {
 }
 
 function _cleanupTouchDrag() {
+  // Touch drag state spans document-level listeners, so cleanup has to fully
+  // unwind everything even when the gesture is cancelled mid-drag.
   if (!_touchDragState) return;
   document.removeEventListener('pointermove', _onTouchDragMove);
   document.removeEventListener('pointerup', _onTouchDragEnd);
@@ -267,6 +269,8 @@ function unmountShellPrompt() {
 }
 
 function mountShellPrompt(tabId, force = false) {
+  // Only the active tab owns the live prompt node. Moving that one node keeps
+  // prompt state continuous when switching tabs instead of cloning inputs.
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const mobileMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
   if (!force && !mobileMode && _welcomeBootPending) {
@@ -385,6 +389,8 @@ function updateOutputFollowButton(id) {
 }
 
 function _createTabPanel(id) {
+  // Each tab panel contains both transcript output and its own action row so a
+  // tab can be restored/shared without depending on global footer controls.
   const panel = document.createElement('div');
   panel.className = 'tab-panel';
   panel.dataset.id = id;
@@ -420,6 +426,14 @@ function _createTabPanel(id) {
 
   const terminalActions = document.createElement('div');
   terminalActions.className = 'terminal-actions';
+  const wordmark = document.createElement('a');
+  wordmark.className = 'terminal-wordmark';
+  wordmark.href = APP_CONFIG.project_readme || '#';
+  wordmark.target = '_blank';
+  wordmark.rel = 'noopener noreferrer';
+  const wmVersion = APP_CONFIG.version ? ` v${APP_CONFIG.version}` : '';
+  wordmark.textContent = `${APP_CONFIG.app_name || 'darklab shell'}${wmVersion}`;
+  terminalActions.appendChild(wordmark);
   terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
   terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'permalink'));
   terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
@@ -433,6 +447,8 @@ function _createTabPanel(id) {
 }
 
 function createTab(label) {
+  // Tabs are created fully client-side; history restore and shortcut flows all
+  // funnel through this one constructor so the DOM/state shape stays uniform.
   if (APP_CONFIG.max_tabs > 0 && tabs.length >= APP_CONFIG.max_tabs) {
     showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
     return null;
@@ -535,6 +551,8 @@ function createTab(label) {
 }
 
 function activateTab(id, { focusComposer = true } = {}) {
+  // Activation swaps the live prompt, the status pill, output-follow helpers,
+  // and the visible transcript. Keep it centralized here to avoid drift.
   // Exit hist-search mode cleanly before switching tabs
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof exitHistSearch === 'function') exitHistSearch(false);
@@ -573,6 +591,8 @@ function activateTab(id, { focusComposer = true } = {}) {
 }
 
 function closeTab(id) {
+  // Closing a tab may need to preserve run state until the kill flow or output
+  // persistence finishes, so final removal is sometimes deferred.
   cancelWelcome(id);
   const idx = tabs.findIndex(t => t.id === id);
   if (typeof _cancelPendingOutputBatch === 'function') _cancelPendingOutputBatch(id);

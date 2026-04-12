@@ -38,6 +38,8 @@ def _log_content_view(route: str, **extra):
 
 
 def _current_theme_name():
+    # Keep cookie/default theme resolution in one place so HTML templates and
+    # JSON endpoints report the same active selection.
     theme_name = request.cookies.get("pref_theme_name", "").strip()
     if theme_name and theme_name in _config.THEME_REGISTRY_MAP:
         log.debug(
@@ -126,7 +128,7 @@ def get_config():
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
         "prompt_prefix":         cfg["prompt_prefix"],
-        "project_readme":        cfg["project_readme"],
+        "project_readme":        _config.PROJECT_README,
         "default_theme":         cfg["default_theme"],
         "motd":                  cfg["motd"],
         "recent_commands_limit": cfg["recent_commands_limit"],
@@ -181,7 +183,7 @@ def allowed_commands():
 @content_bp.route("/faq")
 def faq():
     """Return built-in FAQ entries plus any custom faq.yaml entries."""
-    items = load_all_faq(_config.CFG["app_name"], _config.CFG["project_readme"])
+    items = load_all_faq(_config.CFG["app_name"], _config.PROJECT_README)
     _log_content_view("/faq", count=len(items))
     return jsonify({"items": items})
 

@@ -1,6 +1,7 @@
 // ── Shared utility module ──
 // Default values used until the /config endpoint responds.
-// app.js overwrites APP_CONFIG with the server response on page load.
+// app.js overwrites APP_CONFIG with the server response on page load, but these
+// defaults keep early-rendered helpers safe during bootstrap failures.
 let APP_CONFIG = {
   version: '',
   app_name: 'darklab shell',

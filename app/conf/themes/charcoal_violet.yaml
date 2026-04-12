@@ -1,64 +1,116 @@
 # darklab shell — Dark Theme: Charcoal Violet
 # ----------------------------------------------
 # A monochrome charcoal theme with a subtle violet accent.
-
-label: "Charcoal Violet"
-group: "Dark Neutral"
+label: Charcoal Violet
+color_scheme: dark
+group: Dark Neutral
 sort: 6
-
-bg: "#101014"
-surface: "#18181e"
-border: "rgba(171, 150, 233, 0.14)"
-border_bright: "rgba(171, 150, 233, 0.28)"
-text: "#eceaf3"
-muted: "#8a8799"
-green: "#a78bfa"
-green_dim: "#7e67c7"
-green_glow: "rgba(167, 139, 250, 0.10)"
-amber: "#d1a864"
-red: "#df7077"
-blue: "#bcc9ff"
-prompt_line_text: "#f7f4ff"
-panel_bg: "#18181e"
-panel_alt_bg: "#111116"
-panel_border: "rgba(171, 150, 233, 0.14)"
-panel_shadow: "rgba(0,0,0,0.68)"
-terminal_bar_bg: "#101014"
-terminal_bar_border: "#22212b"
-terminal_actions_bg: "transparent"
-terminal_wrap_border: "rgba(171, 150, 233, 0.26)"
-terminal_wrap_shadow: "rgba(0,0,0,0.68)"
-toolbar_button_bg: "transparent"
-toolbar_button_border: "#282533"
-toolbar_button_text: "#9b97a8"
-toolbar_button_hover_bg: "transparent"
-toolbar_button_hover_border: "#7e67c7"
-toolbar_button_hover_text: "#a78bfa"
-toolbar_button_active_bg: "rgba(167,139,250,0.06)"
-toolbar_button_active_border: "#7e67c7"
-toolbar_button_active_text: "#a78bfa"
-chip_bg: "transparent"
-chip_border: "#282533"
-chip_text: "#9b97a8"
-chip_hover_bg: "rgba(167,139,250,0.12)"
-chip_hover_border: "#7e67c7"
-chip_hover_text: "#eceaf3"
-chip_overflow_text: "#a78bfa"
-tabs_bar_bg: "#101014"
-tabs_bar_scrollbar_track: "rgba(255,255,255,0.05)"
-tabs_bar_scrollbar_thumb: "#4c4960"
-tabs_bar_scrollbar_thumb_hover: "#64617a"
-tabs_scroll_btn_bg: "transparent"
-tabs_scroll_btn_border: "#22212b"
-tabs_scroll_btn_text: "#9b97a8"
-tabs_scroll_btn_hover_bg: "transparent"
-tabs_scroll_btn_hover_border: "#282533"
-tabs_scroll_btn_hover_text: "#eceaf3"
-tab_bg: "linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))"
-tab_border: "#282533"
-tab_text: "#9b97a8"
-tab_hover_text: "#eceaf3"
-tab_active_bg: "rgba(167,139,250,0.05)"
-tab_active_border: "rgba(167,139,250,0.34)"
-tab_active_text: "#a78bfa"
-tab_active_shadow: "none"
+bg: '#101014'
+surface: '#18181e'
+border: rgba(171, 150, 233, 0.14)
+border_bright: rgba(171, 150, 233, 0.28)
+text: '#eceaf3'
+muted: '#8a8799'
+green: '#a78bfa'
+green_dim: '#7e67c7'
+green_glow: rgba(167, 139, 250, 0.10)
+amber: '#d1a864'
+red: '#df7077'
+blue: '#bcc9ff'
+terminal_font_size: 14px
+terminal_line_height: '1.65'
+prompt_line_text: '#f7f4ff'
+panel_bg: '#18181e'
+panel_alt_bg: '#111116'
+panel_border: rgba(171, 150, 233, 0.14)
+panel_shadow: rgba(166,158,184,0.11)
+terminal_bar_bg: '#101014'
+terminal_bar_border: '#22212b'
+terminal_actions_bg: transparent
+terminal_wrap_border: rgba(171, 150, 233, 0.26)
+terminal_wrap_shadow: rgba(166,158,184,0.18)
+window_btn_close: color-mix(in srgb, var(--red) 78%, var(--surface))
+window_btn_minimize: color-mix(in srgb, var(--amber) 78%, var(--surface))
+window_btn_maximize: color-mix(in srgb, var(--green) 78%, var(--surface))
+toolbar_button_bg: transparent
+toolbar_button_border: '#282533'
+toolbar_button_text: '#9b97a8'
+toolbar_button_hover_bg: transparent
+toolbar_button_hover_border: '#7e67c7'
+toolbar_button_hover_text: '#a78bfa'
+toolbar_button_active_bg: rgba(167,139,250,0.06)
+toolbar_button_active_border: '#7e67c7'
+toolbar_button_active_text: '#a78bfa'
+chip_bg: transparent
+chip_border: '#282533'
+chip_text: '#9b97a8'
+chip_hover_bg: rgba(167,139,250,0.12)
+chip_hover_border: '#7e67c7'
+chip_hover_text: '#eceaf3'
+chip_overflow_text: '#a78bfa'
+tabs_bar_scrollbar_track: rgba(255,255,255,0.05)
+tabs_bar_scrollbar_thumb: '#4c4960'
+tabs_bar_scrollbar_thumb_hover: '#64617a'
+tabs_scroll_btn_bg: transparent
+tabs_scroll_btn_border: '#22212b'
+tabs_scroll_btn_text: '#9b97a8'
+tabs_scroll_btn_hover_bg: transparent
+tabs_scroll_btn_hover_border: '#282533'
+tabs_scroll_btn_hover_text: '#eceaf3'
+tab_bg: linear-gradient(180deg, rgba(255,255,255,0.02), rgba(255,255,255,0.01))
+tab_border: '#282533'
+tab_text: '#9b97a8'
+tab_hover_text: '#eceaf3'
+tab_active_bg: rgba(167,139,250,0.05)
+tab_active_border: rgba(167,139,250,0.34)
+tab_active_text: '#a78bfa'
+tab_active_shadow: none
+tab_close_bg: rgba(255,255,255,0.02)
+tab_close_border: rgba(255,255,255,0.06)
+tab_close_hover_bg: color-mix(in srgb, var(--green-dim) 18%, transparent)
+tab_close_hover_border: color-mix(in srgb, var(--green-dim) 30%, transparent)
+tab_close_hover_text: inherit
+tab_touch_drag_text_shadow: 0 0 10px color-mix(in srgb, var(--green) 14%, transparent)
+tab_drop_shadow: 0 0 10px color-mix(in srgb, var(--green) 45%, transparent)
+history_panel_bg: '#000000'
+history_panel_shadow: rgba(166,158,184,0.18)
+history_entry_hover_bg: rgba(167,139,250,0.12)
+history_load_overlay_bg: rgba(0,0,0,0.76)
+history_load_modal_bg: 'color-mix(in srgb, var(--surface) 88%, #000)'
+history_load_modal_border: rgba(171, 150, 233, 0.14)
+history_load_modal_shadow: rgba(0,0,0,0.35)
+faq_modal_bg: '#141414'
+options_modal_bg: '#141414'
+kill_modal_bg: '#141414'
+hist_del_modal_bg: '#141414'
+dropdown_bg: color-mix(in srgb, var(--surface) 96%, transparent)
+dropdown_border: color-mix(in srgb, var(--green) 18%, transparent)
+dropdown_shadow: rgba(0,0,0,0.35)
+dropdown_up_bg: color-mix(in srgb, var(--surface) 98%, transparent)
+dropdown_up_border: color-mix(in srgb, var(--green) 28%, transparent)
+dropdown_up_shadow: rgba(0,0,0,0.45)
+dropdown_item_text: '#9a9a9a'
+overlay_backdrop_bg: rgba(0,0,0,0.76)
+faq_code_bg: '#141414'
+allowed_chip_bg: '#141414'
+options_select_bg: '#141414'
+tab_status_ok_bg: '#39ff14'
+toast_bg: '#141414'
+toast_text: '#39ff14'
+toast_border: '#1a7a08'
+toast_error_bg: color-mix(in srgb, var(--red) 8%, var(--bg))
+toast_error_text: '#ff3c3c'
+toast_error_border: color-mix(in srgb, var(--red) 45%, transparent)
+mobile_composer_host_bg: linear-gradient(180deg, rgba(0,0,0,0.92), rgba(0,0,0,0.98))
+mobile_composer_host_light_bg: linear-gradient(180deg, rgba(238,242,246,0.94), rgba(238,242,246,0.99))
+mobile_menu_bg: '#141414'
+mobile_menu_border: '#3c3c3c'
+mobile_menu_shadow: rgba(0,0,0,0.6)
+mobile_menu_button_hover_bg: var(--green-glow)
+mobile_menu_button_hover_text: '#39ff14'
+mobile_menu_button_border: '#2a2a2a'
+welcome_command_hover_bg: color-mix(in srgb, var(--green) 6%, transparent)
+welcome_command_hover_shadow: 0 0 0 1px var(--green-glow)
+welcome_ascii_text_shadow: 0 0 10px color-mix(in srgb, var(--green) 14%, transparent),
+  0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)
+welcome_ascii_filter: saturate(1.12) contrast(1.08) brightness(1.08)

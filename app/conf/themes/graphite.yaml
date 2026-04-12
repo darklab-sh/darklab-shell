@@ -4,6 +4,7 @@
 # Clean and clinical — like brushed aluminum, matte white paper.
 
 label: "Graphite"
+color_scheme: light
 group: "Neutral Light"
 sort: 90
 
@@ -31,7 +32,10 @@ terminal_bar_bg: "#d4d4da"
 terminal_bar_border: "#c0c0c8"
 terminal_actions_bg: "rgba(30, 30, 50, 0.02)"
 terminal_wrap_border: "rgba(30, 30, 50, 0.20)"
-terminal_wrap_shadow: "rgba(30, 30, 50, 0.10)"
+terminal_wrap_shadow: "rgba(30, 30, 50, 0.17)"
+window_btn_close: "color-mix(in srgb, var(--red) 62%, var(--surface))"
+window_btn_minimize: "color-mix(in srgb, var(--amber) 62%, var(--surface))"
+window_btn_maximize: "color-mix(in srgb, var(--green) 62%, var(--surface))"
 
 toolbar_button_bg: "#dcdce2"
 toolbar_button_border: "#c0c0c8"
@@ -51,7 +55,6 @@ chip_hover_border: "#9898a4"
 chip_hover_text: "#08080e"
 chip_overflow_text: "#2a4e8a"
 
-tabs_bar_bg: "#cacacf"
 tabs_bar_scrollbar_track: "rgba(30, 30, 50, 0.08)"
 tabs_bar_scrollbar_thumb: "#9898a4"
 tabs_bar_scrollbar_thumb_hover: "#78788a"
@@ -78,9 +81,11 @@ tab_touch_drag_text_shadow: "0 0 10px rgba(46,110,88,0.10)"
 tab_drop_shadow: "0 0 10px rgba(46,110,88,0.20)"
 
 history_panel_bg: "#d4d4da"
+history_panel_shadow: "rgba(30, 30, 50, 0.22)"
 history_entry_hover_bg: "rgba(42, 78, 138, 0.06)"
 history_load_overlay_bg: "rgba(8, 8, 20, 0.72)"
 history_load_modal_bg: "#f4f4f6"
+history_load_modal_border: "rgba(30, 30, 50, 0.14)"
 history_load_modal_shadow: "rgba(30, 30, 50, 0.16)"
 
 faq_modal_bg: "#f4f4f6"
@@ -95,6 +100,7 @@ dropdown_up_bg: "#e4e4e8"
 dropdown_up_border: "rgba(42, 78, 138, 0.28)"
 dropdown_up_shadow: "rgba(30, 30, 50, 0.14)"
 dropdown_item_text: "#484858"
+overlay_backdrop_bg: "rgba(8, 8, 20, 0.72)"
 
 faq_code_bg: "#dcdce2"
 allowed_chip_bg: "#dcdce2"

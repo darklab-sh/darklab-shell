@@ -96,6 +96,18 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ## Completed
 
+### UI Polish Pass
+
+- Differentiated the shell button groups so header navigation, recent-command chips, tabs, and terminal action buttons no longer all share the same flat rectangular treatment.
+- Reworked the terminal search, line-number, and timestamp controls so utilities, toggles, and status no longer read like one flat button strip; search now uses a dedicated utility treatment and the mode toggles use explicit on/off indicators.
+- Restyled the new-tab `+` control as a secondary ghost tab so it reads as an additive action instead of another normal tab.
+- Tightened the live prompt presentation so it remains terminal-native while separating more cleanly from the welcome block and control area through spacing and welcome-to-prompt handoff tuning.
+- Reworked the terminal window chassis so the app shell now has a visible right/bottom 3D lift instead of a flat single-line border, with the shadow geometry handled in CSS and the shadow color controlled per theme through `terminal_wrap_shadow`.
+- Made the terminal window buttons theme-aware via `window_btn_close`, `window_btn_minimize`, and `window_btn_maximize`, with defaults and per-theme values wired through the theme system.
+- Applied a unified thin, theme-aware scrollbar treatment across the main scrollable surfaces instead of leaving browser-default scrollbars in the output, history, permalink, autocomplete, and modal areas.
+- Refined the footer wordmark link so it reads as a muted shell link at rest and picks up a subtle monospace-style hover underline without competing with the action buttons.
+- Tightened the welcome-to-output transition so the settled welcome block now owns a faint separator and a little more breathing room before normal transcript content begins, instead of relying on the prompt line to create that boundary.
+
 ### Logging Review
 
 - Expanded the main content-route logging surface so config, theme, FAQ, autocomplete, and welcome reads emit `CONTENT_VIEWED` info logs with route/session context.
@@ -162,7 +174,7 @@ Theme resolution follows the documented order:
 2. `default_theme` from `app/conf/config.yaml`
 3. baked-in dark fallback palette
 
-Mobile uses the same selector with a full-screen chooser and a two-column preview layout on wider phones. The theme examples in `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are copyable templates only; the runtime selector reads the registry in `app/conf/themes/`.
+Mobile uses the same selector with a full-screen chooser and a two-column preview layout on wider phones. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are generated reference artifacts from `_THEME_DEFAULTS` in `app/config.py`; the runtime selector reads the registry in `app/conf/themes/`.
 
 ### Shell-Style Input Refactor
 
@@ -222,7 +234,7 @@ Mobile uses the same selector with a full-screen chooser and a two-column previe
 ### Version Source Cleanup
 
 - The backend `/config` response is the canonical version source, the initial header label is generic, and the frontend updates the visible version label only after config loads.
-- Result: `app/config.py` defines the backend version, `/config` exposes it to the frontend, and the UI falls back to a generic `real-time` label until config loads.
+- Result: `app/config.py` defines the backend version, `/config` exposes it to the frontend, and the version label is empty until config loads.
 
 ### Welcome / Helper Follow-ups
 

@@ -1,6 +1,8 @@
 // ── Shared autocomplete logic ──
 
 function _positionAutocomplete(itemsCount) {
+  // Desktop anchors the dropdown to the prompt row; mobile anchors it above the
+  // simplified composer so suggestions never hide behind the keyboard.
   if (!acDropdown) return false;
   const wrap = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) || acDropdown.parentElement;
   const composerHost = (typeof mobileComposerHost !== 'undefined' && mobileComposerHost) || null;

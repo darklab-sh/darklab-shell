@@ -23,6 +23,8 @@ history_bp = Blueprint("history", __name__)
 # ── Preview output helpers ────────────────────────────────────────────────────
 
 def _preview_output_entries_from_run(run):
+    # Prefer the saved full-output artifact when present, otherwise reconstruct a
+    # preview from the inline DB columns used by older rows.
     raw = run.get("output_preview")
     if raw is None:
         raw = run.get("output")
@@ -72,6 +74,7 @@ def _preview_notice(run):
 @history_bp.route("/history")
 def get_history():
     """Return the most recent completed runs for this session."""
+    # History is isolated per anonymous browser session, not shared globally.
     session_id = get_session_id()
     with db_connect() as conn:
         rows = conn.execute(
@@ -222,6 +225,8 @@ def clear_history():
 @history_bp.route("/share", methods=["POST"])
 def save_share():
     """Save a tab snapshot (all output from a tab) for sharing via permalink."""
+    # Snapshot permalinks capture the currently visible tab transcript rather than
+    # requiring a completed run ID, so the client POSTs normalized line objects.
     data = request.get_json() or {}
     if not isinstance(data, dict):
         return jsonify({"error": "Request body must be a JSON object"}), 400

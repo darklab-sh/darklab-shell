@@ -21,6 +21,8 @@ assets_bp = Blueprint("assets", __name__)
 
 
 def _fmt_elapsed(seconds):
+    # Diagnostics prefers short operator-readable durations over raw second
+    # counts for summary cards and activity tables.
     s = int(seconds or 0)
     if s >= 3600:
         h, m = s // 3600, (s % 3600) // 60

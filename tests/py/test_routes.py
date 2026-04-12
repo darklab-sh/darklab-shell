@@ -18,6 +18,8 @@ from database import DB_PATH
 
 
 # ── Fixtures ──────────────────────────────────────────────────────────────────
+# Route tests intentionally disable rate limiting so individual cases can focus
+# on route behavior rather than shared per-IP quota state.
 
 def get_client(*, use_forwarded_for=True):
     shell_app.app.config["TESTING"] = True
@@ -40,6 +42,16 @@ class TestIndexRoute:
         client = get_client()
         resp = client.get("/")
         assert b"<!DOCTYPE html>" in resp.data or b"<html" in resp.data.lower()
+
+    def test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/").get_data(as_text=True)
+        assert 'id="diag-btn"' in body
+        assert 'href="/diag"' in body
+        assert 'target="_blank"' in body
+        assert 'rel="noopener noreferrer"' in body
+        assert 'button data-action="diag"' in body
 
 # ── /health ───────────────────────────────────────────────────────────────────
 
@@ -157,9 +169,9 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["prompt_prefix"] == "ops@darklab:~$"
 
-    def test_project_readme_reflects_cfg(self):
+    def test_project_readme_is_constant(self):
         client = get_client()
-        with mock.patch.dict("config.CFG", {"project_readme": "https://example.invalid/README.md"}):
+        with mock.patch("config.PROJECT_README", "https://example.invalid/README.md"):
             data = json.loads(client.get("/config").data)
         assert data["project_readme"] == "https://example.invalid/README.md"
 
@@ -242,23 +254,23 @@ class TestThemesRoute:
         assert "blue_paper" in themes
         assert "olive_grove" in themes
         assert "darklab_obsidian" in themes
-        assert "obsidian_emerald" in themes
+        assert "emerald_obsidian" in themes
         assert "charcoal_steel" in themes
         assert "dark" not in themes
         assert "light" not in themes
         assert themes["blue_paper"]["label"] == "Blue Paper"
         assert themes["olive_grove"]["label"] == "Olive Grove"
         assert themes["darklab_obsidian"]["label"] == "Darklab Obsidian"
-        assert themes["obsidian_emerald"]["label"] == "Obsidian Emerald"
+        assert themes["emerald_obsidian"]["label"] == "Emerald Obsidian"
         assert themes["charcoal_steel"]["label"] == "Charcoal Steel"
         assert themes["blue_paper"]["group"] == "Cool Light"
         assert themes["olive_grove"]["group"] == "Warm Light"
         assert themes["darklab_obsidian"]["group"] == "Dark Neon"
-        assert themes["obsidian_emerald"]["group"] == "Dark Neon"
+        assert themes["emerald_obsidian"]["group"] == "Dark Neon"
         assert themes["blue_paper"]["filename"] == "blue_paper.yaml"
         assert themes["olive_grove"]["filename"] == "olive_grove.yaml"
         assert themes["darklab_obsidian"]["filename"] == "darklab_obsidian.yaml"
-        assert themes["obsidian_emerald"]["filename"] == "obsidian_emerald.yaml"
+        assert themes["emerald_obsidian"]["filename"] == "emerald_obsidian.yaml"
 
     def test_default_theme_is_exposed_as_filename(self):
         client = get_client()
@@ -513,6 +525,10 @@ class TestDiagRoute:
             resp = client.get("/diag")
         body = resp.get_data(as_text=True)
         assert "diag test shell" in body
+        assert "operator diagnostics" in body
+        assert 'class="term-action-btn diag-back-btn"' in body
+        assert 'href="/"' in body
+        assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
 
     def test_json_format_param_returns_json(self):

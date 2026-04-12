@@ -8,7 +8,8 @@
     "test:unit:watch": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "capture:container-smoke-test": "node scripts/node/capture_output_for_smoke_test.mjs"
+    "capture:container-smoke-test": "node scripts/node/capture_output_for_smoke_test.mjs",
+    "capture:readme-screenshot": "playwright test tests/js/e2e/readme-screenshot.spec.js"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",

@@ -14,6 +14,8 @@ function _collectSearchTextNodes(root) {
 }
 
 function _highlightSearchLine(line, re) {
+  // Search highlighting operates on a cloned line so the live transcript keeps
+  // its original DOM structure until a match has actually been confirmed.
   const clone = line.cloneNode(true);
   const parts = _collectSearchTextNodes(clone);
   const text = parts.map(part => part.text).join('');

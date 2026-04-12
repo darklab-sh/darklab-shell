@@ -2,7 +2,13 @@
 
 A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history, run previews, and permalinks. Completed runs can also persist full output as compressed artifacts for later inspection. The project is built to run in Docker by default, but also supports local development without containers.
 
+![darklab shell screenshot](docs/readme-app.png)
+
+_This screenshot is refreshed by the Playwright e2e suite and can be regenerated directly with `npm run capture:readme-screenshot`._
+
+
 ## Table of Contents
+- [Architecture At A Glance](#architecture-at-a-glance)
 - [Features](#features)
 - [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
@@ -10,8 +16,34 @@ A web-based shell for running network diagnostics and vulnerability scans agains
 - [Configuration](#configuration)
 - [Operator Diagnostics](#operator-diagnostics)
 - [Development & Testing](#development--testing)
-- [Architecture At A Glance](#architecture-at-a-glance)
-- [Architecture & Docs](#architecture--decision-log)
+
+---
+
+## Architecture At A Glance
+
+```mermaid
+flowchart LR
+  Browser["Browser UI"]
+  Flask["Flask + Gunicorn"]
+  Redis["Redis"]
+  Storage["SQLite + output artifacts"]
+  Runner["Scanner subprocesses"]
+
+  Browser -->|HTTP + SSE| Flask
+  Flask <--> Redis
+  Flask <--> Storage
+  Flask --> Runner
+```
+
+This is the high-level runtime shape of the app:
+
+- the browser renders the shell UI and consumes SSE output streams
+- Flask/Gunicorn owns routing, validation, shell-helper dispatch, and orchestration
+- Redis handles shared worker coordination such as rate limiting and kill-path PID tracking
+- SQLite plus artifact files hold durable history/share state
+- real command execution happens in subprocesses rather than inside the web worker process
+
+For the full decision log and the more detailed component diagrams, see [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ---
 
@@ -51,8 +83,11 @@ See [Feature Details](#feature-details) for the full grouped capability list.
 │   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
 │   ├── container_smoke_test.sh # Fresh-image Container Smoke Test wrapper
 │   ├── capture_container_smoke_test_outputs.sh # Re-captures the smoke-test baseline from a known-good container
+│   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
 │   └── node/
 │       └── capture_output_for_smoke-test.mjs # Browser-driven smoke-test corpus capture helper
+├── docs/
+│   └── readme-app.png          # Current README hero screenshot; regenerate with npm run capture:readme-screenshot
 ├── tests/
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
@@ -91,6 +126,7 @@ See [Feature Details](#feature-details) for the full grouped capability list.
 │           ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
 │           ├── output.spec.js  # copy/clear/save/export behavior
 │           ├── rate-limit.spec.js # per-session /run rate limiting
+│           ├── readme-screenshot.spec.js # Refreshes the README hero screenshot during Playwright runs
 │           ├── search.spec.js  # search/highlight/navigation behavior
 │           ├── share.spec.js    # snapshot permalinks and clipboard behavior
 │           ├── history.spec.js  # History drawer: load command, dedup tab, star/chip cleanup
@@ -142,7 +178,12 @@ See [Feature Details](#feature-details) for the full grouped capability list.
     ├── requirements.txt        # Python runtime dependencies
     └── static/
         ├── css/
-        │   └── styles.css      # All application styles
+        │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
+        │   ├── base.css        # Theme tokens, reset, base layout, header, input, and dropdown foundations
+        │   ├── shell.css       # Terminal shell frame, panels, history row, utility buttons, and modals
+        │   ├── components.css  # Tabs, search UI, permalink/history surfaces, toast, and menu components
+        │   ├── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
+        │   └── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
         ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
         └── js/
             ├── session.js      # Session UUID + apiFetch wrapper (loads first)
@@ -445,9 +486,8 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | Setting | Default | Description |
 |---------|---------|-------------|
 | `app_name` | `darklab shell` | Name shown in the browser tab, header, and permalink pages |
-| `project_readme` | `https://gitlab.com/darklab.sh/darklab-shell#darklab-shell` | URL used by the built-in FAQ and synthetic README links |
 | `prompt_prefix` | `anon@darklab:~$` | Prompt text shown in the shell input and welcome samples. Can be customized independently of `app_name` |
-| `motd` | _(empty)_ | Optional message displayed at the top of the terminal on page load. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
+| `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the direct TCP peer IP (`request.remote_addr`), not `X-Forwarded-For`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
@@ -479,7 +519,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 
 Theme configuration is documented in [THEME.md](THEME.md). The theme externalization work is part of the v1.4 line. In short:
 
-- `app/conf/themes/` contains the selectable theme variants; the root `theme_dark.yaml.example` / `theme_light.yaml.example` files are copyable templates only and are not used by the runtime selector; `default_theme` in `config.yaml` points at a full filename from that directory
+- `app/conf/themes/` contains the selectable theme variants; the root `theme_dark.yaml.example` / `theme_light.yaml.example` files are generated reference templates only and are not used by the runtime selector; regenerate them with [scripts/generate_theme_examples.py](scripts/generate_theme_examples.py) after changing `_THEME_DEFAULTS` in `app/config.py`; `default_theme` in `config.yaml` points at a full filename from that directory
 - `app/conf/themes/` holds the runtime theme variants; the loader scans that directory and exposes the results to the browser
 
 ### Dependency Version Tracking
@@ -505,10 +545,11 @@ If you run this repo in GitLab CI, the `dependency-version-check` job in `.gitla
 - `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell, including the mobile composer surfaces, and permalink pages share one theme source of truth
 - `app/templates/theme_vars_script.html` exposes the same resolved values plus the full theme registry to the browser-side runtime selector and export helpers
 - `app/static/js/app.js` exposes the theme helpers, and `app/static/js/controller.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
+- the theme selector keeps live preview-on-click behavior; on desktop it now opens as a right-side drawer so more of the shell stays visible while you compare themes, while mobile keeps the existing full-screen chooser
 - `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
 - `app/app.py` also exposes `/themes` for clients that want to inspect the available registry
 - the resolved theme also drives a best-effort document `color-scheme` hint (`only light`, `only dark`, or `light dark`) so mobile browsers that honor standards-based scheme hints are less likely to auto-darken light themes
-- `app/app.py` also exposes `project_readme` through `/config` so the FAQ and synthetic README links can point at a project-specific URL
+- `app/app.py` also exposes the built-in project README URL through `/config` so the FAQ and synthetic README links stay aligned with the shipped project documentation
 
 See [THEME.md](THEME.md) for the full architecture walkthrough and a complete appendix of every supported theme option and default.
 
@@ -1179,12 +1220,13 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **785 pytest + 289 Vitest + 138 Playwright = 1,212 tests**.
+Current totals: **789 pytest + 292 Vitest + 139 Playwright = 1,220 tests**.
 
 The testing model is intentionally layered:
 - `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
 - `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
-- `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, and history-panel action-button close behavior
+- `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, history-panel action-button close behavior, and the README hero screenshot capture
+- `pytest` also locks the rendered shell chrome where it matters at the template layer, including the diagnostics header content and the desktop-vs-mobile diagnostics navigation split (`/diag` new tab on desktop, in-app action on mobile)
 
 The shell chrome now uses direct DOM construction for the tab headers, history entries, and FAQ limits / allowed-command sections, plus class-based modal wrappers in the template. Search highlighting also walks text nodes instead of rewriting serialized HTML, so mixed-content lines keep their markup intact. That reduces string-built fragments without changing the visible UI or the test model above.
 
@@ -1198,7 +1240,7 @@ The permalink/export refactor was primarily about removing duplicated static HTM
 
 ## Architecture At A Glance
 
-For a higher-level explanation of how the app works, start with [ARCHITECTURE.md](ARCHITECTURE.md):
+For a higher-level explanation of how the app works including a full architectural decision log, start with [ARCHITECTURE.md](ARCHITECTURE.md):
 
 - `System Overview` for the major runtime pieces and responsibilities
 - `Runtime Topology` for the browser / Flask / Redis / SQLite / scanner-process diagram

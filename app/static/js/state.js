@@ -1,7 +1,7 @@
 // ── Shared UI state ──
 // The browser scripts still read/write these names directly, but the actual
 // storage lives here so the app can move away from prompt-specific globals in
-// a controlled way.
+// a controlled way without changing every module at once.
 (function initSharedState(global) {
   const defaults = {
     tabs: [],

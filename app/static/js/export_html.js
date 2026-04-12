@@ -1,5 +1,7 @@
 // ── Shared HTML export helpers ───────────────────────────────────────────────
 (function () {
+  // HTML export deliberately inlines the runtime theme variables so downloaded
+  // files preserve the active palette without depending on the live app shell.
   const EXPORT_FONT_FILES = [
     { family: 'JetBrains Mono', weight: 300, filename: 'JetBrainsMono-300.ttf' },
     { family: 'JetBrains Mono', weight: 400, filename: 'JetBrainsMono-400.ttf' },
@@ -20,6 +22,11 @@
     '--amber',
     '--red',
     '--blue',
+    '--theme-panel-bg',
+    '--theme-panel-border',
+    '--theme-panel-shadow',
+    '--theme-terminal-bar-bg',
+    '--theme-terminal-bar-border',
     '--terminal-font-size',
     '--terminal-line-height',
   ];
@@ -67,6 +74,22 @@
     return {};
   }
 
+  function getThemeExportColorScheme() {
+    const registryCurrent = window.ThemeRegistry && window.ThemeRegistry.current;
+    if (registryCurrent && typeof registryCurrent.color_scheme === 'string' && registryCurrent.color_scheme.trim()) {
+      return registryCurrent.color_scheme.trim();
+    }
+    const colorSchemeMeta = document.querySelector('meta[name="color-scheme"]');
+    if (colorSchemeMeta && typeof colorSchemeMeta.content === 'string' && colorSchemeMeta.content.trim()) {
+      return colorSchemeMeta.content.trim();
+    }
+    const docScheme = document.documentElement && document.documentElement.style
+      ? document.documentElement.style.colorScheme
+      : '';
+    if (typeof docScheme === 'string' && docScheme.trim()) return docScheme.trim();
+    return 'light dark';
+  }
+
   function buildTerminalExportStyles(fontFacesCss = '') {
     const themeVars = getThemeExportVars();
     const themeDecls = Object.entries(themeVars)
@@ -83,12 +106,24 @@ ${themeDecls}
     padding: 28px 32px; margin: 0; line-height: 1.65;
   }
   .header {
-    margin-bottom: 20px; padding-bottom: 14px;
-    border-bottom: 1px solid var(--border);
+    margin-bottom: 20px;
+    padding: 16px 18px;
+    border: 1px solid var(--theme-terminal-bar-border, var(--border));
+    background: var(--theme-terminal-bar-bg, var(--bg));
+    border-radius: 4px 4px 0 0;
   }
   .app-name { color: var(--green); font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }
   .meta { color: var(--muted); font-size: 11px; }
-  .output { white-space: pre-wrap; word-break: break-all; }
+  .output {
+    white-space: pre-wrap;
+    word-break: break-all;
+    background: var(--theme-panel-bg, var(--surface));
+    border: 1px solid var(--theme-panel-border, var(--border));
+    border-top: none;
+    border-radius: 0 0 4px 4px;
+    padding: 16px 18px 18px;
+    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-panel-shadow, transparent) 74%, transparent);
+  }
   .line { display: block; }
   .line.exit-ok   { color: var(--green); font-weight: 700; margin-top: 8px; }
   .line.exit-fail { color: var(--red); font-weight: 700; margin-top: 8px; }
@@ -111,10 +146,12 @@ ${themeDecls}
     linesHtml = '',
     fontFacesCss = '',
   }) {
+    const colorScheme = getThemeExportColorScheme();
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
+<meta name="color-scheme" content="${escapeExportHtml(colorScheme)}">
 <title>${escapeExportHtml(title)} — ${escapeExportHtml(appName)}</title>
 <style>
 ${buildTerminalExportStyles(fontFacesCss)}
