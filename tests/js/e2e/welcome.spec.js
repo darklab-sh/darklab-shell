@@ -248,6 +248,9 @@ test.describe('welcome animation', () => {
 
     test('switches to the mobile welcome path with the mobile banner', async ({ page }) => {
       await page.setViewportSize({ width: 390, height: 844 })
+      await page.addInitScript(() => {
+        sessionStorage.clear()
+      })
       await page.reload()
       await page.locator('#mobile-cmd').waitFor()
 

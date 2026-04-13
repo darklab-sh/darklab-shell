@@ -165,6 +165,8 @@ async function loadAppFns({
 
   const storage = new MemoryStorage()
   const sessionStore = new MemoryStorage()
+  const tabsState = tabsOverride
+  let activeTabState = activeTabId
   if (theme !== null) storage.setItem('theme', theme)
   for (const [name, value] of Object.entries(cookies)) {
     document.cookie = `${name}=${encodeURIComponent(value)}; path=/`
@@ -201,6 +203,14 @@ async function loadAppFns({
   const clearSearch = vi.fn()
   const navigateSearch = vi.fn()
   const logClientError = vi.fn()
+  const getTab = vi.fn(id => tabsState.find(tab => tab && tab.id === id) || null)
+  const getActiveTab = vi.fn(() => tabsState.find(tab => tab && tab.id === activeTabState) || null)
+  const setTabs = vi.fn(nextTabs => {
+    tabsState.splice(0, tabsState.length, ...nextTabs)
+  })
+  const setActiveTabId = vi.fn(id => {
+    activeTabState = id
+  })
   const cmdInput = document.getElementById('cmd')
   const acDropdown = document.getElementById('ac-dropdown')
   const domBindings = {
@@ -396,8 +406,12 @@ async function loadAppFns({
     mountShellPrompt: () => {},
     unmountShellPrompt: () => {},
     logClientError,
-    tabs: tabsOverride,
-    activeTabId,
+    tabs: tabsState,
+    activeTabId: activeTabState,
+    getTab,
+    getActiveTab,
+    setTabs,
+    setActiveTabId,
     confirmKill: confirmKillOverride,
     closeTab: closeTabOverride,
     activateTab: activateTabOverride,
@@ -458,6 +472,10 @@ async function loadAppFns({
     getVisibleComposerInput,
     getComposerValue,
     setRunButtonDisabled,
+    persistTabSessionStateNow,
+    schedulePersistTabSessionState,
+    restoreTabSessionState,
+    _getTabSessionStateKey: () => TAB_SESSION_STATE_KEY,
     confirmHistAction,
     executeHistAction,
     doKill,
@@ -476,6 +494,7 @@ async function loadAppFns({
     resetComposerState,
     syncShellPrompt,
     _getAcIndex: () => acIndex,
+    _getWelcomeBootPending: () => _welcomeBootPending,
   }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
   await Promise.resolve()
@@ -484,6 +503,7 @@ async function loadAppFns({
   return {
     ...fns,
     storage,
+    tabs: tabsState,
     apiFetch,
     runSearch,
     clearSearch,
@@ -515,6 +535,10 @@ async function loadAppFns({
     closeKillOverlay: fns.closeKillOverlay,
     syncShellPrompt: fns.syncShellPrompt,
     sessionStorage: sessionStore,
+    getTab,
+    getActiveTab,
+    setTabs,
+    setActiveTabId,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
       else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
@@ -1050,6 +1074,262 @@ describe('app helpers', () => {
 
     expect(shellPromptText.textContent).toBe('ping darklab.sh')
     expect(shellPromptWrap.classList.contains('shell-prompt-empty')).toBe(false)
+  })
+
+  it('persists only non-running tabs for session restore', async () => {
+    const tabs = [
+      {
+        id: 'tab-1',
+        label: 'tab 1',
+        command: 'dig darklab.sh',
+        renamed: false,
+        draftInput: 'dig darklab.sh',
+        st: 'idle',
+        exitCode: null,
+        historyRunId: '',
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' }],
+        closing: false,
+      },
+      {
+        id: 'tab-2',
+        label: 'ping',
+        command: 'ping darklab.sh',
+        renamed: true,
+        draftInput: '',
+        st: 'running',
+        exitCode: null,
+        historyRunId: 'run-1',
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [{ text: '$ ping darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' }],
+        closing: false,
+      },
+    ]
+    const { persistTabSessionStateNow, sessionStorage, _getTabSessionStateKey } = await loadAppFns({
+      tabs,
+      activeTabId: 'tab-1',
+    })
+
+    persistTabSessionStateNow()
+
+    const saved = JSON.parse(sessionStorage.getItem(_getTabSessionStateKey()))
+    expect(saved.tabs).toHaveLength(1)
+    expect(saved.tabs[0].label).toBe('tab 1')
+    expect(saved.tabs[0].draftInput).toBe('')
+  })
+
+  it('restores saved non-running tabs and active draft state from session storage', async () => {
+    const tabs = []
+    let seq = 0
+    const createTab = vi.fn((label) => {
+      const id = `tab-${++seq}`
+      tabs.push({
+        id,
+        label,
+        command: '',
+        renamed: false,
+        draftInput: '',
+        st: 'idle',
+        exitCode: null,
+        historyRunId: null,
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [],
+        closing: false,
+      })
+      return id
+    })
+    const activateTab = vi.fn((id) => {
+      tabs.forEach(tab => { tab.active = tab.id === id })
+    })
+    const {
+      restoreTabSessionState,
+      sessionStorage,
+      _getTabSessionStateKey,
+      _getWelcomeBootPending,
+      tabs: restoredTabs,
+      getTab,
+    } = await loadAppFns({
+      tabs,
+      createTab,
+      activateTab,
+      activeTabId: null,
+    })
+
+    sessionStorage.setItem(_getTabSessionStateKey(), JSON.stringify({
+      version: 1,
+      activeIndex: 1,
+      tabs: [
+        {
+          label: 'tab 1',
+          command: 'dig darklab.sh',
+          renamed: false,
+          draftInput: 'dig darklab.sh',
+          st: 'idle',
+          exitCode: null,
+          historyRunId: '',
+          previewTruncated: false,
+          fullOutputAvailable: false,
+          fullOutputLoaded: false,
+          rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' }],
+        },
+        {
+          label: 'notes',
+          command: '',
+          renamed: true,
+          draftInput: 'ffuf -u https://target/FUZZ',
+          st: 'fail',
+          exitCode: 1,
+          historyRunId: 'run-2',
+          previewTruncated: false,
+          fullOutputAvailable: true,
+          fullOutputLoaded: true,
+          rawLines: [{ text: '[connection error]', cls: 'exit-fail', tsC: '', tsE: '' }],
+        },
+      ],
+    }))
+
+    expect(restoreTabSessionState()).toBe(true)
+    expect(_getWelcomeBootPending()).toBe(false)
+    expect(restoredTabs).toHaveLength(2)
+    expect(createTab).toHaveBeenCalledTimes(2)
+    expect(getTab('tab-2')?.draftInput).toBe('ffuf -u https://target/FUZZ')
+    expect(getTab('tab-2')?.renamed).toBe(true)
+    expect(activateTab).toHaveBeenCalledWith('tab-2', { focusComposer: false })
+  })
+
+  it('preserves a non-active tab draft even when createTab activation would overwrite it during restore', async () => {
+    const tabs = []
+    let seq = 0
+    let activeId = null
+    const createTab = vi.fn((label) => {
+      const id = `tab-${++seq}`
+      tabs.push({
+        id,
+        label,
+        command: '',
+        renamed: false,
+        draftInput: '',
+        st: 'idle',
+        exitCode: null,
+        historyRunId: null,
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [],
+        closing: false,
+      })
+      if (activeId) {
+        const prev = tabs.find(tab => tab.id === activeId)
+        if (prev) prev.draftInput = ''
+      }
+      activeId = id
+      return id
+    })
+    const activateTab = vi.fn((id) => {
+      activeId = id
+      tabs.forEach(tab => { tab.active = tab.id === id })
+    })
+    const {
+      restoreTabSessionState,
+      sessionStorage,
+      _getTabSessionStateKey,
+      getTab,
+    } = await loadAppFns({
+      tabs,
+      createTab,
+      activateTab,
+      activeTabId: null,
+    })
+
+    sessionStorage.setItem(_getTabSessionStateKey(), JSON.stringify({
+      version: 1,
+      activeIndex: 1,
+      tabs: [
+        {
+          label: 'tab 1',
+          command: '',
+          renamed: false,
+          draftInput: 'dig darklab.sh',
+          st: 'idle',
+          exitCode: null,
+          historyRunId: '',
+          previewTruncated: false,
+          fullOutputAvailable: false,
+          fullOutputLoaded: false,
+          rawLines: [],
+        },
+        {
+          label: 'tab 2',
+          command: '',
+          renamed: false,
+          draftInput: 'hostname',
+          st: 'idle',
+          exitCode: null,
+          historyRunId: '',
+          previewTruncated: false,
+          fullOutputAvailable: false,
+          fullOutputLoaded: false,
+          rawLines: [],
+        },
+      ],
+    }))
+
+    expect(restoreTabSessionState()).toBe(true)
+    expect(getTab('tab-1')?.draftInput).toBe('dig darklab.sh')
+    expect(getTab('tab-2')?.draftInput).toBe('hostname')
+  })
+
+  it('preserves the last created non-active tab draft when the final restored active tab is different', async () => {
+    const tabs = []
+    let seq = 0
+    const createTab = vi.fn((label) => {
+      const id = `tab-${++seq}`
+      tabs.push({
+        id,
+        label,
+        command: '',
+        renamed: false,
+        draftInput: '',
+        st: 'idle',
+        exitCode: null,
+        historyRunId: null,
+        previewTruncated: false,
+        fullOutputAvailable: false,
+        fullOutputLoaded: false,
+        rawLines: [],
+        closing: false,
+      })
+      return id
+    })
+    const {
+      restoreTabSessionState,
+      sessionStorage,
+      _getTabSessionStateKey,
+      getTab,
+    } = await loadAppFns({
+      tabs,
+      createTab,
+      activeTabId: null,
+    })
+
+    sessionStorage.setItem(_getTabSessionStateKey(), JSON.stringify({
+      version: 1,
+      activeIndex: 0,
+      tabs: [
+        { label: 'tab 1', command: '', renamed: false, draftInput: 'alpha', st: 'idle', exitCode: null, historyRunId: '', previewTruncated: false, fullOutputAvailable: false, fullOutputLoaded: false, rawLines: [] },
+        { label: 'tab 2', command: '', renamed: false, draftInput: 'beta', st: 'idle', exitCode: null, historyRunId: '', previewTruncated: false, fullOutputAvailable: false, fullOutputLoaded: false, rawLines: [] },
+      ],
+    }))
+
+    expect(restoreTabSessionState()).toBe(true)
+    expect(getTab('tab-1')?.draftInput).toBe('alpha')
+    expect(getTab('tab-2')?.draftInput).toBe('beta')
   })
 
   it('manually inserts printable desktop keydown input once', async () => {

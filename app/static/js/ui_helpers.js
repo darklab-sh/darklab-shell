@@ -420,13 +420,32 @@
     return disabled;
   };
   global.isRunButtonDisabled = () => !!((runBtn && runBtn.disabled) || (typeof mobileRunBtn !== 'undefined' && mobileRunBtn && mobileRunBtn.disabled));
+  const syncTerminalActionLayout = (tabId) => {
+    const btn = (typeof tabPanels !== 'undefined' && tabPanels)
+      ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`)
+      : null;
+    const actions = btn && btn.parentElement && btn.parentElement.classList && btn.parentElement.classList.contains('terminal-actions')
+      ? btn.parentElement
+      : null;
+    if (!actions) return;
+    const hasVisibleKill = !!(btn.style ? btn.style.display !== 'none' : !btn.hidden);
+    actions.classList.toggle('terminal-actions-has-visible-kill', hasVisibleKill);
+  };
   global.showTabKillBtn = (tabId) => {
     const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-    if (btn && btn.style) btn.style.display = 'inline-block';
+    if (btn) {
+      btn.hidden = false;
+      if (btn.style) btn.style.display = 'inline-block';
+    }
+    syncTerminalActionLayout(tabId);
   };
   global.hideTabKillBtn = (tabId) => {
     const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-    if (btn && btn.style) btn.style.display = 'none';
+    if (btn) {
+      btn.hidden = true;
+      if (btn.style) btn.style.display = 'none';
+    }
+    syncTerminalActionLayout(tabId);
   };
   global.showMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();

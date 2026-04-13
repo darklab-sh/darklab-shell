@@ -45,6 +45,7 @@ const tsBtn = document.getElementById('ts-btn');
 const lnBtn = document.getElementById('ln-btn');
 const themeBtn = document.getElementById('theme-btn');
 const headerTitle = document.getElementById('header-title');
+const mobileHeaderActions = document.getElementById('mobile-header-actions');
 const faqBody = document.querySelector('.faq-body');
 const faqLimitsText = document.getElementById('faq-limits-text');
 const faqAllowedText = document.getElementById('faq-allowed-text');

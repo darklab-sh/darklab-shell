@@ -961,6 +961,24 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_active_history_returns_running_runs_for_this_session(self):
+        client = get_client()
+        session = f"session-{uuid.uuid4()}"
+        active_runs = [
+            {
+                "run_id": "run-1",
+                "command": "ping darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+            }
+        ]
+
+        with mock.patch("blueprints.history.active_runs_for_session", return_value=active_runs) as active_mock:
+            resp = client.get("/history/active", headers={"X-Session-ID": session})
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"runs": active_runs}
+        active_mock.assert_called_once_with(session)
+
 
 # ── /share ────────────────────────────────────────────────────────────────────
 

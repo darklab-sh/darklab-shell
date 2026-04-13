@@ -119,8 +119,12 @@ const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optio
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
 const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
 const _headerHomeParent = typeof headerTitle !== 'undefined' && headerTitle ? headerTitle.closest('header') : (typeof document !== 'undefined' ? document.querySelector('header') : null);
+const _mobileHeaderActionsHomeParent = typeof mobileHeaderActions !== 'undefined' && mobileHeaderActions ? mobileHeaderActions : _headerHomeParent;
 const SHARE_REDACTION_SESSION_KEY = 'share_redaction_choice';
+const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
 let _pendingShareRedactionResolver = null;
+let _tabSessionPersistTimer = null;
+let _tabSessionRestoreInProgress = false;
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -303,11 +307,11 @@ function syncMobileShellLayout(mobileMode) {
   syncMobileShellTranscriptLayout(useMobile, mobileShellTranscriptMount, mobileShellChromeMount);
   syncMobileShellOverlayLayout(useMobile, mobileShellOverlaysMount);
   if (status && _headerHomeParent) {
-    if (useMobile) _moveComposerNode(status, _headerHomeParent, hamburgerBtn || null);
+    if (useMobile) _moveComposerNode(status, _mobileHeaderActionsHomeParent, hamburgerBtn || null);
     else _moveComposerNode(status, _statusHomeParent);
   }
   if (runTimer && _headerHomeParent) {
-    if (useMobile) _moveComposerNode(runTimer, _headerHomeParent, hamburgerBtn || null);
+    if (useMobile) _moveComposerNode(runTimer, _mobileHeaderActionsHomeParent, hamburgerBtn || null);
     else _moveComposerNode(runTimer, _runTimerHomeParent);
   }
   if (!useMobile && _shellInputRowHomeParent) _moveComposerNode(shellInputRow, _shellInputRowHomeParent);
@@ -633,6 +637,161 @@ function confirmPermalinkRedactionChoice() {
   return new Promise(resolve => {
     _pendingShareRedactionResolver = resolve;
   });
+}
+
+function _snapshotTabRawLines(rawLines) {
+  if (!Array.isArray(rawLines)) return [];
+  return rawLines.map(line => ({
+    text: String(line && line.text || ''),
+    cls: String(line && line.cls || ''),
+    tsC: String(line && line.tsC || ''),
+    tsE: String(line && line.tsE || ''),
+  }));
+}
+
+function _flushActiveTabDraftForSessionState() {
+  const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  if (!activeTab || activeTab.st === 'running') return;
+  activeTab.draftInput = typeof getComposerValue === 'function'
+    ? getComposerValue()
+    : (typeof cmdInput !== 'undefined' && cmdInput ? cmdInput.value || '' : '');
+}
+
+function _tabSessionSnapshot() {
+  _flushActiveTabDraftForSessionState();
+  const allTabs = Array.isArray(tabs) ? tabs : [];
+  const persisted = allTabs
+    .filter(tab => tab && tab.st !== 'running' && !tab.closing)
+    .map(tab => ({
+      label: String(tab.label || ''),
+      command: String(tab.command || ''),
+      renamed: !!tab.renamed,
+      draftInput: String(tab.draftInput || ''),
+      st: String(tab.st || 'idle'),
+      exitCode: tab.exitCode == null ? null : Number(tab.exitCode),
+      historyRunId: String(tab.historyRunId || ''),
+      previewTruncated: !!tab.previewTruncated,
+      fullOutputAvailable: !!tab.fullOutputAvailable,
+      fullOutputLoaded: !!tab.fullOutputLoaded,
+      rawLines: _snapshotTabRawLines(tab.rawLines),
+    }));
+  if (!persisted.length) return null;
+  const activeIndex = persisted.findIndex((_, idx) => {
+    const sourceTabs = allTabs.filter(tab => tab && tab.st !== 'running' && !tab.closing);
+    return sourceTabs[idx] && sourceTabs[idx].id === activeTabId;
+  });
+  return {
+    version: 1,
+    activeIndex: activeIndex >= 0 ? activeIndex : 0,
+    tabs: persisted,
+  };
+}
+
+function persistTabSessionStateNow() {
+  if (_tabSessionRestoreInProgress) return;
+  try {
+    const snapshot = _tabSessionSnapshot();
+    if (!snapshot) {
+      sessionStorage.removeItem(TAB_SESSION_STATE_KEY);
+      return;
+    }
+    sessionStorage.setItem(TAB_SESSION_STATE_KEY, JSON.stringify(snapshot));
+  } catch (_) {}
+}
+
+function schedulePersistTabSessionState() {
+  if (_tabSessionRestoreInProgress) return;
+  clearTimeout(_tabSessionPersistTimer);
+  _tabSessionPersistTimer = setTimeout(() => {
+    _tabSessionPersistTimer = null;
+    persistTabSessionStateNow();
+  }, 120);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    persistTabSessionStateNow();
+  });
+  window.addEventListener('beforeunload', () => {
+    persistTabSessionStateNow();
+  });
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) persistTabSessionStateNow();
+  });
+}
+
+function restoreTabSessionState() {
+  let parsed;
+  try {
+    parsed = JSON.parse(sessionStorage.getItem(TAB_SESSION_STATE_KEY) || 'null');
+  } catch (_) {
+    return false;
+  }
+  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.tabs) || !parsed.tabs.length) return false;
+
+  _tabSessionRestoreInProgress = true;
+  try {
+    _welcomeBootPending = false;
+    if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
+    if (typeof tabsBar !== 'undefined' && tabsBar) {
+      tabsBar.querySelectorAll('.tab').forEach(node => node.remove());
+    }
+    if (typeof tabPanels !== 'undefined' && tabPanels) tabPanels.innerHTML = '';
+    if (typeof setTabs === 'function') setTabs([]);
+    if (typeof setActiveTabId === 'function') setActiveTabId(null);
+
+    const restoredIds = [];
+    const restoredRecords = [];
+    parsed.tabs.forEach((item, index) => {
+      const label = String(item && item.label || `tab ${index + 1}`);
+      const tabId = typeof createTab === 'function' ? createTab(label) : null;
+      if (!tabId) return;
+      const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+      if (!tab) return;
+      tab.command = String(item && item.command || '');
+      tab.renamed = !!(item && item.renamed);
+      tab.draftInput = String(item && item.draftInput || '');
+      tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
+      tab.historyRunId = String(item && item.historyRunId || '');
+      tab.previewTruncated = !!(item && item.previewTruncated);
+      tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
+      tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
+      if (typeof renderRestoredTabOutput === 'function') {
+        renderRestoredTabOutput(tabId, item && item.rawLines);
+      }
+      if (typeof setTabStatus === 'function') {
+        const status = typeof item?.st === 'string' && item.st !== 'running' ? item.st : 'idle';
+        setTabStatus(tabId, status);
+      }
+      if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
+      restoredIds.push(tabId);
+      restoredRecords.push({ tabId, item });
+    });
+
+    restoredRecords.forEach(({ tabId, item }) => {
+      const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+      if (!tab) return;
+      tab.command = String(item && item.command || '');
+      tab.renamed = !!(item && item.renamed);
+      tab.draftInput = String(item && item.draftInput || '');
+      tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
+      tab.historyRunId = String(item && item.historyRunId || '');
+      tab.previewTruncated = !!(item && item.previewTruncated);
+      tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
+      tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
+    });
+
+    if (!restoredIds.length) return false;
+    const activeIndex = Math.max(0, Math.min(Number(parsed.activeIndex) || 0, restoredIds.length - 1));
+    if (typeof activateTab === 'function') activateTab(restoredIds[activeIndex], { focusComposer: false });
+    if (typeof mountShellPrompt === 'function') mountShellPrompt(restoredIds[activeIndex], true);
+    return true;
+  } finally {
+    _tabSessionRestoreInProgress = false;
+  }
 }
 
 function confirmPendingKill() {
@@ -968,6 +1127,11 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   // shared composer state stay on the same path.
   mobileInput.addEventListener('input', () => {
     handleComposerInputChange(mobileInput);
+    const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    if (activeTab && activeTab.st !== 'running') {
+      activeTab.draftInput = typeof getComposerValue === 'function' ? getComposerValue() : (mobileInput.value || '');
+      if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    }
   });
 
   mobileInput.addEventListener('keydown', e => {

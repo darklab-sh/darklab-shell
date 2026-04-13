@@ -9,6 +9,7 @@ kill a process started by a different worker. When Redis is unavailable
 import os
 import threading
 import logging
+import json
 
 from config import CFG
 
@@ -43,6 +44,8 @@ if not redis_client:
         )
 
 _pid_map: dict[str, int] = {}
+_active_run_meta: dict[str, dict] = {}
+_session_run_ids: dict[str, set[str]] = {}
 _pid_lock = threading.Lock()
 
 # PID entries expire after 4 hours as a safety net for orphaned entries
@@ -68,3 +71,107 @@ def pid_pop(run_id: str) -> int | None:
     else:
         with _pid_lock:
             return _pid_map.pop(run_id, None)
+
+
+def active_run_register(run_id: str, pid: int, session_id: str, command: str, started: str) -> None:
+    """Register the metadata needed to restore an in-flight run after reload."""
+    payload = {
+        "run_id": run_id,
+        "pid": pid,
+        "session_id": session_id,
+        "command": command,
+        "started": started,
+    }
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        session_key = f"sessionprocs:{session_id}"
+        redis_client.set(meta_key, json.dumps(payload), ex=_PID_TTL)
+        redis_client.sadd(session_key, run_id)
+        redis_client.expire(session_key, _PID_TTL)
+    else:
+        with _pid_lock:
+            _active_run_meta[run_id] = payload
+            _session_run_ids.setdefault(session_id, set()).add(run_id)
+
+
+def active_run_remove(run_id: str) -> None:
+    """Remove active-run metadata after completion or explicit kill."""
+    if redis_client:
+        meta_key = f"procmeta:{run_id}"
+        raw = redis_client.get(meta_key)
+        if raw:
+            try:
+                session_id = json.loads(raw).get("session_id", "")
+            except Exception:
+                session_id = ""
+            if session_id:
+                redis_client.srem(f"sessionprocs:{session_id}", run_id)
+        redis_client.delete(meta_key)
+        return
+
+    with _pid_lock:
+        meta = _active_run_meta.pop(run_id, None)
+        session_id = str(meta.get("session_id", "")) if isinstance(meta, dict) else ""
+        if session_id and session_id in _session_run_ids:
+            _session_run_ids[session_id].discard(run_id)
+            if not _session_run_ids[session_id]:
+                _session_run_ids.pop(session_id, None)
+
+
+def active_runs_for_session(session_id: str) -> list[dict]:
+    """Return in-flight runs for one session, ordered oldest-first by start time."""
+    if not session_id:
+        return []
+
+    if redis_client:
+        session_key = f"sessionprocs:{session_id}"
+        run_ids = sorted(redis_client.smembers(session_key) or ())
+        items = []
+        stale = []
+        for run_id in run_ids:
+            raw = redis_client.get(f"procmeta:{run_id}")
+            if not raw:
+                stale.append(run_id)
+                continue
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                stale.append(run_id)
+                continue
+            if str(payload.get("session_id", "")) != session_id:
+                stale.append(run_id)
+                continue
+            items.append(payload)
+        if stale:
+            redis_client.srem(session_key, *stale)
+        return sorted(
+            [
+                {
+                    "run_id": str(item.get("run_id", "")),
+                    "command": str(item.get("command", "")),
+                    "started": str(item.get("started", "")),
+                }
+                for item in items
+                if item.get("run_id") and item.get("command") and item.get("started")
+            ],
+            key=lambda item: item["started"],
+        )
+
+    with _pid_lock:
+        run_ids = list(_session_run_ids.get(session_id, set()))
+        items = []
+        for run_id in run_ids:
+            item = _active_run_meta.get(run_id)
+            if not item:
+                continue
+            items.append(
+                {
+                    "run_id": str(item.get("run_id", "")),
+                    "command": str(item.get("command", "")),
+                    "started": str(item.get("started", "")),
+                }
+            )
+        return sorted(
+            [item for item in items if item["run_id"] and item["command"] and item["started"]],
+            key=lambda item: item["started"],
+        )

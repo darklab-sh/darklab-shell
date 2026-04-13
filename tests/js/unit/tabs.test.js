@@ -70,6 +70,7 @@ function loadTabsFns({
     mobileCmdInput,
     newTabBtn,
     resetCmdHistoryNav: () => {},
+    _tabSessionRestoreInProgress: false,
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
     APP_CONFIG: {
       max_tabs: maxTabs,
@@ -180,10 +181,12 @@ function loadTabsAndOutputFns({
     mobileComposerRow,
     newTabBtn,
     resetCmdHistoryNav: () => {},
+    _tabSessionRestoreInProgress: false,
     APP_CONFIG: {
       max_tabs: maxTabs,
       max_output_lines: maxOutputLines,
       app_name: 'darklab shell',
+      prompt_prefix: 'anon@darklab:~$',
       share_redaction_enabled: shareRedactionEnabled,
       share_redaction_rules: shareRedactionRules,
     },
@@ -204,6 +207,7 @@ function loadTabsAndOutputFns({
   }, `{
     createTab,
     mountShellPrompt,
+    renderRestoredTabOutput,
     _getTabs: () => getTabs(),
     _stickOutputToBottom,
     _maybeMountDeferredPrompt,
@@ -633,6 +637,17 @@ describe('tabs helpers', () => {
     mountShellPrompt(id)
 
     expect(output.contains(shellPromptWrap)).toBe(false)
+  })
+
+  it('renderRestoredTabOutput rebuilds prompt-echo lines with the prompt prefix span', () => {
+    const { createTab, renderRestoredTabOutput } = loadTabsAndOutputFns()
+    const id = createTab('tab 1')
+
+    renderRestoredTabOutput(id, [{ text: 'anon@darklab:~$ dig darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' }])
+
+    const promptLine = document.querySelector(`#output-${id} .line.prompt-echo`)
+    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~$')
+    expect(promptLine?.textContent).toBe('anon@darklab:~$ dig darklab.sh')
   })
 
   it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {

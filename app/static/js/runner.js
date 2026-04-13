@@ -5,6 +5,7 @@
 // the result will appear in the history panel once it completes.
 // Keyed by tabId so multiple concurrent tabs each have their own independent timer.
 const _stalledTimeouts = new Map();
+let _activeRunPollTimer = null;
 
 function _resetStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
@@ -43,8 +44,8 @@ function _formatElapsed(totalSecs) {
   return h > 0 ? `${h}h ${m}m ${s}s` : `${m}m ${s}s`;
 }
 
-function startTimer() {
-  timerStart = Date.now();
+function startTimer(startMs = Date.now()) {
+  timerStart = startMs;
   showRunTimer();
   timerInterval = setInterval(() => {
     runTimer.textContent = _formatElapsed((Date.now() - timerStart) / 1000);
@@ -55,6 +56,133 @@ function stopTimer() {
   clearInterval(timerInterval);
   timerInterval = null;
   hideRunTimer();
+}
+
+function syncActiveRunTimer(tabId = activeTabId) {
+  const t = getTab(tabId);
+  if (!t || t.st !== 'running' || !t.runStart) {
+    stopTimer();
+    return;
+  }
+  startTimer(t.runStart);
+}
+
+function _activeReconnectTabs() {
+  return tabs.filter(t => t && t.st === 'running' && t.reconnectedRun && t.historyRunId);
+}
+
+function _activeRunReconnectNotice(run) {
+  const startedAt = new Date(run.started);
+  const startedLabel = Number.isNaN(startedAt.getTime())
+    ? 'unknown start time'
+    : startedAt.toLocaleString();
+  return [
+    `[reconnected to active run started at ${startedLabel}]`,
+    '[live output cannot be replayed after reload; this tab will restore the saved run automatically when it completes]',
+  ];
+}
+
+function restoreActiveRunsAfterReload(runs) {
+  const items = Array.isArray(runs) ? runs : [];
+  if (!items.length) {
+    stopPollingActiveRunsAfterReload();
+    return false;
+  }
+
+  let firstRestoredTabId = null;
+  items.forEach((run, index) => {
+    const bootstrapTab = index === 0 && tabs.length === 1 ? tabs[0] : null;
+    const canReuseBootstrapTab = !!(bootstrapTab
+      && bootstrapTab.st === 'idle'
+      && !bootstrapTab.renamed
+      && !bootstrapTab.command
+      && !bootstrapTab.historyRunId
+      && !bootstrapTab.draftInput
+      && Array.isArray(bootstrapTab.rawLines)
+      && bootstrapTab.rawLines.length === 0);
+    const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab(run.command);
+    if (!tabId) return;
+    if (!firstRestoredTabId) firstRestoredTabId = tabId;
+    clearTab(tabId);
+    const t = getTab(tabId);
+    if (!t) return;
+    if (!t.renamed) setTabLabel(tabId, run.command);
+    t.command = run.command;
+    t.runId = run.run_id;
+    t.historyRunId = run.run_id;
+    t.reconnectedRun = true;
+    t.killed = false;
+    t.pendingKill = false;
+    t.previewTruncated = false;
+    t.fullOutputAvailable = false;
+    t.fullOutputLoaded = false;
+    t.runStart = Number.isNaN(Date.parse(run.started)) ? Date.now() : Date.parse(run.started);
+    t.currentRunStartIndex = 0;
+    t.followOutput = true;
+    appendCommandEcho(run.command, tabId);
+    _activeRunReconnectNotice(run).forEach(line => appendLine(line, 'notice', tabId));
+    setTabStatus(tabId, 'running');
+    showTabKillBtn(tabId);
+  });
+
+  if (firstRestoredTabId) activateTab(firstRestoredTabId);
+  syncActiveRunTimer(activeTabId);
+  startPollingActiveRunsAfterReload();
+  return true;
+}
+
+function _restoreCompletedReconnectedRun(tab, run) {
+  if (!tab || !run || typeof restoreHistoryRunIntoTab !== 'function') return Promise.resolve();
+  return restoreHistoryRunIntoTab(run, { targetTabId: tab.id, hidePanelOnSuccess: false })
+    .then(() => {
+      const refreshed = getTab(tab.id);
+      if (refreshed) refreshed.reconnectedRun = false;
+      if (tab.id === activeTabId) stopTimer();
+    })
+    .catch(() => {
+      appendLine('[reconnected run finished, but the saved result could not be restored automatically]', 'notice', tab.id);
+      appendLine('[open the history panel to load the completed run]', 'notice', tab.id);
+      setTabStatus(tab.id, 'fail');
+      const refreshed = getTab(tab.id);
+      if (refreshed) refreshed.reconnectedRun = false;
+      if (tab.id === activeTabId) stopTimer();
+    });
+}
+
+function pollActiveRunsAfterReload() {
+  const reconnectTabs = _activeReconnectTabs();
+  if (!reconnectTabs.length) {
+    stopPollingActiveRunsAfterReload();
+    return Promise.resolve();
+  }
+
+  return apiFetch('/history/active')
+    .then(r => r.json())
+    .then(data => {
+      const activeIds = new Set((Array.isArray(data.runs) ? data.runs : []).map(run => run.run_id));
+      return Promise.all(reconnectTabs.map(tab => {
+        if (activeIds.has(tab.historyRunId)) return Promise.resolve();
+        return apiFetch(`/history/${tab.historyRunId}?json&preview=1`)
+          .then(r => r.ok ? r.json() : Promise.reject(new Error('run not ready')))
+          .then(run => _restoreCompletedReconnectedRun(tab, run))
+          .catch(() => Promise.resolve());
+      }));
+    })
+    .finally(() => {
+      if (!_activeReconnectTabs().length) stopPollingActiveRunsAfterReload();
+    });
+}
+
+function startPollingActiveRunsAfterReload() {
+  if (_activeRunPollTimer || !_activeReconnectTabs().length) return;
+  _activeRunPollTimer = setInterval(() => {
+    pollActiveRunsAfterReload().catch(err => _logRunnerError('active run reconnect poll failed', err));
+  }, 5000);
+}
+
+function stopPollingActiveRunsAfterReload() {
+  clearInterval(_activeRunPollTimer);
+  _activeRunPollTimer = null;
 }
 
 function elapsedSeconds() {
@@ -186,6 +314,7 @@ function doKill(tabId) {
     t.pendingKill = true;
   }
   t.killed = true;
+  t.reconnectedRun = false;
   stopTimer();
   appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   setTabStatus(tabId, 'killed');
@@ -273,6 +402,7 @@ function submitCommand(rawCmd) {
     _runTab.fullOutputAvailable = false;
     _runTab.fullOutputLoaded = false;
     _runTab.historyRunId = null;
+    _runTab.reconnectedRun = false;
     _runTab.followOutput = true;
     _runTab.deferPromptMount = false;
   }
@@ -339,6 +469,7 @@ function submitCommand(rawCmd) {
                 if (t) {
                   t.runId = msg.run_id;
                   t.historyRunId = msg.run_id;
+                  t.reconnectedRun = false;
                   if (t.pendingKill) {
                     // Kill was requested before runId was available — send it now
                     t.pendingKill = false;
@@ -368,6 +499,7 @@ function submitCommand(rawCmd) {
                 if (t) {
                   t.exitCode = msg.code;
                   t.runId = null;
+                  t.reconnectedRun = false;
                   t.deferPromptMount = true;
                   t.previewTruncated = !!msg.preview_truncated;
                   t.fullOutputAvailable = !!msg.full_output_available;

@@ -526,6 +526,7 @@ function createTab(label) {
     command: '',
     runId: null,
     historyRunId: null,
+    reconnectedRun: false,
     runStart: null,
     currentRunStartIndex: null,
     exitCode: null,
@@ -547,6 +548,7 @@ function createTab(label) {
   activateTab(id);
   updateNewTabBtn();
   updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   return id;
 }
 
@@ -559,7 +561,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   }
   // Flush the current composer value into the leaving tab's draftInput before switching.
   const prevId = activeTabId;
-  if (prevId && prevId !== id) {
+  if (!_tabSessionRestoreInProgress && prevId && prevId !== id) {
     const prevTab = getTab(prevId);
     if (prevTab && prevTab.st === 'running') {
       prevTab.draftInput = '';
@@ -585,9 +587,11 @@ function activateTab(id, { focusComposer = true } = {}) {
     setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   }
   resetCmdHistoryNav();
+  if (typeof syncActiveRunTimer === 'function') syncActiveRunTimer(id);
   if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   updateOutputFollowButton(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function closeTab(id) {
@@ -612,6 +616,7 @@ function closeTab(id) {
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
     updateNewTabBtn();
     updateTabScrollButtons();
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
     return;
   }
   if (tabs.length === 1) {
@@ -630,6 +635,7 @@ function closeTab(id) {
       setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
     }
     _blurActiveElement();
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
     return;
   }
   tabs.splice(idx, 1);
@@ -655,6 +661,7 @@ function closeTab(id) {
   }
   updateNewTabBtn();
   updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function setTabStatus(id, st) {
@@ -668,6 +675,7 @@ function setTabStatus(id, st) {
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   }
   updateOutputFollowButton(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function setTabLabel(id, label) {
@@ -675,6 +683,7 @@ function setTabLabel(id, label) {
   if (lbl) lbl.textContent = label.length > 28 ? label.slice(0, 26) + '…' : label;
   const t = getTab(id);
   if (t) t.label = label;
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function getOutput(id) {
@@ -703,6 +712,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
       t.fullOutputAvailable = false;
       t.fullOutputLoaded = false;
       t.historyRunId = null;
+      t.reconnectedRun = false;
     }
   }
   if (id === activeTabId && (!preserveRunState || !wasRunning)) {
@@ -729,6 +739,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     && typeof blurVisibleComposerInputIfMobile === 'function') {
     setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
   }
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function finalizeClosingTab(id) {
@@ -748,6 +759,7 @@ function finalizeClosingTab(id) {
       && typeof blurVisibleComposerInputIfMobile === 'function') {
       setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
     }
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
     return true;
   }
 
@@ -761,6 +773,7 @@ function finalizeClosingTab(id) {
   updateNewTabBtn();
   updateTabScrollButtons();
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   return true;
 }
 

@@ -11,6 +11,7 @@ import select
 import shutil
 import signal
 import subprocess  # nosec B404
+import threading
 import uuid
 from datetime import datetime, timezone
 
@@ -27,7 +28,7 @@ from database import db_connect
 from extensions import limiter
 from fake_commands import execute_fake_command, resolve_fake_command
 from helpers import get_client_ip, get_session_id
-from process import pid_pop, pid_register
+from process import active_run_register, active_run_remove, pid_pop, pid_register
 from run_output_store import RunOutputCapture
 
 log = logging.getLogger("shell")
@@ -99,6 +100,24 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
             "run_id": run_id, "session": session_id, "cmd": command,
         })
+
+
+def _finalize_completed_run(run_id, session_id, client_ip, original_command, run_started, exit_code, capture):
+    finished = datetime.now(timezone.utc)
+    elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
+    log.info("RUN_END", extra={
+        "run_id": run_id, "session": session_id, "ip": client_ip,
+        "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+    })
+    _save_completed_run(
+        run_id, session_id, original_command, run_started,
+        finished.isoformat(), exit_code, capture,
+    )
+    return elapsed
+
+
+def _timeout_notice(command_timeout):
+    return f"[timeout] Command exceeded {command_timeout}s limit and was killed."
 
 
 def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0):
@@ -237,6 +256,7 @@ def run_command():
         return jsonify({"error": str(e)}), 500
 
     pid_register(run_id, proc.pid)
+    active_run_register(run_id, proc.pid, session_id, original_command, run_started)
     log.info("RUN_START", extra={
         "run_id": run_id, "session": session_id, "ip": client_ip,
         "pid": proc.pid, "cmd": original_command,
@@ -247,7 +267,70 @@ def run_command():
     HEARTBEAT_INTERVAL = CFG["heartbeat_interval_seconds"]
     COMMAND_TIMEOUT    = CFG["command_timeout_seconds"] or None  # None = no timeout
 
+    def _continue_run_detached():
+        try:
+            run_started_dt = datetime.fromisoformat(run_started)
+            if proc.stdout is None:
+                raise RuntimeError("Process stdout pipe was not created")
+            while True:
+                if COMMAND_TIMEOUT:
+                    elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
+                    if elapsed >= COMMAND_TIMEOUT:
+                        try:
+                            pgid = os.getpgid(proc.pid)
+                            if SCANNER_PREFIX:
+                                subprocess.run(
+                                    [SUDO_BIN, "-u", "scanner", KILL_BIN, "-TERM", f"-{pgid}"],
+                                    timeout=5
+                                )  # nosec B603
+                            else:
+                                os.killpg(pgid, signal.SIGTERM)
+                        except (ProcessLookupError, OSError):
+                            pass
+                        timeout_msg = _timeout_notice(COMMAND_TIMEOUT)
+                        line_dt = datetime.now(timezone.utc)
+                        capture.add_line(
+                            timeout_msg,
+                            cls="notice",
+                            ts_clock=line_dt.strftime("%H:%M:%S"),
+                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                        )
+                        log.warning("CMD_TIMEOUT", extra={
+                            "run_id": run_id, "session": session_id, "ip": client_ip,
+                            "timeout": COMMAND_TIMEOUT, "cmd": original_command,
+                        })
+                        break
+                ready, _, _ = select.select([proc.stdout], [], [], HEARTBEAT_INTERVAL)
+                if ready:
+                    line = proc.stdout.readline()
+                    if line:
+                        line_dt = datetime.now(timezone.utc)
+                        capture.add_line(
+                            line,
+                            ts_clock=line_dt.strftime("%H:%M:%S"),
+                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                        )
+                    else:
+                        break
+                else:
+                    if proc.poll() is not None:
+                        break
+
+            proc.stdout.close()
+            proc.wait()
+            _finalize_completed_run(
+                run_id, session_id, client_ip, original_command, run_started, proc.returncode, capture,
+            )
+        except Exception:
+            log.error("RUN_STREAM_ERROR", exc_info=True, extra={
+                "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
+            })
+        finally:
+            pid_pop(run_id)
+            active_run_remove(run_id)
+
     def generate():
+        detached = False
         try:
             # Send the run_id first so the client can call /kill
             yield f"data: {json.dumps({'type': 'started', 'run_id': run_id})}\n\n"
@@ -283,9 +366,7 @@ def run_command():
                                 os.killpg(pgid, signal.SIGTERM)
                         except (ProcessLookupError, OSError):
                             pass
-                        timeout_msg = (
-                            f"[timeout] Command exceeded {COMMAND_TIMEOUT}s limit and was killed."
-                        )
+                        timeout_msg = _timeout_notice(COMMAND_TIMEOUT)
                         log.warning("CMD_TIMEOUT", extra={
                             "run_id": run_id, "session": session_id, "ip": client_ip,
                             "timeout": COMMAND_TIMEOUT, "cmd": original_command,
@@ -317,12 +398,9 @@ def run_command():
             proc.stdout.close()
             proc.wait()
             exit_code = proc.returncode
-            finished  = datetime.now(timezone.utc)
-            elapsed   = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
-            log.info("RUN_END", extra={
-                "run_id": run_id, "session": session_id, "ip": client_ip,
-                "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
-            })
+            elapsed = _finalize_completed_run(
+                run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
+            )
             yield f"data: {json.dumps({
                 'type': 'exit',
                 'code': exit_code,
@@ -331,20 +409,23 @@ def run_command():
                 'output_line_count': capture.output_line_count,
                 'full_output_available': capture.full_output_available,
             })}\n\n"
-
-            # Store completed run in SQLite for persistent permalink/history access
-            _save_completed_run(
-                run_id, session_id, original_command, run_started,
-                finished.isoformat(), exit_code, capture,
-            )
-
+        except GeneratorExit:
+            detached = True
+            threading.Thread(
+                target=_continue_run_detached,
+                name=f"run-drain-{run_id[:8]}",
+                daemon=True,
+            ).start()
+            raise
         except Exception as e:
             log.error("RUN_STREAM_ERROR", exc_info=True, extra={
                 "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
             })
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         finally:
-            pid_pop(run_id)
+            if not detached:
+                pid_pop(run_id)
+                active_run_remove(run_id)
 
     return Response(generate(), mimetype="text/event-stream",
                     headers={"X-Accel-Buffering": "no", "Cache-Control": "no-cache"})
@@ -363,6 +444,7 @@ def kill_command():
     if not pid:
         log.debug("KILL_MISS", extra={"ip": client_ip, "run_id": run_id})
         return jsonify({"error": "No such process"}), 404
+    active_run_remove(run_id)
     try:
         # Subprocesses are spawned with preexec_fn=os.setsid, which makes
         # PGID == PID at creation time. Use the stored PID directly as the

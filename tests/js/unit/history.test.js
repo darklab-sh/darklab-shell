@@ -358,6 +358,12 @@ describe('history panel actions', () => {
     const createTab = vi.fn(() => 'tab-2')
     const activateTab = vi.fn()
     const appendLine = vi.fn()
+    const appendCommandEcho = vi.fn()
+    const setTabStatus = vi.fn((id, st) => {
+      const tab = tabs.find(t => t.id === id)
+      if (tab) tab.st = st
+    })
+    const hideTabKillBtn = vi.fn()
     const tabs = [{ id: 'tab-1', command: '', rawLines: [], st: 'idle' }]
     const historyPanel = document.getElementById('history-panel')
     const historyList = document.getElementById('history-list')
@@ -412,6 +418,9 @@ describe('history panel actions', () => {
         activateTab,
         createTab,
         appendLine,
+        appendCommandEcho,
+        setTabStatus,
+        hideTabKillBtn,
         showToast,
         window: { open: windowOpen },
         _getStarred,
@@ -439,6 +448,9 @@ describe('history panel actions', () => {
       clipboard,
       windowOpen,
       appendLine,
+      appendCommandEcho,
+      setTabStatus,
+      hideTabKillBtn,
       showToast,
     }
   }
@@ -935,7 +947,7 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, appendLine } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, appendLine, hideTabKillBtn, setTabStatus } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -979,7 +991,7 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, appendLine } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, appendLine, appendCommandEcho, setTabStatus, hideTabKillBtn } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
     await new Promise(resolve => setImmediate(resolve))
@@ -990,9 +1002,11 @@ describe('history panel actions', () => {
 
     expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
-    expect(appendLine).toHaveBeenCalledWith('$ ping darklab.sh', '', 'tab-2')
+    expect(appendCommandEcho).toHaveBeenCalledWith('ping darklab.sh', 'tab-2')
     expect(appendLine).toHaveBeenCalledWith('ok line 1', '', 'tab-2')
     expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('preview truncated'), 'notice', 'tab-2')
+    expect(setTabStatus).toHaveBeenCalledWith('tab-2', 'ok')
+    expect(hideTabKillBtn).toHaveBeenCalledWith('tab-2')
   })
 
   it('clears the history loading overlay and shows a failure toast when a restore fetch fails', async () => {

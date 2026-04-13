@@ -82,6 +82,14 @@ function _renderHistoryRootSuggestions(runs) {
   _historyRefreshRootDropdown();
 }
 
+function _appendHistoryCommandEcho(tabId, command) {
+  if (typeof appendCommandEcho === 'function') {
+    appendCommandEcho(command, tabId);
+    return;
+  }
+  appendLine(command, 'prompt-echo', tabId);
+}
+
 function _hideHistoryRootDropdown() {
   if (typeof historyRootDropdown === 'undefined' || !historyRootDropdown) return;
   historyRootDropdown.replaceChildren();
@@ -602,6 +610,49 @@ function _setHistoryLoadState(loading) {
   else hideHistoryLoadOverlay();
 }
 
+function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess = true } = {}) {
+  if (!run || !run.id) return Promise.reject(new Error('missing run id'));
+  const existing = targetTabId ? getTab(targetTabId) : tabs.find(t => t.command === run.command);
+  const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
+  const restoreUrl = run.full_output_available
+    ? `/history/${run.id}?json`
+    : `/history/${run.id}?json&preview=1`;
+
+  return apiFetch(restoreUrl)
+    .then(r => r.json())
+    .then(fullRun => {
+      const previewNotice = fullRun.preview_notice || null;
+      const tabId = targetTabId || (canUpgradeExisting ? existing.id : createTab(fullRun.command));
+      if (!tabId) throw new Error('failed to create restore tab');
+      if (typeof clearTab === 'function') clearTab(tabId);
+      const t = getTab(tabId);
+      if (t) {
+        t.command = fullRun.command;
+        t.runId = null;
+        t.historyRunId = fullRun.id || run.id;
+        t.exitCode = fullRun.exit_code;
+        t.previewTruncated = !!previewNotice;
+        t.fullOutputAvailable = !!fullRun.full_output_available;
+        t.fullOutputLoaded = !!fullRun.full_output_available && !previewNotice;
+        t.reconnectedRun = false;
+      }
+      _appendHistoryCommandEcho(tabId, fullRun.command);
+      (fullRun.output || []).forEach(line => appendLine(line, '', tabId));
+      if (previewNotice) appendLine(previewNotice, 'notice', tabId);
+      appendLine(
+        `[history — exit ${fullRun.exit_code}]`,
+        fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail',
+        tabId
+      );
+      if (typeof setTabStatus === 'function') {
+        setTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');
+      }
+      if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
+      if (hidePanelOnSuccess) hideHistoryPanel();
+      return tabId;
+    });
+}
+
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
   // history instead of assuming the in-memory tab state is authoritative.
@@ -641,31 +692,10 @@ function refreshHistoryPanel() {
         const cmdEl = entry.querySelector('.history-entry-cmd');
         cmdEl.textContent = 'loading…';
         _setHistoryLoadState(true);
-        const restoreUrl = run.full_output_available
-          ? `/history/${run.id}?json`
-          : `/history/${run.id}?json&preview=1`
-        apiFetch(restoreUrl)
-          .then(r => r.json())
-          .then(fullRun => {
-            const previewNotice = fullRun.preview_notice || null;
-            const newId = canUpgradeExisting ? existing.id : createTab(fullRun.command);
-            if (canUpgradeExisting) clearTab(newId);
-            const t = getTab(newId);
-            if (t) {
-              t.command = fullRun.command;
-              t.previewTruncated = !!previewNotice;
-              t.fullOutputAvailable = !!fullRun.full_output_available;
-              t.fullOutputLoaded = !!fullRun.full_output_available && !previewNotice;
-            }
-            appendLine(`$ ${fullRun.command}`, '', newId);
-            appendLine('', '', newId);
-            (fullRun.output || []).forEach(line => appendLine(line, '', newId));
-            if (previewNotice) {
-              appendLine(previewNotice, 'notice', newId);
-            }
-            appendLine(`[history — exit ${fullRun.exit_code}]`, fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail', newId);
-            hideHistoryPanel();
-          })
+        restoreHistoryRunIntoTab(run, {
+          targetTabId: canUpgradeExisting ? existing.id : null,
+          hidePanelOnSuccess: true,
+        })
           .catch(() => {
             entry.querySelector('.history-entry-cmd').textContent = run.command;
             showToast('Failed to load run');

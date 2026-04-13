@@ -8,18 +8,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### Now
 
-- **Saved command presets**
-  - Let users save named command templates beyond history/starred entries.
-  - Better for repeat workflows like DNS checks, HTTP triage, or common scan recipes.
-
-- **Reconnect to active runs after reload**
-  - Let users re-attach to running commands after a reload instead of only finding them later in history.
-  - This is the biggest remaining continuity gap in the product.
-
-- **Session restore for tabs and drafts**
-  - Restore open tabs, drafts, and recent shell state after a reload.
-  - Natural extension of the existing per-tab draft and history work.
-
 - **Context-aware autocomplete**
   - Move beyond a flat suggestion list and tailor completions by command root and prior tokens.
   - Especially useful for long scanner commands with many flags.
@@ -68,6 +56,10 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### Later
 
+- **Saved command presets**
+  - Let users save named command templates beyond history/starred entries.
+  - Better for repeat workflows like DNS checks, HTTP triage, or common scan recipes.
+
 - **Parameterized command forms**
   - Add optional structured builders for common tools like `curl`, `dig`, `nmap`, and `ffuf`.
   - Keep raw-shell usage intact while making common tasks easier.
@@ -97,6 +89,17 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 - **Guided workflows and onboarding**
   - Curated task-oriented entry points such as DNS troubleshooting, TLS checks, quick HTTP triage, or subdomain discovery.
   - Extend the welcome flow and help surfaces so onboarding suggests real tasks, not just isolated commands and hints.
+
+### Live Stream Reattach
+
+- **Full reconnectable live stream**
+  - Explore a true reconnectable live-output path that can resume active command streams after reload rather than only restoring a placeholder tab and polling for completion.
+  - This is a separate architecture step from the current active-run reconnect support and would likely require:
+    - a per-run live output buffer
+    - resumable stream offsets or event IDs
+    - multi-consumer fan-out instead of one transient SSE consumer
+    - explicit lifecycle cleanup once runs complete
+  - Best fit is a dedicated live-stream architecture pass rather than incremental UI polish.
 
 ### Architecture-Driven Product Bets
 

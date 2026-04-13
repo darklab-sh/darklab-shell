@@ -162,6 +162,118 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
+  test('reload restores non-running tabs, transcript preview, and the active draft', async ({ page }) => {
+    const restoreCmd = 'status'
+    await runCommand(page, restoreCmd)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${restoreCmd}`)
+
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#cmd').fill('ffuf -u https://target/FUZZ')
+    await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+
+    await expect(page.locator('.tab')).toHaveCount(2)
+    await expect(page.locator('.welcome-banner')).toHaveCount(0)
+    await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
+
+    await page.locator('.tab').first().click()
+    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${restoreCmd}`)
+    await expect(page.locator('.tab-panel.active .output')).toContainText('runs in session')
+  })
+
+  test('reload restores a completed tab with a visible prompt and preserved prompt formatting', async ({ page }) => {
+    const restoreCmd = 'status'
+    await runCommand(page, restoreCmd)
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toContainText(`$ ${restoreCmd}`)
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+
+    const activeOutput = page.locator('.tab-panel.active .output')
+    const promptEcho = page.locator('.tab-panel.active .output .line.prompt-echo').first()
+    const livePrompt = page.locator('.tab-panel.active .output #shell-prompt-wrap')
+
+    await expect(activeOutput).toContainText(`$ ${restoreCmd}`)
+    await expect(promptEcho.locator('.prompt-prefix')).toContainText('$')
+    await expect(livePrompt).toBeVisible()
+
+    await page.locator('#cmd').fill('hostname')
+    await expect(page.locator('#cmd')).toHaveValue('hostname')
+  })
+
+  test('reload restores idle tabs and drafts alongside an active-run reconnect tab', async ({ page }) => {
+    const idleCmd = 'status'
+    const activeCmd = 'ping darklab.sh'
+    let activeRunStarted = false
+
+    await page.route('**/run', async route => {
+      const body = route.request().postData() || '{}'
+      const payload = JSON.parse(body)
+      if ((payload.command || '') !== activeCmd) {
+        await route.continue()
+        return
+      }
+      activeRunStarted = true
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          'data: {"type":"started","run_id":"tabs-reconnect-run"}\n\n',
+          'data: {"type":"output","text":"long run started\\n"}\n\n',
+        ].join(''),
+      })
+    })
+
+    await page.route('**/history/active', async route => {
+      if (!activeRunStarted) {
+        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ runs: [] }) })
+        return
+      }
+      await route.fulfill({
+        status: 200,
+        contentType: 'application/json',
+        body: JSON.stringify({
+          runs: [{
+            run_id: 'tabs-reconnect-run',
+            command: activeCmd,
+            started: '2026-04-13T00:00:00Z',
+          }],
+        }),
+      })
+    })
+
+    await runCommand(page, idleCmd)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${idleCmd}`)
+
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#cmd').fill(activeCmd)
+    await page.keyboard.press('Enter')
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
+    await expect(page.locator('.tab-panel.active .output')).toContainText('long run started')
+
+    await page.locator('#new-tab-btn').click()
+    await page.locator('#cmd').fill('ffuf -u https://target/FUZZ')
+    await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
+
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+
+    await expect(page.locator('.tab')).toHaveCount(3)
+    await expect(page.locator('.welcome-banner')).toHaveCount(0)
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING')
+    await expect(page.locator('.tab-panel.active .output')).toContainText('[reconnected to active run started at')
+    await expect(page.locator('.tab-panel.active .output')).toContainText(activeCmd)
+
+    await page.locator('.tab').nth(1).click()
+    await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
+
+    await page.locator('.tab').first().click()
+    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${idleCmd}`)
+    await expect(page.locator('.tab-panel.active .output')).toContainText('runs in session')
+  })
+
   test('pressing Enter on a blank prompt appends a fresh prompt line', async ({ page }) => {
     // Wait for welcome blocks to finish rendering (_welcomeDone is set just before
     // the hint feed starts). Checking _welcomeDone rather than a visible hint element

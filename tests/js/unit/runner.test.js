@@ -44,6 +44,7 @@ function loadRunnerFns({
   createTab = () => 'tab-2',
   addToHistory = () => {},
   appendLine = () => {},
+  appendCommandEcho = () => {},
   getComposerValue: getComposerValueOverride = null,
   getVisibleComposerInput: getVisibleComposerInputOverride = null,
   welcomeActive = false,
@@ -52,6 +53,7 @@ function loadRunnerFns({
   showToast: showToastOverride = null,
   dismissMobileKeyboardAfterSubmit = () => {},
   maybeMountDeferredPrompt = vi.fn(),
+  restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1')),
 } = {}) {
   const normalizedTabs = tabs.map(tab => ({
     rawLines: [],
@@ -101,12 +103,20 @@ function loadRunnerFns({
 
   const setTabLabel = vi.fn()
   const setTabStatus = vi.fn((id, nextStatus) => {
-    const tab = tabs.find(t => t.id === id)
+    const tab = normalizedTabs.find(t => t.id === id)
     if (tab) tab.st = nextStatus
     const dot = document.querySelector(`.tab[data-id="${id}"] .tab-status`)
     if (dot) dot.className = `tab-status ${nextStatus}`
   })
   const clearTab = clearTabOverride || vi.fn()
+  const activateTab = vi.fn((id) => {
+    const tab = normalizedTabs.find(t => t.id === id)
+    if (tab) {
+      activeTabId = id
+      status.className = 'status-pill running'
+      status.textContent = 'RUNNING'
+    }
+  })
   const cancelWelcome = vi.fn()
   const showToast = showToastOverride || vi.fn()
 
@@ -134,7 +144,9 @@ function loadRunnerFns({
     addToHistory,
     setTabLabel,
     setTabStatus,
+    activateTab,
     appendLine,
+    appendCommandEcho,
     apiFetch,
     createTab,
     clearTab,
@@ -145,6 +157,7 @@ function loadRunnerFns({
     showToast,
     dismissMobileKeyboardAfterSubmit,
     _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
+    restoreHistoryRunIntoTab,
     getComposerValue: getComposerValueOverride || (() => cmdValue),
     ...(getVisibleComposerInputOverride ? { getVisibleComposerInput: getVisibleComposerInputOverride } : {}),
     describeFetchError: (err, context = 'server') => {
@@ -166,6 +179,9 @@ function loadRunnerFns({
     submitVisibleComposerCommand,
     interruptPromptLine,
     runCommand,
+    restoreActiveRunsAfterReload,
+    pollActiveRunsAfterReload,
+    syncActiveRunTimer,
     _getPendingKillTabId: () => pendingKillTabId,
   }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
 
@@ -181,6 +197,7 @@ function loadRunnerFns({
     showToast,
     interruptPromptLine: fns.interruptPromptLine,
     maybeMountDeferredPrompt,
+    restoreHistoryRunIntoTab,
   }
 }
 
@@ -213,9 +230,104 @@ describe('runner helpers', () => {
     expect(tabs[0].killed).toBe(true)
     expect(document.querySelector('.tab-status').className).toBe('tab-status killed')
     expect(document.querySelector('.tab-kill-btn').style.display).toBe('none')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(true)
     expect(status.className).toBe('status-pill killed')
     expect(runBtn.disabled).toBe(false)
     expect(maybeMountDeferredPrompt).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('restoreActiveRunsAfterReload marks restored tabs as running placeholders', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const setTabLabel = vi.fn()
+    const now = Date.now()
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(now))
+    const { restoreActiveRunsAfterReload, tabs, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      appendLine,
+      createTab,
+    })
+
+    restoreActiveRunsAfterReload([
+      { run_id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z' },
+    ])
+
+    expect(tabs[0].historyRunId).toBe('run-1')
+    expect(tabs[0].reconnectedRun).toBe(true)
+    expect(tabs[0].st).toBe('running')
+    expect(appendLine).toHaveBeenCalledWith('ping darklab.sh', 'prompt-echo', 'tab-1')
+    expect(document.querySelector('.tab-kill-btn').hidden).toBe(false)
+    expect(status.className).toBe('status-pill running')
+    vi.useRealTimers()
+  })
+
+  it('restoreActiveRunsAfterReload does not overwrite a restored non-running tab', () => {
+    const appendLine = vi.fn()
+    const createTab = vi.fn(() => 'tab-2')
+    const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'idle',
+        runId: null,
+        rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo' }],
+        draftInput: 'dig darklab.sh',
+        command: 'dig darklab.sh',
+        historyRunId: 'run-old',
+        renamed: true,
+        pendingKill: false,
+        killed: false,
+      }],
+      appendLine,
+      createTab,
+    })
+
+    restoreActiveRunsAfterReload([
+      { run_id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z' },
+    ])
+
+    expect(createTab).toHaveBeenCalledWith('ping darklab.sh')
+    expect(tabs[0].historyRunId).toBe('run-old')
+  })
+
+  it('pollActiveRunsAfterReload restores a completed reconnected run through history', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/history/active') {
+        return Promise.resolve({ json: () => Promise.resolve({ runs: [] }) })
+      }
+      if (url === '/history/run-123?json&preview=1') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ id: 'run-123', command: 'ping darklab.sh', exit_code: 0 }),
+        })
+      }
+      return Promise.reject(new Error(`unexpected ${url}`))
+    })
+    const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1'))
+    const { pollActiveRunsAfterReload, tabs } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-123',
+        historyRunId: 'run-123',
+        reconnectedRun: true,
+        rawLines: [],
+        pendingKill: false,
+        killed: false,
+      }],
+      apiFetch,
+      restoreHistoryRunIntoTab,
+    })
+
+    await pollActiveRunsAfterReload()
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/active')
+    expect(apiFetch).toHaveBeenCalledWith('/history/run-123?json&preview=1')
+    expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 'run-123' }),
+      { targetTabId: 'tab-1', hidePanelOnSuccess: false }
+    )
+    expect(tabs[0].reconnectedRun).toBe(false)
   })
 
   it('doKill marks pendingKill when runId is not yet available', () => {

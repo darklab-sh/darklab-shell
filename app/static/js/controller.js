@@ -266,18 +266,34 @@ apiFetch('/faq').then(r => r.json()).then(data => {
   logClientError('failed to load /faq', err);
 });
 
-apiFetch('/history').then(r => r.json()).then(data => {
-  hydrateCmdHistory(data.runs || []);
-}).catch(err => {
-  logClientError('failed to load /history', err);
-});
-
 // ── Tabs ──
 setupTabScrollControls();
 applyTimestampPreference(getPreference('pref_timestamps') || 'off', false);
 applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
-createTab('tab 1');
-runWelcome();
+
+Promise.all([
+  apiFetch('/history').then(r => r.json()).catch(err => {
+    logClientError('failed to load /history', err);
+    return { runs: [] };
+  }),
+  apiFetch('/history/active').then(r => r.json()).catch(err => {
+    logClientError('failed to load /history/active', err);
+    return { runs: [] };
+  }),
+]).then(([historyData, activeData]) => {
+  hydrateCmdHistory(historyData.runs || []);
+  const restoredTabs = typeof restoreTabSessionState === 'function'
+    && restoreTabSessionState();
+  const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
+    && restoreActiveRunsAfterReload(activeData.runs || []);
+  if (!restoredTabs && !restoredActiveRuns) {
+    createTab('tab 1');
+    runWelcome();
+    return;
+  }
+  _welcomeBootPending = false;
+});
+
 setTimeout(() => {
   if (!cmdInput) return;
   if (useMobileTerminalViewportMode()) {
@@ -722,6 +738,7 @@ cmdInput.addEventListener('input', () => {
   const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
   if (_activeTab && _activeTab.st !== 'running') {
     _activeTab.draftInput = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   }
 });
 

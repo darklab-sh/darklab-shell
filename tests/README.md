@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 805
-- `vitest`: 323
-- `playwright`: 139
-- total: 1,267
+- `pytest`: 806
+- `vitest`: 328
+- `playwright`: 141
+- total: 1,275
 
 This document is organized in two parts:
 
@@ -600,6 +600,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestHistoryRoute.test_history_search_filters_by_command_text` | Checks that `/history` command-text search narrows the returned runs. |
 | `TestHistoryRoute.test_history_filters_by_command_root` | Checks that `/history` command-root filtering returns matching runs and exposes the session root list. |
 | `TestHistoryRoute.test_history_filters_by_exit_code_and_recent_date_range` | Checks that `/history` exit-code and recent-date filters can be combined. |
+| `TestHistoryRoute.test_active_history_returns_running_runs_for_this_session` | Checks that `/history/active` returns the current session's in-flight run metadata. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
@@ -810,6 +811,10 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `settles welcome immediately when Enter is pressed during welcome playback` | Verifies that settles welcome immediately when Enter is pressed during welcome playback. |
 | `does not run command when Enter is pressed in cmd input during welcome playback` | Verifies that does not run command when Enter is pressed in cmd input during welcome playback. |
 | `renders the shell prompt line from composer state instead of the stale hidden input` | Verifies that renders the shell prompt line from composer state instead of the stale hidden input. |
+| `persists only non-running tabs for session restore` | Verifies that the browser session snapshot excludes active runs and only saves non-running tabs for reload restore. |
+| `restores saved non-running tabs and active draft state from session storage` | Verifies that saved tab labels, drafts, and transcript previews rebuild from browser session storage after reload. |
+| `preserves a non-active tab draft even when createTab activation would overwrite it during restore` | Verifies that the restore flow reapplies saved drafts after tab creation so a non-active tab draft survives restore-time activation churn. |
+| `preserves the last created non-active tab draft when the final restored active tab is different` | Verifies that the final active-tab selection in session restore does not wipe the last created non-active tab's saved draft. |
 | `manually inserts printable desktop keydown input once` | Verifies that manually inserts printable desktop keydown input once. |
 | `updates the visible cursor when the selection changes without typing` | Verifies that updates the visible cursor when the selection changes without typing. |
 | `moves the cursor from composer state instead of stale DOM selection` | Verifies that moves the cursor from composer state instead of stale DOM selection. |
@@ -1004,6 +1009,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `formats hour + minutes + seconds` | Verifies that formats hour + minutes + seconds. |
 | `setStatus maps known states to status-pill text` | Verifies that setStatus maps known states to status-pill text. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
+| `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
+| `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
+| `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
@@ -1353,6 +1361,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `switching to a tab does not restore prior commands into input` | Verifies that switching to a tab does not restore prior commands into input. |
 | `running a command in one tab does not block another tab from running` | Verifies that running a command in one tab does not block another tab from running. |
 | `a freshly created tab starts with an empty input` | Verifies that a freshly created tab starts with an empty input. |
+| `reload restores non-running tabs, transcript preview, and the active draft` | Verifies that reload restores idle-tab transcript state and the selected tab's saved draft within the same browser session. |
+| `reload restores a completed tab with a visible prompt and preserved prompt formatting` | Verifies that a restored completed tab remounts a usable prompt immediately and keeps the styled prompt prefix in restored transcript output. |
+| `reload restores idle tabs and drafts alongside an active-run reconnect tab` | Verifies that same-session reload restores idle tabs/drafts from browser session state while also rebuilding an active-run reconnect tab from `/history/active`. |
 | `pressing Enter on a blank prompt appends a fresh prompt line` | Verifies that pressing Enter on a blank prompt appends a fresh prompt line. |
 | `closing the only tab resets it instead of removing it` | Verifies that closing the only tab resets it instead of removing it. |
 | `drag reordering the active tab returns focus to the terminal input` | Verifies that drag reordering the active tab returns focus to the terminal input. |

@@ -14,6 +14,7 @@ import config as _config
 from database import db_connect, delete_run_artifacts
 from helpers import get_client_ip, get_session_id
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
+from process import active_runs_for_session
 from redaction import redact_line_entries
 from run_output_store import load_full_output_entries
 
@@ -175,6 +176,14 @@ def get_history():
         "date_range": date_range or None,
     })
     return jsonify({"runs": runs, "roots": roots})
+
+
+@history_bp.route("/history/active")
+def get_active_history_runs():
+    """Return currently running commands for this session."""
+    session_id = get_session_id()
+    runs = active_runs_for_session(session_id)
+    return jsonify({"runs": runs})
 
 
 @history_bp.route("/history/<run_id>")

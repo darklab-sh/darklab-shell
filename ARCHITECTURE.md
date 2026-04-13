@@ -32,7 +32,7 @@ At a mid to high level, darklab shell works like this:
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
-- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input.
+- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser session storage now also holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
 
 ## Logical Runtime Layers
@@ -44,7 +44,7 @@ flowchart TB
   subgraph Client["Browser Runtime"]
     Templates["HTML templates + CSS theme vars"]
     JS["Vanilla JavaScript UI/state"]
-    BrowserApis["Cookies · localStorage · fetch · SSE"]
+    BrowserApis["Cookies · localStorage · sessionStorage · fetch · SSE"]
   end
 
   subgraph App["Python Web Application"]
@@ -76,7 +76,7 @@ flowchart TB
 
 This diagram is intentionally framework- and runtime-oriented rather than app-module-oriented. It is meant to answer the “which layer owns which responsibility?” question without duplicating the more detailed app diagrams later in the document.
 
-- the browser runtime owns rendering, local interaction state, and web-platform APIs such as cookies, `localStorage`, `fetch`, and SSE consumption
+- the browser runtime owns rendering, local interaction state, and web-platform APIs such as cookies, `localStorage`, `sessionStorage`, `fetch`, and SSE consumption
 - the Python web application owns routing, template rendering, config/theme loading, request validation, fake-command handling, and orchestration of real command execution
 - Redis owns the cross-worker coordination that cannot safely live inside one Gunicorn worker process
 - SQLite and artifact files own the durable run/share state that must survive reloads and restarts
@@ -139,7 +139,7 @@ sequenceDiagram
   R->>X: getdel pid
   R->>P: kill process group
 
-  B->>C: GET /history /share /diag
+  B->>C: GET /history /history/active /share /diag
   C->>D: read run/snapshot/usage state
   C-->>B: JSON or themed HTML
 ```
@@ -149,6 +149,8 @@ There are three core request classes:
 - content/bootstrap reads
 - run/kill lifecycle
 - history/share/diagnostic reads
+
+`/history/active` is part of that third class. It exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and then hand those tabs back to the normal `/history/<run_id>` restore path once the run completes. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
 
 That split is reflected directly in the blueprint structure.
 
@@ -400,9 +402,9 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 - `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
 - `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
 - `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
-- `draftInput` — unsaved command text that the user was composing in this tab; flushed from `cmdInput.value` on tab switch and restored via `setComposerValue(..., { dispatch: false })` when the tab is reactivated. Not saved for running tabs (the command was already submitted). The `controller.js` input handler also keeps this field live on every keystroke so the flush at switch time is always consistent.
+- `draftInput` — unsaved command text that the user was composing in this tab; flushed from `cmdInput.value` on tab switch and restored via `setComposerValue(..., { dispatch: false })` when the tab is reactivated. Not saved for running tabs (the command was already submitted). The `controller.js` input handler also keeps this field live on every keystroke so the flush at switch time is always consistent, and the reload-restore path reapplies saved drafts after tab creation so non-active drafts survive the full session restore sequence.
 
-Tab switching is draft-preserving: `activateTab` in `tabs.js` saves the leaving tab's current input as `draftInput`, then restores the arriving tab's saved draft into the prompt without triggering an input event (which would reopen autocomplete). It also calls `acHide()` and resets `acFiltered = []` so stale suggestions from the leaving tab's session cannot bleed into the arriving tab. `resetCmdHistoryNav()` is also called on switch to clear the command-history cursor.
+Tab switching is draft-preserving: `activateTab` in `tabs.js` saves the leaving tab's current input as `draftInput`, then restores the arriving tab's saved draft into the prompt without triggering an input event (which would reopen autocomplete). It also calls `acHide()` and resets `acFiltered = []` so stale suggestions from the leaving tab's session cannot bleed into the arriving tab. `resetCmdHistoryNav()` is also called on switch to clear the command-history cursor. During full session restore, draft-flush side effects are suppressed until the saved tabs have been fully rebuilt so the final active-tab selection cannot wipe a non-active tab's saved draft.
 
 ### Live Output Rendering
 
@@ -541,7 +543,7 @@ Not every `config.yaml` key is exposed to the browser. Server-side persistence c
 
 ### Session Identity
 
-An anonymous UUID is generated in `localStorage` on first visit and sent as `X-Session-ID` header on every API call. History and run data is scoped to this session. It's not authentication — just isolation between browser sessions.
+An anonymous UUID is generated in `localStorage` on first visit and sent as `X-Session-ID` header on every API call. History and run data is scoped to this session. It's not authentication — just isolation between browser sessions. The browser also keeps a separate `sessionStorage` snapshot for non-running tabs and draft input so reload restores can rebuild the recent workspace without persisting that UI state across browser sessions.
 
 ---
 
@@ -555,10 +557,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 805
-- `vitest`: 323
-- `playwright`: 139
-- total: 1,267
+- `pytest`: 806
+- `vitest`: 328
+- `playwright`: 141
+- total: 1,275
 
 ### Testing Architecture
 
@@ -584,6 +586,8 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews now store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
 - `/history` — session-scoped history API used by the drawer. It now supports filtering by command text, command root, exit status, and recent date range, and also returns a distinct `roots` list so the command-root filter can use app-owned autocomplete suggestions without tying the suggestion set to the currently narrowed result list.
+- `/history/active` — session-scoped in-flight run metadata used only for reload continuity. It returns running `run_id`, `command`, and `started` values so the browser can restore placeholder tabs, keep kill available, preserve prompt-echo formatting for the submitted command, and poll until the run becomes a normal completed history row.
+- browser `sessionStorage` snapshot — session-scoped idle workspace state used only for reload continuity of non-running tabs. It stores labels, transcript previews, status, draft input, and active-tab selection so the browser can remount a usable prompt immediately without replaying welcome.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
 
