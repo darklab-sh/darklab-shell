@@ -35,6 +35,7 @@ async function loadAppFns({
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
   acHide: acHideOverride = () => {},
+  acExpandSharedPrefix: acExpandSharedPrefixOverride = () => false,
   getOutput: getOutputOverride = null,
   mobileViewport = null,
   mobileTouch = true,
@@ -399,6 +400,7 @@ async function loadAppFns({
     acIndex: acIndexOverride,
     acShow: acShowOverride,
     acAccept: () => {},
+    acExpandSharedPrefix: acExpandSharedPrefixOverride,
     resetCmdHistoryNav: () => {},
     navigateCmdHistory: navigateCmdHistoryOverride,
     setupTabScrollControls: () => {},
@@ -2593,6 +2595,52 @@ describe('app helpers', () => {
     // ArrowUp at the first item wraps to the last
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true }))
     expect(_getAcIndex()).toBe(2)
+  })
+
+  it('Tab expands the typed value to the longest shared autocomplete prefix before cycling', async () => {
+    const { cmdInput, _getAcIndex } = await loadAppFns({
+      acSuggestions: ['ping', 'ping -c 4', 'ping google.com'],
+      acFiltered: ['ping', 'ping -c 4', 'ping google.com'],
+      acIndex: -1,
+      acExpandSharedPrefix: (items) => {
+        if (items.join('|') !== 'ping|ping -c 4|ping google.com') return false
+        document.getElementById('cmd').value = 'ping'
+        return true
+      },
+    })
+
+    cmdInput.value = 'pi'
+    cmdInput.setSelectionRange(2, 2)
+    cmdInput.dispatchEvent(new Event('input'))
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+
+    expect(cmdInput.value).toBe('ping')
+    expect(_getAcIndex()).toBe(-1)
+  })
+
+  it('Tab cycles autocomplete suggestions once the shared prefix is exhausted', async () => {
+    const { cmdInput, _getAcIndex, acDropdown } = await loadAppFns({
+      acSuggestions: ['ping -c 4', 'ping google.com', 'ping localhost'],
+      acFiltered: ['ping -c 4', 'ping google.com', 'ping localhost'],
+      acIndex: -1,
+      acShow: () => {
+        acDropdown.style.display = 'block'
+      },
+    })
+
+    cmdInput.value = 'ping '
+    cmdInput.setSelectionRange(5, 5)
+    cmdInput.dispatchEvent(new Event('input'))
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    expect(_getAcIndex()).toBe(0)
+    expect(acDropdown.style.display).toBe('block')
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
+    expect(_getAcIndex()).toBe(1)
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+    expect(_getAcIndex()).toBe(0)
   })
 
   it('Tab key with a modifier does not trigger autocomplete accept or selection', async () => {

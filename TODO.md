@@ -21,10 +21,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Extend the same app-native post-filter model beyond `grep` to high-value shell tools like `head`, `tail`, and `wc -l`.
   - Keep the scope narrow: one supported post-filter stage, no general shell piping or chaining.
 
-- **More bash-like tab completion**
-  - Make repeated `Tab` presses feel closer to a shell by supporting longest-common-prefix expansion and clearer cycling behavior.
-  - Strong realism win without changing subprocess semantics.
-
 - **Shell aliases**
   - Allow operator-defined aliases that resolve before validation, so common shortcuts feel more shell-native without exposing unrestricted composition.
 

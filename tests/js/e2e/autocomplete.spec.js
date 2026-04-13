@@ -6,7 +6,7 @@ test.describe('autocomplete', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('arrow navigation and tab accept the highlighted suggestion', async ({ page }) => {
+  test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({ page }) => {
     const input = page.locator('#cmd')
     await input.fill('nmap')
 
@@ -19,6 +19,13 @@ test.describe('autocomplete', () => {
     await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('nmap -h')
 
     await page.keyboard.press('Tab')
+    await expect(input).toHaveValue('nmap -')
+    await expect(dropdown).toBeVisible()
+
+    await page.keyboard.press('ArrowDown')
+    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('nmap -h')
+
+    await page.keyboard.press('Enter')
     await expect(input).toHaveValue('nmap -h')
     await expect(dropdown).toBeHidden()
   })

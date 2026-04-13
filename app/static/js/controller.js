@@ -877,8 +877,17 @@ cmdInput.addEventListener('keydown', e => {
   if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
-    else if (acIndex >= 0 && acFiltered[acIndex]) { acAccept(acFiltered[acIndex]); }
-    else if (acFiltered.length > 0) { acIndex = 0; acShow(acFiltered); }
+    else if (acFiltered.length > 0) {
+      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+      if (acIndex < 0 || !isAcDropdownOpen()) {
+        acIndex = 0;
+      } else if (e.shiftKey) {
+        acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+      } else {
+        acIndex = (acIndex + 1) % acFiltered.length;
+      }
+      acShow(acFiltered);
+    }
     return;
   }
   if (e.key === 'ArrowDown') {

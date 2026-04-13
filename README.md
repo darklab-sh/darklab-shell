@@ -71,7 +71,7 @@ Use the README as the entrypoint, then go deeper with the specialized docs:
 
 ## Features
 
-- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, and selection-safe desktop shortcuts
+- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, bash-like `Tab` completion, and selection-safe desktop shortcuts
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, stable Firefox-friendly layout, shared desktop/mobile Run-button state, and output-follow behavior that keeps the latest lines visible when the keyboard opens
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy/save/export actions, and a jump-to-live / jump-to-bottom helper when you scroll away from the tail
 - **History and sharing** — recent command chips, a persistent history drawer with search/filtering, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot permalinks, and full-output artifacts for longer runs
@@ -632,9 +632,17 @@ Placement rules:
 | Key | Action |
 |-----|--------|
 | **↑ / ↓** | Navigate through suggestions |
-| **Tab** | Accept the highlighted suggestion (or the only match if one result) |
+| **Tab** | Expand to the longest shared prefix, then cycle suggestions forward |
+| **Shift+Tab** | Cycle suggestions backward |
 | **Enter** | Accept highlighted suggestion, or run the command if none selected |
 | **Escape** | Dismiss the dropdown |
+
+Completion behavior is intentionally shell-like rather than picker-like:
+
+- if there is only one match, `Tab` accepts it immediately
+- if multiple matches share a longer common prefix than what you typed, the first `Tab` expands to that shared prefix
+- once no longer shared prefix remains, repeated `Tab` presses move the highlight through the current matches
+- `Enter` accepts the currently highlighted match
 
 **Format** — same conventions as `conf/allowed_commands.txt`:
 - One suggestion per line

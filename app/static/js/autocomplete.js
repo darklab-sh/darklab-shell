@@ -128,6 +128,36 @@ function acHide() {
   acIndex = -1;
 }
 
+function _getAutocompleteSharedPrefix(items) {
+  if (!Array.isArray(items) || !items.length) return '';
+  const first = typeof items[0] === 'string' ? items[0] : '';
+  if (!first) return '';
+  const lowerItems = items.map(item => (typeof item === 'string' ? item.toLowerCase() : ''));
+  let end = first.length;
+  for (let i = 1; i < lowerItems.length; i += 1) {
+    const candidate = lowerItems[i];
+    let j = 0;
+    const limit = Math.min(end, candidate.length);
+    while (j < limit && lowerItems[0][j] === candidate[j]) j += 1;
+    end = j;
+    if (!end) return '';
+  }
+  return first.slice(0, end);
+}
+
+function acExpandSharedPrefix(items) {
+  if (!Array.isArray(items) || items.length < 2) return false;
+  const currentValue = (typeof getComposerValue === 'function')
+    ? getComposerValue()
+    : (cmdInput ? cmdInput.value || '' : '');
+  const sharedPrefix = _getAutocompleteSharedPrefix(items);
+  if (!sharedPrefix) return false;
+  if (sharedPrefix.length <= currentValue.length) return false;
+  if (!sharedPrefix.toLowerCase().startsWith(currentValue.toLowerCase())) return false;
+  setComposerValue(sharedPrefix, sharedPrefix.length, sharedPrefix.length);
+  return true;
+}
+
 function acAccept(s) {
   setComposerValue(s, s.length, s.length);
   acHide();

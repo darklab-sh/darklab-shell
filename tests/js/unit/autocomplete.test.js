@@ -24,6 +24,8 @@ function loadAutocompleteFns() {
     acShow,
     acHide,
     acAccept,
+    acExpandSharedPrefix,
+    _getAutocompleteSharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
   }`)
 }
@@ -126,6 +128,35 @@ describe('autocomplete helpers', () => {
     expect(document.getElementById('ac').style.display).toBe('none')
     expect(mobileFocusSpy).toHaveBeenCalledTimes(1)
     expect(desktopFocusSpy).not.toHaveBeenCalled()
+  })
+
+  it('computes the shared prefix across multiple suggestions', () => {
+    const { _getAutocompleteSharedPrefix } = loadAutocompleteFns()
+
+    expect(_getAutocompleteSharedPrefix(['ping', 'ping -c 4', 'ping google.com'])).toBe('ping')
+    expect(_getAutocompleteSharedPrefix(['curl', 'dig'])).toBe('')
+  })
+
+  it('expands the composer value to the longest shared prefix when one exists', () => {
+    const { acExpandSharedPrefix } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'pi'
+
+    const expanded = acExpandSharedPrefix(['ping', 'ping -c 4', 'ping google.com'])
+
+    expect(expanded).toBe(true)
+    expect(input.value).toBe('ping')
+  })
+
+  it('expands through the shared trailing space when suggestions only diverge after the command root', () => {
+    const { acExpandSharedPrefix } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'ping'
+
+    const expanded = acExpandSharedPrefix(['ping -c 4', 'ping google.com'])
+
+    expect(expanded).toBe(true)
+    expect(input.value).toBe('ping ')
   })
 
   it('mousedown on a suggestion accepts it without blurring the input', () => {

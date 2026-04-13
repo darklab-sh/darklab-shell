@@ -847,6 +847,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `closes transient ui while the mobile keyboard is open` | Verifies that closes transient ui while the mobile keyboard is open. |
 | `matches autocomplete suggestions from the beginning of each command only` | Verifies that matches autocomplete suggestions from the beginning of each command only. |
 | `hides autocomplete when the typed command exactly matches a suggestion` | Verifies that hides autocomplete when the typed command exactly matches a suggestion. |
+| `Tab expands the typed value to the longest shared autocomplete prefix before cycling` | Verifies that Tab expands the typed value to the longest shared autocomplete prefix before cycling. |
+| `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
 | `renders cursor and selection state from composer state` | Verifies that renders cursor and selection state from composer state. |
 | `supports ctrl+w to delete one word to the left` | Verifies that supports ctrl+w to delete one word to the left. |
 | `supports ctrl+u to delete to the beginning of the line` | Verifies that supports ctrl+u to delete to the beginning of the line. |
@@ -899,6 +901,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `applies the active class to the indexed suggestion` | Verifies that applies the active class to the indexed suggestion. |
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
+| `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
+| `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
+| `expands through the shared trailing space when suggestions only diverge after the command root` | Verifies that expands through the shared trailing space when suggestions only diverge after the command root. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
 | `positions dropdown above when space below is tight and preserves item order` | Verifies that positions dropdown above when space below is tight and preserves item order. |
 | `clamps the below-mode dropdown height so it does not extend past the viewport edge` | Verifies that clamps the below-mode dropdown height so it does not extend past the viewport edge. |
@@ -1182,7 +1187,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 
 | Test | Description |
 | --- | --- |
-| `arrow navigation and tab accept the highlighted suggestion` | Verifies that arrow navigation and tab accept the highlighted suggestion. |
+| `Tab expands to the shared prefix and Enter accepts the highlighted suggestion` | Verifies that Tab expands to the shared prefix and Enter accepts the highlighted suggestion. |
 | `clicking outside the prompt hides autocomplete without changing the input` | Verifies that clicking outside the prompt hides autocomplete without changing the input. |
 
 #### `boot-resilience.spec.js`
