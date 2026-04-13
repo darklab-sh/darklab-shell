@@ -216,6 +216,16 @@ function renderRestoredTabOutput(tabId, rawLines) {
   tab.rawLines = lines;
   lines.forEach(line => _appendRestoredOutputSpan(out, line));
   syncOutputPrefixes(out);
+  const mobileMode = !!(
+    typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+  );
+  if (mobileMode && lines.length) {
+    tab.followOutput = true;
+    _stickOutputToBottom(out, tab);
+  }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
 }
 

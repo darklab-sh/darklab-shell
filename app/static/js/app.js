@@ -719,7 +719,9 @@ if (typeof window !== 'undefined') {
 
 if (typeof document !== 'undefined') {
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) persistTabSessionStateNow();
+    if (document.hidden) {
+      persistTabSessionStateNow();
+    }
   });
 }
 

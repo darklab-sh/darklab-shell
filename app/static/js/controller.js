@@ -297,14 +297,6 @@ Promise.all([
 setTimeout(() => {
   if (!cmdInput) return;
   if (useMobileTerminalViewportMode()) {
-    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-      try {
-        window.scrollTo({ top: 0, behavior: 'auto' });
-      } catch (_) {
-        // jsdom does not implement scrollTo; browsers do.
-      }
-    }
     return;
   }
   refocusTerminalInput();

@@ -93,6 +93,25 @@ test.describe('mobile menu', () => {
     await expect.poll(async () => page.evaluate(() => window.scrollY)).toBeLessThanOrEqual(startScrollY + 12)
   })
 
+  test('reloading on mobile restores the active output pane at the bottom', async ({ page }) => {
+    await runCommandMobile(page, 'help')
+
+    const output = page.locator('.tab-panel.active .output')
+    await expect.poll(async () => output.evaluate(el => el.scrollHeight > el.clientHeight + 40)).toBe(true)
+
+    await output.evaluate(el => { el.scrollTop = 0 })
+    await expect.poll(async () => output.evaluate(el => el.scrollTop)).toBe(0)
+
+    await page.reload()
+    await page.evaluate(() => window.dispatchEvent(new Event('resize')))
+    await expect.poll(async () => page.evaluate(() => document.body.classList.contains('mobile-terminal-mode'))).toBe(true)
+
+    await expect.poll(async () => output.evaluate(el => {
+      const remaining = el.scrollHeight - (el.scrollTop + el.clientHeight)
+      return Math.max(0, Math.round(remaining))
+    })).toBeLessThanOrEqual(16)
+  })
+
   test('mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused', async ({ page }) => {
     await page.locator('#mobile-cmd').fill('nmap')
 
