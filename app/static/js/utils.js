@@ -8,6 +8,53 @@ function escapeRegex(s) {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+function normalizeRedactionRules(rules) {
+  if (!Array.isArray(rules)) return [];
+  return rules
+    .filter(rule => rule && typeof rule === 'object')
+    .map(rule => {
+      const pattern = typeof rule.pattern === 'string' ? rule.pattern : '';
+      if (!pattern.trim()) return null;
+      const replacement = typeof rule.replacement === 'string' ? rule.replacement : '[redacted]';
+      const flags = typeof rule.flags === 'string'
+        ? Array.from(new Set(rule.flags.toLowerCase().split('').filter(ch => ch === 'i' || ch === 'm'))).join('')
+        : '';
+      try {
+        return {
+          label: typeof rule.label === 'string' ? rule.label.trim() : '',
+          pattern,
+          replacement,
+          flags,
+          regex: new RegExp(pattern, `g${flags}`),
+        };
+      } catch (_) {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
+
+function applyRedactionRules(text, rules) {
+  let value = String(text ?? '');
+  for (const rule of normalizeRedactionRules(rules)) {
+    value = value.replace(rule.regex, rule.replacement);
+  }
+  return value;
+}
+
+function redactLineEntries(entries, rules) {
+  return (Array.isArray(entries) ? entries : [])
+    .map(item => {
+      if (typeof item === 'string') return applyRedactionRules(item, rules);
+      if (!item || typeof item !== 'object' || typeof item.text !== 'string') return null;
+      return {
+        ...item,
+        text: applyRedactionRules(item.text, rules),
+      };
+    })
+    .filter(Boolean);
+}
+
 // Render a small Markdown subset for MOTD: **bold**, `code`, [text](url), newlines.
 // escapeHtml is applied first to prevent XSS, then patterns are applied so the
 // operator notice stays useful without needing a full Markdown parser.

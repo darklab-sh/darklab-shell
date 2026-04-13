@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { makeTestIp, waitForHistoryRuns } from './helpers.js'
+import { makeTestIp, waitForHistoryRuns, createShareSnapshot } from './helpers.js'
 
 const MOBILE = { width: 375, height: 812 }
 const LONG_CMD = 'ping -c 4 8.8.8.8'
@@ -121,7 +121,7 @@ test.describe('mobile menu', () => {
 
     const startScrollY = await page.evaluate(() => window.scrollY)
     await runCommandMobile(page, 'hostname')
-    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+    await createShareSnapshot(page)
     await expect(page.locator('.tab-panel.active [data-action="permalink"]')).not.toBeFocused()
     await page.locator('.tab-panel.active [data-action="copy"]').click()
     await expect(page.locator('.tab-panel.active [data-action="copy"]')).not.toBeFocused()
@@ -377,7 +377,7 @@ test.describe('mobile menu', () => {
       })
     })
 
-    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+    await createShareSnapshot(page)
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
     await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)

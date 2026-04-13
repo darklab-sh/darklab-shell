@@ -127,6 +127,34 @@ class TestLoadConfig:
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
 
+    def test_share_redaction_enabled_defaults_true(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write("app_name: test-shell\n")
+            cfg = app_config.load_config(tmp)
+        assert cfg["share_redaction_enabled"] is True
+
+    def test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled(self):
+        rules = app_config.get_share_redaction_rules({
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [
+                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+            ],
+        })
+        labels = [rule["label"] for rule in rules]
+        assert "bearer token" in labels
+        assert "email address" in labels
+        assert labels[-1] == "custom"
+
+    def test_get_share_redaction_rules_returns_empty_when_disabled(self):
+        rules = app_config.get_share_redaction_rules({
+            "share_redaction_enabled": False,
+            "share_redaction_rules": [
+                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+            ],
+        })
+        assert rules == []
+
 class TestLoadAllowedCommands:
     def _write(self, content, tmp_dir):
         path = os.path.join(tmp_dir, "allowed_commands.txt")
@@ -523,6 +551,27 @@ class TestThemeRegistry:
         finally:
             os.unlink(path)
         assert "https://example.invalid/README.md" in result[0]["answer_html"]
+
+    def test_load_all_faq_clarifies_snapshot_vs_run_permalink(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        by_question = {item["question"]: item for item in result}
+        share_html = by_question["How do I save or share my results?"]["answer_html"]
+        tabs_html = by_question["How do tabs and permalinks work?"]["answer_html"]
+        shortcuts_html = by_question["Are there keyboard shortcuts?"]["answer_html"]
+        assert "share snapshot" in share_html
+        assert "run permalink" in share_html
+        assert "/share" in share_html
+        assert "/history/&lt;run_id&gt;" in share_html
+        assert "share snapshot" in tabs_html
+        assert "run permalink" in tabs_html
+        assert "share snapshot for the active tab" in shortcuts_html
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────

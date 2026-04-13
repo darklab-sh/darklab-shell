@@ -50,18 +50,20 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
         },
         {
             "question": "How do I save or share my results?",
-            "answer": "Use permalink, copy, save .html, or save .txt from the tab action bar.",
+            "answer": "Use share snapshot, copy, save .html, or save .txt from the tab action bar.",
             "answer_html": (
                 "There are several options below each tab's output:<br><br>"
-                "<code>permalink</code> — saves a snapshot of everything visible in the tab and "
-                "generates a shareable URL. The snapshot page lets the recipient copy, download, or "
-                "inspect the raw data.<br>"
+                "<code>share snapshot</code> — saves a shareable snapshot of everything visible in "
+                "the current tab and generates a <code>/share</code> URL. When redaction is enabled, "
+                "you can choose whether that snapshot should be shared raw or redacted before it is "
+                "saved.<br>"
                 "<code>copy</code> — copies the full plain-text output to your clipboard.<br>"
                 "<code>save .html</code> — downloads a themed HTML file with ANSI colors "
                 "preserved. It uses app-hosted vendor fonts when viewed alongside this shell and "
                 "falls back to browser monospace fonts offline.<br>"
                 "<code>save .txt</code> — downloads a plain-text version of the output.<br><br>"
-                "Single-run permalinks are also available from the <strong>⧖ history</strong> panel."
+                "The <strong>⧖ history</strong> panel also provides <code>run permalink</code>, which "
+                "copies the canonical <code>/history/&lt;run_id&gt;</code> link for one saved command."
             ),
         },
         {
@@ -75,14 +77,17 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "<strong>+</strong> button to keep results from different sessions visible at the "
                 "same time. Each tab tracks its own status independently. Double-click a tab label to "
                 "rename it.<br><br>"
-                "The <strong>permalink</strong> button captures everything currently visible in that "
-                "tab and saves it as a shareable page. If a full saved artifact exists, the permalink "
-                "uses that full output. The link opens a styled HTML view with ANSI color rendering "
-                "and options to copy to clipboard, save as .html, save as .txt, or view raw JSON. "
-                "Permalinks survive container restarts.<br><br>"
+                "The <strong>share snapshot</strong> button captures everything currently visible in "
+                "that tab and saves it as a shareable <code>/share</code> page. If a full saved "
+                "artifact exists, the snapshot uses that full output. The shared page opens a styled "
+                "HTML view with ANSI color rendering and options to copy to clipboard, save as .html, "
+                "save as .txt, or view raw JSON. Snapshot links survive container restarts.<br><br>"
                 "The <strong>⧖ history</strong> panel shows your recent runs. You can load any past "
-                "result into a new tab, copy a single-run permalink from there, or <strong>★ star</strong> "
-                "a command to pin it to the top of the list."
+                "result into a new tab, copy a <strong>run permalink</strong> from there, or "
+                "<strong>★ star</strong> a command to pin it to the top of the list. Use "
+                "<strong>share snapshot</strong> when you want a share/export view of the active tab; "
+                "use <strong>run permalink</strong> when you want the canonical link for one saved "
+                "command in history."
             ),
         },
         {
@@ -114,8 +119,8 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "add <code>Shift</code> to go backwards.</li>"
                 "<li><code>Option+1</code> through <code>Option+9</code> "
                 "(<code>Alt+1</code> … <code>Alt+9</code>) — jump directly to a tab by number.</li>"
-                "<li><code>Option+P</code> (<code>Alt+P</code>) — create a permalink for the active "
-                "tab.</li>"
+                "<li><code>Option+P</code> (<code>Alt+P</code>) — create a share snapshot for the "
+                "active tab.</li>"
                 "<li><code>Option+Shift+C</code> (<code>Alt+Shift+C</code>) — copy the active tab "
                 "output.</li>"
                 "<li><code>Ctrl+L</code> — clear the active tab.</li>"

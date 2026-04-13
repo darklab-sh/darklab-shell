@@ -43,6 +43,36 @@
 # Server default if unset: 8
 # recent_commands_limit: 8
 
+# Enable the built-in basic redaction model for snapshot permalinks and local
+# export actions (`save txt` / `save html`). When enabled, the app applies a
+# conservative built-in baseline before any operator-defined rules:
+#   - bearer tokens / Authorization: Bearer ...
+#   - email addresses
+#   - IPv4 addresses
+#   - IPv6 addresses
+#   - hostnames / dotted domains
+# The app then appends any operator-defined rules from `share_redaction_rules`.
+# Normal run history remains unchanged in this first version.
+# Server default if unset: true
+# share_redaction_enabled: true
+#
+# Optional operator-defined regex rules appended after the built-in share/export
+# redaction rules.
+# Each rule supports:
+#   label:       optional human-readable name
+#   pattern:     required regular expression
+#   replacement: replacement text (default: [redacted])
+#   flags:       optional regex flags from: i, m
+# Server default if unset: []
+# share_redaction_rules:
+#   - label: bearer token
+#     pattern: 'Bearer\s+\S+'
+#     replacement: 'Bearer [redacted]'
+#     flags: i
+#   - label: ipv4
+#     pattern: '\b\d{1,3}(?:\.\d{1,3}){3}\b'
+#     replacement: '[ip-redacted]'
+
 # Permalink retention in days. Runs and snapshots older than this will be
 # deleted from the database on startup. Set to 0 for unlimited retention.
 # Server default if unset: 365

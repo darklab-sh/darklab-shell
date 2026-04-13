@@ -9,11 +9,15 @@ from datetime import datetime, timezone
 
 from flask import Blueprint, jsonify, request
 
-from config import APP_VERSION, CFG
+import config as _config
 from database import db_connect, delete_run_artifacts
 from helpers import get_client_ip, get_session_id
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
+from redaction import redact_line_entries
 from run_output_store import load_full_output_entries
+
+APP_VERSION = _config.APP_VERSION
+CFG = _config.CFG
 
 log = logging.getLogger("shell")
 
@@ -232,11 +236,14 @@ def save_share():
         return jsonify({"error": "Request body must be a JSON object"}), 400
     label   = data.get("label", "untitled")
     content = data.get("content", [])  # list of {text, cls} objects
+    apply_redaction = data.get("apply_redaction", True)
     session_id = get_session_id()
     if not isinstance(label, str):
         return jsonify({"error": "Label must be a string"}), 400
     if not isinstance(content, list):
         return jsonify({"error": "Content must be a list"}), 400
+    if not isinstance(apply_redaction, bool):
+        return jsonify({"error": "apply_redaction must be a boolean"}), 400
     for item in content:
         if isinstance(item, str):
             continue
@@ -247,6 +254,8 @@ def save_share():
         if "cls" in item and not isinstance(item["cls"], str):
             return jsonify({"error": "Content objects must use string cls values"}), 400
     label = label.strip()
+    if CFG.get("share_redaction_enabled") and apply_redaction:
+        content = redact_line_entries(content, _config.get_share_redaction_rules(CFG))
     share_id = str(uuid.uuid4())
     created  = datetime.now(timezone.utc).isoformat()
     with db_connect() as conn:

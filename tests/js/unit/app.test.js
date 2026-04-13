@@ -154,11 +154,17 @@ async function loadAppFns({
       <div id="permalink-toast"></div>
       <div id="kill-overlay"></div>
       <div id="hist-del-overlay"></div>
+      <div id="share-redaction-overlay"></div>
+      <button id="share-redaction-cancel"></button>
+      <button id="share-redaction-raw"></button>
+      <button id="share-redaction-confirm"></button>
+      <input id="share-redaction-remember-toggle" type="checkbox" />
       <div class="prompt-wrap"></div>
     </div>
   `
 
   const storage = new MemoryStorage()
+  const sessionStore = new MemoryStorage()
   if (theme !== null) storage.setItem('theme', theme)
   for (const [name, value] of Object.entries(cookies)) {
     document.cookie = `${name}=${encodeURIComponent(value)}; path=/`
@@ -173,6 +179,8 @@ async function loadAppFns({
           version: '9.9',
           project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
           default_theme: 'darklab_obsidian.yaml',
+          share_redaction_enabled: true,
+          share_redaction_rules: [],
           motd: '',
           command_timeout_seconds: 0,
           max_output_lines: 0,
@@ -210,6 +218,10 @@ async function loadAppFns({
     histDelCancelBtn: document.getElementById('hist-del-cancel'),
     histDelNonfavBtn: document.getElementById('hist-del-nonfav'),
     histDelConfirmBtn: document.getElementById('hist-del-confirm'),
+    shareRedactionCancelBtn: document.getElementById('share-redaction-cancel'),
+    shareRedactionRawBtn: document.getElementById('share-redaction-raw'),
+    shareRedactionConfirmBtn: document.getElementById('share-redaction-confirm'),
+    shareRedactionRememberToggle: document.getElementById('share-redaction-remember-toggle'),
     killCancelBtn: document.getElementById('kill-cancel'),
     killConfirmBtn: document.getElementById('kill-confirm'),
     searchPrevBtn: document.getElementById('search-prev'),
@@ -251,6 +263,7 @@ async function loadAppFns({
     themeCloseBtn: document.querySelector('.theme-close'),
     killOverlay: document.getElementById('kill-overlay'),
     histDelOverlay: document.getElementById('hist-del-overlay'),
+    shareRedactionOverlay: document.getElementById('share-redaction-overlay'),
     faqOverlay: document.getElementById('faq-overlay'),
     optionsOverlay: document.getElementById('options-overlay'),
     permalinkToast: document.getElementById('permalink-toast'),
@@ -337,6 +350,7 @@ async function loadAppFns({
   ], {
     document,
     localStorage: storage,
+    sessionStorage: sessionStore,
     apiFetch,
     APP_CONFIG: {},
     AnsiUp: FakeAnsiUp,
@@ -452,6 +466,11 @@ async function loadAppFns({
     isKillOverlayOpen,
     confirmPendingKill,
     closeKillOverlay,
+    confirmPermalinkRedactionChoice,
+    getRememberedShareRedactionChoice,
+    resolveShareRedactionChoice,
+    cancelShareRedactionChoice,
+    isShareRedactionOverlayOpen,
     getComposerState,
     setComposerState,
     resetComposerState,
@@ -495,6 +514,7 @@ async function loadAppFns({
     confirmPendingKill: fns.confirmPendingKill,
     closeKillOverlay: fns.closeKillOverlay,
     syncShellPrompt: fns.syncShellPrompt,
+    sessionStorage: sessionStore,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
       else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
@@ -2391,6 +2411,41 @@ describe('app helpers', () => {
     closeKillOverlay()
     expect(isKillOverlayOpen()).toBe(false)
     expect(visibleInput.focus).not.toHaveBeenCalled()
+  })
+
+  it('wires the share redaction modal buttons, remember choice, and backdrop correctly', async () => {
+    const {
+      confirmPermalinkRedactionChoice,
+      isShareRedactionOverlayOpen,
+      getRememberedShareRedactionChoice,
+      sessionStorage,
+    } = await loadAppFns()
+    const shareRedactionOverlay = document.getElementById('share-redaction-overlay')
+    const rememberToggle = document.getElementById('share-redaction-remember-toggle')
+
+    const redactedChoice = confirmPermalinkRedactionChoice()
+    expect(isShareRedactionOverlayOpen()).toBe(true)
+    rememberToggle.checked = true
+    document.getElementById('share-redaction-confirm').click()
+    await expect(redactedChoice).resolves.toBe('redacted')
+    expect(shareRedactionOverlay.style.display).toBe('none')
+    expect(getRememberedShareRedactionChoice()).toBe('redacted')
+    expect(sessionStorage.getItem('share_redaction_choice')).toBe('redacted')
+
+    await expect(confirmPermalinkRedactionChoice()).resolves.toBe('redacted')
+    expect(shareRedactionOverlay.style.display).toBe('none')
+
+    sessionStorage.removeItem('share_redaction_choice')
+    const rawChoice = confirmPermalinkRedactionChoice()
+    expect(isShareRedactionOverlayOpen()).toBe(true)
+    document.getElementById('share-redaction-raw').click()
+    await expect(rawChoice).resolves.toBe('raw')
+    expect(getRememberedShareRedactionChoice()).toBe(null)
+
+    const cancelChoice = confirmPermalinkRedactionChoice()
+    shareRedactionOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await expect(cancelChoice).resolves.toBe(null)
+    expect(shareRedactionOverlay.style.display).toBe('none')
   })
 
   it('wires search controls and Escape dismissal correctly', async () => {

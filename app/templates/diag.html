@@ -428,8 +428,8 @@ body.diag-page::before { display: none; }
           <td>
             {% if value is none %}<span class="diag-warn">—</span>
             {% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
-            {% elif value == true %}<span class="diag-ok">true</span>
-            {% elif value == false %}<span class="diag-warn">false</span>
+            {% elif value is sameas true %}<span class="diag-ok">true</span>
+            {% elif value is sameas false %}<span class="diag-warn">false</span>
             {% else %}{{ value }}{% endif %}
           </td>
         </tr>
@@ -442,8 +442,8 @@ body.diag-page::before { display: none; }
           <td>
             {% if value is none %}<span class="diag-warn">—</span>
             {% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
-            {% elif value == true %}<span class="diag-ok">true</span>
-            {% elif value == false %}<span class="diag-warn">false</span>
+            {% elif value is sameas true %}<span class="diag-ok">true</span>
+            {% elif value is sameas false %}<span class="diag-warn">false</span>
             {% else %}{{ value }}{% endif %}
           </td>
         </tr>

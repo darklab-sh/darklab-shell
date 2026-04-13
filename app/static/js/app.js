@@ -112,12 +112,15 @@ const _historyPanelHomeParent = typeof historyPanel !== 'undefined' && historyPa
 const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && permalinkToast ? permalinkToast.parentElement : null;
 const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay ? killOverlay.parentElement : null;
 const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
+const _shareRedactionOverlayHomeParent = typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
 const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
 const _headerHomeParent = typeof headerTitle !== 'undefined' && headerTitle ? headerTitle.closest('header') : (typeof document !== 'undefined' ? document.querySelector('header') : null);
+const SHARE_REDACTION_SESSION_KEY = 'share_redaction_choice';
+let _pendingShareRedactionResolver = null;
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -185,6 +188,7 @@ const _uiOverlayRefs = {
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
   killOverlay: typeof killOverlay !== 'undefined' && killOverlay ? killOverlay : null,
   histDelOverlay: typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay : null,
+  shareRedactionOverlay: typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay : null,
 };
 
 function _bindMobileComposerInteractions(uiRefs) {
@@ -258,7 +262,8 @@ const _mobileShellOverlayNodes = [
   { node: historyPanel, homeParent: _historyPanelHomeParent, desktopAnchor: permalinkToast || null },
   { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: killOverlay || null },
   { node: killOverlay, homeParent: _killOverlayHomeParent, desktopAnchor: histDelOverlay || null },
-  { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: faqOverlay || null },
+  { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: shareRedactionOverlay || null },
+  { node: shareRedactionOverlay, homeParent: _shareRedactionOverlayHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: null },
@@ -559,6 +564,75 @@ function closeKillOverlay() {
   hideKillOverlay();
   pendingKillTabId = null;
   refocusTerminalInput();
+}
+
+function getRememberedShareRedactionChoice() {
+  try {
+    const stored = sessionStorage.getItem(SHARE_REDACTION_SESSION_KEY);
+    return stored === 'raw' || stored === 'redacted' ? stored : null;
+  } catch (_) {
+    return null;
+  }
+}
+
+function _rememberShareRedactionChoice(choice, remember) {
+  try {
+    if (!remember) {
+      sessionStorage.removeItem(SHARE_REDACTION_SESSION_KEY);
+      return;
+    }
+    if (choice === 'raw' || choice === 'redacted') {
+      sessionStorage.setItem(SHARE_REDACTION_SESSION_KEY, choice);
+    }
+  } catch (_) {}
+}
+
+function showShareRedactionOverlay() {
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  if (shareRedactionRememberToggle) shareRedactionRememberToggle.checked = false;
+  showModalOverlay(shareRedactionOverlay, 'flex');
+}
+
+function hideShareRedactionOverlay() {
+  if (shareRedactionRememberToggle) shareRedactionRememberToggle.checked = false;
+  hideModalOverlay(shareRedactionOverlay);
+}
+
+function isShareRedactionOverlayOpen() {
+  return isModalOverlayOpen(shareRedactionOverlay, 'flex');
+}
+
+function resolveShareRedactionChoice(choice) {
+  const remember = !!(shareRedactionRememberToggle && shareRedactionRememberToggle.checked);
+  _rememberShareRedactionChoice(choice, remember);
+  hideShareRedactionOverlay();
+  if (_pendingShareRedactionResolver) {
+    const resolver = _pendingShareRedactionResolver;
+    _pendingShareRedactionResolver = null;
+    resolver(choice);
+  }
+}
+
+function cancelShareRedactionChoice() {
+  const wasOpen = isShareRedactionOverlayOpen();
+  const hadPending = !!_pendingShareRedactionResolver;
+  hideShareRedactionOverlay();
+  if (_pendingShareRedactionResolver) {
+    const resolver = _pendingShareRedactionResolver;
+    _pendingShareRedactionResolver = null;
+    resolver(null);
+  }
+  if (wasOpen || hadPending) refocusTerminalInput();
+}
+
+function confirmPermalinkRedactionChoice() {
+  if (APP_CONFIG && APP_CONFIG.share_redaction_enabled === false) return Promise.resolve('raw');
+  const remembered = getRememberedShareRedactionChoice();
+  if (remembered) return Promise.resolve(remembered);
+  showShareRedactionOverlay();
+  return new Promise(resolve => {
+    _pendingShareRedactionResolver = resolve;
+  });
 }
 
 function confirmPendingKill() {

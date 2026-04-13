@@ -576,7 +576,8 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 #kill-modal,
-#hist-del-modal {
+#hist-del-modal,
+#share-redaction-modal {
   width: min(520px, 92vw);
   padding: 18px 20px;
 }
@@ -627,6 +628,18 @@ body.mobile-terminal-mode .output-follow-btn {
   border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
 }
 
+.modal-secondary-neutral {
+  background: transparent;
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
+  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
+}
+
+.modal-secondary-neutral:hover {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--theme-panel-border) 100%, transparent);
+  background: color-mix(in srgb, var(--theme-panel-bg) 18%, transparent);
+}
+
 .modal-secondary-warning:hover {
   color: var(--amber);
   border-color: color-mix(in srgb, var(--amber) 52%, transparent);
@@ -637,6 +650,16 @@ body.mobile-terminal-mode .output-follow-btn {
   background: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
   color: var(--theme-modal-warning-btn-text);
   border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
+}
+
+.modal-primary-accent {
+  background: color-mix(in srgb, var(--green) 88%, var(--theme-panel-bg));
+  color: var(--theme-on-accent-text);
+  border: 1px solid color-mix(in srgb, var(--green) 54%, transparent);
+}
+
+.modal-inline-field {
+  margin-bottom: 18px;
 }
 
 .modal-primary-warning:hover {

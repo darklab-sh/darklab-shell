@@ -74,6 +74,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
     await page.locator('[data-action="permalink"]').click()
+    await page.locator('#share-redaction-confirm').click()
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to create permalink')
   })

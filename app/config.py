@@ -7,8 +7,9 @@ import os
 import pwd
 from pathlib import Path
 import yaml
+from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.4"
+APP_VERSION = "1.5"
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"
 
 
@@ -70,6 +71,8 @@ def load_config(conf_dir=None):
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "diagnostics_allowed_cidrs":  [],
+        "share_redaction_enabled":    True,
+        "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
@@ -107,10 +110,25 @@ def load_config(conf_dir=None):
         full_output_max_mb = 5
     defaults["full_output_max_mb"] = full_output_max_mb
     defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
+    # Share/export redaction rules are normalized up front so the browser and
+    # the snapshot endpoint both receive the same validated rule set.
+    defaults["share_redaction_rules"] = normalize_redaction_rules(
+        defaults.get("share_redaction_rules", [])
+    )
     return defaults
 
 
 CFG = load_config()
+
+
+def get_share_redaction_rules(cfg=None):
+    """Return the effective share/export redaction rules for the current config."""
+    active_cfg = cfg or CFG
+    if not active_cfg.get("share_redaction_enabled", True):
+        return []
+    # Built-in rules provide a conservative baseline. Operator-defined rules are
+    # appended so deployments can add environment-specific masking on top.
+    return BUILTIN_SHARE_REDACTION_RULES + list(active_cfg.get("share_redaction_rules") or [])
 
 
 _THEME_DEFAULTS = {

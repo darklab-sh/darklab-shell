@@ -75,6 +75,7 @@ Use the README as the entrypoint, then go deeper with the specialized docs:
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, stable Firefox-friendly layout, shared desktop/mobile Run-button state, and output-follow behavior that keeps the latest lines visible when the keyboard opens
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy/save/export actions, and a jump-to-live / jump-to-bottom helper when you scroll away from the tail
 - **History and sharing** — recent command chips, a persistent history drawer, starring/favorites, canonical run permalinks, snapshot permalinks, and full-output artifacts for longer runs
+- **Safer sharing and exports** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks and local exports, with optional operator regex rules appended on top. Permalink creation can now choose raw vs redacted sharing per snapshot, without changing the stored run history
 - **Themes and presentation** — named theme variants, theme-aware permalink/export rendering, mobile/desktop theme parity, MOTD support, welcome animation assets, and a backend-driven FAQ modal
 - **Shell helpers** — built-in fake shell commands like `help`, `history`, `last`, `limits`, `status`, `which`, `type`, `faq`, `banner`, and `clear`, plus real `man` support where available
 - **Security and operations** — allowlist-based execution, shell metacharacter blocking, loopback/path blocking, Redis-backed rate limiting and PID tracking, structured logging, and an IP-gated diagnostics page
@@ -360,6 +361,8 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `prompt_prefix` | `anon@darklab:~$` | Prompt text shown in the shell input and welcome samples. Can be customized independently of `app_name` |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
+| `share_redaction_enabled` | `true` | Enables the built-in basic share/export redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot and can remember that choice for the current browser session. When disabled, no built-in or custom share/export redaction rules run |
+| `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in share/export redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This first version does not change the stored run history or the history drawer permalink path; it only affects snapshot sharing and local export paths |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
@@ -656,7 +659,7 @@ Shipped app-safe shortcuts:
 | `Option+Tab` (`Alt+Tab`) | Next tab (Shift reverses) | Arrow and Tab are interchangeable |
 | `Option+1` ... `Option+9` (`Alt+1` ... `Alt+9`) | Jump to tab 1 ... 9 | |
 | `Enter` / `Escape` in kill confirmation | Confirm / cancel kill | Mirrors modal button intent |
-| `Option+P` (`Alt+P`) | Create permalink for active tab | |
+| `Option+P` (`Alt+P`) | Create share snapshot for active tab | |
 | `Option+Shift+C` (`Alt+Shift+C`) | Copy active tab output | Kept distinct from terminal `Ctrl+C` |
 | `Ctrl+L` | Clear current tab output | Shell-style convenience |
 | `Ctrl+A` | Move cursor to start of line | Readline-style editing |
@@ -742,9 +745,9 @@ The full [SecLists](https://github.com/danielmiessler/SecLists) collection is in
 
 Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The prompt input stays neutral when switching tabs (no automatic repopulation), so drafts do not leak across tabs. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, use the tab-scroll arrows or drag tabs to reorder.
 
-The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies a shareable link to that run's output), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions. Large history restores show an in-drawer loading overlay so slower machines do not look hung while the preview is fetched and rendered.
+The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as `$ <command>` followed by the results. Each entry also has: **copy command** (copies the command text to the clipboard), **permalink** (copies the canonical `/history/<run_id>` link for that saved run), and **☆ star** (pins the entry to the top of the list). Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions. Large history restores show an in-drawer loading overlay so slower machines do not look hung while the preview is fetched and rendered.
 
-When full-output persistence is enabled, the **permalink** action for a run automatically points at the complete saved output of that run. Loading a history entry into a normal tab still uses the capped preview (`/history/<run_id>?json&preview=1`) so the browser is not forced to render very large scans. If the preview was truncated, the tab includes a notice pointing to the permalink for the full output.
+When full-output persistence is enabled, the history drawer **permalink** action automatically points at the complete saved output of that run. The active tab’s **share snapshot** action creates a separate `/share/<id>` snapshot of the current tab view and can optionally redact it before saving. Loading a history entry into a normal tab still uses the capped preview (`/history/<run_id>?json&preview=1`) so the browser is not forced to render very large scans. If the preview was truncated, the tab includes a notice pointing to the permalink for the full output.
 
 The **clear all** button at the top of the history drawer prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt.
 
@@ -1051,7 +1054,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **791 pytest + 295 Vitest + 139 Playwright = 1,225 tests**.
+Current totals: **800 pytest + 305 Vitest + 139 Playwright = 1,244 tests**.
 
 Use the docs by purpose:
 

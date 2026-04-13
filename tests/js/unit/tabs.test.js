@@ -14,12 +14,19 @@ function loadTabsFns({
   maxOutputLines = 100,
   version = undefined,
   projectReadme = undefined,
+  shareRedactionEnabled = true,
+  shareRedactionRules = [],
+  confirmPermalinkRedactionChoice = () => Promise.resolve(shareRedactionEnabled ? 'redacted' : 'raw'),
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
   doKill = vi.fn(),
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
+  urlImpl = {
+    createObjectURL: () => 'blob:mock',
+    revokeObjectURL: () => {},
+  },
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -64,19 +71,25 @@ function loadTabsFns({
     newTabBtn,
     resetCmdHistoryNav: () => {},
     ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell', ...(version !== undefined && { version }), ...(projectReadme !== undefined && { project_readme: projectReadme }) },
+    APP_CONFIG: {
+      max_tabs: maxTabs,
+      max_output_lines: maxOutputLines,
+      app_name: 'darklab shell',
+      share_redaction_enabled: shareRedactionEnabled,
+      share_redaction_rules: shareRedactionRules,
+      ...(version !== undefined && { version }),
+      ...(projectReadme !== undefined && { project_readme: projectReadme }),
+    },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
     doKill,
     cancelWelcome: () => {},
+    confirmPermalinkRedactionChoice,
     apiFetch,
     location: { origin: 'https://example.test' },
     navigator,
-    URL: {
-      createObjectURL: () => 'blob:mock',
-      revokeObjectURL: () => {},
-    },
+    URL: urlImpl,
     Blob,
     ansi_up: { ansi_to_html: (s) => `<em>${s}</em>` },
     shellPromptWrap,
@@ -118,6 +131,8 @@ function loadTabsAndOutputFns({
   maxOutputLines = 100,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   clipboardWrite = () => Promise.resolve(),
+  shareRedactionEnabled = true,
+  shareRedactionRules = [],
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -165,7 +180,13 @@ function loadTabsAndOutputFns({
     mobileComposerRow,
     newTabBtn,
     resetCmdHistoryNav: () => {},
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell' },
+    APP_CONFIG: {
+      max_tabs: maxTabs,
+      max_output_lines: maxOutputLines,
+      app_name: 'darklab shell',
+      share_redaction_enabled: shareRedactionEnabled,
+      share_redaction_rules: shareRedactionRules,
+    },
     setStatus: () => {},
     clearSearch: () => {},
     confirmKill: () => {},
@@ -245,6 +266,15 @@ describe('tabs helpers', () => {
     expect(wordmark.tagName).toBe('A')
     expect(wordmark.textContent).toBe('darklab shell v2.0')
     expect(wordmark.getAttribute('href')).toBe('https://example.invalid/readme')
+  })
+
+  it('createTab labels the active-tab permalink action as share snapshot', () => {
+    const { createTab } = loadTabsFns()
+
+    const id = createTab('tab 1')
+    const btn = document.querySelector(`#tab-panels .tab-panel[data-id="${id}"] [data-action="permalink"]`)
+
+    expect(btn.textContent).toBe('share snapshot')
   })
 
   it('createTab renders wordmark with just the app name when version is absent', () => {
@@ -672,6 +702,51 @@ describe('tabs helpers', () => {
     expect(document.getElementById('permalink-toast').classList.contains('toast-error')).toBe(false)
   })
 
+  it('permalinkTab can bypass redaction when the confirmation chooses raw sharing', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/share') return Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) })
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const confirmPermalinkRedactionChoice = vi.fn(() => Promise.resolve('raw'))
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      confirmPermalinkRedactionChoice,
+      shareRedactionRules: [
+        { pattern: '\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b', replacement: '[ip-redacted]' },
+      ],
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'connected to 203.0.113.10', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(confirmPermalinkRedactionChoice).toHaveBeenCalledTimes(1)
+    const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
+    const payload = JSON.parse(shareCall[1].body)
+    expect(payload.apply_redaction).toBe(false)
+    expect(payload.content[0].text).toBe('connected to 203.0.113.10')
+  })
+
+  it('permalinkTab cancels sharing when the redaction confirmation is dismissed', async () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }))
+    const confirmPermalinkRedactionChoice = vi.fn(() => Promise.resolve(null))
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      confirmPermalinkRedactionChoice,
+    })
+    const id = createTab('tab 1')
+    const cmdInput = document.getElementById('cmd')
+    _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(apiFetch).not.toHaveBeenCalledWith('/share', expect.anything())
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
   it('permalinkTab does not append a truncation warning for a tab with full output already loaded', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/history/run-1?json') {
@@ -709,6 +784,7 @@ describe('tabs helpers', () => {
     const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
     expect(shareCall).toBeTruthy()
     const payload = JSON.parse(shareCall[1].body)
+    expect(payload.apply_redaction).toBe(true)
     expect(payload.content).toHaveLength(5)
     expect(payload.content.map(entry => entry.text)).toEqual([
       '$ tab 1',
@@ -838,6 +914,84 @@ describe('tabs helpers', () => {
     saveTab(id)
 
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
+  })
+
+  it('saveTab applies configured redaction rules to exported text', async () => {
+    let savedBlob = null
+    const { createTab, saveTab, _getTabs } = loadTabsFns({
+      shareRedactionRules: [
+        { pattern: 'Bearer\\s+\\S+', replacement: 'Bearer [redacted]' },
+      ],
+      urlImpl: {
+        createObjectURL: (blob) => {
+          savedBlob = blob
+          return 'blob:mock'
+        },
+        revokeObjectURL: () => {},
+      },
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'Authorization: Bearer abc123', cls: '', tsC: '', tsE: '' })
+
+    saveTab(id)
+
+    await expect(savedBlob.text()).resolves.toBe('Authorization: Bearer [redacted]')
+  })
+
+  it('exportTabHtml applies configured redaction rules to rendered HTML output', async () => {
+    window.ExportHtmlUtils = {
+      escapeExportHtml: s => s,
+      renderExportPromptEcho: s => s,
+      fetchVendorFontFacesCss: () => Promise.resolve(''),
+      buildTerminalExportHtml: ({ linesHtml }) => linesHtml,
+      exportTimestamp: () => '2026-01-01-00-00-00',
+    }
+    let savedBlob = null
+    const { createTab, exportTabHtml, _getTabs } = loadTabsFns({
+      shareRedactionRules: [
+        { pattern: 'token=\\w+', replacement: 'token=[redacted]' },
+      ],
+      urlImpl: {
+        createObjectURL: (blob) => {
+          savedBlob = blob
+          return 'blob:mock'
+        },
+        revokeObjectURL: () => {},
+      },
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'token=abc123', cls: '', tsC: '', tsE: '' })
+
+    await exportTabHtml(id)
+
+    const html = await savedBlob.text()
+    expect(html).toContain('token=[redacted]')
+    expect(html).not.toContain('token=abc123')
+    delete window.ExportHtmlUtils
+  })
+
+  it('permalinkTab applies configured redaction rules before creating a snapshot', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/share') return Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) })
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      shareRedactionRules: [
+        { pattern: '\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b', replacement: '[ip-redacted]' },
+      ],
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'connected to 203.0.113.10', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise(resolve => setImmediate(resolve))
+    await new Promise(resolve => setImmediate(resolve))
+
+    const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
+    const payload = JSON.parse(shareCall[1].body)
+    expect(payload.apply_redaction).toBe(true)
+    expect(payload.content[0].text).toBe('connected to [ip-redacted]')
   })
 
   it('startTabRename updates scroll buttons when the strip begins overflowing during edit', () => {

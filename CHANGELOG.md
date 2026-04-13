@@ -4,6 +4,24 @@ All notable changes to darklab shell are documented here.
 
 ---
 
+## [1.5] — Unreleased
+
+### Fixed
+
+- **Diagnostics redaction config rendering** — the `/diag` config table now renders numeric zero values as `0` instead of incorrectly treating them as boolean `false`, and the redaction-rule count field is now named `custom_redaction_rule_count` so it is clear the count only refers to operator-defined regex rules, not the built-in baseline.
+
+### Changed
+
+- **Documentation set cleanup** — `README.md`, `ARCHITECTURE.md`, and `tests/README.md` now have clearer ownership with less overlap, `ARCHITECTURE.md` has been split from the new `DECISIONS.md`, the README now has a top-level documentation map, and the testing doc now reads as a proper handbook plus full appendix rather than a loose inventory.
+- **Share snapshot wording and diagnostics visibility** — the active-tab action is now labeled `share snapshot` to distinguish it from the history drawer’s canonical run permalink path. The built-in FAQ now explains the difference explicitly, `config.yaml` documents the exact built-in redaction categories, and `/diag` now surfaces both `share_redaction_enabled` and the configured `custom_redaction_rule_count` in its Config section.
+
+### Added
+
+- **Share/export redaction rules** — snapshot permalinks and local `save txt` / `save html` exports now use a built-in basic redaction baseline for common sensitive values such as bearer tokens, email addresses, IPs, and hostnames, with optional operator regex rules appended after it. The feature is controlled by `share_redaction_enabled`, keeps normal run history unchanged in this first phase, and is enforced server-side before snapshot persistence.
+- **Permalink share-time redaction choice** — when share redaction is enabled, creating a snapshot permalink now asks whether to share the redacted or raw version, explains the kinds of values redaction covers, and can remember that choice for the current browser session. The `/share` route now honors an explicit `apply_redaction` flag so the server matches the UI’s raw-vs-redacted choice instead of always forcing the redacted path.
+
+---
+
 ## [1.4] — 2026-04-12
 
 ### Fixed

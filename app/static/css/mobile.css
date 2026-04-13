@@ -361,7 +361,8 @@
   body.mobile-terminal-mode #theme-modal,
   body.mobile-terminal-mode #options-modal,
   body.mobile-terminal-mode #kill-modal,
-  body.mobile-terminal-mode #hist-del-modal {
+  body.mobile-terminal-mode #hist-del-modal,
+  body.mobile-terminal-mode #share-redaction-modal {
     width: 100%;
     max-width: 100%;
     border-radius: 14px 14px 0 0;
@@ -372,7 +373,8 @@
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
   body.mobile-terminal-mode #kill-modal,
-  body.mobile-terminal-mode #hist-del-modal {
+  body.mobile-terminal-mode #hist-del-modal,
+  body.mobile-terminal-mode #share-redaction-modal {
     width: calc(100% - 24px);
     max-width: min(520px, calc(100% - 24px));
     border-left: 1px solid;
@@ -398,7 +400,8 @@
   body.mobile-terminal-mode #theme-modal::before,
   body.mobile-terminal-mode #options-modal::before,
   body.mobile-terminal-mode #kill-modal::before,
-  body.mobile-terminal-mode #hist-del-modal::before {
+  body.mobile-terminal-mode #hist-del-modal::before,
+  body.mobile-terminal-mode #share-redaction-modal::before {
     display: none;
   }
   body.mobile-terminal-mode #theme-modal::before {

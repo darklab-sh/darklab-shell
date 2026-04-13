@@ -86,3 +86,22 @@ export async function closeHistory(page) {
     await panel.waitFor({ state: 'hidden' })
   }
 }
+
+/**
+ * Create a snapshot permalink from the active tab, handling the share-time
+ * redaction confirmation modal before waiting for the POST /share response.
+ */
+export async function createShareSnapshot(page, { choice = 'redacted' } = {}) {
+  const responsePromise = page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST')
+
+  await page.locator('[data-action="permalink"]').click()
+  await page.locator('#share-redaction-overlay').waitFor({ state: 'visible' })
+
+  if (choice === 'raw') {
+    await page.locator('#share-redaction-raw').click()
+  } else {
+    await page.locator('#share-redaction-confirm').click()
+  }
+
+  return responsePromise
+}

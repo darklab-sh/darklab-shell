@@ -146,6 +146,8 @@ def diag():
         "full_output_max_mb":         CFG.get("full_output_max_mb"),
         "history_panel_limit":        CFG.get("history_panel_limit"),
         "permalink_retention_days":   CFG.get("permalink_retention_days"),
+        "share_redaction_enabled":    CFG.get("share_redaction_enabled"),
+        "custom_redaction_rule_count": len(CFG.get("share_redaction_rules") or []),
         "trusted_proxy_cidrs":        CFG.get("trusted_proxy_cidrs", []),
         "log_level":                  CFG.get("log_level"),
         "log_format":                 CFG.get("log_format"),

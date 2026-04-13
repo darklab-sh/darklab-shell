@@ -130,6 +130,8 @@ def get_config():
         "prompt_prefix":         cfg["prompt_prefix"],
         "project_readme":        _config.PROJECT_README,
         "default_theme":         cfg["default_theme"],
+        "share_redaction_enabled": cfg["share_redaction_enabled"],
+        "share_redaction_rules": _config.get_share_redaction_rules(cfg),
         "motd":                  cfg["motd"],
         "recent_commands_limit": cfg["recent_commands_limit"],
         "max_output_lines":      cfg["max_output_lines"],

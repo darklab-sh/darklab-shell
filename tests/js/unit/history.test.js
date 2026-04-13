@@ -456,6 +456,16 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(false)
   })
 
+  it('refreshHistoryPanel labels the history permalink action as permalink', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel()
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
+    expect(btn.textContent).toBe('permalink')
+  })
+
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/history') {

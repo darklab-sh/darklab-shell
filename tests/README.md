@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 791
-- `vitest`: 295
+- `pytest`: 800
+- `vitest`: 305
 - `playwright`: 139
-- total: 1,225
+- total: 1,244
 
 This document is organized in two parts:
 
@@ -197,6 +197,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestSplitChainedCommands.test_empty_parts_stripped` | Checks empty parts stripped handling. |
 | `TestSplitChainedCommands.test_empty_string_returns_empty_list` | Checks that empty string returns empty list. |
 | `TestLoadConfig.test_local_config_overrides_base_config_without_replacing_defaults` | Checks that local config overrides base config without replacing defaults. |
+| `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
+| `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
+| `TestLoadConfig.test_get_share_redaction_rules_returns_empty_when_disabled` | Checks that effective share redaction rules are empty when the feature is disabled. |
 | `TestLoadAllowedCommands.test_missing_file_returns_none_and_empty_deny` | Checks that missing file returns none and empty deny. |
 | `TestLoadAllowedCommands.test_allow_entries_parsed` | Checks allow entries parsed handling. |
 | `TestLoadAllowedCommands.test_deny_entries_stripped_of_bang_and_preserve_case` | Checks that deny entries stripped of bang and preserve case. |
@@ -528,6 +531,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestConfigRoute.test_project_readme_is_constant` | Checks that project readme is constant. |
 | `TestConfigRoute.test_welcome_timing_reflects_cfg` | Checks that welcome timing reflects CFG. |
 | `TestConfigRoute.test_command_timeout_defaults_to_one_hour` | Checks that command timeout defaults to one hour. |
+| `TestConfigRoute.test_share_redaction_rules_reflect_cfg` | Checks that share redaction rules are exposed through the config route. |
+| `TestConfigRoute.test_share_redaction_rules_empty_when_disabled` | Checks that the config route returns no effective share redaction rules when the feature is disabled. |
 | `TestConfigRoute.test_diag_enabled_false_when_cidrs_empty` | Checks that diagnostics enabled false when cidrs empty. |
 | `TestConfigRoute.test_diag_enabled_false_when_client_ip_not_in_cidrs` | Checks that diagnostics enabled false when client IP not in cidrs. |
 | `TestConfigRoute.test_diag_enabled_true_when_client_ip_in_cidrs` | Checks that diagnostics enabled true when client IP in cidrs. |
@@ -600,6 +605,10 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestShareRoute.test_post_rejects_content_object_with_non_string_text` | Checks that post rejects content object with non string text. |
 | `TestShareRoute.test_post_rejects_content_object_with_non_string_cls` | Checks that post rejects content object with non string cls. |
 | `TestShareRoute.test_post_accepts_renderable_content_objects` | Checks that post accepts renderable content objects. |
+| `TestShareRoute.test_post_applies_share_redaction_rules_before_persisting_snapshot` | Checks that snapshot creation applies configured share redaction rules before persistence. |
+| `TestShareRoute.test_post_applies_builtin_share_redaction_rules_before_persisting_snapshot` | Checks that snapshot creation applies the built-in share redaction baseline before persistence. |
+| `TestShareRoute.test_post_skips_share_redaction_when_apply_redaction_false` | Checks that snapshot creation can explicitly bypass share redaction when raw sharing is requested. |
+| `TestShareRoute.test_post_rejects_non_boolean_apply_redaction` | Checks that snapshot creation rejects non-boolean apply_redaction values. |
 | `TestShareRoute.test_post_rejects_non_object_json` | Checks that post rejects non object JSON. |
 | `TestShareRoute.test_get_nonexistent_share_returns_404` | Checks that get nonexistent share returns 404. |
 | `TestShareRoute.test_get_share_json_returns_content` | Checks that get share JSON returns content. |
@@ -860,6 +869,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `wires the history delete modal buttons and backdrop correctly` | Verifies that wires the history delete modal buttons and backdrop correctly. |
 | `wires the kill modal buttons and backdrop correctly` | Verifies that wires the kill modal buttons and backdrop correctly. |
 | `does not refocus the mobile composer when closing the kill confirmation modal` | Verifies that does not refocus the mobile composer when closing the kill confirmation modal. |
+| `wires the share redaction modal buttons, remember choice, and backdrop correctly` | Verifies that the permalink share-redaction modal can choose raw vs redacted sharing, remember a session choice, and cancel from the backdrop. |
 | `wires search controls and Escape dismissal correctly` | Verifies that wires search controls and Escape dismissal correctly. |
 | `refocuses the visible mobile composer after closing search with Escape` | Verifies that refocuses the visible mobile composer after closing search with Escape. |
 | `opens and closes the FAQ overlay through the wired controls` | Verifies that opens and closes the FAQ overlay through the wired controls. |
@@ -893,6 +903,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | Test | Description |
 | --- | --- |
 | `includes the welcome timing keys exposed by /config` | Verifies that includes the welcome timing keys exposed by /config. |
+| `keeps the built-in share redaction baseline in bootstrap defaults` | Verifies that the frontend bootstrap defaults preserve the built-in share redaction baseline. |
 
 #### `history.test.js`
 
@@ -1065,12 +1076,17 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `permalinkTab shows a toast when there is no output to share` | Verifies that permalinkTab shows a toast when there is no output to share. |
 | `permalinkTab shows a failure toast when the share request rejects` | Verifies that permalinkTab shows a failure toast when the share request rejects. |
 | `permalinkTab falls back to execCommand when clipboard writeText rejects` | Verifies that permalinkTab falls back to execCommand when clipboard writeText rejects. |
+| `permalinkTab can bypass redaction when the confirmation chooses raw sharing` | Verifies that permalinkTab can create a raw snapshot when the confirmation chooses raw sharing. |
+| `permalinkTab cancels sharing when the redaction confirmation is dismissed` | Verifies that permalinkTab stops before snapshot creation when the redaction confirmation is dismissed. |
 | `permalinkTab does not append a truncation warning for a tab with full output already loaded` | Verifies that permalinkTab does not append a truncation warning for a tab with full output already loaded. |
 | `copyTab shows a toast when there is no exportable output` | Verifies that copyTab shows a toast when there is no exportable output. |
 | `refocuses the terminal input after copy, save, and html export actions` | Verifies that refocuses the terminal input after copy, save, and html export actions. |
 | `builds exported HTML styles from the injected theme vars object` | Verifies that builds exported HTML styles from the injected theme vars object. |
 | `builds exported HTML with color-scheme metadata and themed shell surfaces` | Verifies that builds exported HTML with color-scheme metadata and themed shell surfaces. |
 | `saveTab shows a toast when there is only welcome output` | Verifies that saveTab shows a toast when there is only welcome output. |
+| `saveTab applies configured redaction rules to exported text` | Verifies that saveTab applies configured redaction rules to exported text. |
+| `exportTabHtml applies configured redaction rules to rendered HTML output` | Verifies that exportTabHtml applies configured redaction rules to rendered HTML output. |
+| `permalinkTab applies configured redaction rules before creating a snapshot` | Verifies that permalinkTab applies configured redaction rules before creating a snapshot. |
 | `startTabRename updates scroll buttons when the strip begins overflowing during edit` | Verifies that startTabRename updates scroll buttons when the strip begins overflowing during edit. |
 | `refocuses the terminal input after clicking the left tab scroll button` | Verifies that refocuses the terminal input after clicking the left tab scroll button. |
 | `refocuses the terminal input after clicking the right tab scroll button` | Verifies that refocuses the terminal input after clicking the right tab scroll button. |
@@ -1092,6 +1108,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `escapes parentheses` | Verifies that escapes parentheses. |
 | `escapes square brackets` | Verifies that escapes square brackets. |
 | `escaped string matches literally when used in RegExp` | Verifies that escaped string matches literally when used in RegExp. |
+| `drops invalid rules and preserves supported replacement metadata` | Verifies that normalizeRedactionRules drops invalid rules and preserves supported replacement metadata. |
+| `applies multiple redaction rules in order` | Verifies that applyRedactionRules applies multiple redaction rules in order. |
+| `redacts structured line entries without mutating other fields` | Verifies that redactLineEntries redacts structured line entries without mutating other fields. |
 | `1+1=2` | 1+1=2. |
 | `11=2` | 11=2. |
 | `11=2` | 11=2. |

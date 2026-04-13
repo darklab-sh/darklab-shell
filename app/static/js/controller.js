@@ -121,6 +121,7 @@ function setupMobileSheetDragClose() {
   const optionsModal = document.getElementById('options-modal');
   const killModal = document.getElementById('kill-modal');
   const histDelModal = document.getElementById('hist-del-modal');
+  const shareRedactionModal = document.getElementById('share-redaction-modal');
 
   bindMobileSheetDragClose(mobileMenu, () => hideMobileMenu());
   bindMobileSheetDragClose(historyPanel, () => hideHistoryPanel());
@@ -131,6 +132,7 @@ function setupMobileSheetDragClose() {
     hideHistoryDeleteOverlay();
     pendingHistAction = null;
   });
+  bindMobileSheetDragClose(shareRedactionModal, () => cancelShareRedactionChoice());
 }
 
 function setupMobileComposer() {
@@ -373,6 +375,20 @@ histDelOverlay.addEventListener('click', e => {
   if (e.target === _uiOverlayRefs.histDelOverlay) { hideHistoryDeleteOverlay(); pendingHistAction = null; }
 });
 
+// ── Share redaction modal ──
+shareRedactionCancelBtn?.addEventListener('click', () => {
+  cancelShareRedactionChoice();
+});
+shareRedactionRawBtn?.addEventListener('click', () => {
+  resolveShareRedactionChoice('raw');
+});
+shareRedactionConfirmBtn?.addEventListener('click', () => {
+  resolveShareRedactionChoice('redacted');
+});
+_uiOverlayRefs.shareRedactionOverlay?.addEventListener('click', e => {
+  if (e.target === _uiOverlayRefs.shareRedactionOverlay) cancelShareRedactionChoice();
+});
+
 // ── Kill modal ──
 killCancelBtn.addEventListener('click', () => {
   closeKillOverlay();
@@ -414,6 +430,13 @@ document.addEventListener('keydown', e => {
     if (e.key === 'Escape') {
       hideHistoryDeleteOverlay();
       pendingHistAction = null;
+      e.preventDefault();
+      return;
+    }
+  }
+  if (isShareRedactionOverlayOpen()) {
+    if (e.key === 'Escape') {
+      cancelShareRedactionChoice();
       e.preventDefault();
       return;
     }
@@ -498,6 +521,7 @@ document.addEventListener('keydown', e => {
     closeFaq();
     closeOptions();
     closeThemeSelector();
+    cancelShareRedactionChoice();
     hideSearchBar();
     clearSearch();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -515,6 +539,7 @@ document.addEventListener('keydown', e => {
     && cmdInput
     && !isFaqOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
     && !isKillOverlayOpen()
+    && !isShareRedactionOverlayOpen()
   ) {
     e.preventDefault();
     if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
@@ -698,9 +723,9 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isShareRedactionOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeOptions(); closeThemeSelector();
+      closeFaq(); closeOptions(); closeThemeSelector(); cancelShareRedactionChoice();
       refocusTerminalInput();
       e.preventDefault();
     }

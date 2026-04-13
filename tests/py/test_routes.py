@@ -127,6 +127,8 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in ("app_name", "project_readme", "prompt_prefix", "default_theme", "max_tabs", "max_output_lines"):
             assert key in data
+        assert "share_redaction_enabled" in data
+        assert "share_redaction_rules" in data
 
     def test_max_tabs_is_int(self):
         client = get_client()
@@ -236,6 +238,32 @@ class TestConfigRoute:
         }):
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
+
+    def test_share_redaction_rules_reflect_cfg(self):
+        client = get_client()
+        rules = [
+            {"label": "bearer", "pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": "i"},
+        ]
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": rules,
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["share_redaction_enabled"] is True
+        assert any(rule["label"] == "bearer token" for rule in data["share_redaction_rules"])
+        assert data["share_redaction_rules"][-1] == rules[0]
+
+    def test_share_redaction_rules_empty_when_disabled(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": False,
+            "share_redaction_rules": [
+                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+            ],
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["share_redaction_enabled"] is False
+        assert data["share_redaction_rules"] == []
 
 
 # ── /themes ──────────────────────────────────────────────────────────────────
@@ -447,7 +475,8 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         cfg = data["config"]
         for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
-                    "persist_full_run_output", "permalink_retention_days"):
+                    "persist_full_run_output", "permalink_retention_days",
+                    "share_redaction_enabled", "custom_redaction_rule_count"):
             assert key in cfg, f"missing config key: {key}"
 
     def test_db_section_ok_and_has_counts(self):
@@ -545,6 +574,17 @@ class TestDiagRoute:
         assert 'href="/"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
+
+    def test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [],
+        }):
+            body = client.get("/diag").get_data(as_text=True)
+        assert "custom_redaction_rule_count" in body
+        assert ">0<" in body
 
     def test_json_format_param_returns_json(self):
         client = self._allowed_client()
@@ -896,6 +936,87 @@ class TestShareRoute:
         data = json.loads(resp.data)
         assert "id" in data
 
+    def test_post_applies_share_redaction_rules_before_persisting_snapshot(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [
+                {"pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": ""},
+            ],
+        }):
+            create_resp = client.post(
+                "/share",
+                json={
+                    "label": "good content",
+                    "content": [
+                        {"text": "Authorization: Bearer abc123", "cls": "notice"},
+                    ],
+                },
+                headers={"X-Session-ID": "test-session"},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            fetch = client.get(f"/share/{share_id}?json")
+        data = json.loads(fetch.data)
+        assert data["content"][0]["text"] == "Authorization: Bearer [redacted]"
+
+    def test_post_applies_builtin_share_redaction_rules_before_persisting_snapshot(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [],
+        }):
+            create_resp = client.post(
+                "/share",
+                json={
+                    "label": "builtin redaction",
+                    "content": [
+                        {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
+                    ],
+                },
+                headers={"X-Session-ID": "test-session"},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            fetch = client.get(f"/share/{share_id}?json")
+        data = json.loads(fetch.data)
+        assert data["content"][0]["text"] == "contact [email-redacted] at [ip-redacted]"
+
+    def test_post_skips_share_redaction_when_apply_redaction_false(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [],
+        }):
+            create_resp = client.post(
+                "/share",
+                json={
+                    "label": "raw share",
+                    "apply_redaction": False,
+                    "content": [
+                        {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
+                    ],
+                },
+                headers={"X-Session-ID": "test-session"},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            fetch = client.get(f"/share/{share_id}?json")
+        data = json.loads(fetch.data)
+        assert data["content"][0]["text"] == "contact admin@example.com at 203.0.113.10"
+
+    def test_post_rejects_non_boolean_apply_redaction(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={
+                "label": "bad share",
+                "apply_redaction": "yes",
+                "content": [{"text": "line 1", "cls": ""}],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        assert resp.status_code == 400
+        data = json.loads(resp.data)
+        assert data["error"] == "apply_redaction must be a boolean"
+
     def test_post_rejects_non_object_json(self):
         client = get_client()
         resp = client.post(
@@ -986,7 +1107,7 @@ class TestShareRoute:
 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "$ ping -c 4 darklab.sh" in body
+        assert "$ ping -c 4 [host-redacted]" in body
         assert "$ curl http://localhost:5001/config" not in body
 
     def test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content(self):

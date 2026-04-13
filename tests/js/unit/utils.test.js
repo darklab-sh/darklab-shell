@@ -1,10 +1,13 @@
 import { vi } from 'vitest'
 import { fromScript } from './helpers/extract.js'
 
-const { escapeHtml, escapeRegex, renderMotd, showToast, copyTextToClipboard } = fromScript(
+const { escapeHtml, escapeRegex, normalizeRedactionRules, applyRedactionRules, redactLineEntries, renderMotd, showToast, copyTextToClipboard } = fromScript(
   'app/static/js/utils.js',
   'escapeHtml',
   'escapeRegex',
+  'normalizeRedactionRules',
+  'applyRedactionRules',
+  'redactLineEntries',
   'renderMotd',
   'showToast',
   'copyTextToClipboard',
@@ -121,6 +124,46 @@ describe('renderMotd', () => {
     expect(out).toContain('<code>ping</code>')
     expect(out).toContain('<a href="https://darklab.sh"')
     expect(out).toContain('<br>')
+  })
+})
+
+describe('normalizeRedactionRules', () => {
+  it('keeps valid rules and drops invalid ones', () => {
+    const rules = normalizeRedactionRules([
+      { pattern: 'token=\\w+', replacement: 'token=[redacted]', flags: 'i' },
+      { pattern: '(', replacement: '[bad]' },
+      { replacement: '[missing pattern]' },
+    ])
+
+    expect(rules).toHaveLength(1)
+    expect(rules[0].pattern).toBe('token=\\w+')
+    expect(rules[0].replacement).toBe('token=[redacted]')
+    expect(rules[0].flags).toBe('i')
+  })
+})
+
+describe('applyRedactionRules', () => {
+  it('applies regex replacements in order', () => {
+    const out = applyRedactionRules(
+      'Authorization: Bearer abc123',
+      [{ pattern: 'Bearer\\s+\\S+', replacement: 'Bearer [redacted]' }],
+    )
+
+    expect(out).toBe('Authorization: Bearer [redacted]')
+  })
+})
+
+describe('redactLineEntries', () => {
+  it('redacts only the text field while preserving line metadata', () => {
+    const lines = redactLineEntries([
+      { text: 'token=abc123', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' },
+    ], [
+      { pattern: 'token=\\w+', replacement: 'token=[redacted]' },
+    ])
+
+    expect(lines).toEqual([
+      { text: 'token=[redacted]', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' },
+    ])
   })
 })
 

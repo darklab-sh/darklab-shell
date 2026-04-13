@@ -76,6 +76,8 @@ test.describe('keyboard shortcuts', () => {
       altKey: true,
     })
 
+    await expect(page.locator('#share-redaction-overlay')).toBeVisible()
+    await page.locator('#share-redaction-confirm').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5000 })
     await expect(page.locator('#permalink-toast')).toContainText(/link copied/i)
     await expect(page.locator('#cmd')).toHaveValue('')

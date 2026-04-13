@@ -435,7 +435,7 @@ function _createTabPanel(id) {
   wordmark.textContent = `${APP_CONFIG.app_name || 'darklab shell'}${wmVersion}`;
   terminalActions.appendChild(wordmark);
   terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
-  terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'permalink'));
+  terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'share snapshot'));
   terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
   terminalActions.appendChild(_createTabActionButton(id, 'save', 'save txt'));
   terminalActions.appendChild(_createTabActionButton(id, 'html', 'save html'));
@@ -775,6 +775,27 @@ function _getExportableRawLines(tab) {
   });
 }
 
+function _getShareRedactionRules() {
+  return APP_CONFIG && Array.isArray(APP_CONFIG.share_redaction_rules)
+    ? APP_CONFIG.share_redaction_rules
+    : [];
+}
+
+function _shareRedactionEnabled() {
+  return !(APP_CONFIG && APP_CONFIG.share_redaction_enabled === false);
+}
+
+function _getRedactedLines(lines) {
+  return typeof redactLineEntries === 'function'
+    ? redactLineEntries(lines, _getShareRedactionRules())
+    : (Array.isArray(lines) ? lines : []);
+}
+
+function _getRedactedExportableRawLines(tab) {
+  const lines = _getExportableRawLines(tab);
+  return _getRedactedLines(lines);
+}
+
 // ── Copy to clipboard ──
 function copyTab(id) {
   const t = getTab(id);
@@ -798,7 +819,7 @@ function copyTab(id) {
 // content and ANSI escape codes don't appear in the saved file.
 function saveTab(id) {
   const t = getTab(id);
-  const lines = _getExportableRawLines(t);
+  const lines = _getRedactedExportableRawLines(t);
   if (!lines.length) {
     showToast('No output to export');
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
@@ -831,8 +852,9 @@ async function exportTabHtml(id) {
   try {
     const appName = APP_CONFIG.app_name || 'darklab shell';
     const exportedAt = new Date().toLocaleString();
+    const lines = _getRedactedLines(t.rawLines);
 
-    const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {
+    const linesHtml = lines.map(({ text, cls, tsC }) => {
       const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
       let content;
       if (cls === 'prompt-echo') {
@@ -967,6 +989,13 @@ async function permalinkTab(id) {
     showToast('No output to share yet');
     return;
   }
+  const redactionMode = typeof confirmPermalinkRedactionChoice === 'function'
+    ? await confirmPermalinkRedactionChoice()
+    : (_shareRedactionEnabled() ? 'redacted' : 'raw');
+  if (redactionMode !== 'raw' && redactionMode !== 'redacted') {
+    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    return;
+  }
   let shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
   if (t.fullOutputAvailable && !t.fullOutputLoaded && t.historyRunId) {
     try {
@@ -977,10 +1006,12 @@ async function permalinkTab(id) {
       shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
     }
   }
+  const applyRedaction = redactionMode === 'redacted';
+  if (applyRedaction) shareContent = _getRedactedLines(shareContent);
   apiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: t.label, content: shareContent })
+    body: JSON.stringify({ label: t.label, content: shareContent, apply_redaction: applyRedaction })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
     copyTextToClipboard(url)

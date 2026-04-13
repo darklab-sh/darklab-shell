@@ -186,6 +186,29 @@
   </div>
 </div>
 
+<!-- Share redaction confirmation modal -->
+<div id="share-redaction-overlay" class="modal-overlay u-hidden">
+  <div id="share-redaction-modal" class="modal-card">
+    <div class="modal-copy">
+      Create permalink with redaction enabled?<br>
+      <span class="modal-copy-note">Redaction can mask common sensitive values such as IP addresses, host names, email addresses, bearer tokens, and any operator-defined share redaction rules before the snapshot is saved.</span>
+    </div>
+    <div class="faq-item modal-inline-field">
+      <div class="faq-a options-fieldset">
+        <label class="options-choice">
+          <input type="checkbox" id="share-redaction-remember-toggle">
+          <span>Remember this choice for this browser session</span>
+        </label>
+      </div>
+    </div>
+    <div class="modal-actions modal-actions-wrap">
+      <button id="share-redaction-cancel" class="term-action-btn" type="button">Cancel</button>
+      <button id="share-redaction-raw" class="modal-secondary modal-secondary-neutral" type="button">Share Raw</button>
+      <button id="share-redaction-confirm" class="modal-primary modal-primary-accent" type="button">Share Redacted</button>
+    </div>
+  </div>
+</div>
+
 <!-- FAQ Modal -->
 <div id="faq-overlay">
   <div id="faq-modal">

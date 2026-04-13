@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
+import { runCommand, openHistoryWithEntries, makeTestIp, createShareSnapshot } from './helpers.js'
 
 const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
@@ -37,10 +37,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     // Intercept the POST /share response so we can capture the share URL
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     expect(shareResp.status()).toBe(200)
 
     // Toast should appear with the "copied" message
@@ -51,10 +48,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     // Click permalink and capture the share URL from the server response
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     // Navigate to the permalink page
@@ -67,10 +61,7 @@ test.describe('permalink / share', () => {
   test('permalink page honors the theme cookie for the live view and export', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.context().addCookies([
@@ -118,7 +109,7 @@ test.describe('permalink / share', () => {
       })
     })
 
-    await page.locator('[data-action="permalink"]').click()
+    await createShareSnapshot(page)
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
     await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
@@ -168,10 +159,7 @@ test.describe('permalink / share', () => {
   test('snapshot permalink supports line-number and timestamp display toggles', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -193,10 +181,7 @@ test.describe('permalink / share', () => {
   test('permalink page honors line-number and timestamp cookies on load', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.context().addCookies([
@@ -217,10 +202,7 @@ test.describe('permalink / share', () => {
   test('permalink exports use timestamped filenames for txt and html downloads', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -241,10 +223,7 @@ test.describe('permalink / share', () => {
   test('permalink exports include prompt echo and current prefix display state', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -284,10 +263,7 @@ test.describe('permalink / share', () => {
   test('mobile permalink page toast hides after copy', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.setViewportSize(MOBILE)

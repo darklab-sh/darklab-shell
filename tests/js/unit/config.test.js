@@ -21,6 +21,20 @@ describe('frontend config defaults', () => {
       welcome_status_labels: expect.any(Array),
       welcome_hint_interval_ms: expect.any(Number),
       welcome_hint_rotations: expect.any(Number),
+      share_redaction_enabled: expect.any(Boolean),
+      share_redaction_rules: expect.any(Array),
     })
+  })
+
+  it('keeps the built-in share redaction baseline in bootstrap defaults', () => {
+    const { APP_CONFIG } = fromDomScript(
+      'app/static/js/config.js',
+      {},
+      'APP_CONFIG',
+    )
+
+    expect(APP_CONFIG.share_redaction_enabled).toBe(true)
+    expect(APP_CONFIG.share_redaction_rules.some(rule => rule.label === 'bearer token')).toBe(true)
+    expect(APP_CONFIG.share_redaction_rules.some(rule => rule.label === 'email address')).toBe(true)
   })
 })

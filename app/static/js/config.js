@@ -1,4 +1,37 @@
 // ── Shared utility module ──
+const DEFAULT_SHARE_REDACTION_RULES = [
+  {
+    label: 'bearer token',
+    pattern: 'Authorization:\\s*Bearer\\s+\\S+',
+    replacement: 'Authorization: Bearer [redacted]',
+    flags: 'i',
+  },
+  {
+    label: 'email address',
+    pattern: '\\b[A-Z0-9._%+-]+@[A-Z0-9.-]+\\.[A-Z]{2,63}\\b',
+    replacement: '[email-redacted]',
+    flags: 'i',
+  },
+  {
+    label: 'ipv4 address',
+    pattern: '\\b(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)(?:\\.(?:25[0-5]|2[0-4]\\d|1\\d\\d|[1-9]?\\d)){3}\\b',
+    replacement: '[ip-redacted]',
+    flags: '',
+  },
+  {
+    label: 'ipv6 address',
+    pattern: '\\b(?:[0-9A-F]{1,4}:){2,7}[0-9A-F]{1,4}\\b',
+    replacement: '[ip-redacted]',
+    flags: 'i',
+  },
+  {
+    label: 'hostname',
+    pattern: '(?<![@\\w-])(?:[A-Z0-9](?:[A-Z0-9-]{0,61}[A-Z0-9])?\\.)+[A-Z]{2,63}(?![\\w-])',
+    replacement: '[host-redacted]',
+    flags: 'i',
+  },
+];
+
 // Default values used until the /config endpoint responds.
 // app.js overwrites APP_CONFIG with the server response on page load, but these
 // defaults keep early-rendered helpers safe during bootstrap failures.
@@ -8,6 +41,8 @@ let APP_CONFIG = {
   project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
   prompt_prefix: 'anon@darklab:~$',
   default_theme: 'darklab_obsidian.yaml',
+  share_redaction_enabled: true,
+  share_redaction_rules: DEFAULT_SHARE_REDACTION_RULES,
   motd: '',
   recent_commands_limit: 8,
   max_output_lines: 5000,
