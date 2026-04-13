@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 800
-- `vitest`: 305
+- `pytest`: 805
+- `vitest`: 323
 - `playwright`: 139
-- total: 1,244
+- total: 1,267
 
 This document is organized in two parts:
 
@@ -597,6 +597,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
 | `TestHistoryRoute.test_history_respects_panel_limit_and_sorts_newest_first` | Checks that history respects panel limit and sorts newest first. |
+| `TestHistoryRoute.test_history_search_filters_by_command_text` | Checks that `/history` command-text search narrows the returned runs. |
+| `TestHistoryRoute.test_history_filters_by_command_root` | Checks that `/history` command-root filtering returns matching runs and exposes the session root list. |
+| `TestHistoryRoute.test_history_filters_by_exit_code_and_recent_date_range` | Checks that `/history` exit-code and recent-date filters can be combined. |
 | `TestShareRoute.test_post_creates_snapshot` | Checks post creates snapshot handling. |
 | `TestShareRoute.test_post_rejects_non_string_label` | Checks that post rejects non string label. |
 | `TestShareRoute.test_post_rejects_non_list_content` | Checks that post rejects non list content. |
@@ -930,6 +933,23 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
 | `refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject` | Verifies that refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject. |
 | `closes the history panel when a history action button is clicked` | Verifies that closes the history panel when a history action button is clicked. |
+| `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
+| `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
+| `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
+| `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
+| `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
+| `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
+| `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
+| `keeps the history drawer open when removing an active filter chip` | Verifies that clearing a filter chip does not trip the global outside-click handler and close the drawer. |
+| `toggles the mobile advanced history filters section` | Verifies that the mobile-only advanced history filter block expands and collapses correctly. |
+| `resetHistoryMobileFilters collapses the advanced mobile history filters` | Verifies that reopening or closing the mobile history drawer resets the advanced filter block to the collapsed state. |
+| `shows the active filter count in the mobile filters button label` | Verifies that the mobile filters button shows the current active-filter count. |
+| `hides the root suggestion menu when the only matching suggestion exactly matches the input` | Verifies that the custom command-root suggestion menu disappears once the input already matches the only suggestion. |
+| `accepts a root suggestion with one mobile-style pointer interaction` | Verifies that the custom command-root menu accepts with a single pointer interaction instead of requiring a second native picker confirmation. |
+| `keeps the root suggestion menu hidden until at least one character is typed` | Verifies that the command-root suggestion menu stays hidden on bare focus and only opens after input. |
+| `refreshHistoryPanel applies the starred-only filter client-side` | Verifies that starred-only history filtering stays local to the drawer state. |
+| `clearHistoryFilters resets the drawer controls and the request URL` | Verifies that clearing all history filters resets both control values and the generated `/history` query string. |
+| `shows a filtered empty state when no runs match the active filters` | Verifies that the drawer distinguishes “no matching runs” from “no runs yet”. |
 | `executeHistAction shows a failure toast when deleting a run fails` | Verifies that executeHistAction shows a failure toast when deleting a run fails. |
 | `executeHistAction shows a failure toast when clearing non-favorite history fails` | Verifies that executeHistAction shows a failure toast when clearing non-favorite history fails. |
 | `shows and clears the history loading overlay while a run is being restored` | Verifies that shows and clears the history loading overlay while a run is being restored. |

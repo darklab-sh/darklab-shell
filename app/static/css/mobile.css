@@ -428,8 +428,72 @@
   body.mobile-terminal-mode .history-panel-header {
     padding: 12px 16px;
   }
+  body.mobile-terminal-mode .history-panel-body {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .history-panel-filters {
+    padding: 10px 14px;
+    gap: 10px;
+    align-items: stretch;
+  }
+  body.mobile-terminal-mode .history-mobile-filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    font-size: 14px;
+    flex: 1 1 100%;
+  }
+  body.mobile-terminal-mode .history-advanced-filters {
+    display: none;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  body.mobile-terminal-mode #history-panel.mobile-history-filters-open .history-advanced-filters {
+    display: flex;
+  }
+  body.mobile-terminal-mode .history-active-filters {
+    padding: 10px 14px;
+  }
+  body.mobile-terminal-mode .history-panel-filters input,
+  body.mobile-terminal-mode .history-panel-filters select,
+  body.mobile-terminal-mode .history-filter-toggle,
+  body.mobile-terminal-mode .history-filter-clear-btn {
+    min-height: 40px;
+    font-size: 16px;
+  }
+  body.mobile-terminal-mode #history-search-input,
+  body.mobile-terminal-mode #history-mobile-filters-toggle,
+  body.mobile-terminal-mode .history-root-autocomplete,
+  body.mobile-terminal-mode #history-root-input,
+  body.mobile-terminal-mode #history-exit-filter,
+  body.mobile-terminal-mode #history-date-filter,
+  body.mobile-terminal-mode .history-filter-toggle,
+  body.mobile-terminal-mode .history-filter-clear-btn {
+    flex: 1 1 100%;
+  }
+  body.mobile-terminal-mode .history-root-dropdown {
+    border-radius: 6px;
+    max-height: 220px;
+    z-index: 6;
+  }
+  body.mobile-terminal-mode .history-root-dropdown .ac-item {
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+  }
+  body.mobile-terminal-mode .history-filter-clear-btn {
+    margin-left: 0;
+  }
+  body.mobile-terminal-mode .history-active-filter-chip {
+    min-height: 34px;
+    font-size: 12px;
+  }
   body.mobile-terminal-mode #history-list {
-    padding: 8px 0 calc(14px + env(safe-area-inset-bottom, 0));
+    padding: 8px 0 0;
   }
   body.mobile-terminal-mode #theme-modal .faq-header {
     position: sticky;

@@ -57,51 +57,14 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 
 The `shell` logger is configured with `propagate = False` so records don't double-emit to the root logger. Werkzeug's own request lines are suppressed (`logging.getLogger("werkzeug").setLevel(ERROR)`) because request logging is handled by `before_request` / `after_request` hooks instead.
 
-**Formatters:**
+**Formatter design:**
 
 - `GELFFormatter` — emits compact GELF 1.1 JSON. `short_message` is a bare event name (e.g. `RUN_START`); all context is in `_`-prefixed additional fields. This gives Graylog direct indexable fields (`_ip`, `_run_id`, `_cmd`) without any extraction rules.
 - `_TextFormatter` — human-readable `2026-04-02T10:00:00Z [INFO ] EVENT  key=value ...` lines. Extra fields are sorted alphabetically and appended after the event name. String values containing spaces are repr-quoted.
 
 Both formatters use a shared `_extra_fields(record)` helper that extracts caller-supplied fields from the LogRecord (anything not in `_STDLIB_ATTRS` and not underscore-prefixed).
 
-**Log event inventory:**
-
-| Level | Event | Where | Key extra fields |
-|-------|-------|-------|-----------------|
-| DEBUG | `REQUEST` | before_request | ip, method, path, qs |
-| DEBUG | `RESPONSE` | after_request | ip, method, path, status, size |
-| DEBUG | `KILL_MISS` | kill_command | ip, run_id |
-| DEBUG | `HEALTH_OK` | health() | — |
-| INFO  | `LOGGING_CONFIGURED` | configure_logging | level, format |
-| INFO  | `CMD_REWRITE` | run_command | ip, original, rewritten |
-| INFO  | `RUN_START` | run_command | ip, run_id, session, pid, cmd |
-| INFO  | `RUN_END` | generate() | ip, run_id, session, exit_code, elapsed, cmd |
-| INFO  | `RUN_KILL` | kill_command | ip, run_id, pid, pgid |
-| INFO  | `DB_PRUNED` | db_init | runs, snapshots, retention_days |
-| INFO  | `PAGE_LOAD` | index | ip, session, theme |
-| INFO  | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
-| DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
-| INFO  | `SHARE_CREATED` | save_share | ip, share_id, label |
-| INFO  | `SHARE_VIEWED` | get_share | ip, share_id, label |
-| INFO  | `RUN_VIEWED` | get_run | ip, run_id, cmd |
-| INFO  | `HISTORY_VIEWED` | get_history | ip, session, count |
-| INFO  | `HISTORY_DELETED` | delete_run | ip, run_id, session |
-| INFO  | `HISTORY_CLEARED` | clear_history | ip, session, count |
-| WARN  | `RUN_NOT_FOUND` | get_run | ip, run_id |
-| WARN  | `SHARE_NOT_FOUND` | get_share | ip, share_id |
-| WARN  | `CMD_DENIED` | run_command | ip, session, cmd, reason |
-| INFO  | `DIAG_VIEWED` | diag() | ip |
-| WARN  | `DIAG_DENIED` | diag() | ip, allowed_cidrs |
-| WARN  | `UNTRUSTED_PROXY` | get_client_ip | ip, proxy_ip, forwarded_for, path |
-| WARN  | `RATE_LIMIT` | errorhandler(429) | ip, path, limit |
-| WARN  | `CMD_TIMEOUT` | generate() | ip, run_id, session, timeout, cmd |
-| WARN  | `KILL_FAILED` | kill_command | ip, run_id, pid, error |
-| WARN  | `HEALTH_DEGRADED` | health() | db, redis |
-| ERROR | `RUN_SPAWN_ERROR` | run_command | ip, session, cmd (+ traceback) |
-| ERROR | `RUN_STREAM_ERROR` | generate() | ip, run_id, session, cmd (+ traceback) |
-| ERROR | `RUN_SAVED_ERROR` | generate() | run_id, session, cmd (+ traceback) |
-| ERROR | `HEALTH_DB_FAIL` | health() | (+ traceback) |
-| ERROR | `HEALTH_REDIS_FAIL` | health() | (+ traceback) |
+The concrete event inventory and the operator-facing description of the `text` and `gelf` output formats live in [ARCHITECTURE.md](ARCHITECTURE.md), since those are current-system details rather than decision history.
 
 **Timing note:** `client_ip` is captured once at the top of `run_command()` as a local variable before the `generate()` closure is defined. This avoids a hidden dependency on Flask's request context being active when the generator body runs during streaming. The same `client_ip` local is closed over in `generate()`.
 

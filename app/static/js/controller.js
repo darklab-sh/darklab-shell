@@ -211,6 +211,7 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn =
       _closeMajorOverlays();
       const isOpen = togglePanelOverlay(historyPanel);
       if (isOpen) {
+        if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
         if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
         refreshHistoryPanel();
       }
@@ -345,6 +346,7 @@ histBtn.addEventListener('click', () => {
   _closeMajorOverlays();
   const isOpen = togglePanelOverlay(historyPanel);
   if (isOpen) {
+    if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     refreshHistoryPanel();
   } else {
@@ -352,6 +354,7 @@ histBtn.addEventListener('click', () => {
   }
 });
 historyCloseBtn.addEventListener('click', () => {
+  if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
   hideHistoryPanel();
 });
 

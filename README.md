@@ -74,7 +74,7 @@ Use the README as the entrypoint, then go deeper with the specialized docs:
 - **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, and selection-safe desktop shortcuts
 - **Mobile shell** — dedicated mobile composer, keyboard helper row, stable Firefox-friendly layout, shared desktop/mobile Run-button state, and output-follow behavior that keeps the latest lines visible when the keyboard opens
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy/save/export actions, and a jump-to-live / jump-to-bottom helper when you scroll away from the tail
-- **History and sharing** — recent command chips, a persistent history drawer, starring/favorites, canonical run permalinks, snapshot permalinks, and full-output artifacts for longer runs
+- **History and sharing** — recent command chips, a persistent history drawer with search/filtering, starring/favorites, canonical run permalinks, snapshot permalinks, and full-output artifacts for longer runs
 - **Safer sharing and exports** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks and local exports, with optional operator regex rules appended on top. Permalink creation can now choose raw vs redacted sharing per snapshot, without changing the stored run history
 - **Themes and presentation** — named theme variants, theme-aware permalink/export rendering, mobile/desktop theme parity, MOTD support, welcome animation assets, and a backend-driven FAQ modal
 - **Shell helpers** — built-in fake shell commands like `help`, `history`, `last`, `limits`, `status`, `which`, `type`, `faq`, `banner`, and `clear`, plus real `man` support where available
@@ -290,7 +290,7 @@ Tradeoffs of the non-Docker path:
 
 ### History and Sharing
 
-- **Run history drawer** — completed runs are available in a slide-out panel with timestamps, exit codes, restore-to-tab, copy-command, and permalink actions
+- **Run history drawer** — completed runs are available in a slide-out panel with timestamps, exit codes, search, command-root/date/exit/starred filters, removable active-filter chips, restore-to-tab, copy-command, and permalink actions
 - **Recent commands** — recent commands appear as clickable chips for fast re-runs, with desktop overflow collapsing to `+ more`
 - **Starred / favorites** — starred commands are pinned to the top of both the chip row and history drawer, and starring from the drawer can promote a command into the chip row immediately
 - **Permalinks** — tabs can create snapshot permalinks, history entries link to canonical stored runs, and full-output artifacts can back longer run permalinks without bloating the interactive preview store
@@ -751,6 +751,8 @@ When full-output persistence is enabled, the history drawer **permalink** action
 
 The **clear all** button at the top of the history drawer prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt.
 
+The history drawer now also supports command-text search plus filters for command root, exit status, recent date range, and starred-only results. On mobile, the advanced filters stay behind a dedicated `filters` toggle to preserve result space, and the command-root field uses app-owned autocomplete suggestions instead of the browser’s native picker.
+
 On mobile, the search, history, theme, and FAQ buttons are accessible via the **☰** menu in the top-right corner of the header.
 
 ---
@@ -1054,7 +1056,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **800 pytest + 305 Vitest + 139 Playwright = 1,244 tests**.
+Current totals: **805 pytest + 323 Vitest + 139 Playwright = 1,267 tests**.
 
 Use the docs by purpose:
 

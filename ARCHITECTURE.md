@@ -18,6 +18,7 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 - [Primary Request Flows](#primary-request-flows)
 - [Frontend Composition](#frontend-composition)
 - [Persistence Model](#persistence-model)
+- [Logging](#logging)
 - [Test Suite](#test-suite)
 - [Testing Architecture](#testing-architecture)
 - [Database](#database)
@@ -273,6 +274,75 @@ flowchart TB
 - `commands.py` and `fake_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
+## Logging
+
+The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
+
+### Output Formats
+
+The logging layer supports two output formats selected by `log_format` in `config.yaml`:
+
+- `text`
+  - human-readable single-line logs for local development and plain `docker compose logs`
+  - output shape is `timestamp [LEVEL] EVENT key=value ...`
+  - extra fields are sorted alphabetically and appended after the event name
+  - string values containing spaces are repr-quoted so copy/paste remains readable
+- `gelf`
+  - newline-delimited GELF 1.1 JSON for Graylog-style aggregation
+  - `short_message` is the bare event name such as `RUN_START`
+  - event context is emitted as `_`-prefixed additional fields such as `_ip`, `_run_id`, and `_cmd`
+  - this makes the application logs directly indexable by a GELF-aware backend without extra parsing rules
+
+The Docker logging driver and the application formatter are intentionally separate controls. The production Compose override can ship container stdout over Docker GELF transport, while `log_format: gelf` controls whether the application itself emits GELF-shaped records or plain text.
+
+### Log Event Inventory
+
+The current event inventory is:
+
+| Level | Event | Where | Key extra fields |
+|-------|-------|-------|-----------------|
+| DEBUG | `REQUEST` | `before_request` | ip, method, path, qs |
+| DEBUG | `RESPONSE` | `after_request` | ip, method, path, status, size |
+| DEBUG | `KILL_MISS` | `kill_command` | ip, run_id |
+| DEBUG | `HEALTH_OK` | `health()` | — |
+| INFO  | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
+| INFO  | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
+| INFO  | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd |
+| INFO  | `RUN_END` | `generate()` | ip, run_id, session, exit_code, elapsed, cmd |
+| INFO  | `RUN_KILL` | `kill_command` | ip, run_id, pid, pgid |
+| INFO  | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
+| INFO  | `PAGE_LOAD` | `index` | ip, session, theme |
+| INFO  | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
+| INFO  | `SHARE_CREATED` | `save_share` | ip, share_id, label |
+| INFO  | `SHARE_VIEWED` | `get_share` | ip, share_id, label |
+| INFO  | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
+| INFO  | `HISTORY_VIEWED` | `get_history` | ip, session, count |
+| INFO  | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
+| INFO  | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
+| WARN  | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
+| WARN  | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
+| WARN  | `CMD_DENIED` | `run_command` | ip, session, cmd, reason |
+| INFO  | `DIAG_VIEWED` | `diag()` | ip |
+| WARN  | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
+| WARN  | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
+| WARN  | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
+| WARN  | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
+| WARN  | `KILL_FAILED` | `kill_command` | ip, run_id, pid, error |
+| WARN  | `HEALTH_DEGRADED` | `health()` | db, redis |
+| ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
+| ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
+| ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
+| ERROR | `HEALTH_DB_FAIL` | `health()` | (+ traceback) |
+| ERROR | `HEALTH_REDIS_FAIL` | `health()` | (+ traceback) |
+
+### Logging Shape Notes
+
+- request/response logging is owned by Flask hooks rather than Werkzeug's default request-line logging
+- run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
+- diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the `/run` path
+- proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
+
 ## Command Auto-Rewrites
 
 These happen in `rewrite_command()` silently (no user-visible notice unless specified):
@@ -485,10 +555,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 800
-- `vitest`: 305
+- `pytest`: 805
+- `vitest`: 323
 - `playwright`: 139
-- total: 1,244
+- total: 1,267
 
 ### Testing Architecture
 
@@ -513,6 +583,7 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 `./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews now store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
+- `/history` — session-scoped history API used by the drawer. It now supports filtering by command text, command root, exit status, and recent date range, and also returns a distinct `roots` list so the command-root filter can use app-owned autocomplete suggestions without tying the suggestion set to the currently narrowed result list.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
 

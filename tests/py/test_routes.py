@@ -9,6 +9,7 @@ import logging
 import os
 import sqlite3
 import uuid
+from datetime import datetime, timedelta
 import unittest.mock as mock
 
 import app as shell_app
@@ -785,6 +786,8 @@ class TestHistoryRoute:
         )
         assert "runs" in data
         assert isinstance(data["runs"], list)
+        assert "roots" in data
+        assert isinstance(data["roots"], list)
 
     def test_delete_all_returns_ok(self):
         client = get_client()
@@ -837,6 +840,121 @@ class TestHistoryRoute:
             commands = [r["command"] for r in data["runs"]]
 
             assert commands == ["echo three", "echo two"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_search_filters_by_command_text(self):
+        client = get_client()
+        session = "history-search-session"
+        run_ids = ["search-run-1", "search-run-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "ping darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get("/history?q=dig", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_filters_by_command_root(self):
+        client = get_client()
+        session = "history-root-session"
+        run_ids = ["root-run-1", "root-run-2", "root-run-3"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "nmap -sV darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]", 1),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "nmap -Pn darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]", 0),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "dig darklab.sh A", "2026-01-01T00:00:05", "2026-01-01T00:00:06", 0, "[]", 1),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get("/history?command_root=nmap", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["nmap -Pn darklab.sh", "nmap -sV darklab.sh"]
+            assert data["roots"] == ["dig", "nmap"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_filters_by_exit_code_and_recent_date_range(self):
+        client = get_client()
+        session = "history-date-session"
+        run_ids = ["date-run-1", "date-run-2", "date-run-3"]
+        recent = datetime.now().replace(microsecond=0)
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "curl recent ok", recent.isoformat(), (recent + timedelta(seconds=2)).isoformat(), 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[1],
+                    session,
+                    "curl recent fail",
+                    (recent - timedelta(hours=1)).isoformat(),
+                    (recent - timedelta(hours=1) + timedelta(seconds=2)).isoformat(),
+                    2,
+                    "[]",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[2],
+                    session,
+                    "curl old fail",
+                    (recent - timedelta(days=40)).isoformat(),
+                    (recent - timedelta(days=40) + timedelta(seconds=2)).isoformat(),
+                    2,
+                    "[]",
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?exit_code=nonzero&date_range=24h",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["curl recent fail"]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])

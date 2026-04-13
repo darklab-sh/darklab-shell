@@ -15,6 +15,268 @@ function _toggleStar(cmd) {
   _saveStarred(s);
 }
 
+// History drawer filters are deliberately simple in the first pass:
+// server-backed search/filtering for persisted run attributes, plus a local
+// starred-only toggle that continues to use the existing localStorage model.
+let _historyFilterRefreshTimer = null;
+let _historyFilters = {
+  q: '',
+  commandRoot: '',
+  exitCode: 'all',
+  dateRange: 'all',
+  starredOnly: false,
+};
+let _historyMobileAdvancedOpen = false;
+let _historyRootSuggestions = [];
+let _historyRootFiltered = [];
+let _historyRootIndex = -1;
+let _historyRootSuppressInputOnce = false;
+
+function _normalizeHistoryFilterValue(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function _syncHistoryFilterControls() {
+  if (typeof historySearchInput !== 'undefined' && historySearchInput) historySearchInput.value = _historyFilters.q;
+  if (typeof historyMobileFiltersToggle !== 'undefined' && historyMobileFiltersToggle) {
+    const activeCount = _historyActiveFilterItems().length;
+    const baseLabel = _historyMobileAdvancedOpen ? 'hide filters' : 'filters';
+    historyMobileFiltersToggle.textContent = activeCount > 0 ? `${baseLabel} (${activeCount})` : baseLabel;
+    historyMobileFiltersToggle.setAttribute('aria-expanded', _historyMobileAdvancedOpen ? 'true' : 'false');
+  }
+  if (typeof historyPanel !== 'undefined' && historyPanel) {
+    historyPanel.classList.toggle('mobile-history-filters-open', !!_historyMobileAdvancedOpen);
+  }
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
+  if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
+  if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
+  if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
+}
+
+function _historyHasActiveServerFilters() {
+  return Boolean(
+    _historyFilters.q
+    || _historyFilters.commandRoot
+    || _historyFilters.exitCode !== 'all'
+    || _historyFilters.dateRange !== 'all'
+  );
+}
+
+function _historyHasAnyFilters() {
+  return _historyHasActiveServerFilters() || !!_historyFilters.starredOnly;
+}
+
+function _historyCommandRootsFromRuns(runs) {
+  const roots = new Set();
+  for (const run of Array.isArray(runs) ? runs : []) {
+    const root = typeof run === 'string'
+      ? run.trim()
+      : (run && typeof run.command === 'string' ? run.command.trim().split(/\s+/, 1)[0] : '');
+    if (root) roots.add(root);
+  }
+  return [...roots].sort((a, b) => a.localeCompare(b));
+}
+
+function _renderHistoryRootSuggestions(runs) {
+  _historyRootSuggestions = _historyCommandRootsFromRuns(runs);
+  _historyRefreshRootDropdown();
+}
+
+function _hideHistoryRootDropdown() {
+  if (typeof historyRootDropdown === 'undefined' || !historyRootDropdown) return;
+  historyRootDropdown.replaceChildren();
+  historyRootDropdown.classList.add('u-hidden');
+  _historyRootFiltered = [];
+  _historyRootIndex = -1;
+}
+
+function _historyRootMatches(query) {
+  const value = _normalizeHistoryFilterValue(query).toLowerCase();
+  if (!value) return [];
+  return _historyRootSuggestions
+    .filter(root => root.toLowerCase().startsWith(value))
+    .slice(0, 12);
+}
+
+function _acceptHistoryRootSuggestion(root) {
+  _historyRootSuppressInputOnce = true;
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = root;
+  _hideHistoryRootDropdown();
+  _setHistoryFilter('commandRoot', root);
+  if (typeof historyRootInput !== 'undefined' && historyRootInput && typeof historyRootInput.focus === 'function') {
+    setTimeout(() => historyRootInput.focus({ preventScroll: true }), 0);
+  }
+}
+
+function _renderHistoryRootDropdown(items, query) {
+  if (typeof historyRootDropdown === 'undefined' || !historyRootDropdown) return;
+  historyRootDropdown.replaceChildren();
+  if (!items.length) {
+    _hideHistoryRootDropdown();
+    return;
+  }
+  const normalizedQuery = _normalizeHistoryFilterValue(query).toLowerCase();
+  if (items.length === 1 && normalizedQuery && items[0].toLowerCase() === normalizedQuery) {
+    _hideHistoryRootDropdown();
+    return;
+  }
+  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  historyRootDropdown.classList.toggle('ac-mobile', mobileMode);
+  items.forEach((root, index) => {
+    const item = document.createElement('div');
+    item.className = 'ac-item' + (index === _historyRootIndex ? ' ac-active' : '');
+    const matchIndex = normalizedQuery ? root.toLowerCase().indexOf(normalizedQuery) : -1;
+    if (matchIndex >= 0 && normalizedQuery) {
+      item.innerHTML = escapeHtml(root.slice(0, matchIndex))
+        + '<span class="ac-match">' + escapeHtml(root.slice(matchIndex, matchIndex + normalizedQuery.length)) + '</span>'
+        + escapeHtml(root.slice(matchIndex + normalizedQuery.length));
+    } else {
+      item.textContent = root;
+    }
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      _acceptHistoryRootSuggestion(root);
+    });
+    item.addEventListener('touchstart', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      _acceptHistoryRootSuggestion(root);
+    }, { passive: false });
+    historyRootDropdown.appendChild(item);
+  });
+  historyRootDropdown.classList.remove('u-hidden');
+}
+
+function _historyRefreshRootDropdown() {
+  const query = typeof historyRootInput !== 'undefined' && historyRootInput ? historyRootInput.value : _historyFilters.commandRoot;
+  _historyRootFiltered = _historyRootMatches(query);
+  if (_historyRootIndex >= _historyRootFiltered.length) _historyRootIndex = _historyRootFiltered.length - 1;
+  _renderHistoryRootDropdown(_historyRootFiltered, query);
+}
+
+function _historyActiveFilterItems() {
+  const items = [];
+  if (_historyFilters.q) items.push({ key: 'q', label: `search: ${_historyFilters.q}` });
+  if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `root: ${_historyFilters.commandRoot}` });
+  if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
+  else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: non-zero' });
+  else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
+  if (_historyFilters.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${_historyFilters.dateRange}` });
+  if (_historyFilters.starredOnly) items.push({ key: 'starredOnly', label: 'starred' });
+  return items;
+}
+
+function _renderHistoryActiveFilters() {
+  if (typeof historyActiveFilters === 'undefined' || !historyActiveFilters) return;
+  historyActiveFilters.replaceChildren();
+  const items = _historyActiveFilterItems();
+  historyActiveFilters.classList.toggle('u-hidden', !items.length);
+  items.forEach(item => {
+    const chip = document.createElement('div');
+    chip.className = 'history-active-filter-chip';
+    chip.dataset.filterKey = item.key;
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    chip.appendChild(label);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'history-active-filter-remove';
+    removeBtn.type = 'button';
+    removeBtn.setAttribute('aria-label', `Remove ${item.label} filter`);
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const resetValue = item.key === 'starredOnly' ? false : (item.key === 'q' || item.key === 'commandRoot' ? '' : 'all');
+      _setHistoryFilter(item.key, resetValue);
+    });
+    chip.appendChild(removeBtn);
+    historyActiveFilters.appendChild(chip);
+  });
+}
+
+function _buildHistoryRequestUrl() {
+  const params = new URLSearchParams();
+  if (_historyFilters.q) params.set('q', _historyFilters.q);
+  if (_historyFilters.commandRoot) params.set('command_root', _historyFilters.commandRoot);
+  if (_historyFilters.exitCode !== 'all') params.set('exit_code', _historyFilters.exitCode);
+  if (_historyFilters.dateRange !== 'all') params.set('date_range', _historyFilters.dateRange);
+  const query = params.toString();
+  return query ? `/history?${query}` : '/history';
+}
+
+function _applyHistoryClientFilters(runs) {
+  const items = Array.isArray(runs) ? runs.slice() : [];
+  const starred = _getStarred();
+  const filtered = _historyFilters.starredOnly
+    ? items.filter(run => starred.has(run.command))
+    : items;
+  return [
+    ...filtered.filter(run => starred.has(run.command)),
+    ...filtered.filter(run => !starred.has(run.command)),
+  ];
+}
+
+function _renderHistoryEmptyState() {
+  if (typeof historyList === 'undefined' || !historyList) return;
+  const empty = document.createElement('div');
+  empty.className = 'history-empty-state';
+  const title = document.createElement('div');
+  title.className = 'history-empty-state-title';
+  title.textContent = _historyHasAnyFilters() ? 'No matching runs.' : 'No runs yet.';
+  empty.appendChild(title);
+
+  const detail = document.createElement('div');
+  detail.className = 'history-empty-state-detail';
+  detail.textContent = _historyHasAnyFilters()
+    ? 'Adjust or clear the current filters to widen the history results.'
+    : 'Completed commands will appear here for this browser session.';
+  empty.appendChild(detail);
+  historyList.appendChild(empty);
+}
+
+function _scheduleHistoryPanelRefresh() {
+  if (_historyFilterRefreshTimer) clearTimeout(_historyFilterRefreshTimer);
+  _historyFilterRefreshTimer = setTimeout(() => {
+    _historyFilterRefreshTimer = null;
+    refreshHistoryPanel();
+  }, 120);
+}
+
+function _setHistoryFilter(key, value, { debounce = false } = {}) {
+  if (key === 'starredOnly') _historyFilters.starredOnly = !!value;
+  else _historyFilters[key] = _normalizeHistoryFilterValue(value) || (key === 'q' || key === 'commandRoot' ? '' : 'all');
+  if (debounce) _scheduleHistoryPanelRefresh();
+  else refreshHistoryPanel();
+}
+
+function clearHistoryFilters() {
+  _historyFilters = {
+    q: '',
+    commandRoot: '',
+    exitCode: 'all',
+    dateRange: 'all',
+    starredOnly: false,
+  };
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  _hideHistoryRootDropdown();
+  refreshHistoryPanel();
+}
+
+function resetHistoryMobileFilters() {
+  _historyMobileAdvancedOpen = false;
+  _syncHistoryFilterControls();
+  _hideHistoryRootDropdown();
+}
+
+function toggleHistoryMobileFilters(force = null) {
+  const next = force === null ? !_historyMobileAdvancedOpen : !!force;
+  _historyMobileAdvancedOpen = next;
+  _syncHistoryFilterControls();
+  return _historyMobileAdvancedOpen;
+}
+
 
 // ── Command history chips ──
 
@@ -90,6 +352,7 @@ function _makeOverflowChip(_count) {
   chip.title = 'Open history panel';
   chip.addEventListener('click', () => {
     if (!historyPanel) return;
+    if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
     showHistoryPanel();
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   });
@@ -211,7 +474,14 @@ function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry' + (isStarred ? ' starred' : '');
   const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
-  const time = new Date(run.started).toLocaleTimeString();
+  const startedAt = new Date(run.started);
+  const now = new Date();
+  const time = startedAt.toLocaleTimeString();
+  const showDate = !Number.isNaN(startedAt.getTime()) && (
+    startedAt.getFullYear() !== now.getFullYear()
+    || startedAt.getMonth() !== now.getMonth()
+    || startedAt.getDate() !== now.getDate()
+  );
 
   const cmd = document.createElement('div');
   cmd.className = 'history-entry-cmd';
@@ -223,6 +493,12 @@ function _createHistoryEntry(run, isStarred) {
   const timeEl = document.createElement('span');
   timeEl.textContent = time;
   meta.appendChild(timeEl);
+  if (showDate) {
+    const dateEl = document.createElement('span');
+    dateEl.className = 'history-entry-date';
+    dateEl.textContent = startedAt.toLocaleDateString();
+    meta.appendChild(dateEl);
+  }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;
   exitEl.textContent = `exit ${run.exit_code}`;
@@ -329,22 +605,17 @@ function _setHistoryLoadState(loading) {
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
   // history instead of assuming the in-memory tab state is authoritative.
-  apiFetch('/history').then(r => r.json()).then(data => {
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
     historyList.replaceChildren();
-    if (!data.runs.length) {
-      const empty = document.createElement('div');
-      empty.className = 'history-empty-state';
-      empty.textContent = 'No runs yet.';
-      historyList.appendChild(empty);
+    _renderHistoryRootSuggestions(Array.isArray(data.roots) ? data.roots : data.runs);
+    const sorted = _applyHistoryClientFilters(data.runs);
+    const starred = _getStarred();
+    if (!sorted.length) {
+      _renderHistoryEmptyState();
       return;
     }
-
-    const starred = _getStarred();
-    // Starred runs first, then by recency (server already sorts by recency)
-    const sorted = [
-      ...data.runs.filter(r => starred.has(r.command)),
-      ...data.runs.filter(r => !starred.has(r.command)),
-    ];
 
     sorted.forEach(run => {
       const isStarred = starred.has(run.command);
@@ -443,6 +714,88 @@ function refreshHistoryPanel() {
     });
   });
 }
+
+if (typeof historySearchInput !== 'undefined' && historySearchInput) {
+  historySearchInput.addEventListener('input', e => {
+    _setHistoryFilter('q', e.target.value, { debounce: true });
+  });
+}
+
+if (typeof historyMobileFiltersToggle !== 'undefined' && historyMobileFiltersToggle) {
+  historyMobileFiltersToggle.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleHistoryMobileFilters();
+  });
+}
+
+if (typeof historyRootInput !== 'undefined' && historyRootInput) {
+  historyRootInput.addEventListener('input', e => {
+    if (_historyRootSuppressInputOnce) {
+      _historyRootSuppressInputOnce = false;
+      return;
+    }
+    _historyRootIndex = -1;
+    _historyRefreshRootDropdown();
+    _setHistoryFilter('commandRoot', e.target.value, { debounce: true });
+  });
+  historyRootInput.addEventListener('focus', () => {
+    _historyRootIndex = -1;
+    _historyRefreshRootDropdown();
+  });
+  historyRootInput.addEventListener('blur', () => {
+    setTimeout(() => _hideHistoryRootDropdown(), 0);
+  });
+  historyRootInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      _hideHistoryRootDropdown();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      if (!_historyRootFiltered.length) return;
+      e.preventDefault();
+      _historyRootIndex = (_historyRootIndex + 1) % _historyRootFiltered.length;
+      _renderHistoryRootDropdown(_historyRootFiltered, historyRootInput.value);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      if (!_historyRootFiltered.length) return;
+      e.preventDefault();
+      _historyRootIndex = _historyRootIndex <= 0 ? _historyRootFiltered.length - 1 : _historyRootIndex - 1;
+      _renderHistoryRootDropdown(_historyRootFiltered, historyRootInput.value);
+      return;
+    }
+    if (e.key === 'Enter' && _historyRootIndex >= 0 && _historyRootFiltered[_historyRootIndex]) {
+      e.preventDefault();
+      _acceptHistoryRootSuggestion(_historyRootFiltered[_historyRootIndex]);
+    }
+  });
+}
+
+if (typeof historyExitFilter !== 'undefined' && historyExitFilter) {
+  historyExitFilter.addEventListener('change', e => {
+    _setHistoryFilter('exitCode', e.target.value);
+  });
+}
+
+if (typeof historyDateFilter !== 'undefined' && historyDateFilter) {
+  historyDateFilter.addEventListener('change', e => {
+    _setHistoryFilter('dateRange', e.target.value);
+  });
+}
+
+if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) {
+  historyStarredToggle.addEventListener('change', e => {
+    _setHistoryFilter('starredOnly', e.target.checked);
+  });
+}
+
+if (typeof historyClearFiltersBtn !== 'undefined' && historyClearFiltersBtn) {
+  historyClearFiltersBtn.addEventListener('click', () => clearHistoryFilters());
+}
+
+_syncHistoryFilterControls();
 
 
 // ── Ctrl+R reverse-history search ──

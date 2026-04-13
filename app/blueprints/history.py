@@ -5,7 +5,8 @@ History and share routes: run history, single-run permalinks, snapshot permalink
 import json
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
+from typing import Any
 
 from flask import Blueprint, jsonify, request
 
@@ -22,6 +23,45 @@ CFG = _config.CFG
 log = logging.getLogger("shell")
 
 history_bp = Blueprint("history", __name__)
+
+
+def _normalize_history_filter_text(value):
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _history_cutoff_for_range(date_range):
+    # Relative ranges avoid local-time/calendar ambiguity while still giving the
+    # history drawer an easy way to narrow recent activity.
+    now = datetime.now(timezone.utc).replace(tzinfo=None, microsecond=0)
+    if date_range == "24h":
+        return (now - timedelta(hours=24)).isoformat()
+    if date_range == "7d":
+        return (now - timedelta(days=7)).isoformat()
+    if date_range == "30d":
+        return (now - timedelta(days=30)).isoformat()
+    return None
+
+
+def _history_command_roots(conn, session_id):
+    rows = conn.execute(
+        """
+        SELECT
+          CASE
+            WHEN instr(trim(command), ' ') > 0 THEN substr(trim(command), 1, instr(trim(command), ' ') - 1)
+            ELSE trim(command)
+          END AS root,
+          MAX(started) AS latest_started
+        FROM runs
+        WHERE session_id = ? AND trim(command) != ''
+        GROUP BY root
+        ORDER BY latest_started DESC
+        LIMIT 50
+        """,
+        (session_id,),
+    ).fetchall()
+    return [str(row["root"]) for row in rows if row["root"]]
 
 
 # ── Preview output helpers ────────────────────────────────────────────────────
@@ -73,20 +113,51 @@ def _preview_notice(run):
     )
 
 
-# ── Routes ────────────────────────────────────────────────────────────────────
+# Routes
 
 @history_bp.route("/history")
 def get_history():
     """Return the most recent completed runs for this session."""
     # History is isolated per anonymous browser session, not shared globally.
     session_id = get_session_id()
+    query = _normalize_history_filter_text(request.args.get("q"))
+    command_root = _normalize_history_filter_text(request.args.get("command_root")).lower()
+    exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
+    date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
+
+    sql = (
+        "SELECT id, command, started, finished, exit_code, "
+        "preview_truncated, output_line_count, full_output_available, full_output_truncated "
+        "FROM runs WHERE session_id = ?"
+    )
+    params: list[Any] = [session_id]
+
+    if query:
+        sql += " AND LOWER(command) LIKE ?"
+        params.append(f"%{query.lower()}%")
+
+    if command_root:
+        sql += " AND (LOWER(command) = ? OR LOWER(command) LIKE ?)"
+        params.extend([command_root, f"{command_root} %"])
+
+    if exit_code_filter == "0":
+        sql += " AND exit_code = 0"
+    elif exit_code_filter == "nonzero":
+        sql += " AND exit_code IS NOT NULL AND exit_code != 0"
+    elif exit_code_filter == "incomplete":
+        sql += " AND exit_code IS NULL"
+
+    cutoff = _history_cutoff_for_range(date_range)
+    if cutoff:
+        sql += " AND started >= ?"
+        params.append(cutoff)
+
+    sql += " ORDER BY started DESC LIMIT ?"
+    params.append(CFG["history_panel_limit"])
+
     with db_connect() as conn:
-        rows = conn.execute(
-            "SELECT id, command, started, finished, exit_code, "
-            "preview_truncated, output_line_count, full_output_available, full_output_truncated "
-            "FROM runs WHERE session_id = ? ORDER BY started DESC LIMIT ?",
-            (session_id, CFG["history_panel_limit"])
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
+        roots = _history_command_roots(conn, session_id)
     runs = []
     for row in rows:
         item = dict(row)
@@ -95,9 +166,15 @@ def get_history():
         item["full_output_truncated"] = bool(item.get("full_output_truncated"))
         runs.append(item)
     log.info("HISTORY_VIEWED", extra={
-        "ip": get_client_ip(), "session": session_id, "count": len(runs),
+        "ip": get_client_ip(),
+        "session": session_id,
+        "count": len(runs),
+        "q": query or None,
+        "command_root": command_root or None,
+        "exit_code_filter": exit_code_filter or None,
+        "date_range": date_range or None,
     })
-    return jsonify({"runs": runs})
+    return jsonify({"runs": runs, "roots": roots})
 
 
 @history_bp.route("/history/<run_id>")

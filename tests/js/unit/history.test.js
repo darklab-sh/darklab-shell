@@ -298,6 +298,26 @@ describe('history panel actions', () => {
   function loadHistoryPanel({ clipboardImpl, apiFetchImpl } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
+      <input id="history-search-input" />
+      <button id="history-mobile-filters-toggle"></button>
+      <div id="history-advanced-filters"></div>
+      <input id="history-root-input" />
+      <div id="history-root-dropdown" class="u-hidden"></div>
+      <select id="history-exit-filter">
+        <option value="all">all</option>
+        <option value="0">0</option>
+        <option value="nonzero">nonzero</option>
+        <option value="incomplete">incomplete</option>
+      </select>
+      <select id="history-date-filter">
+        <option value="all">all</option>
+        <option value="24h">24h</option>
+        <option value="7d">7d</option>
+        <option value="30d">30d</option>
+      </select>
+      <input id="history-starred-toggle" type="checkbox" />
+      <button id="history-clear-filters"></button>
+      <div id="history-active-filters" class="u-hidden"></div>
       <div id="history-list"></div>
       <div id="history-load-overlay"></div>
       <div id="hist-del-overlay"></div>
@@ -314,6 +334,7 @@ describe('history panel actions', () => {
       if (url === '/history') {
         return Promise.resolve({
           json: () => Promise.resolve({
+            roots: ['ping'],
             runs: [
               { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
             ],
@@ -341,6 +362,16 @@ describe('history panel actions', () => {
     const historyPanel = document.getElementById('history-panel')
     const historyList = document.getElementById('history-list')
     const historyLoadOverlay = document.getElementById('history-load-overlay')
+    const historySearchInput = document.getElementById('history-search-input')
+    const historyMobileFiltersToggle = document.getElementById('history-mobile-filters-toggle')
+    const historyAdvancedFilters = document.getElementById('history-advanced-filters')
+    const historyRootInput = document.getElementById('history-root-input')
+    const historyRootDropdown = document.getElementById('history-root-dropdown')
+    const historyExitFilter = document.getElementById('history-exit-filter')
+    const historyDateFilter = document.getElementById('history-date-filter')
+    const historyStarredToggle = document.getElementById('history-starred-toggle')
+    const historyClearFiltersBtn = document.getElementById('history-clear-filters')
+    const historyActiveFilters = document.getElementById('history-active-filters')
     const histDelOverlay = document.getElementById('hist-del-overlay')
     const histDelMsg = document.getElementById('hist-del-msg')
     const histDelConfirmBtn = document.getElementById('hist-del-confirm')
@@ -362,6 +393,16 @@ describe('history panel actions', () => {
         historyPanel,
         historyList,
         historyLoadOverlay,
+        historySearchInput,
+        historyMobileFiltersToggle,
+        historyAdvancedFilters,
+        historyRootInput,
+        historyRootDropdown,
+        historyExitFilter,
+        historyDateFilter,
+        historyStarredToggle,
+        historyClearFiltersBtn,
+        historyActiveFilters,
         histRow: document.createElement('div'),
         histDelOverlay,
         histDelMsg,
@@ -387,6 +428,12 @@ describe('history panel actions', () => {
         refreshHistoryPanel,
         executeHistAction,
         confirmHistAction,
+        clearHistoryFilters,
+        _buildHistoryRequestUrl,
+        _setHistoryFilter,
+        resetHistoryMobileFilters,
+        toggleHistoryMobileFilters,
+        _saveStarred,
       }`),
       apiFetch,
       clipboard,
@@ -464,6 +511,342 @@ describe('history panel actions', () => {
 
     const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
     expect(btn.textContent).toBe('permalink')
+  })
+
+  it('shows a date in history metadata when the run is not from today', async () => {
+    const RealDate = Date
+    class MockDate extends RealDate {
+      constructor(value) {
+        super(value ?? '2026-01-02T12:00:00Z')
+      }
+      static now() {
+        return new RealDate('2026-01-02T12:00:00Z').getTime()
+      }
+    }
+    globalThis.Date = MockDate
+    try {
+      const { refreshHistoryPanel } = loadHistoryPanel({
+        apiFetchImpl: vi.fn(() => Promise.resolve({
+          json: () => Promise.resolve({
+            runs: [
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+            ],
+          }),
+        })),
+      })
+
+      refreshHistoryPanel()
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(document.querySelector('.history-entry-date')).not.toBeNull()
+    } finally {
+      globalThis.Date = RealDate
+    }
+  })
+
+  it('omits the date in history metadata for runs from the current day', async () => {
+    const RealDate = Date
+    class MockDate extends RealDate {
+      constructor(value) {
+        super(value ?? '2026-01-02T12:00:00Z')
+      }
+      static now() {
+        return new RealDate('2026-01-02T12:00:00Z').getTime()
+      }
+    }
+    globalThis.Date = MockDate
+    try {
+      const { refreshHistoryPanel } = loadHistoryPanel({
+        apiFetchImpl: vi.fn(() => Promise.resolve({
+          json: () => Promise.resolve({
+            runs: [
+              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-02T18:00:00Z', exit_code: 0 },
+            ],
+          }),
+        })),
+      })
+
+      refreshHistoryPanel()
+      await new Promise(resolve => setImmediate(resolve))
+
+      expect(document.querySelector('.history-entry-date')).toBeNull()
+    } finally {
+      globalThis.Date = RealDate
+    }
+  })
+
+  it('refreshHistoryPanel sends the active server-side filters to /history', async () => {
+    const { refreshHistoryPanel, apiFetch, _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel()
+
+    _setHistoryFilter('q', 'dig')
+    _setHistoryFilter('commandRoot', 'nmap')
+    _setHistoryFilter('exitCode', 'nonzero')
+    _setHistoryFilter('dateRange', '7d')
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(_buildHistoryRequestUrl()).toBe('/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d')
+    expect(apiFetch).toHaveBeenLastCalledWith('/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d')
+    expect(typeof refreshHistoryPanel).toBe('function')
+  })
+
+  it('populates command root suggestions from loaded history runs', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() => Promise.resolve({
+        json: () => Promise.resolve({
+          roots: ['curl', 'dig', 'ping'],
+          runs: [
+            { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+            { id: 'run-2', command: 'dig darklab.sh A', started: '2026-01-01T00:01:00Z', exit_code: 0 },
+            { id: 'run-3', command: 'ping -c 4 darklab.sh', started: '2026-01-01T00:02:00Z', exit_code: 0 },
+          ],
+        }),
+      })),
+    })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+    const input = document.getElementById('history-root-input')
+    input.value = 'd'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    const suggestions = [...document.querySelectorAll('#history-root-dropdown .ac-item')].map(el => el.textContent.trim())
+    expect(suggestions).toEqual(['dig'])
+  })
+
+  it('keeps the root suggestion menu hidden until at least one character is typed', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() => Promise.resolve({
+        json: () => Promise.resolve({
+          roots: ['curl', 'dig', 'ping'],
+          runs: [],
+        }),
+      })),
+    })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const input = document.getElementById('history-root-input')
+    input.dispatchEvent(new Event('focus'))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('hides the root suggestion menu when the only matching suggestion exactly matches the input', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() => Promise.resolve({
+        json: () => Promise.resolve({
+          roots: ['dig'],
+          runs: [
+            { id: 'run-1', command: 'dig darklab.sh A', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+          ],
+        }),
+      })),
+    })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const input = document.getElementById('history-root-input')
+    input.value = 'dig'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('accepts a root suggestion with one mobile-style pointer interaction', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() => Promise.resolve({
+        json: () => Promise.resolve({
+          roots: ['dig', 'ping'],
+          runs: [
+            { id: 'run-1', command: 'dig darklab.sh A', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+          ],
+        }),
+      })),
+    })
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const input = document.getElementById('history-root-input')
+    input.value = 'di'
+    input.dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    document.querySelector('#history-root-dropdown .ac-item')
+      .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(input.value).toBe('dig')
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('renders active filter chips for the current history filters', async () => {
+    const { _setHistoryFilter } = loadHistoryPanel()
+
+    _setHistoryFilter('q', 'dig')
+    _setHistoryFilter('commandRoot', 'nmap')
+    _setHistoryFilter('exitCode', 'nonzero')
+    _setHistoryFilter('dateRange', '7d')
+    _setHistoryFilter('starredOnly', true)
+    await new Promise(resolve => setImmediate(resolve))
+
+    const chips = [...document.querySelectorAll('#history-active-filters .history-active-filter-chip')].map(el => el.textContent)
+    expect(chips).toEqual([
+      expect.stringContaining('search: dig'),
+      expect.stringContaining('root: nmap'),
+      expect.stringContaining('exit: non-zero'),
+      expect.stringContaining('date: 7d'),
+      expect.stringContaining('starred'),
+    ])
+    expect(document.getElementById('history-active-filters').classList.contains('u-hidden')).toBe(false)
+  })
+
+  it('removes an individual filter when its active filter chip is cleared', async () => {
+    const { _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel()
+
+    _setHistoryFilter('q', 'dig')
+    _setHistoryFilter('commandRoot', 'nmap')
+    await new Promise(resolve => setImmediate(resolve))
+
+    const removeBtn = [...document.querySelectorAll('#history-active-filters .history-active-filter-chip')]
+      .find(el => el.textContent.includes('root: nmap'))
+      ?.querySelector('.history-active-filter-remove')
+
+    removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(_buildHistoryRequestUrl()).toBe('/history?q=dig')
+    expect(document.getElementById('history-root-input').value).toBe('')
+  })
+
+  it('keeps the history drawer open when removing an active filter chip', async () => {
+    const { _setHistoryFilter } = loadHistoryPanel()
+    const historyPanel = document.getElementById('history-panel')
+    historyPanel.classList.add('open')
+
+    _setHistoryFilter('q', 'dig')
+    await new Promise(resolve => setImmediate(resolve))
+
+    document.querySelector('#history-active-filters .history-active-filter-remove')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(historyPanel.classList.contains('open')).toBe(true)
+  })
+
+  it('toggles the mobile advanced history filters section', () => {
+    const { toggleHistoryMobileFilters } = loadHistoryPanel()
+    const historyPanel = document.getElementById('history-panel')
+    const toggleBtn = document.getElementById('history-mobile-filters-toggle')
+
+    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(false)
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('false')
+
+    toggleHistoryMobileFilters(true)
+    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(true)
+    expect(toggleBtn.textContent).toBe('hide filters')
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('true')
+
+    toggleHistoryMobileFilters(false)
+    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(false)
+    expect(toggleBtn.textContent).toBe('filters')
+    expect(toggleBtn.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('resetHistoryMobileFilters collapses the advanced mobile history filters', () => {
+    const { toggleHistoryMobileFilters, resetHistoryMobileFilters } = loadHistoryPanel()
+    const historyPanel = document.getElementById('history-panel')
+
+    toggleHistoryMobileFilters(true)
+    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(true)
+
+    resetHistoryMobileFilters()
+    expect(historyPanel.classList.contains('mobile-history-filters-open')).toBe(false)
+    expect(document.getElementById('history-mobile-filters-toggle').textContent).toBe('filters')
+  })
+
+  it('shows the active filter count in the mobile filters button label', async () => {
+    const { _setHistoryFilter } = loadHistoryPanel()
+    const toggleBtn = document.getElementById('history-mobile-filters-toggle')
+
+    _setHistoryFilter('q', 'dig')
+    _setHistoryFilter('dateRange', '7d')
+    _setHistoryFilter('starredOnly', true)
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(toggleBtn.textContent).toBe('filters (3)')
+  })
+
+  it('refreshHistoryPanel applies the starred-only filter client-side', async () => {
+    const { _saveStarred } = loadHistoryPanel({
+      apiFetchImpl: vi.fn((url) => {
+        if (url === '/history') {
+          return Promise.resolve({
+            json: () => Promise.resolve({
+              runs: [
+                { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
+                { id: 'run-2', command: 'dig darklab.sh A', started: '2026-01-01T00:01:00Z', exit_code: 0 },
+              ],
+            }),
+          })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      }),
+    })
+
+    _saveStarred(new Set(['dig darklab.sh A']))
+    document.getElementById('history-starred-toggle').checked = true
+    document.getElementById('history-starred-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(resolve => setImmediate(resolve))
+
+    const entries = [...document.querySelectorAll('#history-list .history-entry-cmd')].map(el => el.textContent)
+    expect(entries).toEqual(['dig darklab.sh A'])
+  })
+
+  it('clearHistoryFilters resets the drawer controls and the request URL', async () => {
+    const { _buildHistoryRequestUrl, clearHistoryFilters } = loadHistoryPanel()
+    document.getElementById('history-search-input').value = 'curl'
+    document.getElementById('history-search-input').dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('history-root-input').value = 'dig'
+    document.getElementById('history-root-input').dispatchEvent(new Event('input', { bubbles: true }))
+    document.getElementById('history-exit-filter').value = '0'
+    document.getElementById('history-exit-filter').dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-date-filter').value = '24h'
+    document.getElementById('history-date-filter').dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('history-starred-toggle').checked = true
+    document.getElementById('history-starred-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 140))
+
+    clearHistoryFilters()
+
+    expect(_buildHistoryRequestUrl()).toBe('/history')
+    expect(document.getElementById('history-search-input').value).toBe('')
+    expect(document.getElementById('history-root-input').value).toBe('')
+    expect(document.getElementById('history-exit-filter').value).toBe('all')
+    expect(document.getElementById('history-date-filter').value).toBe('all')
+    expect(document.getElementById('history-starred-toggle').checked).toBe(false)
+  })
+
+  it('shows a filtered empty state when no runs match the active filters', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() => Promise.resolve({
+        json: () => Promise.resolve({ runs: [] }),
+      })),
+    })
+
+    document.getElementById('history-search-input').value = 'nmap'
+    document.getElementById('history-search-input').dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 140))
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    expect(document.querySelector('.history-empty-state-title')?.textContent).toBe('No matching runs.')
+    expect(document.querySelector('.history-empty-state-detail')?.textContent).toContain('Adjust or clear')
   })
 
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {

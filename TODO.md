@@ -8,10 +8,6 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### Now
 
-- **Richer history filtering and search**
-  - Add filtering by command root, exit code, starred status, date, and full-output availability.
-  - Current history is useful, but it will become harder to navigate as usage grows.
-
 - **Saved command presets**
   - Let users save named command templates beyond history/starred entries.
   - Better for repeat workflows like DNS checks, HTTP triage, or common scan recipes.

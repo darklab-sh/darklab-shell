@@ -19,6 +19,7 @@ All notable changes to darklab shell are documented here.
 
 - **Share/export redaction rules** — snapshot permalinks and local `save txt` / `save html` exports now use a built-in basic redaction baseline for common sensitive values such as bearer tokens, email addresses, IPs, and hostnames, with optional operator regex rules appended after it. The feature is controlled by `share_redaction_enabled`, keeps normal run history unchanged in this first phase, and is enforced server-side before snapshot persistence.
 - **Permalink share-time redaction choice** — when share redaction is enabled, creating a snapshot permalink now asks whether to share the redacted or raw version, explains the kinds of values redaction covers, and can remember that choice for the current browser session. The `/share` route now honors an explicit `apply_redaction` flag so the server matches the UI’s raw-vs-redacted choice instead of always forcing the redacted path.
+- **History drawer filtering and search** — the run history drawer now supports search by command text plus filters for command root, exit code, recent date range, and starred status. Active filters are shown as removable chips, non-today runs show a date token in the result metadata, and the command-root field now uses app-owned autocomplete suggestions backed by a server-provided `roots` list instead of a native browser datalist.
 
 ---
 
