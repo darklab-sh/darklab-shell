@@ -10,12 +10,12 @@ _This screenshot is refreshed by the Playwright e2e suite and can be regenerated
 ## Table of Contents
 - [Architecture At A Glance](#architecture-at-a-glance)
 - [Features](#features)
-- [Project Structure](#project-structure)
 - [Quick Start](#quick-start)
 - [Feature Details](#feature-details)
 - [Configuration](#configuration)
 - [Operator Diagnostics](#operator-diagnostics)
 - [Development & Testing](#development--testing)
+- [Project Structure](#project-structure)
 
 ---
 
@@ -43,7 +43,16 @@ This is the high-level runtime shape of the app:
 - SQLite plus artifact files hold durable history/share state
 - real command execution happens in subprocesses rather than inside the web worker process
 
-For the full decision log and the more detailed component diagrams, see [ARCHITECTURE.md](ARCHITECTURE.md).
+For details, use the specialized docs instead of this README:
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) for current system structure and runtime diagrams:
+  - `System Overview`
+  - `Runtime Topology`
+  - `Primary Request Flows`
+  - `Frontend Composition`
+  - `Persistence Model`
+- [DECISIONS.md](DECISIONS.md) for architectural rationale and tradeoffs
+- [tests/README.md](tests/README.md) for the canonical test inventory, focused run commands, and maintenance notes
 
 ---
 
@@ -59,156 +68,6 @@ For the full decision log and the more detailed component diagrams, see [ARCHITE
 - **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, and SQLite persistence for history, previews, snapshots, and artifacts
 
 See [Feature Details](#feature-details) for the full grouped capability list.
-
----
-
-## Project Structure
-
-```
-.
-├── .env                        # Port and other environment defaults (edit here to change APP_PORT)
-├── docker-compose.yml
-├── Dockerfile
-├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
-├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
-│                               #   tests that import app.py get correct static analysis in VS Code
-├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
-├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
-├── .nvmrc                      # Node version pin (22) for Vitest / Playwright
-├── package.json                # JS dev dependencies and test scripts
-├── vitest.config.js            # Vitest unit test config (jsdom environment)
-├── playwright.config.js        # Playwright e2e test config (starts Flask on port 5001)
-├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
-├── scripts/
-│   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
-│   ├── container_smoke_test.sh # Fresh-image Container Smoke Test wrapper
-│   ├── capture_container_smoke_test_outputs.sh # Re-captures the smoke-test baseline from a known-good container
-│   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
-│   └── node/
-│       └── capture_output_for_smoke-test.mjs # Browser-driven smoke-test corpus capture helper
-├── docs/
-│   └── readme-app.png          # Current README hero screenshot; regenerate with npm run capture:readme-screenshot
-├── tests/
-│   ├── py/                     # Python / pytest tests
-│   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
-│   │   ├── fixtures/
-│   │   │   └── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
-│   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
-│   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
-│   │   ├── test_run_history_share.py # Higher-value /run, history, share, fake-command, and persistence flows
-│   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and fake-command resolution
-│   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
-│   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
-│   │   └── test_logging.py     # Structured logging: formatters, configure_logging, all log events, including CONTENT_VIEWED / THEME_SELECTED / HISTORY_VIEWED
-│   └── js/
-│       ├── unit/               # Vitest unit tests for pure JS functions
-│       │   ├── helpers/
-│       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
-│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, active-input composer boundary, composer-host spacing guard, mobile output-follow regression, live-tail helper regression, state-driven cursor-helper regression, phase-5 keydown/submit boundary, phase-7 prompt render boundary, modal controls
-│       │   ├── runner.test.js      # _formatElapsed, run/kill edge cases, stall recovery
-│       │   ├── history.test.js     # starred state, clipboard, delete/clear failures, mobile chip behavior, composer-state draft restore
-│       │   ├── state.test.js       # composer state store accessors and reset behavior
-│       │   ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
-│       │   ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
-│       │   ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
-│       │   ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
-│       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
-│       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
-│       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
-│       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
-│       └── e2e/                # Playwright end-to-end tests (require running Flask server)
-│           ├── helpers.js      # runCommand/openHistory helpers
-│           ├── commands.spec.js # command execution, denial, and status rendering
-│           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
-│           ├── runner-stall.spec.js   # SSE stall recovery
-│           ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
-│           ├── kill.spec.js    # kill confirmation and running-tab stop behavior
-│           ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
-│           ├── output.spec.js  # copy/clear/save/export behavior
-│           ├── rate-limit.spec.js # per-session /run rate limiting
-│           ├── readme-screenshot.spec.js # Refreshes the README hero screenshot during Playwright runs
-│           ├── search.spec.js  # search/highlight/navigation behavior
-│           ├── share.spec.js    # snapshot permalinks and clipboard behavior
-│           ├── history.spec.js  # History drawer: load command, dedup tab, star/chip cleanup
-│           ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
-│           ├── timestamps.spec.js # timestamp and line-number toggle behavior
-│           ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
-│           ├── welcome.spec.js # welcome animation/browser interaction coverage
-│           └── tabs.spec.js     # Tab lifecycle, rename, reorder, and new-tab behaviour
-├── examples/
-│   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
-│   └── run_local.sh             # Script to run without Docker using Python directly
-├── data/                       # Writable volume — SQLite database (auto-created)
-│   └── history.db              #   stores run history and tab snapshots
-└── app/
-    ├── app.py                  # Flask factory — logging setup, blueprint registration, before/after-request hooks
-    ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
-    ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
-    ├── blueprints/
-    │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
-    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
-    │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
-    │   └── history.py          # /history*, /share*; preview-output shaping helpers
-    ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
-    ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
-    ├── logging_setup.py        # structured logging formatters and logger configuration
-    ├── database.py             # SQLite connection, schema init, retention pruning
-    ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
-    ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
-    ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
-    ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
-    ├── favicon.ico             # Site favicon
-    ├── conf/                   # Operator-configurable files — edit these to customise the instance
-    │   ├── config.yaml             # Application configuration (see Configuration section)
-    │   ├── config.local.yaml       # Optional untracked per-server overrides loaded after config.yaml; sibling *.local.* overlays are also supported
-    │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
-    │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
-    │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
-    │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
-    │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
-    │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
-    │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
-    │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
-    ├── templates/
-    │   ├── index.html          # Frontend HTML shell rendered by Flask
-    │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
-    │   ├── permalink_base.html # Shared shell for permalink pages
-    │   ├── permalink.html      # Live permalink page template
-    │   └── permalink_error.html # Missing/expired permalink template
-    ├── requirements.txt        # Python runtime dependencies
-    └── static/
-        ├── css/
-        │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
-        │   ├── base.css        # Theme tokens, reset, base layout, header, input, and dropdown foundations
-        │   ├── shell.css       # Terminal shell frame, panels, history row, utility buttons, and modals
-        │   ├── components.css  # Tabs, search UI, permalink/history surfaces, toast, and menu components
-        │   ├── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
-        │   └── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
-        ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
-        └── js/
-            ├── session.js      # Session UUID + apiFetch wrapper (loads first)
-            ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
-            ├── config.js       # APP_CONFIG defaults
-            ├── dom.js          # Shared DOM element references
-            ├── state.js        # Shared app-state store/accessors
-            ├── ui_helpers.js   # DOM-facing helpers and visibility setters
-            ├── tabs.js         # Tab lifecycle management
-            ├── output.js       # ANSI rendering and line management
-            ├── search.js       # In-output search (with case-sensitive and regex modes)
-            ├── autocomplete.js # Command autocomplete dropdown
-            ├── export_html.js  # Shared export HTML builder / embedded-font helper
-            ├── history.js      # Command history chips and drawer (with starring)
-            ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
-            ├── runner.js       # Command execution, SSE stream, kill, stall detection
-            ├── app.js          # Shared UI helpers, overlays, and mobile-layout glue
-            ├── controller.js   # Initialization and event wiring (loads after app.js)
-            └── vendor/
-                └── ansi_up.js  # ANSI-to-HTML library — committed browser-global build copied into
-                                #   /usr/local/share/shell-assets for the image; repo copy remains the
-                                #   fallback for local/docker-compose runs
-```
-
----
 
 ## Quick Start
 
@@ -313,7 +172,7 @@ The tab is reset to an error state so you can run another command. The original 
 
 #### Production Override
 
-The base [docker-compose.yml](docker-compose.yml) is the standalone/local deployment shape. The optional production override at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) layers in deployment-specific behavior:
+The base [docker-compose.yml](docker-compose.yml) is the standalone deployment shape used for local runs. The optional production override at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) layers in deployment-specific behavior:
 
 1. Docker container log transport:
    - enables the Docker `gelf` log driver for both `shell` and `redis`
@@ -325,9 +184,8 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone/local deploy
    - removes the host `ports:` binding from the base file
    - switches the app to `expose:`
    - joins the external Docker network `darklab-net`
-4. Production naming:
-   - pins `container_name: shell.darklab.sh`
-   - pins `container_name: redis-shell.darklab.sh`
+4. Deployment naming:
+   - sets deployment-specific `container_name` values for the `shell` and `redis` services
 5. Application log format:
    - still requires `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
 6. Optional runtime sizing:
@@ -346,11 +204,11 @@ The `docker-compose.yml` includes a `redis:7-alpine` service used for two purpos
 - **Rate limiting** — Flask-Limiter uses Redis as its shared counter store so the configured per-IP limits are enforced accurately across all Gunicorn workers. Without Redis, each of the 4 workers maintains its own independent counter, effectively multiplying the limit by 4.
 - **Active process tracking** — running process IDs (`run_id → pid`) are stored in Redis with a 4-hour TTL so any worker can look up a PID to handle a kill request, regardless of which worker started the command.
 
-Redis is configured as read-only (`read_only: true`) with a `tmpfs` at `/tmp` for scratch space. The app connects via the `REDIS_URL` environment variable (`redis://redis:6379/0`). If Redis is unavailable (e.g. local dev without Docker), the app falls back to in-process state — correct for single-process use but not for multi-worker Gunicorn.
+Redis is configured as read-only (`read_only: true`) with a `tmpfs` at `/tmp` for scratch space. The app connects via the `REDIS_URL` environment variable (`redis://redis:6379/0`). If Redis is unavailable (e.g. local development without Docker), the app falls back to in-process state — correct for single-process use but not for multi-worker Gunicorn.
 
 ### Option 2: Run Locally Without Docker
 
-This is useful when you want a lightweight local dev loop and do not need the containerized runtime model.
+This is useful when you want a lightweight local development loop and do not need the containerized runtime model.
 
 Before you start:
 
@@ -481,7 +339,7 @@ npm test
 
 ## Configuration
 
-All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the instance-specific differences stay active. If you want a private server-specific layer, add `app/conf/config.local.yaml`; it is loaded after `config.yaml` and can override any subset of keys without affecting the checked-in file. The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
+All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the deployment-specific differences stay active. If you want an untracked deployment override layer, add `app/conf/config.local.yaml`; it is loaded after `config.yaml` and can override any subset of keys without affecting the checked-in file. The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -517,41 +375,25 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 
 ### Theme System
 
-Theme configuration is documented in [THEME.md](THEME.md). The theme externalization work is part of the v1.4 line. In short:
+Theme configuration is documented in [THEME.md](THEME.md). The runtime model is:
 
-- `app/conf/themes/` contains the selectable theme variants; the root `theme_dark.yaml.example` / `theme_light.yaml.example` files are generated reference templates only and are not used by the runtime selector; regenerate them with [scripts/generate_theme_examples.py](scripts/generate_theme_examples.py) after changing `_THEME_DEFAULTS` in `app/config.py`; `default_theme` in `config.yaml` points at a full filename from that directory
-- `app/conf/themes/` holds the runtime theme variants; the loader scans that directory and exposes the results to the browser
+- `app/conf/themes/` contains the selectable theme variants used by the browser-facing registry
+- `default_theme` in `config.yaml` points at one of those filenames
+- `theme_dark.yaml.example` and `theme_light.yaml.example` are generated reference templates; regenerate them with [scripts/generate_theme_examples.py](scripts/generate_theme_examples.py) after changing `_THEME_DEFAULTS` in `app/config.py`
+- theme resolution order is: `localStorage.theme`, then `default_theme`, then the built-in dark fallback palette
+- the resolved theme is injected into the live shell, permalink pages, diagnostics page, and HTML export path so those surfaces stay visually aligned
+
+See [THEME.md](THEME.md) for the full theme architecture, token reference, and authoring workflow.
 
 ### Dependency Version Tracking
 
-This repo includes a lightweight maintenance setup for checking whether core dependencies are behind:
+This repo includes a lightweight dependency-maintenance path:
 
-- [scripts/check_versions.sh](scripts/check_versions.sh) prints pinned Python requirements, Node devDependencies from `package.json` / `package-lock.json`, the Docker base image line directly from `Dockerfile`, and pinned Go/pip/gem tool versions from `Dockerfile` while ignoring prerelease tags like alpha and rc builds
-- Docker image freshness is still best checked after a build with `docker scout quickview <image>` or `docker scout recommendations <image>`
+- [scripts/check_versions.sh](scripts/check_versions.sh) inspects pinned Python, Node, Docker, Go, pip, and gem versions and reports obvious drift
+- [scripts/container_smoke_test.sh](scripts/container_smoke_test.sh) verifies that Dockerfile and packaged-tool changes still produce a working runtime
+- [scripts/capture_container_smoke_test_outputs.sh](scripts/capture_container_smoke_test_outputs.sh) refreshes the stored smoke-test corpus when command output changes intentionally
 
-The shell script is for a quick local “what looks stale right now?” check; Docker Scout is for the container image itself. The script also checks the pinned tool versions embedded in `Dockerfile` against the Go module proxy, PyPI, and RubyGems so you can see which build-time tools are behind without guessing. For Go tools installed via `go install .../cmd/...`, the checker resolves the module root from the Dockerfile line before querying the proxy.
-
-After identifying and applying upgrades, use the two Container Smoke Test scripts to verify nothing broke:
-
-- [scripts/capture_container_smoke_test_outputs.sh](scripts/capture_container_smoke_test_outputs.sh) — drives a live browser session against a running container and records the visible output of every command in `app/conf/auto_complete.txt` into `tests/py/fixtures/container_smoke_test-expectations.json`. Run this against a known-good container to update the baseline when a tool's help text or output format changes intentionally.
-- [scripts/container_smoke_test.sh](scripts/container_smoke_test.sh) — builds a fresh image via `docker compose`, starts the container, and runs every Container Smoke Test command through `/run`, checking each one against the stored expectations. Run this after every Dockerfile or package upgrade to confirm that all commands are still present and producing the expected output before merging.
-
-When you want to isolate a single area, the script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, and `--debug` for Go proxy diagnostics.
-
-If you run this repo in GitLab CI, the `dependency-version-check` job in `.gitlab-ci.yml` is available as a manual run in pipelines and publishes the output as an artifact, so you can review drift without opening a PR first.
-- each theme YAML may include an optional `label:` field; the selector uses that friendly name when present and falls back to a humanized filename stem otherwise
-- theme resolution order is: `localStorage.theme`, then `default_theme` from `config.yaml` (full filename, normalized to the registry entry), then the baked-in dark fallback palette
-- `app/config.py` loads those YAML files, merges them with built-in defaults, and exposes the resolved values as CSS variables and a theme registry
-- `app/templates/theme_vars_style.html` injects the resolved values into the page so the live shell, including the mobile composer surfaces, and permalink pages share one theme source of truth
-- `app/templates/theme_vars_script.html` exposes the same resolved values plus the full theme registry to the browser-side runtime selector and export helpers
-- `app/static/js/app.js` exposes the theme helpers, and `app/static/js/controller.js` applies the selected theme on the fly through the theme selector modal preview cards and persists the choice in cookies/localStorage
-- the theme selector keeps live preview-on-click behavior; on desktop it now opens as a right-side drawer so more of the shell stays visible while you compare themes, while mobile keeps the existing full-screen chooser
-- `app/static/js/export_html.js` uses the injected theme values when generating downloadable HTML, so the exported file stays in sync with the active theme
-- `app/app.py` also exposes `/themes` for clients that want to inspect the available registry
-- the resolved theme also drives a best-effort document `color-scheme` hint (`only light`, `only dark`, or `light dark`) so mobile browsers that honor standards-based scheme hints are less likely to auto-darken light themes
-- `app/app.py` also exposes the built-in project README URL through `/config` so the FAQ and synthetic README links stay aligned with the shipped project documentation
-
-See [THEME.md](THEME.md) for the full architecture walkthrough and a complete appendix of every supported theme option and default.
+Use [tests/README.md](tests/README.md) for the smoke-test workflow and [DECISIONS.md](DECISIONS.md) for the rationale behind the image-validation path.
 
 ---
 
@@ -596,7 +438,7 @@ The production override and application log format are configured separately:
 - App log formatting:
   - set `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
 
-Without the production override, Docker uses its default log driver and the app keeps its standalone/local host-port binding. Without `log_format: gelf`, the application still emits plain `text` logs even if Docker is shipping container stdout to a GELF endpoint.
+Without the production override, Docker uses its default log driver and the app keeps its standalone host-port binding. Without `log_format: gelf`, the application still emits plain `text` logs even if Docker is shipping container stdout to a GELF endpoint.
 
 ---
 
@@ -680,21 +522,9 @@ Tool names and subcommand prefixes are matched **case-insensitively**. Flag name
 **`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
 
 ```
-curl -o /dev/null -s -w "%{http_code}" https://darklab.sh
-wget -q -O /dev/null --server-response https://darklab.sh
+curl -o /dev/null -s -w "%{http_code}" https://example.com
+wget -q -O /dev/null --server-response https://example.com
 ```
-
-### Loopback Address Blocking
-
-Commands containing `localhost`, `127.0.0.1`, `0.0.0.0`, or `[::1]` anywhere in the command string are blocked at both the client and server, regardless of which tool is used or how the address appears in the URL. This prevents web shell users from reaching internal Flask endpoints directly (e.g. `curl http://localhost:8888/diag`). Word-boundary anchors mean external hostnames like `notlocalhost.com` are not affected.
-
-An additional OS-level guard is applied at startup: `entrypoint.sh` adds an iptables rule blocking the `scanner` user from making outbound TCP connections to the app port. This covers tools that might bypass command validation, such as scripting languages invoked through the shell.
-
-### Shell Operator Blocking
-
-When the allowlist is active, the following operators are blocked outright, both in the browser and on the server, to prevent chaining disallowed commands:
-
-`&&` `||` `|` `;` `;;` `` ` `` `$()` `>` `>>` `<`
 
 ---
 
@@ -799,30 +629,6 @@ The file is fetched once on page load. To update suggestions, edit `conf/auto_co
 ---
 
 ## Keyboard Shortcuts
-
-Current keyboard behavior:
-
-- `Enter` on a blank prompt adds a fresh prompt line without calling `/run`
-- `Ctrl+C` opens kill confirmation while a command is running, or drops to a fresh prompt line when idle
-- During welcome, printable typing plus `Enter` and `Escape` immediately settle the animation into the live prompt
-- In autocomplete, `Up` / `Down` navigate, `Tab` accepts, `Enter` accepts-or-runs, and `Escape` dismisses
-- With a blank prompt, `Up` / `Down` cycles through recent command history, including history hydrated from the server on first load
-- `Option+T` (`Alt+T`) opens a new tab
-- `Option+W` (`Alt+W`) closes the current tab
-- `Option+Left` / `Option+Right` (`Alt+Left` / `Alt+Right`) cycle between tabs
-- `Option+Tab` (`Alt+Tab`) cycles to the next tab; add `Shift` to reverse direction
-- `Option+1` through `Option+9` (`Alt+1` ... `Alt+9`) jump directly to tabs 1 through 9
-- `Option+P` (`Alt+P`) creates a permalink for the active tab
-- `Option+Shift+C` (`Alt+Shift+C`) copies active-tab output
-- `Ctrl+L` clears the active tab
-- In the kill dialog, `Enter` confirms and `Escape` cancels
-- `Ctrl+W` deletes one word to the left
-- `Ctrl+A` moves the cursor to the start of the line
-- `Ctrl+E` moves the cursor to the end of the line
-- `Ctrl+U` deletes from the cursor to the start of the line
-- `Ctrl+K` deletes from the cursor to the end of the line
-- `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) move backward / forward by word
-- `Ctrl+R` opens reverse-history search — type to filter past commands; `↑↓` or `Ctrl+R` navigates matches; `Enter` accepts and runs; `Tab` accepts without running; `Escape` restores the draft that was in the prompt before search started; `Ctrl+C` leaves the typed query in the input
 
 On macOS, `Option` is the key used for the app-safe `Alt` shortcuts above. The `Ctrl+...` bindings are intentional shell-style controls and are separate from browser `Command` shortcuts.
 
@@ -953,7 +759,7 @@ Click **⌕ search** in the terminal bar (next to the tabs) to open the search b
 
 Two toggle buttons sit between the input and the match counter:
 
-| Button | Default | Behaviour |
+| Button | Default | Behavior |
 |--------|---------|-----------|
 | **Aa** | off | Case-sensitive matching — when off, search is case-insensitive |
 | **.**__*__ | off | Regular expression mode — when on, the search term is treated as a JavaScript regex; an invalid pattern shows `invalid regex` instead of throwing |
@@ -1041,7 +847,19 @@ The container uses two unprivileged system users:
 - **`appuser`** — Gunicorn runs as this user. Owns `/data` with `chmod 700`, so it can read and write the SQLite database. Cannot write anywhere else in the read-only container
 - **`scanner`** — all user-submitted commands run as this user, enforced by prepending `sudo -u scanner env HOME=/tmp` to every `subprocess.Popen` call. Has no write access to `/data`. `HOME` is explicitly set to `/tmp` (the tmpfs mount) so tools like nuclei that write config and cache to `$HOME` use the in-memory filesystem rather than trying to access a non-existent home directory
 
-As a second layer of defence, the application also blocks any command that references `/data` or `/tmp` as a filesystem path argument at validation time, before the command ever reaches the subprocess layer.
+As a second layer of defense, the application also blocks any command that references `/data` or `/tmp` as a filesystem path argument at validation time, before the command ever reaches the subprocess layer.
+
+### Loopback Address Blocking
+
+Commands containing `localhost`, `127.0.0.1`, `0.0.0.0`, or `[::1]` anywhere in the command string are blocked at both the client and server, regardless of which tool is used or how the address appears in the URL. This prevents web shell users from reaching internal Flask endpoints directly (e.g. `curl http://localhost:8888/diag`). Word-boundary anchors mean external hostnames like `notlocalhost.com` are not affected.
+
+An additional OS-level guard is applied at startup: `entrypoint.sh` adds an iptables rule blocking the `scanner` user from making outbound TCP connections to the app port. This covers tools that might bypass command validation, such as scripting languages invoked through the shell.
+
+### Shell Operator Blocking
+
+When the allowlist is active, the following operators are blocked outright, both in the browser and on the server, to prevent chaining disallowed commands:
+
+`&&` `||` `|` `;` `;;` `` ` `` `$()` `>` `>>` `<`
 
 The container starts as root only long enough for `entrypoint.sh` to: fix `/data` ownership after the volume mount resets it, set `/tmp` to `1777` (world-writable with sticky bit), and pre-create `/tmp/.config` and `/tmp/.cache` owned by `scanner` so tools don't try to create them as root. It then drops to `appuser` via `gosu` before starting Gunicorn. Neither `appuser` nor `scanner` has a login shell or password.
 
@@ -1194,7 +1012,7 @@ npm install
 
 Recommended VS Code extensions:
 
-- `Container Tools` - Dockerfile and Compose syntax support. Pythong debugging in containers.
+- `Container Tools` - Dockerfile and Compose syntax support. Python debugging in containers.
 - `Python` — Python language support, interpreter selection, test discovery
 - `Pylance` — type checking and import/navigation support
 - `YAML` — schema-aware editing for config and theme files
@@ -1222,33 +1040,11 @@ npm run test:e2e
 
 Current totals: **791 pytest + 295 Vitest + 139 Playwright = 1,225 tests**.
 
-The testing model is intentionally layered:
-- `pytest` covers backend contracts, route behavior, persistence helpers, and logging without a browser
-- `Vitest` covers client-side helpers and DOM-bound browser-module logic in jsdom
-- `Playwright` covers the integrated UI against a live Flask server, including the mobile/browser regressions that recently covered keyboard visibility, the lower-composer hit-target fix, tab isolation, permalink preference cookies, close-running-tab behavior, history-panel action-button close behavior, and the README hero screenshot capture
-- `pytest` also locks the rendered shell chrome where it matters at the template layer, including the diagnostics header content and the desktop-vs-mobile diagnostics navigation split (`/diag` new tab on desktop, in-app action on mobile)
+Use the docs by purpose:
 
-The shell chrome now uses direct DOM construction for the tab headers, history entries, and FAQ limits / allowed-command sections, plus class-based modal wrappers in the template. Search highlighting also walks text nodes instead of rewriting serialized HTML, so mixed-content lines keep their markup intact. That reduces string-built fragments without changing the visible UI or the test model above.
-
-After a Dockerfile or package upgrade, `scripts/container_smoke_test.sh` is the primary verification step: it builds a fresh base image, creates a temporary runtime container, copies the repo `app/` tree plus a generated `config.local.yaml` into `/app`, commits that runtime image, and then starts it via `docker compose` using the root `docker-compose.yml` as the base before running every command from `app/conf/auto_complete.txt` through `/run` and checking each against the expected output in `tests/py/fixtures/container_smoke_test-expectations.json`. That DinD-safe runtime-image step avoids client-side bind mounts entirely, which matters in GitLab CI because the Docker daemon runs in a separate sidecar and cannot reliably see the job container's filesystem. The generated smoke-test compose also strips fixed `container_name` values so local developer stacks do not collide with the test Redis or shell containers. The wrapper now performs a startup gate first and stops immediately if build, compose startup, or health checks fail, instead of attempting the full command corpus against a broken image. The fixture publishes `8888` on an ephemeral host port and discovers the real port with `docker compose port` instead of guessing a free localhost port in the wrong namespace. A failure means a tool is missing, broken, or producing unexpected output in the new image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container. Using the compose file ensures the test environment matches the real deployment including tmpfs, Redis, and `init: true` — running bare `docker run` lacks those. The smoke-test module also carries focused `_docker_reach_host()`, compose-port parsing, and early-kill regressions so DinD jobs keep probing the Docker daemon host, the actual published port, and the stop-on-expected-output contract. The test writes `test-results/container_smoke_test.xml`. GitLab CI has a `container-smoke-test` job that is available as a manual run in pipelines.
-
-Playwright runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel workers create avoidable cross-test interference.
-
-The canonical testing guide lives in [tests/README.md](tests/README.md). It contains the full file-by-file appendix, focused run commands, suite-specific notes, and maintenance conventions. `ARCHITECTURE.md` only keeps the architectural rationale for how the suites are split and why they are implemented the way they are.
-
-The permalink/export refactor was primarily about removing duplicated static HTML/CSS/JS and moving the shared page chrome and export styling into reusable templates and helpers, so the live permalink view and downloadable export stay easier to maintain together.
-
-## Architecture At A Glance
-
-For a higher-level explanation of how the app works including a full architectural decision log, start with [ARCHITECTURE.md](ARCHITECTURE.md):
-
-- `System Overview` for the major runtime pieces and responsibilities
-- `Runtime Topology` for the browser / Flask / Redis / SQLite / scanner-process diagram
-- `Primary Request Flows` for page load, `/run`, `/kill`, history/share, and diagnostics flow
-- `Frontend Composition` for the browser script load order and ownership boundaries
-- `Persistence Model` for the split between run previews, snapshots, and full-output artifacts
-
-Use the rest of `ARCHITECTURE.md` after that for the deeper decision log: why SSE was chosen, why Redis is used for cross-worker coordination, how the two-user runtime model works, why the mobile shell was simplified, and how the test layers are split.
+- [tests/README.md](tests/README.md) for the full suite appendix, focused test commands, browser-test notes, and smoke-test workflow
+- [ARCHITECTURE.md](ARCHITECTURE.md) for where the test layers sit in the overall system
+- [DECISIONS.md](DECISIONS.md) for why the suite is split into `pytest`, `Vitest`, and `Playwright`
 
 ### Linting & Security Scanning
 
@@ -1263,7 +1059,159 @@ bandit -r app/ -ll -q
 pip-audit -r app/requirements.txt -r requirements-dev.txt
 ```
 
-These checks run automatically via the GitLab CI pipeline (`.gitlab-ci.yml`), in four sequential stages: `test` → `lint` → `audit` → `build`. The `test` stage runs three parallel jobs: `test-py-pytest` (pytest), `test-js-unit` (Vitest, Node 22 image), and `test-js-e2e` (Playwright, Python 3.12 image with Node and Chromium installed). The `test`, `lint`, and `audit` stages run for both push and merge-request pipelines. The `build` stage runs on pushes to `main`, on merge requests targeting `main`, and on other branches when `Dockerfile`, `app/requirements.txt`, `.dockerignore`, or `docker-compose*.yml` change. It is also available as a manual trigger otherwise.
+These checks run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml). The test stage fans out into dedicated `pytest`, `Vitest`, and `Playwright` jobs. Use [tests/README.md](tests/README.md) for the detailed suite inventory and local workflow.
+
+---
+
+## Project Structure
+
+Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTURE.md). The architecture and testing docs carry the deeper explanations.
+
+```
+.
+├── .env                        # Port and other environment defaults (edit here to change APP_PORT)
+├── docker-compose.yml
+├── Dockerfile
+├── ARCHITECTURE.md            # Current system structure, diagrams, runtime layers, persistence, and deployment shape
+├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
+├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
+├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
+│                               #   tests that import app.py get correct static analysis in VS Code
+├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
+├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
+├── .nvmrc                      # Node version pin (22) for Vitest / Playwright
+├── package.json                # JS dev dependencies and test scripts
+├── vitest.config.js            # Vitest unit test config (jsdom environment)
+├── playwright.config.js        # Playwright e2e test config (starts Flask on port 5001)
+├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
+├── scripts/
+│   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
+│   ├── container_smoke_test.sh # Fresh-image Container Smoke Test wrapper
+│   ├── capture_container_smoke_test_outputs.sh # Re-captures the smoke-test baseline from a known-good container
+│   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
+│   └── node/
+│       └── capture_output_for_smoke-test.mjs # Browser-driven smoke-test corpus capture helper
+├── docs/
+│   └── readme-app.png          # Current README hero screenshot; regenerate with npm run capture:readme-screenshot
+├── tests/
+│   ├── py/                     # Python / pytest tests
+│   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
+│   │   ├── fixtures/
+│   │   │   └── container_smoke_test-expectations.json # Stored expected output for the Container Smoke Test corpus
+│   │   ├── test_validation.py  # Tests for command validation, rewrites, and runtime availability helpers
+│   │   ├── test_routes.py      # Flask integration tests via test client (all HTTP routes)
+│   │   ├── test_run_history_share.py # Higher-value /run, history, share, fake-command, and persistence flows
+│   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and fake-command resolution
+│   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
+│   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
+│   │   └── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
+│   └── js/
+│       ├── unit/               # Vitest unit tests for browser-module logic
+│       │   ├── helpers/
+│       │   │   └── extract.js  # fromScript() helper — loads browser JS into jsdom via new Function
+│       │   ├── app.test.js         # bootstrap wiring, mobile shell/run-button regressions, prompt/composer boundaries, and modal controls
+│       │   ├── runner.test.js      # elapsed formatting, run/kill edge cases, stall recovery
+│       │   ├── history.test.js     # starring, clipboard, delete/clear failures, mobile chip behavior, draft restore
+│       │   ├── state.test.js       # composer state store accessors and reset behavior
+│       │   ├── tabs.test.js        # tab lifecycle, rename, overflow, export guards, permalink copy
+│       │   ├── output.test.js      # ANSI rendering, timestamp/line-number mode, HTML export
+│       │   ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
+│       │   ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
+│       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
+│       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
+│       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
+│       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
+│       └── e2e/                # Playwright end-to-end tests (require running Flask server)
+│           ├── helpers.js      # runCommand/openHistory helpers
+│           ├── commands.spec.js # command execution, denial, and status rendering
+│           ├── failure-paths.spec.js  # /run denial/rate limit, share/history failure toasts
+│           ├── runner-stall.spec.js   # SSE stall recovery
+│           ├── boot-resilience.spec.js # startup fetch fallbacks and core UI smoke checks
+│           ├── kill.spec.js    # kill confirmation and running-tab stop behavior
+│           ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
+│           ├── output.spec.js  # copy/clear/save/export behavior
+│           ├── rate-limit.spec.js # per-session /run rate limiting
+│           ├── readme-screenshot.spec.js # Refreshes the README hero screenshot during Playwright runs
+│           ├── search.spec.js  # search/highlight/navigation behavior
+│           ├── share.spec.js   # snapshot permalinks and clipboard behavior
+│           ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup
+│           ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
+│           ├── timestamps.spec.js # timestamp and line-number toggle behavior
+│           ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
+│           ├── welcome.spec.js # welcome animation/browser interaction coverage
+│           └── tabs.spec.js    # tab lifecycle, rename, reorder, and new-tab behavior
+├── examples/
+│   ├── docker-compose.prod.yml  # Optional production Docker Compose override (GELF, proxy env, external network)
+│   └── run_local.sh             # Script to run without Docker using Python directly
+├── data/                       # Writable volume — SQLite database (auto-created)
+│   └── history.db              #   stores run history and tab snapshots
+└── app/
+    ├── app.py                  # Flask factory — logging setup, blueprint registration, before/after-request hooks
+    ├── extensions.py           # Flask-Limiter singleton (init_app deferred to app.py)
+    ├── helpers.py              # Trusted-proxy IP resolver and session-ID extractor (used by all blueprints)
+    ├── blueprints/
+    │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
+    │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
+    │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
+    │   └── history.py          # /history*, /share*; preview-output shaping helpers
+    ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
+    ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
+    ├── logging_setup.py        # structured logging formatters and logger configuration
+    ├── database.py             # SQLite connection, schema init, retention pruning
+    ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
+    ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
+    ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
+    ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
+    ├── favicon.ico             # Site favicon
+    ├── conf/                   # Operator-configurable files — edit these to customize the deployment
+    │   ├── config.yaml             # Application configuration (see Configuration section)
+    │   ├── config.local.yaml       # Optional untracked deployment overrides loaded after config.yaml; sibling *.local.* overlays are also supported
+    │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
+    │   ├── auto_complete.txt       # Autocomplete suggestions (one entry per line)
+    │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
+    │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
+    │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
+    │   ├── app_hints_mobile.txt    # Mobile rotating footer hints for the welcome animation (optional)
+    │   ├── faq.yaml                # Custom FAQ entries appended to the built-in FAQ (optional)
+    │   └── welcome.yaml            # Welcome command samples with optional group/featured metadata (optional)
+    ├── templates/
+    │   ├── index.html          # Frontend HTML shell rendered by Flask
+    │   ├── diag.html           # Operator diagnostics page (IP-gated, uses active theme)
+    │   ├── permalink_base.html # Shared shell for permalink pages
+    │   ├── permalink.html      # Live permalink page template
+    │   └── permalink_error.html # Missing/expired permalink template
+    ├── requirements.txt        # Python runtime dependencies
+    └── static/
+        ├── css/
+        │   ├── styles.css      # Compatibility entrypoint that imports the modular CSS files in order
+        │   ├── base.css        # Theme tokens, reset, base layout, header, input, and dropdown foundations
+        │   ├── shell.css       # Terminal shell frame, panels, history row, utility buttons, and modals
+        │   ├── components.css  # Tabs, search UI, permalink/history surfaces, toast, and menu components
+        │   ├── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
+        │   └── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
+        ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
+        └── js/
+            ├── session.js      # Session UUID + apiFetch wrapper (loads first)
+            ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
+            ├── config.js       # APP_CONFIG defaults
+            ├── dom.js          # Shared DOM element references
+            ├── state.js        # Shared app-state store/accessors
+            ├── ui_helpers.js   # DOM-facing helpers and visibility setters
+            ├── tabs.js         # Tab lifecycle management
+            ├── output.js       # ANSI rendering and line management
+            ├── search.js       # In-output search (with case-sensitive and regex modes)
+            ├── autocomplete.js # Command autocomplete dropdown
+            ├── export_html.js  # Shared export HTML builder / embedded-font helper
+            ├── history.js      # Command history chips and drawer (with starring)
+            ├── welcome.js      # Welcome startup animation (ASCII, status lines, samples, hints)
+            ├── runner.js       # Command execution, SSE stream, kill, stall detection
+            ├── app.js          # Shared UI helpers, overlays, and mobile-layout glue
+            ├── controller.js   # Initialization and event wiring (loads after app.js)
+            └── vendor/
+                └── ansi_up.js  # ANSI-to-HTML library — committed browser-global build copied into
+                                #   /usr/local/share/shell-assets for the image; repo copy remains the
+                                #   fallback for local/docker-compose runs
+```
 
 ---
 
@@ -1271,4 +1219,4 @@ These checks run automatically via the GitLab CI pipeline (`.gitlab-ci.yml`), in
 
 - Docker + Docker Compose (Redis is included as a service), **or** Python 3.12+ with Flask ≥ 2.0, Gunicorn, PyYAML, Flask-Limiter[redis], and redis-py
 - Linux host (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- Redis 6.2+ (for `GETDEL` support) — provided by the Docker Compose service; optional in local dev (app falls back to in-process mode)
+- Redis 6.2+ (for `GETDEL` support) — provided by the Docker Compose service; optional in local development (app falls back to in-process mode)

@@ -72,7 +72,7 @@ All notable changes to darklab shell are documented here.
 - **Mobile `composerRefs.row` stealing focus from taps** — tapping on the mobile composer input bubbled to the row's `pointerdown`/`touchstart` handlers, which called `focusCommandInputFromGesture()` and reset the cursor. The row handlers now exclude the mobile input element as a valid trigger target.
 - **macOS accent picker / hold-to-repeat on desktop** — holding a key on the desktop prompt on macOS would open the OS accent chooser instead of repeating the character. The `cmdInput` keydown handler now calls `e.preventDefault()` for all printable, non-modifier, non-IME keys and manually inserts the character via `replaceCmdRange`, signalling to the OS that the key event is handled and suppressing the accent picker. The handler is skipped while the welcome intro is active so Space/Enter/Escape welcome-settle triggers and printable insertion remain under the `document` keydown handler that owns welcome key routing.
 - **Desktop hidden input soft-keyboard guard** — `#cmd` (the hidden desktop input) now carries `inputmode="none"` so mobile browsers do not raise the soft keyboard if the element receives focus unexpectedly.
-- **Desktop command chip row overflow** — the recent-command chip row now truncates to a single line on desktop. Chips that would wrap to a second row are removed and replaced with a `+ more` chip that opens the run history drawer, matching the behaviour of the mobile chip row (which caps at three chips). The chip count re-evaluates on window resize. A `max-height` clip on `.history-row` ensures any briefly-wrapped chips during render are never painted before JS removes them.
+- **Desktop command chip row overflow** — the recent-command chip row now truncates to a single line on desktop. Chips that would wrap to a second row are removed and replaced with a `+ more` chip that opens the run history drawer, matching the behavior of the mobile chip row (which caps at three chips). The chip count re-evaluates on window resize. A `max-height` clip on `.history-row` ensures any briefly-wrapped chips during render are never painted before JS removes them.
 - **Text selection in terminal output** — clicking and dragging to select output text no longer immediately clears the selection by stealing focus back to the command prompt. The `terminalBody` click handler now skips `focusAnyComposerInput` when `window.getSelection().toString()` is non-empty so a just-completed drag selection survives.
 - **Keystrokes forwarded after selecting text** — pressing a printable key while focus is outside the command input (e.g. after selecting output text) now forwards the keystroke to the prompt instead of discarding it. A catch-all at the end of the `document` keydown handler focuses `cmdInput`, inserts the character via `replaceCmdRange`, and calls `e.preventDefault()`. The catch-all is skipped when a modal is open, when the target is a button or link, or when the target is an editable field.
 - **Scroll to bottom on typing** — typing in either the desktop or mobile composer now immediately scrolls the active output to the bottom and resets `followOutput` to `true`. Previously, if the user had scrolled up to review output, typing did not return the view to the prompt.
@@ -310,8 +310,8 @@ All notable changes to darklab shell are documented here.
 - **Shared command availability handling** — runtime command availability is now checked in the shared command layer so missing binaries return the same clean instance-level message for both fake commands and normal allowlisted `/run` commands instead of surfacing raw OS errors or shell failures
 - `history.js` — loading a run from the history drawer now sets `tab.command` on the newly created tab, so switching away and back correctly restores the command in the input bar (previously only tabs created by running a command directly had their command recalled)
 - `history.js` — clicking a history entry whose command is already loaded in another tab now switches to that existing tab instead of opening a duplicate; the history panel closes as normal
-- `history.js` — deleting a history entry now removes the command from the starred set and chip bar; previously the star persisted in localStorage so the command would reappear as a favourite the next time it was run
-- `history.js` — deleting all history now clears the entire starred set and chip bar; deleting non-favourites removes only the unstarred commands from the chip bar while leaving starred chips intact
+- `history.js` — deleting a history entry now removes the command from the starred set and chip bar; previously the star persisted in localStorage so the command would reappear as a favorite the next time it was run
+- `history.js` — deleting all history now clears the entire starred set and chip bar; deleting non-favorites removes only the unstarred commands from the chip bar while leaving starred chips intact
 - `process.py` — `pid_pop` now wraps the Redis `getdel` return value with `str()` before passing to `int()`, resolving a Pylance type error caused by `ResponseT` being assignable to `Awaitable[Any]`
 - `tests/py/test_utils.py` — added `assert result is not None` before `len()` and index access on `load_allowed_commands_grouped()` results to satisfy Pylance's type narrowing (`list | None` is not `Sized`)
 - Logging timing fix — `configure_logging(CFG)` is now called before `from process import ...` so Redis connection log records emitted at module-import time are formatted correctly; previously they fired before `logging.basicConfig` and were silently dropped by Python's lastResort handler
@@ -334,6 +334,7 @@ All notable changes to darklab shell are documented here.
 - `app.py` — removed `logging.basicConfig(...)` block; logging is now fully managed by `logging_setup.configure_logging()`
 - `database.py` — uses the `shell` logger; retention pruning logs `DB_PRUNED` when records are deleted; `db_init()` refactored into three private helpers (`_create_schema`, `_migrate_schema`, `_prune_retention`) for clearer separation of concerns
 - `README.md` / `ARCHITECTURE.md` — updated to document the new logging system, all event names, GELF integration, and module dependency order
+- `ARCHITECTURE.md` / `DECISIONS.md` — split current-system architecture from the architectural rationale and implementation-history notes so the runtime diagrams and the decision log have separate owners
 
 ---
 
@@ -352,7 +353,7 @@ All notable changes to darklab shell are documented here.
 - **Welcome timing config** — four new `config.yaml` keys: `welcome_char_ms`, `welcome_jitter_ms`, `welcome_post_cmd_ms`, `welcome_inter_block_ms`
 - **`/welcome` API endpoint** — serves `welcome.yaml` blocks for the startup typeout animation
 - **Netcat** (`nc`) added to allowed commands and Dockerfile
-- **Expanded test suite** — 362 tests (+166) covering new route behaviour, session isolation, rate limiting, database pruning, permalink expiry, welcome/autocomplete loaders, run/history/share edge cases, and config endpoint fields; new `test_logging.py` with 94 tests for the structured logging module
+- **Expanded test suite** — 362 tests (+166) covering new route behavior, session isolation, rate limiting, database pruning, permalink expiry, welcome/autocomplete loaders, run/history/share edge cases, and config endpoint fields; new `test_logging.py` with 94 tests for the structured logging module
 
 ### Changed
 - **App modularisation** — `app.py` split into `commands.py`, `config.py`, `database.py`, `permalinks.py`, and `process.py` for cleaner separation of concerns
@@ -393,5 +394,5 @@ All notable changes to darklab shell are documented here.
 - **Security tools** — nmap, masscan, naabu, httpx, nuclei, subfinder, dnsx, katana, nikto, wapiti3, wpscan, mtr (report mode), dig, host, whois, curl, ffuf, gobuster, feroxbuster and more
 - **SecLists wordlists** — full collection installed at `/usr/share/wordlists/seclists/`
 - **ARCHITECTURE.md** — documents the system design, data flow, module structure, and database schema
-- **Unit test suite** — pytest tests covering command validation, route behaviour, rate limiting, and deny-rule logic; lint enforced via flake8
+- **Unit test suite** — pytest tests covering command validation, route behavior, rate limiting, and deny-rule logic; lint enforced via flake8
 - **ARIA accessibility** — labelled inputs and buttons throughout the UI
