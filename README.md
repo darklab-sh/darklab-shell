@@ -9,6 +9,7 @@ _This screenshot is refreshed by the Playwright e2e suite and can be regenerated
 
 ## Table of Contents
 - [Architecture At A Glance](#architecture-at-a-glance)
+- [Documentation Map](#documentation-map)
 - [Features](#features)
 - [Quick Start](#quick-start)
 - [Feature Details](#feature-details)
@@ -53,6 +54,18 @@ For details, use the specialized docs instead of this README:
   - `Persistence Model`
 - [DECISIONS.md](DECISIONS.md) for architectural rationale and tradeoffs
 - [tests/README.md](tests/README.md) for the canonical test inventory, focused run commands, and maintenance notes
+
+---
+
+## Documentation Map
+
+Use the README as the entrypoint, then go deeper with the specialized docs:
+
+- [ARCHITECTURE.md](ARCHITECTURE.md) — current system structure, runtime boundaries, data flow, and Mermaid diagrams
+- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
+- [THEME.md](THEME.md) — theme system reference, token behavior, fallback rules, and authoring workflow
+- [tests/README.md](tests/README.md) — test setup, suite selection guidance, artifact notes, and the full appendix
+- [CHANGELOG.md](CHANGELOG.md) — released changes by version
 
 ---
 
