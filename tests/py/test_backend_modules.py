@@ -30,7 +30,7 @@ import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
-    load_mobile_welcome_hints, load_autocomplete, load_autocomplete_context,
+    load_mobile_welcome_hints, load_autocomplete_context,
     load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
@@ -1017,67 +1017,6 @@ class TestMobileWelcomeHintLoading:
         finally:
             os.unlink(path)
 
-
-# ── load_autocomplete ─────────────────────────────────────────────────────────
-
-class TestAutocompleteLoading:
-    def test_missing_yaml_returns_empty_list(self):
-        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nonexistent/autocomplete_context.yaml"):
-            result = load_autocomplete()
-        assert result == []
-
-    def test_valid_entries_returned_from_flat_suggestions(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            flat_suggestions:
-              - nmap -sV
-              - ping -c 4
-              - dig @1.1.1.1
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete()
-        finally:
-            os.unlink(path)
-        assert result == ["nmap -sV", "ping -c 4", "dig @1.1.1.1"]
-
-    def test_blank_yaml_entries_filtered(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            flat_suggestions:
-              - ping -c 4
-              - ""
-              - "   "
-              - dig google.com
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete()
-        finally:
-            os.unlink(path)
-        assert result == ["ping -c 4", "dig google.com"]
-
-    def test_local_overlay_appends_unique_entries(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                flat_suggestions:
-                  - nmap -sV
-                  - ping -c 4
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                flat_suggestions:
-                  - ping -c 4
-                  - curl http://localhost:5001/health
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete()
-        assert result == ["nmap -sV", "ping -c 4", "curl http://localhost:5001/health"]
 
 class TestAutocompleteContextLoading:
     def test_missing_context_file_returns_empty_mapping(self):

@@ -2,24 +2,48 @@
 
 This document records the key architectural decisions, tradeoffs, bugs, and implementation lessons that shaped the current design of darklab shell.
 
-Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures.
+Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures. If you are about to change something and want to know what has historically caused problems, skip to [Known Gotchas And Lessons Learned](#known-gotchas-and-lessons-learned).
 
 ---
 
 ## Table of Contents
+
 - [Runtime And Coordination Decisions](#runtime-and-coordination-decisions)
-- [Observability Decisions](#observability-decisions)
+  - [Real-time Output: SSE over WebSockets](#real-time-output-sse-over-websockets)
+  - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
+  - [Rate Limiting via Redis](#rate-limiting-via-redis)
 - [Security And Isolation Decisions](#security-and-isolation-decisions)
+  - [Cross-User Process Killing](#cross-user-process-killing)
+  - [Two-User Security Model](#two-user-security-model)
+  - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
+  - [Loopback Address Blocking](#loopback-address-blocking)
+  - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
 - [Deployment And Packaging Decisions](#deployment-and-packaging-decisions)
+  - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
+  - [nmap Capabilities](#nmap-capabilities)
+  - [Go Binary Installation](#go-binary-installation)
+  - [SQLite WAL Mode](#sqlite-wal-mode)
+- [Observability Decisions](#observability-decisions)
+  - [Structured Logging](#structured-logging)
 - [Frontend Decisions](#frontend-decisions)
+  - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Dedicated Mobile Shell](#dedicated-mobile-shell)
-- [Known Gotchas & Lessons Learned](#known-gotchas--lessons-learned)
+- [Known Gotchas And Lessons Learned](#known-gotchas-and-lessons-learned)
+  - [Runtime Streaming And Process Lifecycle](#runtime-streaming-and-process-lifecycle)
+  - [Container And Filesystem Behavior](#container-and-filesystem-behavior)
+  - [Frontend And Rendering Gotchas](#frontend-and-rendering-gotchas)
+  - [Long-Running And Local-Dev Edge Cases](#long-running-and-local-dev-edge-cases)
+- [Related Docs](#related-docs)
+
+---
 
 ## Runtime And Coordination Decisions
 
 ### Real-time Output: SSE over WebSockets
 
-Server-Sent Events (SSE) were chosen over WebSockets for output streaming. SSE is simpler to implement with Flask, works correctly behind nginx-proxy without additional configuration, and is unidirectional (server → client) which is all that's needed for streaming command output. The frontend reads the SSE stream via `fetch()` + `ReadableStream` rather than the `EventSource` API, because `EventSource` doesn't support custom headers (needed for the session ID).
+**SSE was chosen over WebSockets for output streaming.**
+
+Server-Sent Events are simpler to implement with Flask, work correctly behind nginx-proxy without additional configuration, and are unidirectional (server → client) which is all that's needed for streaming command output. The frontend reads the SSE stream via `fetch()` + `ReadableStream` rather than the `EventSource` API, because `EventSource` doesn't support custom headers (needed for the session ID).
 
 ### Multi-worker Process Killing via Redis
 
@@ -46,6 +70,105 @@ Request identity now follows an explicit trusted-proxy allowlist (`trusted_proxy
 
 This is what motivated the Redis addition in the first place. Once Redis was a dependency for rate limiting, it became the natural fit for PID tracking too (replacing the SQLite `active_procs` workaround).
 
+---
+
+## Security And Isolation Decisions
+
+### Cross-User Process Killing
+
+**Problem:** Gunicorn runs as `appuser`, commands run as `scanner`. Linux won't let `appuser` signal `scanner`-owned processes.
+
+**Solution:** `sudo -u scanner kill -TERM -<pgid>`. The sudoers rule `appuser ALL=(scanner) NOPASSWD: ALL` covers this. The kill sends to the entire process group (negative pgid) to catch child processes spawned by the shell.
+
+**PGID capture timing:** The `/kill` endpoint stores the subprocess PID at spawn time and uses it directly as the PGID (`pgid = pid`) rather than calling `os.getpgid(pid)` at kill time. Since all subprocesses are spawned with `preexec_fn=os.setsid`, PGID equals PID at creation, making the stored PID a safe stand-in. The alternative — calling `os.getpgid()` after `proc.wait()` has reaped the process — returns the PGID of whatever new process reused that PID. If that new process is a freshly spawned Gunicorn worker (workers and scanner subprocesses draw from the same kernel PID pool), `kill -TERM -<worker_pgid>` sends SIGTERM to the entire Gunicorn worker pool.
+
+### Two-User Security Model
+
+**The container runs two unprivileged users: `appuser` for the web process and `scanner` for all user-submitted commands.**
+
+- **`appuser`** — runs Gunicorn, owns `/data` (chmod 700), can write SQLite
+- **`scanner`** — runs all user-submitted commands via `sudo -u scanner env HOME=/tmp`, no write access to `/data`
+
+`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei, wapiti, and subfinder all write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
+
+### Path Blocking (/data and /tmp)
+
+**Filesystem path references to `/data` and `/tmp` are blocked at validation time using a regex with a negative lookbehind.**
+
+The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because `/data` is preceded by `m`.
+
+Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
+
+### Loopback Address Blocking
+
+**Loopback addresses are blocked at validation time to prevent commands from reaching internal Flask endpoints.**
+
+Commands containing loopback addresses (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) anywhere in the command string are blocked by `_LOOPBACK_RE` in `commands.py`. The regex uses word-boundary anchors (`\b`) so hostnames like `notlocalhost.com` are not caught.
+
+**Why this matters:** the web shell runs commands as the `scanner` user inside the container. Without this block, a user could submit `curl http://localhost:8888/diag` or `curl 127.0.0.1:8888/config` as a command and reach internal Flask endpoints directly. This is not prevented by the `/diag` CIDR gate alone, since connections from inside the container arrive as `127.0.0.1` and would pass any gate that includes that address.
+
+Three complementary layers enforce the restriction:
+
+1. **Server-side regex** (`commands.py` `_is_command_allowed`) — authoritative; catches any tool and any URL form (bare hostname, with port, with scheme, etc.)
+2. **Allowlist deny entries** (`conf/allowed_commands.txt`) — client-side feedback for the most obvious bare-hostname patterns (`!curl localhost`, `!curl 127.0.0.1`, etc.)
+3. **iptables rule** (`entrypoint.sh`) — OS-level TCP block for the `scanner` uid on the app port; fires before the Flask app sees the request and covers tools that bypass command validation (e.g. scripting languages)
+
+The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It uses `REJECT --reject-with tcp-reset` so connections from the scanner user fail immediately rather than timing out. The `|| true` ensures the rule failure does not abort startup in environments where `xt_owner` is unavailable.
+
+### Deny Flag Matching (anywhere in command)
+
+Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `conf/allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
+
+`_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `!curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `!nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `!gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
+
+**`/dev/null` exception:** a denied output flag is allowed when its argument is `/dev/null` (e.g. `curl -o /dev/null -s -w "%{http_code}" <url>`). This is a common pattern for checking HTTP response codes without writing to the filesystem. The exception checks for `flag /dev/null\b` immediately after the flag match.
+
+---
+
+## Deployment And Packaging Decisions
+
+### Startup Sequence (entrypoint.sh)
+
+Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (Docker volume mounts reset ownership to the host user) → sets `/tmp` to `1777` → pre-creates `/tmp/.config/nuclei`, `/tmp/.config/uncover`, `/tmp/.cache` owned by scanner → `gosu appuser gunicorn ...`
+
+**Why `gosu` instead of `su`?** `su` forks an extra process; `gosu` does `exec` which replaces the process, giving Gunicorn PID 1 semantics.
+
+**Why `init: true` in docker-compose?** When Gunicorn is PID 1, orphaned child processes in a scanner subprocess chain are reparented to the Gunicorn master. Scanner commands run as a chain — `sudo → env → sh → tool` — and when the group receives SIGTERM all four processes die simultaneously. If an intermediate parent exits before the leaf process, the leaf becomes an orphan and is adopted by PID 1 (Gunicorn). If that tool exits with a non-zero code (e.g. `wpscan` returns 3 for "potentially interesting findings"), Gunicorn's `reap_workers()` collects it via `waitpid(-1)` and interprets `exit(3)` as `WORKER_BOOT_ERROR`, shutting the entire server down. `init: true` adds Docker's bundled tini init as PID 1; Gunicorn starts as PID 2+, and any orphaned scanner processes are silently reaped by tini without reaching Gunicorn at all.
+
+**Why pre-create `/tmp/.config`?** Without this, the first tool that tries to create it (e.g. nuclei on startup) runs as `scanner`, but the directory doesn't exist yet. If anything root-level touches `$HOME` before the user switch completes, it creates `/tmp/.config` owned by root with `700`, and `scanner` can never write to it.
+
+### nmap Capabilities
+
+**nmap file capabilities (`setcap`) are used instead of running the container privileged.**
+
+nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN scans:
+
+```
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+```
+
+This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
+
+The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rewrite_command()` so users don't need to add it. Without it, nmap falls back to limited scan modes even with the capabilities set.
+
+### Go Binary Installation
+
+**Go tools are installed with `GOBIN=/usr/local/bin` so they are accessible to the `scanner` user.**
+
+All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
+
+`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library that `wapiti3` pulls in as a dependency.
+
+### SQLite WAL Mode
+
+**SQLite runs in WAL mode to support concurrent reads from multiple Gunicorn workers.**
+
+SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=NORMAL`. This allows concurrent reads during writes, which is important with 4 Gunicorn workers all reading/writing the same database simultaneously. The `db_connect()` function applies these pragmas on every connection.
+
+Startup bootstrap is still serialized explicitly. `database.py` calls `db_init()` at module import time, so all Gunicorn workers can reach schema creation, migration, and retention pruning concurrently during boot. `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so that import-time bootstrap work happens once at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
+
+---
+
 ## Observability Decisions
 
 ### Structured Logging
@@ -69,86 +192,7 @@ The concrete event inventory and the operator-facing description of the `text` a
 
 **Timing note:** `client_ip` is captured once at the top of `run_command()` as a local variable before the `generate()` closure is defined. This avoids a hidden dependency on Flask's request context being active when the generator body runs during streaming. The same `client_ip` local is closed over in `generate()`.
 
-## Security And Isolation Decisions
-
-### Cross-User Process Killing
-
-**Problem:** Gunicorn runs as `appuser`, commands run as `scanner`. Linux won't let `appuser` signal `scanner`-owned processes.
-
-**Solution:** `sudo -u scanner kill -TERM -<pgid>`. The sudoers rule `appuser ALL=(scanner) NOPASSWD: ALL` covers this. The kill sends to the entire process group (negative pgid) to catch child processes spawned by the shell.
-
-**PGID capture timing:** The `/kill` endpoint stores the subprocess PID at spawn time and uses it directly as the PGID (`pgid = pid`) rather than calling `os.getpgid(pid)` at kill time. Since all subprocesses are spawned with `preexec_fn=os.setsid`, PGID equals PID at creation, making the stored PID a safe stand-in. The alternative — calling `os.getpgid()` after `proc.wait()` has reaped the process — returns the PGID of whatever new process reused that PID. If that new process is a freshly spawned Gunicorn worker (workers and scanner subprocesses draw from the same kernel PID pool), `kill -TERM -<worker_pgid>` sends SIGTERM to the entire Gunicorn worker pool.
-
-### Two-User Security Model
-
-- **`appuser`** — runs Gunicorn, owns `/data` (chmod 700), can write SQLite
-- **`scanner`** — runs all user-submitted commands via `sudo -u scanner env HOME=/tmp`, no write access to `/data`
-
-`HOME=/tmp` is critical. Without it, `sudo` resets HOME to `/home/scanner` which doesn't exist on the read-only filesystem. Tools like nuclei, wapiti, and subfinder all write to `$HOME` at startup and will fail with "read-only filesystem" errors without this.
-
-### Path Blocking (/data and /tmp)
-
-Commands referencing `/data` or `/tmp` as filesystem paths are blocked at validation time using the regex `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because `/data` is preceded by `m`.
-
-Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
-
-### Loopback Address Blocking
-
-Commands containing loopback addresses (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) anywhere in the command string are blocked at validation time by `_LOOPBACK_RE` in `commands.py`. The regex uses word-boundary anchors (`\b`) so hostnames like `notlocalhost.com` are not caught.
-
-**Why this matters:** the web shell runs commands as the `scanner` user inside the container. Without this block, a user could submit `curl http://localhost:8888/diag` or `curl 127.0.0.1:8888/config` as a command and reach internal Flask endpoints directly. This is not prevented by the `/diag` CIDR gate alone, since connections from inside the container arrive as `127.0.0.1` and would pass any gate that includes that address.
-
-Three complementary layers enforce the restriction:
-
-1. **Server-side regex** (`commands.py` `_is_command_allowed`) — authoritative; catches any tool and any URL form (bare hostname, with port, with scheme, etc.)
-2. **Allowlist deny entries** (`conf/allowed_commands.txt`) — client-side feedback for the most obvious bare-hostname patterns (`!curl localhost`, `!curl 127.0.0.1`, etc.)
-3. **iptables rule** (`entrypoint.sh`) — OS-level TCP block for the `scanner` uid on the app port; fires before the Flask app sees the request and covers tools that bypass command validation (e.g. scripting languages)
-
-The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It uses `REJECT --reject-with tcp-reset` so connections from the scanner user fail immediately rather than timing out. The `|| true` ensures the rule failure does not abort startup in environments where `xt_owner` is unavailable.
-
-### Deny Flag Matching (anywhere in command)
-
-Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `conf/allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
-
-`_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `!curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `!nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `!gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
-
-**`/dev/null` exception:** a denied output flag is allowed when its argument is `/dev/null` (e.g. `curl -o /dev/null -s -w "%{http_code}" <url>`). This is a common pattern for checking HTTP response codes without writing to the filesystem. The exception checks for `flag /dev/null\b` immediately after the flag match.
-
-## Deployment And Packaging Decisions
-
-### Startup Sequence (entrypoint.sh)
-
-Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (Docker volume mounts reset ownership to the host user) → sets `/tmp` to `1777` → pre-creates `/tmp/.config/nuclei`, `/tmp/.config/uncover`, `/tmp/.cache` owned by scanner → `gosu appuser gunicorn ...`
-
-**Why `gosu` instead of `su`?** `su` forks an extra process; `gosu` does `exec` which replaces the process, giving Gunicorn PID 1 semantics.
-
-**Why `init: true` in docker-compose?** When Gunicorn is PID 1, orphaned child processes in a scanner subprocess chain are reparented to the Gunicorn master. Scanner commands run as a chain — `sudo → env → sh → tool` — and when the group receives SIGTERM all four processes die simultaneously. If an intermediate parent exits before the leaf process, the leaf becomes an orphan and is adopted by PID 1 (Gunicorn). If that tool exits with a non-zero code (e.g. `wpscan` returns 3 for "potentially interesting findings"), Gunicorn's `reap_workers()` collects it via `waitpid(-1)` and interprets `exit(3)` as `WORKER_BOOT_ERROR`, shutting the entire server down. `init: true` adds Docker's bundled tini init as PID 1; Gunicorn starts as PID 2+, and any orphaned scanner processes are silently reaped by tini without reaching Gunicorn at all.
-
-**Why pre-create `/tmp/.config`?** Without this, the first tool that tries to create it (e.g. nuclei on startup) runs as `scanner`, but the directory doesn't exist yet. If anything root-level touches `$HOME` before the user switch completes, it creates `/tmp/.config` owned by root with `700`, and `scanner` can never write to it.
-
-### nmap Capabilities
-
-nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN scans. Rather than running the container privileged:
-
-```
-setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
-```
-
-This grants the capabilities to the binary itself — any user who executes nmap gets them for the duration of that process only. `docker-compose.yml` must also have `cap_add: [NET_RAW, NET_ADMIN]` or the host kernel won't make those capabilities available to the container.
-
-The `--privileged` flag (nmap's own flag, not Docker's) is auto-injected by `rewrite_command()` so users don't need to add it. Without it, nmap falls back to limited scan modes even with the capabilities set.
-
-### Go Binary Installation
-
-All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed with `ENV GOBIN=/usr/local/bin` in the Dockerfile. This puts binaries directly in `/usr/local/bin` with world-executable permissions, accessible to the `scanner` user. Without this, Go installs to `/root/go/bin` which is root-owned and inaccessible to `scanner`. Previous symlinks from `/root/go/bin/` to `/usr/local/bin/` also fail because symlinks inherit the target's permissions issue.
-
-`httpx` is renamed to `pd-httpx` via `mv` after install to avoid shadowing the Python `httpx` library that `wapiti3` pulls in as a dependency.
-
-### SQLite WAL Mode
-
-SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=NORMAL`. This allows concurrent reads during writes, which is important with 4 Gunicorn workers all reading/writing the same database simultaneously. The `db_connect()` function applies these pragmas on every connection.
-
-Startup bootstrap is still serialized explicitly. `database.py` calls `db_init()` at module import time, so all Gunicorn workers can reach schema creation, migration, and retention pruning concurrently during boot. `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so that import-time bootstrap work happens once at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
+---
 
 ## Frontend Decisions
 
@@ -160,7 +204,7 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 
 ### Dedicated Mobile Shell
 
-The mobile UI still uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The difference now is that the shell was deliberately simplified back to a normal-flow layout after a focused repro proved the Firefox mobile bug was coming from the app’s integration layer, not from the browser itself.
+The mobile UI still uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The difference now is that the shell was deliberately simplified back to a normal-flow layout after a focused repro proved the Firefox mobile bug was coming from the app's integration layer, not from the browser itself.
 
 The current shape is intentional:
 
@@ -175,7 +219,9 @@ The key architectural decision here is negative: the app no longer tries to outs
 
 This keeps the mobile surface structured without needing a separate frontend bundle or framework split, while preserving the simplified layout that fixed the Firefox mobile issue.
 
-## Known Gotchas & Lessons Learned
+---
+
+## Known Gotchas And Lessons Learned
 
 ### Runtime Streaming And Process Lifecycle
 
@@ -217,8 +263,9 @@ This keeps the mobile surface structured without needing a separate frontend bun
 
 ## Related Docs
 
-- [README.md](README.md)
-- [CONTRIBUTORS.md](CONTRIBUTORS.md)
-- [ARCHITECTURE.md](ARCHITECTURE.md)
-- [tests/README.md](tests/README.md)
-- [THEME.md](THEME.md)
+- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
+- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
+- [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) — local setup, test workflow, linting, and merge request guidance
+- [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
+- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

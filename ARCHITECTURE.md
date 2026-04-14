@@ -6,12 +6,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 
 ---
 
-## Project Overview
-
-A web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, real-time SSE streaming.
-
 ## Table of Contents
-- [Project Overview](#project-overview)
 - [System Overview](#system-overview)
 - [Logical Runtime Layers](#logical-runtime-layers)
 - [Runtime Topology](#runtime-topology)
@@ -21,14 +16,19 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 - [Persistence Model](#persistence-model)
 - [Logging](#logging)
 - [Runtime Security Model](#runtime-security-model)
+- [Shell Prompt Model](#shell-prompt-model)
+- [Config Loading](#config-loading)
+- [Theme System](#theme-system)
 - [Test Suite](#test-suite)
-- [Testing Architecture](#testing-architecture)
-- [Database](#database)
 - [Production Deployment Notes](#production-deployment-notes)
+
+---
 
 ## System Overview
 
-At a mid to high level, darklab shell works like this:
+darklab shell is a web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, and real-time SSE streaming.
+
+At a mid to high level, it works like this:
 
 - A browser-based terminal UI loads a Flask-rendered shell page, then hydrates itself from focused read routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
@@ -156,17 +156,19 @@ There are three core request classes:
 
 That split is reflected directly in the blueprint structure.
 
+---
+
 ## HTTP Route Inventory
 
 This route list belongs in the architecture document because it describes the application surface that contributors maintain, not the operator workflow.
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/` | Serves the Flask-rendered shell UI shell and theme bootstrap |
+| `GET` | `/` | Serves the Flask-rendered shell UI and theme bootstrap |
 | `GET` | `/favicon.ico` | Serves the site favicon |
 | `GET` | `/config` | Returns browser-facing runtime config as JSON |
 | `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
-| `GET` | `/autocomplete` | Returns flat suggestions plus structured command-context autocomplete data as JSON |
+| `GET` | `/autocomplete` | Returns structured command-context autocomplete data as JSON |
 | `GET` | `/faq` | Returns the canonical FAQ dataset as JSON: built-in entries plus any custom `faq.yaml` items |
 | `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
 | `GET` | `/welcome/ascii` | Returns the desktop welcome ASCII banner from `ascii.txt` as plain text |
@@ -183,6 +185,8 @@ This route list belongs in the architecture document because it describes the ap
 | `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
 | `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}`; `redis` is `null` when Redis is not configured |
 | `GET` | `/diag` | IP-gated operator diagnostics page or JSON summary; 404 unless the resolved client IP is in `diagnostics_allowed_cidrs` |
+
+---
 
 ## Frontend Composition
 
@@ -227,9 +231,23 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 - domain scripts own tab/output/search/history/welcome/runner logic
 - `config.js` and `app.js` handle bootstrap concerns, while `controller.js` is the composition root and last loader
 
-The important recent architectural change is that prompt ownership now lives in `composerState`, not in whichever DOM input happened to update last.
+The important recent architectural change is that prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
 The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, and snapshot redaction defaults all sit in the frontend layer rather than in `config.yaml`.
+
+### Frontend Architecture
+
+Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. CSS is split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, and `mobile.css`. Logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
+
+Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built with direct DOM node creation instead of stitched HTML strings, and the template’s modal chrome uses class-based wrappers for hidden state and dialog layout. That keeps the render paths more maintainable without changing the page composition model.
+
+External dependencies: local vendor routes backed by build-time font downloads and a copied-in `ansi_up` browser build for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the checked-in browser-global file at `static/js/vendor/ansi_up.js` serves as the fallback for local development and docker-compose runs. The Dockerfile copies that same file into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
+
+**JS module load order:** `session.js` → `state.js` → `utils.js` → `config.js` → `dom.js` → `ui_helpers.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `controller.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, `app.js` still provides reusable browser helpers, and `controller.js` owns the composition root and must load last so it can wire the DOM after all helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
+
+**Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
+
+---
 
 ## Persistence Model
 
@@ -308,6 +326,31 @@ flowchart TB
 - `commands.py` and `fake_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
+### Database
+
+`./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
+
+- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
+- `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
+- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
+- Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
+  - `/history/active` covers in-flight runs owned by the server/session
+  - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
+
+The storage model is intentionally split:
+
+- live tabs and normal history restore use `max_output_lines` and the `runs.output_preview` payload, which keeps only the most recent preview lines
+- full-output persistence is controlled by backend-only config keys `persist_full_run_output` and `full_output_max_mb`
+- `full_output_max_mb` is multiplied by `1024 * 1024` and enforced on the uncompressed UTF-8 stream before gzip compression, so the limit tracks output volume rather than the final on-disk `.gz` size
+- full-output artifacts for fresh runs are stored as gzip-compressed JSON-lines records, not plain text, so prompt/timestamp/class metadata can be reused by canonical run permalinks
+- the main-page permalink button upgrades to the persisted full artifact when one exists, so `/share/<id>` and `/history/<run_id>` both surface the same complete result when available
+- artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
+- deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
+
+Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Cross-User Signalling And Multi-Worker Kill above).
+
+---
+
 ## Logging
 
 The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
@@ -382,6 +425,8 @@ The current event inventory is:
 - diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the `/run` path
 - proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
 
+---
+
 ## Runtime Security Model
 
 The runtime security model is layered across process ownership, command validation, and container-level controls.
@@ -407,6 +452,21 @@ The container starts as root only long enough for `entrypoint.sh` to fix `/data`
 - when the allowlist is active, shell operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution stay blocked so users cannot chain into disallowed commands
 - `entrypoint.sh` also adds an OS-level rule blocking the `scanner` user from making outbound TCP connections back to the app port
 
+### Command Auto-Rewrites
+
+These happen in `rewrite_command()` silently (no user-visible notice unless specified):
+
+| Command | Rewrite | Reason |
+|---------|---------|--------|
+| `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
+| `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
+| `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
+| `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
+
+### Session Identity
+
+An anonymous UUID is generated in `localStorage` on first visit and sent as `X-Session-ID` header on every API call. History and run data is scoped to this session. It's not authentication — just isolation between browser sessions. The browser also keeps a separate `sessionStorage` snapshot for non-running tabs and draft input so reload restores can rebuild the recent workspace without persisting that UI state across browser sessions.
+
 ### Cross-User Signalling And Multi-Worker Kill
 
 Because commands run as `scanner` and Gunicorn runs as `appuser`, the web worker cannot directly signal `scanner`-owned processes. The kill path therefore uses `sudo -u scanner kill -TERM -<pgid>` so the signal is sent by the user that owns the process group.
@@ -427,32 +487,9 @@ setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 
 The app also injects `--privileged` into `nmap` commands during rewrite so the binary uses its available capability set. At the container layer, `docker-compose.yml` adds `NET_RAW` and `NET_ADMIN` so the kernel makes those capabilities available inside the container in the first place.
 
-## Command Auto-Rewrites
-
-These happen in `rewrite_command()` silently (no user-visible notice unless specified):
-
-| Command | Rewrite | Reason |
-|---------|---------|--------|
-| `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
-| `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
-| `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
-| `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
-
 ---
 
-## Frontend Architecture
-
-Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. CSS is now split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, and `mobile.css`. Logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
-
-Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built with direct DOM node creation instead of stitched HTML strings, and the template’s modal chrome now uses class-based wrappers for hidden state and dialog layout. That keeps the render paths more maintainable without changing the page composition model.
-
-External dependencies: local vendor routes backed by build-time font downloads and a copied-in `ansi_up` browser build for ANSI-to-HTML rendering. `ansi_up` is self-hosted — the checked-in browser-global file at `static/js/vendor/ansi_up.js` serves as the fallback for local development and docker-compose runs. The Dockerfile copies that same file into `/usr/local/share/shell-assets/js/vendor/ansi_up.js`, which the app serves through `/vendor/ansi_up.js`. The same pattern is used for fonts under `/vendor/fonts/`, with repo copies in `app/static/fonts/` acting as fallbacks.
-
-**JS module load order:** `session.js` → `state.js` → `utils.js` → `config.js` → `dom.js` → `ui_helpers.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `controller.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, `app.js` still provides reusable browser helpers, and `controller.js` owns the composition root and must load last so it can wire the DOM after all helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
-
-**Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
-
-### Shell Prompt Model
+## Shell Prompt Model
 
 The prompt architecture is built around one editing state and two render surfaces:
 
@@ -504,9 +541,7 @@ The detailed user-visible welcome behavior belongs in the README. Here, the impo
 
 Command editing is split into separate state machines rather than one overloaded dropdown path:
 
-- normal autocomplete combines two data shapes from `/autocomplete`, both sourced from `autocomplete_context.yaml`:
-  - `flat_suggestions` for whole-command matches
-  - `context` for structured command-context hints
+- normal autocomplete loads structured `context` hints from `/autocomplete`, sourced from `autocomplete.yaml`
 - reverse-history search owns its own pre-draft, query, selection, and exit paths
 - `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
 - navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
@@ -525,25 +560,19 @@ When a user clicks Kill:
 
 Without the `killed` flag, the `-15` exit code causes the exit handler to set status to ERROR, briefly flashing KILLED before reverting.
 
-### Config Loading
+---
+
+## Config Loading
 
 The frontend fetches `/config` on page load and stores the normalized payload in `APP_CONFIG`. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than `config.yaml`; backend-only persistence and storage controls do not cross that boundary.
 
-Theme styling is resolved server-side from the named YAML variants under `app/conf/themes/`, injected through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by live CSS, the runtime theme selector, `/themes`, permalink rendering, and export helpers. The important architectural property is that the same resolved theme values drive every presentation surface, rather than each surface owning its own palette logic.
-
-### Theme System
-
-Theme values are resolved server-side from named YAML variants in `app/conf/themes/` and injected into every presentation surface — live shell, permalink pages, runtime selector, and exported HTML — through a single shared palette. No surface maintains its own independent palette logic. See [THEME.md](THEME.md) for the full architecture, token reference, and authoring workflow.
-
-### Dependency Version Tracking
-
-`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, Go, pip, and gem versions. The CI `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact. See [tests/README.md](tests/README.md) for the container smoke test workflow and [DECISIONS.md](DECISIONS.md) for the rationale behind the image-validation path.
-
 Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_mb` stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB value is converted to bytes internally before any artifact truncation logic runs.
 
-### Session Identity
+---
 
-An anonymous UUID is generated in `localStorage` on first visit and sent as `X-Session-ID` header on every API call. History and run data is scoped to this session. It's not authentication — just isolation between browser sessions. The browser also keeps a separate `sessionStorage` snapshot for non-running tabs and draft input so reload restores can rebuild the recent workspace without persisting that UI state across browser sessions.
+## Theme System
+
+Theme values are resolved server-side from named YAML variants in `app/conf/themes/` and injected into every presentation surface — live shell, permalink pages, runtime selector, and exported HTML — through a single shared palette. No surface maintains its own independent palette logic. See [THEME.md](THEME.md) for the full architecture, token reference, and authoring workflow.
 
 ---
 
@@ -569,45 +598,19 @@ This split exists to keep each risk at the cheapest useful layer:
 - backend behavior stays fast and deterministic in `pytest`
 - browser-module logic is isolated in `Vitest` without changing the classic-script frontend architecture
 - browser-only integration risks such as real focus, scroll, SSE timing, and mobile layout behavior stay in `Playwright`
-- browser-visible autocomplete behavior now spans three contexts:
-  - flat whole-command suggestions
+- browser-visible autocomplete behavior spans two contexts:
   - command-root-aware flag/value suggestions
   - the narrow single-stage built-in pipe context after `command |`
 
 The browser test harness mirrors production constraints rather than abstracting them away:
 
 - the frontend remains a no-build classic-script app, so `Vitest` uses extraction helpers instead of converting the runtime to ES modules
-- `Playwright` now uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects
+- `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects
 - each parallel browser project gets its own Flask server port plus isolated `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
 
 Keep the detailed suite appendix, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).
-
----
-
-## Database
-
-`./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
-
-- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews now store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
-- `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
-- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
-- Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
-  - `/history/active` covers in-flight runs owned by the server/session
-  - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
-
-The storage model is intentionally split:
-
-- live tabs and normal history restore use `max_output_lines` and the `runs.output_preview` payload, which keeps only the most recent preview lines
-- full-output persistence is controlled by backend-only config keys `persist_full_run_output` and `full_output_max_mb`
-- `full_output_max_mb` is multiplied by `1024 * 1024` and enforced on the uncompressed UTF-8 stream before gzip compression, so the limit tracks output volume rather than the final on-disk `.gz` size
-- full-output artifacts for fresh runs are stored as gzip-compressed JSON-lines records, not plain text, so prompt/timestamp/class metadata can be reused by canonical run permalinks
-- the main-page permalink button now upgrades to the persisted full artifact when one exists, so `/share/<id>` and `/history/<run_id>` both surface the same complete result when available
-- artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
-- deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
-
-Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Multi-worker Process Killing above).
 
 ---
 
@@ -643,8 +646,9 @@ Application log format still remains an application-level choice, so operators m
 
 ## Related Docs
 
-- [README.md](README.md)
-- [CONTRIBUTORS.md](CONTRIBUTORS.md)
-- [DECISIONS.md](DECISIONS.md)
-- [tests/README.md](tests/README.md)
-- [THEME.md](THEME.md)
+- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
+- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
+- [CONTRIBUTORS.md](CONTRIBUTORS.md) — local setup, test workflow, linting, and merge request guidance
+- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
+- [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
+- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

@@ -795,59 +795,15 @@ def load_mobile_welcome_hints():
     return hints
 
 
-def _normalize_flat_autocomplete_suggestions(items):
-    if not isinstance(items, list):
-        return []
-    suggestions = []
-    seen = set()
-    for raw_item in items:
-        line = str(raw_item or "").strip()
-        if not line:
-            continue
-        key = line.lower()
-        if key in seen:
-            continue
-        seen.add(key)
-        suggestions.append(line)
-    return suggestions
-
-
 def _load_autocomplete_config(path):
     loaded = _load_yaml_mapping(path)
     if not loaded:
-        return {"flat_suggestions": [], "context": {}}
+        return {"context": {}}
 
-    raw_flat = loaded.get("flat_suggestions", [])
-    raw_context = loaded.get("context", None)
-    if raw_context is None:
-        raw_context = {
-            key: value
-            for key, value in loaded.items()
-            if key != "flat_suggestions"
-        }
-
+    raw_context = loaded.get("context", {})
     return {
-        "flat_suggestions": _normalize_flat_autocomplete_suggestions(raw_flat),
         "context": _normalize_autocomplete_context(raw_context),
     }
-
-
-def load_autocomplete():
-    """Read the unified autocomplete YAML and return flat suggestion strings."""
-    base = _load_autocomplete_config(AUTOCOMPLETE_CONTEXT_FILE)
-    root, ext = os.path.splitext(AUTOCOMPLETE_CONTEXT_FILE)
-    local = _load_autocomplete_config(f"{root}.local{ext}")
-
-    suggestions = []
-    seen = set()
-    for source in (base.get("flat_suggestions", []), local.get("flat_suggestions", [])):
-        for line in source:
-            key = line.lower()
-            if key in seen:
-                continue
-            seen.add(key)
-            suggestions.append(line)
-    return suggestions
 
 
 def _load_yaml_mapping(path):

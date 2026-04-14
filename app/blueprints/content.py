@@ -14,7 +14,6 @@ from commands import (
     load_allowed_commands_grouped,
     load_ascii_art,
     load_ascii_mobile_art,
-    load_autocomplete,
     load_autocomplete_context,
     load_mobile_welcome_hints,
     load_welcome,
@@ -204,11 +203,10 @@ def workflows():
 @content_bp.route("/autocomplete")
 def autocomplete():
     """Return unified flat and contextual autocomplete data from autocomplete_context.yaml."""
-    suggestions = load_autocomplete()
     context = load_autocomplete_context()
     special_commands = get_special_command_keys()
-    _log_content_view("/autocomplete", count=len(suggestions))
-    return jsonify({"suggestions": suggestions, "context": context, "special_commands": special_commands})
+    _log_content_view("/autocomplete")
+    return jsonify({"suggestions": [], "context": context, "special_commands": special_commands})
 
 
 @content_bp.route("/welcome")

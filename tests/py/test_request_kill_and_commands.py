@@ -19,7 +19,6 @@ from fake_commands import (
 )
 from commands import (
     load_allowed_commands_grouped,
-    load_autocomplete,
     load_welcome,
     is_command_allowed,
 )
@@ -172,30 +171,6 @@ class TestAllowedCommandsGroupingEdges:
     def test_missing_file_returns_none(self):
         with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/no/such/file.txt"):
             assert load_allowed_commands_grouped() is None
-
-
-class TestAutocompleteLoadingEdges:
-    def test_ignores_blank_yaml_entries(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            flat_suggestions:
-              - ping
-              - ""
-              - "   "
-              - curl darklab.sh
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete()
-        finally:
-            os.unlink(path)
-
-        assert result == ["ping", "curl darklab.sh"]
-
-    def test_missing_file_returns_empty_list(self):
-        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nope.yaml"):
-            assert load_autocomplete() == []
 
 
 class TestWelcomeLoadingEdges:

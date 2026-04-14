@@ -493,6 +493,10 @@ test.describe('mobile menu', () => {
       el.setSelectionRange(el.value.length, el.value.length)
       el.dispatchEvent(new Event('input', { bubbles: true }))
     })
+    await page.evaluate(() => {
+      const val = 'ping -c 4 example.com'
+      setComposerState({ value: val, selectionStart: val.length, selectionEnd: val.length, activeInput: 'mobile' })
+    })
 
     await page.evaluate(() => {
       document.querySelector('[data-mobile-edit="left"]')

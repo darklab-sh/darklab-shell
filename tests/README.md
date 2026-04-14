@@ -132,7 +132,7 @@ The browser layer now uses a split config model:
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds the container, runs every command in the `flat_suggestions` section of `app/conf/autocomplete_context.yaml`, and compares the output against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. It is not part of the default fast loop and should be run after Dockerfile, packaged-tool, or base-image changes.
+`scripts/container_smoke_test.sh` builds the container, runs every command in `scripts/smoke_test_commands.txt`, and compares the output against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. It is not part of the default fast loop and should be run after Dockerfile, packaged-tool, or base-image changes.
 
 The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately.
 
@@ -148,7 +148,7 @@ If a tool's output has intentionally changed, run the capture script to get a br
 ./scripts/capture_container_smoke_test_outputs.sh
 ```
 
-This script runs the same `flat_suggestions` commands in a browser and writes the raw output to `/tmp`. It does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json` — use it as a reference to make those edits manually.
+This script runs the same commands from `scripts/smoke_test_commands.txt` in a browser and writes the raw output to `/tmp`. It does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json` — use it as a reference to make those edits manually.
 
 GitLab CI mirrors the smoke test in the `container-smoke-test` job, which is exposed as a manual run when you want to verify a fresh image before merging dependency or Dockerfile changes.
 
