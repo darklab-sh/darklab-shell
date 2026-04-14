@@ -4,7 +4,7 @@
 # No rebuild is needed.
 # Optional: add sibling *.local.* files for untracked server-specific overrides.
 # Examples: app/conf/config.local.yaml, app/conf/allowed_commands.local.txt,
-# app/conf/ascii.local.txt, app/conf/auto_complete.local.txt,
+# app/conf/ascii.local.txt, app/conf/autocomplete_context.local.yaml,
 # app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
 # app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.

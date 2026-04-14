@@ -60,7 +60,7 @@
       "exit_code": 0,
       "command": "help",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -148,7 +148,7 @@
       "exit_code": 0,
       "command": "which history",
       "expected_text": [
-        "history: helper command"
+        "history: built-in command"
       ]
     },
     {
@@ -156,7 +156,7 @@
       "exit_code": 0,
       "command": "type curl",
       "expected_text": [
-        "curl is a real command"
+        "curl is an installed command"
       ]
     },
     {
@@ -164,7 +164,7 @@
       "exit_code": 0,
       "command": "type history",
       "expected_text": [
-        "history is a helper command"
+        "history is a built-in command"
       ]
     },
     {
@@ -252,7 +252,7 @@
       "exit_code": 0,
       "command": "man banner",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -260,7 +260,7 @@
       "exit_code": 0,
       "command": "man clear",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -276,7 +276,7 @@
       "exit_code": 0,
       "command": "man date",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -308,7 +308,7 @@
       "exit_code": 0,
       "command": "man env",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -316,7 +316,7 @@
       "exit_code": 0,
       "command": "man faq",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -332,7 +332,7 @@
       "exit_code": 0,
       "command": "man fortune",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -348,7 +348,7 @@
       "exit_code": 0,
       "command": "man groups",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -356,7 +356,7 @@
       "exit_code": 0,
       "command": "man help",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -364,7 +364,7 @@
       "exit_code": 0,
       "command": "man history",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -380,7 +380,7 @@
       "exit_code": 0,
       "command": "man hostname",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -388,7 +388,7 @@
       "exit_code": 0,
       "command": "man id",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -396,7 +396,7 @@
       "exit_code": 0,
       "command": "man last",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -404,7 +404,7 @@
       "exit_code": 0,
       "command": "man limits",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -412,7 +412,7 @@
       "exit_code": 0,
       "command": "man ls",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -420,7 +420,7 @@
       "exit_code": 0,
       "command": "man man",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -468,7 +468,7 @@
       "exit_code": 0,
       "command": "man ps",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -476,7 +476,7 @@
       "exit_code": 0,
       "command": "man pwd",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -484,7 +484,7 @@
       "exit_code": 0,
       "command": "man retention",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -492,7 +492,7 @@
       "exit_code": 0,
       "command": "man shortcuts",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -500,7 +500,7 @@
       "exit_code": 0,
       "command": "man status",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -532,7 +532,7 @@
       "exit_code": 0,
       "command": "man tty",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -540,7 +540,7 @@
       "exit_code": 0,
       "command": "man type",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -548,7 +548,7 @@
       "exit_code": 0,
       "command": "man uname",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -556,7 +556,7 @@
       "exit_code": 0,
       "command": "man uptime",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -564,7 +564,7 @@
       "exit_code": 0,
       "command": "man version",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -580,7 +580,7 @@
       "exit_code": 0,
       "command": "man which",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -588,7 +588,7 @@
       "exit_code": 0,
       "command": "man who",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {
@@ -596,7 +596,7 @@
       "exit_code": 0,
       "command": "man whoami",
       "expected_text": [
-        "Web shell helpers:"
+        "Built-in commands:"
       ]
     },
     {

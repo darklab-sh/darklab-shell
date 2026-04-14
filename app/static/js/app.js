@@ -120,11 +120,12 @@ const _statusHomeParent = typeof status !== 'undefined' && status ? status.paren
 const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
 const _headerHomeParent = typeof headerTitle !== 'undefined' && headerTitle ? headerTitle.closest('header') : (typeof document !== 'undefined' ? document.querySelector('header') : null);
 const _mobileHeaderActionsHomeParent = typeof mobileHeaderActions !== 'undefined' && mobileHeaderActions ? mobileHeaderActions : _headerHomeParent;
-const SHARE_REDACTION_SESSION_KEY = 'share_redaction_choice';
 const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
 let _pendingShareRedactionResolver = null;
 let _tabSessionPersistTimer = null;
 let _tabSessionRestoreInProgress = false;
+const _welcomeIntroModes = ['animated', 'disable_animation', 'remove'];
+const _shareRedactionDefaultModes = ['unset', 'redacted', 'raw'];
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -202,8 +203,10 @@ function _bindMobileComposerInteractions(uiRefs) {
 
 function _bindMobileEditBarInteractions(editBar) {
   if (!editBar || !cmdInput) return;
-  editBar.querySelectorAll('button[data-edit-action]').forEach(btn => {
-    const action = btn.dataset.editAction;
+  editBar.querySelectorAll('button[data-mobile-edit], button[data-edit-action]').forEach(btn => {
+    if (btn.dataset.mobileEditBound === '1') return;
+    btn.dataset.mobileEditBound = '1';
+    const action = btn.dataset.mobileEdit || btn.dataset.editAction;
     const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
     let _repeatDelay = null;
@@ -440,11 +443,23 @@ function getPreference(name) {
   return value ? decodeURIComponent(value) : '';
 }
 
+function getWelcomeIntroPreference() {
+  const value = getPreference('pref_welcome_intro');
+  return _welcomeIntroModes.includes(value) ? value : 'animated';
+}
+
+function getShareRedactionDefaultPreference() {
+  const value = getPreference('pref_share_redaction_default');
+  return _shareRedactionDefaultModes.includes(value) ? value : 'unset';
+}
+
 function syncOptionsControls() {
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
   const lnToggle = optionsLnToggle;
   if (lnToggle) lnToggle.checked = typeof lnMode === 'string' && lnMode === 'on';
+  if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
+  if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
 }
 
 function applyThemePreference(theme, persist = true) {
@@ -462,6 +477,18 @@ function applyLineNumberPreference(mode, persist = true) {
   const nextMode = mode === 'on' ? 'on' : 'off';
   _setLnMode(nextMode);
   if (persist) setPreferenceCookie('pref_line_numbers', nextMode);
+  syncOptionsControls();
+}
+
+function applyWelcomeIntroPreference(mode, persist = true) {
+  const nextMode = _welcomeIntroModes.includes(mode) ? mode : 'animated';
+  if (persist) setPreferenceCookie('pref_welcome_intro', nextMode);
+  syncOptionsControls();
+}
+
+function applyShareRedactionDefaultPreference(mode, persist = true) {
+  const nextMode = _shareRedactionDefaultModes.includes(mode) ? mode : 'unset';
+  if (persist) setPreferenceCookie('pref_share_redaction_default', nextMode);
   syncOptionsControls();
 }
 
@@ -571,24 +598,15 @@ function closeKillOverlay() {
 }
 
 function getRememberedShareRedactionChoice() {
-  try {
-    const stored = sessionStorage.getItem(SHARE_REDACTION_SESSION_KEY);
-    return stored === 'raw' || stored === 'redacted' ? stored : null;
-  } catch (_) {
-    return null;
-  }
+  const stored = getShareRedactionDefaultPreference();
+  return stored === 'raw' || stored === 'redacted' ? stored : null;
 }
 
 function _rememberShareRedactionChoice(choice, remember) {
-  try {
-    if (!remember) {
-      sessionStorage.removeItem(SHARE_REDACTION_SESSION_KEY);
-      return;
-    }
-    if (choice === 'raw' || choice === 'redacted') {
-      sessionStorage.setItem(SHARE_REDACTION_SESSION_KEY, choice);
-    }
-  } catch (_) {}
+  if (!remember) return;
+  if (choice === 'raw' || choice === 'redacted') {
+    applyShareRedactionDefaultPreference(choice);
+  }
 }
 
 function showShareRedactionOverlay() {
@@ -631,8 +649,8 @@ function cancelShareRedactionChoice() {
 
 function confirmPermalinkRedactionChoice() {
   if (APP_CONFIG && APP_CONFIG.share_redaction_enabled === false) return Promise.resolve('raw');
-  const remembered = getRememberedShareRedactionChoice();
-  if (remembered) return Promise.resolve(remembered);
+  const preferred = getShareRedactionDefaultPreference();
+  if (preferred === 'raw' || preferred === 'redacted') return Promise.resolve(preferred);
   showShareRedactionOverlay();
   return new Promise(resolve => {
     _pendingShareRedactionResolver = resolve;
@@ -970,8 +988,16 @@ function performMobileEditAction(action) {
     const pos = Math.max(0, start - 1);
     nextStart = pos;
     nextEnd = pos;
+  } else if (action === 'word-left') {
+    const pos = findWordBoundaryLeft(value, start);
+    nextStart = pos;
+    nextEnd = pos;
   } else if (action === 'right') {
     const pos = Math.min(value.length, end + 1);
+    nextStart = pos;
+    nextEnd = pos;
+  } else if (action === 'word-right') {
+    const pos = findWordBoundaryRight(value, end);
     nextStart = pos;
     nextEnd = pos;
   } else if (action === 'home') {
@@ -991,9 +1017,20 @@ function performMobileEditAction(action) {
       nextStart = cut;
       nextEnd = cut;
     }
+  } else if (action === 'delete-line') {
+    nextValue = '';
+    nextStart = 0;
+    nextEnd = 0;
   }
 
-  if (action === 'left' || action === 'right' || action === 'home' || action === 'end') {
+  if (
+    action === 'left'
+    || action === 'right'
+    || action === 'word-left'
+    || action === 'word-right'
+    || action === 'home'
+    || action === 'end'
+  ) {
     if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
     else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
   } else {
@@ -1175,8 +1212,10 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
 
 function bindMobileEditBarListeners(editBar) {
   if (!editBar) return;
-  editBar.querySelectorAll('button[data-mobile-edit]').forEach(btn => {
-    const action = btn.dataset.mobileEdit;
+  editBar.querySelectorAll('button[data-mobile-edit], button[data-edit-action]').forEach(btn => {
+    if (btn.dataset.mobileEditBound === '1') return;
+    btn.dataset.mobileEditBound = '1';
+    const action = btn.dataset.mobileEdit || btn.dataset.editAction;
     const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
     let _repeatDelay = null;
@@ -1553,7 +1592,7 @@ function _buildFaqLimitsContent(cfg) {
         : '<strong>Unlimited</strong>',
     },
     {
-      label: 'Permalink &amp; history retention',
+      label: 'Permalink & history retention',
       value: retention > 0
         ? `<strong>${retention} day${retention === 1 ? '' : 's'}</strong> — run history and share links are deleted after this period`
         : '<strong>Unlimited</strong> — run history and share links are kept indefinitely',
@@ -1561,21 +1600,25 @@ function _buildFaqLimitsContent(cfg) {
   ];
 
   const frag = document.createDocumentFragment();
-  const table = document.createElement('table');
-  table.className = 'faq-limits-table';
+  const list = document.createElement('div');
+  list.className = 'faq-limits-list';
   rows.forEach(r => {
-    const tr = document.createElement('tr');
-    const labelCell = document.createElement('td');
-    labelCell.className = 'faq-limits-label';
-    labelCell.textContent = r.label;
-    const valueCell = document.createElement('td');
-    valueCell.className = 'faq-limits-value';
-    valueCell.innerHTML = r.value;
-    tr.appendChild(labelCell);
-    tr.appendChild(valueCell);
-    table.appendChild(tr);
+    const row = document.createElement('div');
+    row.className = 'faq-limits-row';
+
+    const labelEl = document.createElement('div');
+    labelEl.className = 'faq-limits-label';
+    labelEl.textContent = r.label;
+
+    const valueEl = document.createElement('div');
+    valueEl.className = 'faq-limits-value';
+    valueEl.innerHTML = r.value;
+
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    list.appendChild(row);
   });
-  frag.appendChild(table);
+  frag.appendChild(list);
 
   const note = document.createElement('span');
   note.className = 'faq-limits-note';

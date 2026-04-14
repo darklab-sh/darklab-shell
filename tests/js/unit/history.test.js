@@ -295,7 +295,7 @@ describe('command history hydration', () => {
 })
 
 describe('history panel actions', () => {
-  function loadHistoryPanel({ clipboardImpl, apiFetchImpl } = {}) {
+  function loadHistoryPanel({ clipboardImpl, apiFetchImpl, mobileMode = false } = {}) {
     document.body.innerHTML = `
       <div id="history-panel"></div>
       <input id="history-search-input" />
@@ -433,6 +433,7 @@ describe('history panel actions', () => {
         }),
         confirmHistAction: () => {},
         executeHistAction: () => {},
+        useMobileTerminalViewportMode: () => mobileMode,
       }, `{
         refreshHistoryPanel,
         executeHistAction,
@@ -500,7 +501,7 @@ describe('history panel actions', () => {
 
     const entry = document.querySelector('#history-list .history-entry')
     entry.querySelector('[data-action="star"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(historyPanel.classList.contains('open')).toBe(false)
+    expect(historyPanel.classList.contains('open')).toBe(true)
 
     historyPanel.classList.add('open')
     entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -511,6 +512,33 @@ describe('history panel actions', () => {
     expect(historyPanel.classList.contains('open')).toBe(false)
 
     historyPanel.classList.add('open')
+    entry.querySelector('[data-action="delete"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(false)
+  })
+
+  it('keeps common history actions open on mobile and only closes for delete', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({ mobileMode: true })
+    const historyPanel = document.getElementById('history-panel')
+    historyPanel.classList.add('open')
+
+    refreshHistoryPanel()
+    await new Promise(resolve => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+
+    entry.querySelector('[data-action="star"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    expect(historyPanel.classList.contains('open')).toBe(true)
+
+    entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(historyPanel.classList.contains('open')).toBe(true)
+
+    entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await Promise.resolve()
+    await Promise.resolve()
+    expect(historyPanel.classList.contains('open')).toBe(true)
+
     entry.querySelector('[data-action="delete"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(false)
   })

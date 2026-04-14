@@ -15,8 +15,9 @@ from run_output_store import delete_artifact_file, ensure_run_output_dir
 
 log = logging.getLogger("shell")
 
-# /tmp (tmpfs) is the intended fallback for local dev without the volume mount
-DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
+# /tmp (tmpfs) is the intended fallback for local dev without the volume mount.
+# APP_DATA_DIR lets test workers and local tooling isolate their own databases.
+DATA_DIR = os.environ.get("APP_DATA_DIR") or ("/data" if os.path.isdir("/data") else "/tmp")  # nosec B108
 DB_PATH  = os.path.join(DATA_DIR, "history.db")
 DB_INIT_LOCK_PATH = os.path.join(DATA_DIR, "history.db.init.lock")
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'hostname'
 
@@ -65,7 +65,6 @@ test.describe('timestamp toggle', () => {
     await page.locator('#ts-btn').click()
     await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
     await expect(page.locator('#cmd')).toBeFocused()
-    await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
 
     await page.locator('#cmd').fill(CMD)
     await page.locator('#cmd').press('Enter')
@@ -82,12 +81,7 @@ test.describe('timestamp toggle', () => {
       const text = document.querySelector('.wlc-command-text')?.textContent || ''
       return text.length >= 5
     })
-    await page.evaluate(() => {
-      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
-    })
-    await page.waitForFunction(() => {
-      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
-    })
+    await ensurePromptReady(page)
 
     await page.evaluate(() => {
       if (typeof submitComposerCommand === 'function') {

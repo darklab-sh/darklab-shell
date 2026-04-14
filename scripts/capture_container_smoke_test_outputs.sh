@@ -5,11 +5,11 @@
 # Run this against a known-good running container whenever the expected
 # output for one or more Container Smoke Test commands changes intentionally —
 # for example, after a tool upgrade that changes help text, a new command
-# added to app/conf/auto_complete.txt, or a rewrite rule that alters output.
+# added to app/conf/autocomplete_context.yaml flat_suggestions, or a rewrite rule that alters output.
 #
 # It drives a live browser session against the running dev container
 # (default: http://localhost:8888) and records the visible output of every
-# command in app/conf/auto_complete.txt into
+# flat autocomplete suggestion in app/conf/autocomplete_context.yaml into
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #
 # Rate limiting: the capture script runs every Container Smoke Test command in sequence

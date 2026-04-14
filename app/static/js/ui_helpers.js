@@ -62,6 +62,44 @@
     if (start > end) [start, end] = [end, start];
     return { start, end };
   };
+  function _estimateComposerTextWidth(input, text) {
+    if (!input || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
+    const style = window.getComputedStyle(input);
+    const fontSize = parseFloat(style.fontSize || '16') || 16;
+    const rawLetterSpacing = parseFloat(style.letterSpacing || '0');
+    const letterSpacing = Number.isFinite(rawLetterSpacing) ? rawLetterSpacing : 0;
+    const len = String(text || '').length;
+    if (!len) return 0;
+    return (len * (fontSize * 0.62)) + (Math.max(0, len - 1) * letterSpacing);
+  }
+  function _syncComposerCaretVisibility(input, start, end) {
+    if (!input || typeof input.scrollLeft !== 'number') return;
+    if (typeof input.clientWidth !== 'number' || input.clientWidth <= 0) return;
+    const value = typeof input.value === 'string' ? input.value : '';
+    const caret = Math.max(0, Math.min(typeof end === 'number' ? end : start, value.length));
+    const anchor = Math.max(0, Math.min(typeof start === 'number' ? start : caret, value.length));
+    if (caret === 0 && anchor === 0) {
+      input.scrollLeft = 0;
+      return;
+    }
+    const style = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+      ? window.getComputedStyle(input)
+      : null;
+    const paddingLeft = style ? (parseFloat(style.paddingLeft || '0') || 0) : 0;
+    const paddingRight = style ? (parseFloat(style.paddingRight || '0') || 0) : 0;
+    const viewport = Math.max(24, input.clientWidth - paddingLeft - paddingRight);
+    const caretX = _estimateComposerTextWidth(input, value.slice(0, caret));
+    const leftEdge = input.scrollLeft;
+    const rightEdge = leftEdge + viewport;
+    const gutter = 12;
+    if (caretX < leftEdge + gutter) {
+      input.scrollLeft = Math.max(0, Math.round(caretX - gutter));
+      return;
+    }
+    if (caretX > rightEdge - gutter) {
+      input.scrollLeft = Math.max(0, Math.round(caretX - viewport + gutter));
+    }
+  }
   global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
     const target = input || global.getVisibleComposerInput();
     if (!target || typeof target.focus !== 'function') return false;
@@ -221,6 +259,7 @@
       if (typeof target.setSelectionRange === 'function') {
         target.setSelectionRange(nextStart, nextEnd);
       }
+      _syncComposerCaretVisibility(target, nextStart, nextEnd);
     }
     if (dispatch && target && target !== exclude) {
       target.dispatchEvent(new Event('input'));
@@ -254,6 +293,7 @@
     if (target && typeof target.setSelectionRange === 'function') {
       target.setSelectionRange(orderedStart, orderedEnd);
     }
+    _syncComposerCaretVisibility(target, orderedStart, orderedEnd);
     return { start: orderedStart, end: orderedEnd };
   };
   global.handleComposerInputChange = (sourceInput) => {
@@ -286,13 +326,22 @@
       if (typeof acHide === 'function') acHide();
       return;
     }
-    const q = value.toLowerCase();
-    acFiltered = (typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
-      .filter(s => s.toLowerCase().startsWith(q))
-      .slice(0, 12);
-    if (acFiltered.some(s => s.toLowerCase() === q)) {
+    const usedContextMatcher = typeof getAutocompleteMatches === 'function';
+    acFiltered = usedContextMatcher
+      ? getAutocompleteMatches(value, start).slice(0, 12)
+      : ((typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
+        .filter(s => s.toLowerCase().startsWith(value.toLowerCase()))
+        .slice(0, 12));
+    if (!acFiltered.length) {
       if (typeof acHide === 'function') acHide();
       return;
+    }
+    if (!usedContextMatcher) {
+      const q = value.trim().toLowerCase();
+      if (acFiltered.some(s => String(s || '').toLowerCase() === q)) {
+        if (typeof acHide === 'function') acHide();
+        return;
+      }
     }
     if (typeof acShow === 'function') acShow(acFiltered);
   };
@@ -460,10 +509,14 @@
     return !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
   };
   global.showAcDropdown = () => {
-    if (acDropdown && acDropdown.style) acDropdown.style.display = 'block';
+    if (!acDropdown) return;
+    if (acDropdown.classList) acDropdown.classList.remove('u-hidden');
+    if (acDropdown.style) acDropdown.style.display = 'block';
   };
   global.hideAcDropdown = () => {
-    if (acDropdown && acDropdown.style) acDropdown.style.display = 'none';
+    if (!acDropdown) return;
+    if (acDropdown.classList) acDropdown.classList.add('u-hidden');
+    if (acDropdown.style) acDropdown.style.display = 'none';
   };
   global.isAcDropdownOpen = () => !!(acDropdown && acDropdown.style && acDropdown.style.display !== 'none');
   global.setVisibilityState = (el, hidden, ariaHidden = null) => {

@@ -2,7 +2,7 @@
 Opt-in regression for the built Docker image.
 
 This suite builds a fresh image, starts the web app container, and runs every
-command from app/conf/auto_complete.txt through /run. Each command is checked
+flat autocomplete suggestion from app/conf/autocomplete_context.yaml through /run. Each command is checked
 against a small normalized output prefix so missing apt/pip/go/gem tools,
 broken fake-command wiring, or changed command output surface before an image
 or dependency update lands.
@@ -30,7 +30,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMANDS_FILE = ROOT / "app" / "conf" / "auto_complete.txt"
+COMMANDS_FILE = ROOT / "app" / "conf" / "autocomplete_context.yaml"
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
@@ -203,10 +203,12 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
 
 
 def _load_autocomplete_commands() -> list[str]:
+    loaded = yaml.safe_load(COMMANDS_FILE.read_text()) or {}
+    raw_commands = loaded.get("flat_suggestions", [])
     commands: list[str] = []
-    for raw_line in COMMANDS_FILE.read_text().splitlines():
-        line = raw_line.strip()
-        if line and not line.startswith("#"):
+    for raw_item in raw_commands:
+        line = str(raw_item or "").strip()
+        if line:
             commands.append(line)
     return commands
 

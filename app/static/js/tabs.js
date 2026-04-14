@@ -5,6 +5,14 @@ let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
 let _tabSeq = 0;
+const _TOUCH_TAB_DRAG_THRESHOLD = 14;
+const _TOUCH_TAB_DRAG_HOLD_MS = 180;
+const _POINTER_TAB_DRAG_THRESHOLD = 6;
+
+function _syncTabDraggable(tab) {
+  if (!tab) return;
+  tab.setAttribute('draggable', 'false');
+}
 
 function _getTabEl(id) {
   return tabsBar ? tabsBar.querySelector(`.tab[data-id="${id}"]`) : null;
@@ -118,10 +126,30 @@ function _tabFromClientX(clientX, excludeId = null) {
   }) || null;
 }
 
+function _edgeTabFromClientX(clientX, excludeId = null) {
+  if (!tabsBar) return null;
+  const nodes = [...tabsBar.querySelectorAll('.tab')].filter(node => node && node.dataset.id !== excludeId);
+  if (!nodes.length) return null;
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  const firstRect = first.getBoundingClientRect();
+  const lastRect = last.getBoundingClientRect();
+  if (clientX < firstRect.left) return { target: first, after: false };
+  if (clientX > lastRect.right) return { target: last, after: true };
+  return null;
+}
+
 function _reorderDraggedTab(dragged, target, clientX) {
-  if (!dragged || !target || !tabsBar || dragged === target) return;
+  if (!dragged || !target || !tabsBar || dragged === target) return false;
   const rect = target.getBoundingClientRect();
   const after = clientX > rect.left + (rect.width / 2);
+  const noChange = after
+    ? target.nextSibling === dragged
+    : target === dragged.nextSibling;
+  if (noChange) {
+    _clearTabDropIndicators();
+    return false;
+  }
   _clearTabDropIndicators();
   target.classList.add(after ? 'tab-drop-after' : 'tab-drop-before');
   if (after) {
@@ -129,6 +157,7 @@ function _reorderDraggedTab(dragged, target, clientX) {
   } else if (target !== dragged.nextSibling) {
     tabsBar.insertBefore(dragged, target);
   }
+  return true;
 }
 
 function _touchDragAutoScroll(clientX) {
@@ -139,124 +168,180 @@ function _touchDragAutoScroll(clientX) {
   else if (clientX >= rect.right - edge) tabsBar.scrollBy({ left: 18, behavior: 'auto' });
 }
 
+function _getTrackedTouchPoint(e, touchId = null) {
+  const pools = [];
+  if (e && e.touches) pools.push(e.touches);
+  if (e && e.changedTouches) pools.push(e.changedTouches);
+  for (const pool of pools) {
+    for (const touch of pool) {
+      if (touchId === null || touch.identifier === touchId) return touch;
+    }
+  }
+  return null;
+}
+
 function _cleanupTouchDrag() {
   // Touch drag state spans document-level listeners, so cleanup has to fully
   // unwind everything even when the gesture is cancelled mid-drag.
   if (!_touchDragState) return;
+  if (
+    _touchDragState.tab
+    && typeof _touchDragState.pointerId === 'number'
+    && typeof _touchDragState.tab.releasePointerCapture === 'function'
+  ) {
+    try { _touchDragState.tab.releasePointerCapture(_touchDragState.pointerId); } catch (_) {}
+  }
   document.removeEventListener('pointermove', _onTouchDragMove);
   document.removeEventListener('pointerup', _onTouchDragEnd);
   document.removeEventListener('pointercancel', _onTouchDragEnd);
+  document.removeEventListener('touchmove', _onTouchDragMove);
+  document.removeEventListener('touchend', _onTouchDragEnd);
+  document.removeEventListener('touchcancel', _onTouchDragEnd);
   _clearTabDropIndicators();
   tabsBar?.classList.remove('tabs-bar-touch-sorting');
-  _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging');
+  tabsBar?.classList.remove('tabs-bar-desktop-sorting');
+  _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging', 'tab-pointer-dragging');
+  if (_touchDragState.holdTimer) clearTimeout(_touchDragState.holdTimer);
   _touchDragState = null;
 }
 
 function _onTouchDragMove(e) {
-  if (!_touchDragState || e.pointerId !== _touchDragState.pointerId) return;
-  const dx = e.clientX - _touchDragState.startX;
-  const dy = e.clientY - _touchDragState.startY;
-  if (!_touchDragState.active) {
-    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-    _touchDragState.active = true;
-    tabsBar?.classList.add('tabs-bar-touch-sorting');
-    _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
+  if (!_touchDragState) return;
+  let clientX;
+  let clientY;
+  if (_touchDragState.source === 'touch') {
+    const point = _getTrackedTouchPoint(e, _touchDragState.touchId);
+    if (!point) return;
+    clientX = point.clientX;
+    clientY = point.clientY;
+  } else {
+    if (e.pointerId !== _touchDragState.pointerId) return;
+    clientX = e.clientX;
+    clientY = e.clientY;
   }
-  e.preventDefault();
+  const dx = clientX - _touchDragState.startX;
+  const dy = clientY - _touchDragState.startY;
+  if (!_touchDragState.active) {
+    if (_touchDragState.source === 'touch') {
+      if (Math.abs(dx) >= _TOUCH_TAB_DRAG_THRESHOLD || Math.abs(dy) >= _TOUCH_TAB_DRAG_THRESHOLD) {
+        if (_touchDragState.holdTimer) {
+          clearTimeout(_touchDragState.holdTimer);
+          _touchDragState.holdTimer = null;
+        }
+        _cleanupTouchDrag();
+      }
+      return;
+    }
+    if (Math.abs(dx) < _POINTER_TAB_DRAG_THRESHOLD && Math.abs(dy) < _POINTER_TAB_DRAG_THRESHOLD) return;
+    _touchDragState.active = true;
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    tabsBar?.classList.add('tabs-bar-desktop-sorting');
+    _touchDragState.tab.classList.add('tab-dragging', 'tab-pointer-dragging');
+  }
+  if (typeof e.preventDefault === 'function') e.preventDefault();
+  if (typeof e.stopPropagation === 'function') e.stopPropagation();
   const dragged = _touchDragState.tab;
-  const target = _tabFromClientX(e.clientX, _touchDragState.id);
+  const target = _tabFromClientX(clientX, _touchDragState.id);
+  const edgeDrop = target ? null : _edgeTabFromClientX(clientX, _touchDragState.id);
   if (target) {
-    _reorderDraggedTab(dragged, target, e.clientX);
+    const changed = _reorderDraggedTab(dragged, target, clientX);
+    if (changed) _touchDragState.moved = true;
+  } else if (edgeDrop && edgeDrop.target !== dragged) {
+    const firstTab = tabsBar.querySelector('.tab');
+    const lastTab = tabsBar.querySelector('.tab:last-of-type');
+    const noChange = (!edgeDrop.after && firstTab === dragged) || (edgeDrop.after && lastTab === dragged);
+    if (noChange) {
+      _clearTabDropIndicators();
+      updateTabScrollButtons();
+      return;
+    }
+    _clearTabDropIndicators();
+    edgeDrop.target.classList.add(edgeDrop.after ? 'tab-drop-after' : 'tab-drop-before');
+    if (edgeDrop.after) {
+      tabsBar.appendChild(dragged);
+    } else {
+      tabsBar.insertBefore(dragged, tabsBar.querySelector('.tab'));
+    }
     _touchDragState.moved = true;
   } else {
     _clearTabDropIndicators();
   }
-  _touchDragAutoScroll(e.clientX);
+  _touchDragAutoScroll(clientX);
   updateTabScrollButtons();
 }
 
 function _onTouchDragEnd(e) {
-  if (!_touchDragState || e.pointerId !== _touchDragState.pointerId) return;
+  if (!_touchDragState) return;
+  if (_touchDragState.source === 'touch') {
+    if (!_getTrackedTouchPoint(e, _touchDragState.touchId) && e.type !== 'touchcancel') return;
+  } else if (e.pointerId !== _touchDragState.pointerId) {
+    return;
+  }
   const state = _touchDragState;
   const moved = state.active && state.moved;
   _cleanupTouchDrag();
+  _syncTabDraggable(state.tab);
   if (!moved) return;
   syncTabOrderFromDom();
   updateTabScrollButtons();
   if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
-  _tabDragSuppressClickUntil = Date.now() + 220;
+  _tabDragSuppressClickUntil = Date.now() + (state.source === 'touch' ? 220 : 140);
   if (state.id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
 }
 
 function _startTouchTabDrag(tab, id, e) {
-  if (!e || e.pointerType !== 'touch') return;
+  if (!e) return;
+  const isTouchEvent = e.type === 'touchstart';
+  if (!isTouchEvent && e.pointerType === 'touch') return;
+  if (!isTouchEvent && e.pointerType !== 'mouse') return;
+  if (!isTouchEvent && typeof e.button === 'number' && e.button !== 0) return;
   if (e.target && e.target.closest && e.target.closest('.tab-close')) return;
+  _syncTabDraggable(tab);
   _cleanupTouchDrag();
+  const point = isTouchEvent ? _getTrackedTouchPoint(e) : e;
+  if (!point) return;
+  const pointerId = !isTouchEvent && typeof e.pointerId === 'number' ? e.pointerId : null;
+  if (pointerId !== null && typeof tab.setPointerCapture === 'function') {
+    try { tab.setPointerCapture(e.pointerId); } catch (_) {}
+  }
   _touchDragState = {
     id,
     tab,
-    pointerId: e.pointerId,
-    startX: e.clientX,
-    startY: e.clientY,
+    source: isTouchEvent ? 'touch' : 'pointer',
+    pointerId,
+    touchId: isTouchEvent && typeof point.identifier === 'number' ? point.identifier : null,
+    startX: point.clientX,
+    startY: point.clientY,
     active: false,
     moved: false,
+    holdTimer: null,
   };
-  document.addEventListener('pointermove', _onTouchDragMove, { passive: false });
-  document.addEventListener('pointerup', _onTouchDragEnd);
-  document.addEventListener('pointercancel', _onTouchDragEnd);
+  if (isTouchEvent) {
+    _touchDragState.holdTimer = setTimeout(() => {
+      if (!_touchDragState || _touchDragState.id !== id || _touchDragState.tab !== tab) return;
+      _touchDragState.holdTimer = null;
+      _touchDragState.active = true;
+      tabsBar?.classList.add('tabs-bar-touch-sorting');
+      _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
+    }, _TOUCH_TAB_DRAG_HOLD_MS);
+  }
+  if (isTouchEvent) {
+    document.addEventListener('touchmove', _onTouchDragMove, { passive: false });
+    document.addEventListener('touchend', _onTouchDragEnd);
+    document.addEventListener('touchcancel', _onTouchDragEnd);
+  } else {
+    document.addEventListener('pointermove', _onTouchDragMove, { passive: false });
+    document.addEventListener('pointerup', _onTouchDragEnd);
+    document.addEventListener('pointercancel', _onTouchDragEnd);
+  }
 }
 
 function bindTabDragReorder(tab, id) {
   if (!tab) return;
-  tab.setAttribute('draggable', 'true');
+  _syncTabDraggable(tab);
   tab.addEventListener('pointerdown', e => _startTouchTabDrag(tab, id, e));
-
-  tab.addEventListener('dragstart', e => {
-    _draggedTabId = id;
-    _dragMoved = false;
-    tab.classList.add('tab-dragging');
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id);
-    }
-  });
-
-  tab.addEventListener('dragover', e => {
-    if (!_draggedTabId || _draggedTabId === id || !tabsBar) return;
-    const dragged = tabsBar.querySelector(`.tab[data-id="${_draggedTabId}"]`);
-    if (!dragged) return;
-    e.preventDefault();
-
-    const rect = tab.getBoundingClientRect();
-    const after = e.clientX > rect.left + (rect.width / 2);
-    if (after) {
-      if (tab.nextSibling !== dragged) tabsBar.insertBefore(dragged, tab.nextSibling);
-    } else if (tab !== dragged.nextSibling) {
-      tabsBar.insertBefore(dragged, tab);
-    }
-    _dragMoved = true;
-  });
-
-  tab.addEventListener('drop', e => {
-    if (!_draggedTabId) return;
-    e.preventDefault();
-    syncTabOrderFromDom();
-    updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
-  });
-
-  tab.addEventListener('dragend', () => {
-    tab.classList.remove('tab-dragging');
-    if (_dragMoved) {
-      syncTabOrderFromDom();
-      updateTabScrollButtons();
-      if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
-      _tabDragSuppressClickUntil = Date.now() + 160;
-      if (id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
-    }
-    _draggedTabId = null;
-    _dragMoved = false;
-  });
+  tab.addEventListener('touchstart', e => _startTouchTabDrag(tab, id, e), { passive: false });
 }
 
 function unmountShellPrompt() {
@@ -464,6 +549,12 @@ function createTab(label) {
       return;
     }
     activateTab(id);
+  });
+
+  tab.addEventListener('dblclick', e => {
+    if (e.target && e.target.closest && e.target.closest('.tab-close')) return;
+    e.stopPropagation();
+    startTabRename(id, labelEl);
   });
 
   // Double-click tab label to rename

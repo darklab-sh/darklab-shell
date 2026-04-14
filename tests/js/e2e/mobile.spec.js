@@ -1,5 +1,11 @@
 import { test, expect } from '@playwright/test'
-import { makeTestIp, waitForHistoryRuns, createShareSnapshot } from './helpers.js'
+import {
+  createShareSnapshot,
+  ensurePromptReady,
+  makeTestIp,
+  setComposerValueForTest,
+  waitForHistoryRuns,
+} from './helpers.js'
 
 const MOBILE = { width: 375, height: 812 }
 const LONG_CMD = 'ping -c 4 8.8.8.8'
@@ -18,7 +24,9 @@ function testScopedIp(testInfo, baseOffset = 0) {
 }
 
 async function runCommandMobile(page, cmd) {
-  await page.locator('#mobile-cmd').fill(cmd)
+  await openMobileKeyboard(page)
+  await page.locator('#mobile-cmd').pressSequentially(cmd)
+  await expect(page.locator('#mobile-run-btn')).toBeEnabled()
   await page.locator('#mobile-run-btn').click()
   await page.locator('.status-pill').filter({ hasNotText: 'RUNNING' }).waitFor({ timeout: 15_000 })
 }
@@ -99,8 +107,26 @@ test.describe('mobile menu', () => {
     const output = page.locator('.tab-panel.active .output')
     await expect.poll(async () => output.evaluate(el => el.scrollHeight > el.clientHeight + 40)).toBe(true)
 
-    await output.evaluate(el => { el.scrollTop = 0 })
-    await expect.poll(async () => output.evaluate(el => el.scrollTop)).toBe(0)
+    await page.evaluate(async () => {
+      const activeId = window.activeTabId
+      const activeTab = Array.isArray(window.tabs)
+        ? window.tabs.find(tab => tab && tab.id === activeId)
+        : null
+      if (activeTab) {
+        activeTab.followOutput = false
+        activeTab.suppressOutputScrollTracking = false
+      }
+      await new Promise(resolve => setTimeout(resolve, 32))
+      const out = document.querySelector('.tab-panel.active .output')
+      if (!out) return
+      out.scrollTop = 0
+      out.dispatchEvent(new Event('scroll'))
+      await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)))
+    })
+    await expect.poll(async () => output.evaluate(el => {
+      const remaining = el.scrollHeight - (el.scrollTop + el.clientHeight)
+      return Math.max(0, Math.round(remaining))
+    })).toBeGreaterThan(100)
 
     await page.reload()
     await page.evaluate(() => window.dispatchEvent(new Event('resize')))
@@ -113,17 +139,53 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused', async ({ page }) => {
-    await page.locator('#mobile-cmd').fill('nmap')
+    await ensurePromptReady(page)
+    await openMobileKeyboard(page)
+    const input = page.locator('#mobile-cmd')
+    await setComposerValueForTest(page, 'nmap -', { mobile: true })
 
     const dropdown = page.locator('#ac-dropdown')
-    await expect(dropdown).toBeVisible()
-    await expect(dropdown).toContainText('nmap -h')
+    await expect.poll(async () => ({
+      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
+      text: (await dropdown.textContent()) || '',
+    })).toEqual(expect.objectContaining({
+      hidden: false,
+      text: expect.stringContaining('-sT'),
+    }))
 
-    await dropdown.locator('.ac-item', { hasText: 'nmap -h' }).tap()
+    await dropdown.locator('.ac-item', { hasText: '-sT' }).tap()
 
-    await expect(page.locator('#mobile-cmd')).toHaveValue('nmap -h')
-    await expect(page.locator('#mobile-cmd')).toBeFocused()
+    await expect(input).toHaveValue('nmap -sT')
+    await expect(input).toBeFocused()
     await expect(dropdown).toBeHidden()
+  })
+
+  test('mobile contextual autocomplete shows value hints after accepting a value-taking flag', async ({ page }) => {
+    await ensurePromptReady(page)
+    await openMobileKeyboard(page)
+    const input = page.locator('#mobile-cmd')
+    await setComposerValueForTest(page, 'curl -', { mobile: true })
+
+    const dropdown = page.locator('#ac-dropdown')
+    await expect.poll(async () => ({
+      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
+      text: (await dropdown.textContent()) || '',
+    })).toEqual(expect.objectContaining({
+      hidden: false,
+      text: expect.stringContaining('-o'),
+    }))
+    await dropdown.locator('.ac-item', { hasText: '-o' }).tap()
+
+    await expect(input).toHaveValue('curl -o')
+    await input.press('Space')
+
+    await expect.poll(async () => ({
+      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
+      text: (await dropdown.textContent()) || '',
+    })).toEqual(expect.objectContaining({
+      hidden: false,
+      text: expect.stringContaining('/dev/null'),
+    }))
   })
 
   test('clicking the mobile transcript closes the keyboard and helper row', async ({ page }) => {
@@ -164,8 +226,7 @@ test.describe('mobile menu', () => {
   test('closing a mobile tab after output returns to the active tab without jumping the page', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await page.locator('#new-tab-btn').click()
-    await page.locator('#mobile-cmd').fill('date')
-    await page.locator('#mobile-run-btn').click()
+    await runCommandMobile(page, 'date')
     await page.locator('.tab').nth(1).locator('.tab-close').click()
 
     await expect(page.locator('#mobile-cmd')).not.toBeFocused()
@@ -363,6 +424,24 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
+  test('mobile history copy and permalink actions keep the drawer open', async ({ page }) => {
+    await runCommandMobile(page, 'hostname')
+    await waitForHistoryRuns(page, 1)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu [data-action="history"]').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+
+    const firstEntry = page.locator('.history-entry').first()
+    await firstEntry.locator('[data-action="copy"]').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await expect(page.locator('#permalink-toast')).toContainText('Command copied to clipboard')
+
+    await firstEntry.locator('[data-action="permalink"]').click()
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+  })
+
   test('mobile run button disables while a command is running', async ({ page }) => {
     await page.locator('#mobile-cmd').fill(LONG_CMD)
     await page.locator('#mobile-run-btn').click()
@@ -428,10 +507,22 @@ test.describe('mobile menu', () => {
     await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(0)
 
     await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="word-right"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(4)
+
+    await page.evaluate(() => {
       document.querySelector('[data-mobile-edit="right"]')
         .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     })
-    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(1)
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(5)
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="word-left"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(0)
 
     await page.evaluate(() => {
       document.querySelector('[data-mobile-edit="end"]')
@@ -444,6 +535,13 @@ test.describe('mobile menu', () => {
         .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     })
     await expect(page.locator('#mobile-cmd')).toHaveValue('ping -c 4 ')
+
+    await page.evaluate(() => {
+      document.querySelector('[data-mobile-edit="delete-line"]')
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    })
+    await expect(page.locator('#mobile-cmd')).toHaveValue('')
+    await expect.poll(async () => page.locator('#mobile-cmd').evaluate(el => el.selectionStart)).toBe(0)
   })
 
   test('mobile long commands keep the composer usable', async ({ page }) => {

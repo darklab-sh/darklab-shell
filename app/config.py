@@ -11,6 +11,7 @@ from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
 APP_VERSION = "1.5"
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"
+APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 
 
 def _load_yaml_config(path):
@@ -93,7 +94,12 @@ def load_config(conf_dir=None):
         "welcome_hint_interval_ms":   4200,
         "welcome_hint_rotations":     0,
     }
-    conf_path = Path(conf_dir) if conf_dir is not None else Path(__file__).resolve().parent / "conf"
+    if conf_dir is not None:
+        conf_path = Path(conf_dir)
+    elif APP_CONF_DIR:
+        conf_path = Path(APP_CONF_DIR)
+    else:
+        conf_path = Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
     defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)

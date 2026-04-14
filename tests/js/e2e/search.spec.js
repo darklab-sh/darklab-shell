@@ -1,11 +1,12 @@
 import { test, expect } from '@playwright/test'
+import { ensurePromptReady } from './helpers.js'
 
 test.describe('search and highlight', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page, { cancelWelcome: true })
     await page.evaluate(() => {
-      cancelWelcome()
       clearTab(activeTabId)
       appendLine('$ curl http://localhost:5001/health', '', activeTabId)
       appendLine('{"status":"ok"}', '', activeTabId)

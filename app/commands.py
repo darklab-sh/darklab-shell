@@ -16,7 +16,7 @@ import yaml
 _HERE = os.path.dirname(__file__)
 _CONF = os.path.join(_HERE, "conf")
 ALLOWED_COMMANDS_FILE = os.path.join(_CONF, "allowed_commands.txt")
-AUTOCOMPLETE_FILE     = os.path.join(_CONF, "auto_complete.txt")
+AUTOCOMPLETE_CONTEXT_FILE = os.path.join(_CONF, "autocomplete_context.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
@@ -31,7 +31,8 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             "answer": (
                 f"{app_name} is a lightweight web interface for running network diagnostic "
                 "and vulnerability scanning commands against remote endpoints, with output streamed "
-                "in real time. It's designed for testing and troubleshooting remote hosts."
+                "in real time. It's designed for testing and troubleshooting remote hosts. "
+                f"See the project README: {project_readme}"
             ),
             "answer_html": (
                 f"{app_name} is a lightweight web interface for running network diagnostic "
@@ -39,14 +40,35 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "in real time. It's designed for testing and troubleshooting remote hosts — things "
                 "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
                 "scans — without needing SSH access to a server. For more detailed information, see "
-                f"the project README at <a href=\"{html.escape(project_readme, quote=True)}\" "
-                "target=\"_blank\" rel=\"noopener\" class=\"faq-link\">README</a>."
+                f"the project <a href=\"{html.escape(project_readme, quote=True)}\" target=\"_blank\" "
+                "rel=\"noopener\" class=\"faq-link\">README</a>."
             ),
         },
         {
             "question": "What commands are allowed?",
             "answer": "Use the grouped allowlist shown in the FAQ modal or run ls in the web shell.",
             "ui_kind": "allowed_commands",
+        },
+        {
+            "question": "What built-in shell features are supported?",
+            "answer": (
+                "The shell supports built-in commands plus a narrow set of commands with built-in "
+                "pipe support like grep, head, tail, and wc -l. For a full list of built-in commands, "
+                "run the command help in the web shell."
+            ),
+            "answer_html": (
+                "This shell includes two kinds of built-in behavior:<br><br>"
+                "<strong>Built-in commands</strong> such as <code>status</code>, "
+                "<code>history</code>, <code>retention</code>, <code>shortcuts</code>, "
+                "<code>limits</code>, and <code>faq</code>. For a full list, run the command <code>help</code>."
+                " These are provided directly by the shell.<br><br>"
+                "<strong>Commands with built-in pipe support</strong> let you trim output with one "
+                "supported pipe stage, for example <code>command | grep pattern</code>, "
+                "<code>command | head -n 20</code>, <code>command | tail -n 20</code>, or "
+                "<code>command | wc -l</code>.<br><br>"
+                "Only one supported pipe stage can be used per command. General shell piping, "
+                "chaining, and redirection are still blocked."
+            ),
         },
         {
             "question": "How do I save or share my results?",
@@ -92,11 +114,11 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
         },
         {
             "question": "How do I stop a running command?",
-            "answer": "Use the Kill button shown while a command is running.",
+            "answer": "Use the Kill button shown or press Ctrl+C while a command is running.",
             "answer_html": (
                 "Click the <strong class=\"faq-kill-verb\">■ Kill</strong> button that appears "
-                "while a command is running. This sends SIGTERM to the entire process group on the "
-                "server, stopping it immediately."
+                "while a command is running or press <code>Ctrl+C</code>. This sends SIGTERM to the "
+                "entire process group on the server, stopping it immediately."
             ),
         },
         {
@@ -360,6 +382,131 @@ _PATH_TMP_RE  = re.compile(r'(?<![\w:/])/tmp\b')
 _LOOPBACK_RE = re.compile(r'\blocalhost\b|127\.0\.0\.1|\b0\.0\.0\.0\b|\[::1\]', re.IGNORECASE)
 
 
+def _split_shell_control_tokens(command: str) -> list[str]:
+    """Split a shell-like command while keeping control operators as tokens."""
+    try:
+        lexer = shlex.shlex(command, posix=True, punctuation_chars='|&;<>')
+        lexer.whitespace_split = True
+        lexer.commenters = ''
+        return list(lexer)
+    except ValueError:
+        return []
+
+
+def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    """Parse the post-filter stage for the narrow app-native grep helper."""
+    if stage_tokens[0].lower() != 'grep':
+        return None, None
+
+    options = {"ignore_case": False, "invert_match": False, "extended": False}
+    pattern = None
+    for token in stage_tokens[1:]:
+        if pattern is not None:
+            return None, "Synthetic grep only supports a single pattern argument."
+        if token.startswith('-') and token != '-':
+            if token.startswith('--'):
+                return None, "Synthetic grep supports only -i, -v, and -E in phase 1."
+            for flag in token[1:]:
+                if flag == 'i':
+                    options["ignore_case"] = True
+                elif flag == 'v':
+                    options["invert_match"] = True
+                elif flag == 'E':
+                    options["extended"] = True
+                else:
+                    return None, "Synthetic grep supports only -i, -v, and -E in phase 1."
+            continue
+        pattern = token
+
+    if pattern is None:
+        return None, "Synthetic grep requires a pattern."
+
+    return {
+        "kind": "grep",
+        "pattern": pattern,
+        **options,
+    }, None
+
+
+def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    """Parse narrow app-native head/tail helpers with default count or -n."""
+    command_name = stage_tokens[0].lower()
+    if command_name not in {"head", "tail"}:
+        return None, None
+
+    count = 10
+    if len(stage_tokens) == 1:
+        return {"kind": command_name, "count": count}, None
+    if len(stage_tokens) != 3 or stage_tokens[1] != "-n":
+        return None, f"Synthetic {command_name} supports only `-n <count>` in phase 1."
+    if not stage_tokens[2].isdigit():
+        return None, f"Synthetic {command_name} requires a non-negative numeric count."
+
+    return {"kind": command_name, "count": int(stage_tokens[2])}, None
+
+
+def _parse_synthetic_wc_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    """Parse the narrow app-native `wc -l` helper."""
+    if stage_tokens[0].lower() != "wc":
+        return None, None
+    if stage_tokens[1:] == ["-l"]:
+        return {"kind": "wc_l"}, None
+    return None, "Synthetic wc supports only `wc -l` in phase 1."
+
+
+def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
+    """Parse a narrow app-native `command | helper ...` post-filter form.
+
+    Returns (spec, error_message). spec is None when the command does not use
+    the synthetic post-filter path. error_message is populated only when the
+    input is clearly trying to use a supported helper but the stage is invalid.
+    """
+    stripped = command.strip()
+    if '|' not in stripped:
+        return None, None
+    if '`' in stripped or '$(' in stripped:
+        return None, None
+
+    tokens = _split_shell_control_tokens(stripped)
+    if not tokens:
+        return None, None
+
+    disallowed_control = {'&&', '||', ';', ';;', '>', '>>', '<', '&'}
+    if any(token in disallowed_control for token in tokens):
+        return None, None
+
+    pipe_count = sum(1 for token in tokens if token == '|')
+    if pipe_count != 1:
+        return None, None
+
+    pipe_index = tokens.index('|')
+    base_tokens = tokens[:pipe_index]
+    stage_tokens = tokens[pipe_index + 1:]
+    if not base_tokens or not stage_tokens:
+        return None, "Synthetic post-filters require `command | helper ...`."
+
+    for parser in (
+        _parse_synthetic_grep_stage,
+        _parse_synthetic_head_tail_stage,
+        _parse_synthetic_wc_stage,
+    ):
+        spec, error = parser(stage_tokens)
+        if spec or error:
+            if spec:
+                spec["base_command"] = shlex.join(base_tokens)
+            return spec, error
+
+    return None, None
+
+
+def parse_synthetic_grep(command: str) -> tuple[dict | None, str | None]:
+    """Backward-compatible grep-only wrapper around the synthetic post-filter parser."""
+    spec, error = parse_synthetic_postfilter(command)
+    if spec and spec.get("kind") == "grep":
+        return spec, error
+    return None, error if error and "grep" in error.lower() else None
+
+
 def load_allowed_commands():
     """Read allowed_commands.txt and return (allow_prefixes, deny_prefixes).
     allow_prefixes is None if the file doesn't exist or has no allow entries (= unrestricted).
@@ -504,16 +651,214 @@ def load_mobile_welcome_hints():
     return hints
 
 
-def load_autocomplete():
-    """Read auto_complete.txt and return a list of suggestion strings."""
+def _normalize_flat_autocomplete_suggestions(items):
+    if not isinstance(items, list):
+        return []
     suggestions = []
     seen = set()
-    for raw_line in _load_text_lines(AUTOCOMPLETE_FILE):
-        line = raw_line.strip()
-        if line and not line.startswith("#") and line not in seen:
-            suggestions.append(line)
-            seen.add(line)
+    for raw_item in items:
+        line = str(raw_item or "").strip()
+        if not line:
+            continue
+        key = line.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        suggestions.append(line)
     return suggestions
+
+
+def _load_autocomplete_config(path):
+    loaded = _load_yaml_mapping(path)
+    if not loaded:
+        return {"flat_suggestions": [], "context": {}}
+
+    raw_flat = loaded.get("flat_suggestions", [])
+    raw_context = loaded.get("context", None)
+    if raw_context is None:
+        raw_context = {
+            key: value
+            for key, value in loaded.items()
+            if key != "flat_suggestions"
+        }
+
+    return {
+        "flat_suggestions": _normalize_flat_autocomplete_suggestions(raw_flat),
+        "context": _normalize_autocomplete_context(raw_context),
+    }
+
+
+def load_autocomplete():
+    """Read the unified autocomplete YAML and return flat suggestion strings."""
+    base = _load_autocomplete_config(AUTOCOMPLETE_CONTEXT_FILE)
+    root, ext = os.path.splitext(AUTOCOMPLETE_CONTEXT_FILE)
+    local = _load_autocomplete_config(f"{root}.local{ext}")
+
+    suggestions = []
+    seen = set()
+    for source in (base.get("flat_suggestions", []), local.get("flat_suggestions", [])):
+        for line in source:
+            key = line.lower()
+            if key in seen:
+                continue
+            seen.add(key)
+            suggestions.append(line)
+    return suggestions
+
+
+def _load_yaml_mapping(path):
+    try:
+        with open(path) as f:
+            loaded = yaml.safe_load(f) or {}
+    except (FileNotFoundError, yaml.YAMLError):
+        return {}
+    return loaded if isinstance(loaded, dict) else {}
+
+
+def _normalize_context_suggestion(item):
+    if isinstance(item, str):
+        value = item.strip()
+        return {"value": value, "description": ""} if value else None
+    if not isinstance(item, dict):
+        return None
+    value = str(item.get("value", "")).strip()
+    if not value:
+        return None
+    description = str(item.get("description", "")).strip()
+    return {"value": value, "description": description}
+
+
+def _normalize_autocomplete_context(data):
+    if not isinstance(data, dict):
+        return {}
+    normalized = {}
+    for raw_root, raw_spec in data.items():
+        root = str(raw_root or "").strip().lower()
+        if not root or not isinstance(raw_spec, dict):
+            continue
+        flags = []
+        seen_flags = set()
+        for raw_flag in raw_spec.get("flags", []) or []:
+            flag = _normalize_context_suggestion(raw_flag)
+            if not flag:
+                continue
+            key = flag["value"].lower()
+            if key in seen_flags:
+                continue
+            seen_flags.add(key)
+            flags.append(flag)
+
+        expects_value = []
+        seen_value_flags = set()
+        for raw_flag in raw_spec.get("expects_value", []) or []:
+            token = str(raw_flag or "").strip()
+            if not token:
+                continue
+            key = token.lower()
+            if key in seen_value_flags:
+                continue
+            seen_value_flags.add(key)
+            expects_value.append(token)
+
+        arg_hints = {}
+        raw_arg_hints = raw_spec.get("arg_hints", {}) or {}
+        if isinstance(raw_arg_hints, dict):
+            for raw_trigger, raw_items in raw_arg_hints.items():
+                trigger = str(raw_trigger or "").strip()
+                if not trigger:
+                    continue
+                hints = []
+                seen_hints = set()
+                for raw_item in raw_items or []:
+                    hint = _normalize_context_suggestion(raw_item)
+                    if not hint:
+                        continue
+                    key = hint["value"].lower()
+                    if key in seen_hints:
+                        continue
+                    seen_hints.add(key)
+                    hints.append(hint)
+                if hints:
+                    arg_hints[trigger] = hints
+
+        pipe_command = bool(raw_spec.get("pipe_command"))
+        pipe_insert_value = str(raw_spec.get("pipe_insert_value") or "").strip()
+        pipe_label = str(raw_spec.get("pipe_label") or "").strip() or pipe_insert_value
+        pipe_description = str(raw_spec.get("pipe_description") or "").strip()
+
+        if flags or expects_value or arg_hints or pipe_command or pipe_insert_value or pipe_label or pipe_description:
+            normalized[root] = {
+                "flags": flags,
+                "expects_value": expects_value,
+                "arg_hints": arg_hints,
+                "pipe_command": pipe_command,
+                "pipe_insert_value": pipe_insert_value,
+                "pipe_label": pipe_label,
+                "pipe_description": pipe_description,
+            }
+    return normalized
+
+
+def _merge_autocomplete_context(base, overlay):
+    merged = deepcopy(base if isinstance(base, dict) else {})
+    for root, spec in (overlay or {}).items():
+        if not isinstance(spec, dict):
+            continue
+        current = merged.setdefault(root, {
+            "flags": [],
+            "expects_value": [],
+            "arg_hints": {},
+            "pipe_command": False,
+            "pipe_insert_value": "",
+            "pipe_label": "",
+            "pipe_description": "",
+        })
+
+        if spec.get("pipe_command"):
+            current["pipe_command"] = True
+        if spec.get("pipe_insert_value"):
+            current["pipe_insert_value"] = spec["pipe_insert_value"]
+        if spec.get("pipe_label"):
+            current["pipe_label"] = spec["pipe_label"]
+        if spec.get("pipe_description"):
+            current["pipe_description"] = spec["pipe_description"]
+        if not current.get("pipe_label") and current.get("pipe_insert_value"):
+            current["pipe_label"] = current["pipe_insert_value"]
+
+        seen_flags = {item["value"].lower() for item in current.get("flags", []) if isinstance(item, dict)}
+        for flag in spec.get("flags", []) or []:
+            key = flag["value"].lower()
+            if key in seen_flags:
+                continue
+            seen_flags.add(key)
+            current.setdefault("flags", []).append(flag)
+
+        seen_value_flags = {str(item).lower() for item in current.get("expects_value", [])}
+        for token in spec.get("expects_value", []) or []:
+            key = str(token).lower()
+            if key in seen_value_flags:
+                continue
+            seen_value_flags.add(key)
+            current.setdefault("expects_value", []).append(token)
+
+        for trigger, hints in (spec.get("arg_hints", {}) or {}).items():
+            bucket = current.setdefault("arg_hints", {}).setdefault(trigger, [])
+            seen_hints = {item["value"].lower() for item in bucket if isinstance(item, dict)}
+            for hint in hints or []:
+                key = hint["value"].lower()
+                if key in seen_hints:
+                    continue
+                seen_hints.add(key)
+                bucket.append(hint)
+    return merged
+
+
+def load_autocomplete_context():
+    """Read the unified autocomplete YAML and return structured root-aware suggestions."""
+    base = _load_autocomplete_config(AUTOCOMPLETE_CONTEXT_FILE)
+    root, ext = os.path.splitext(AUTOCOMPLETE_CONTEXT_FILE)
+    local = _load_autocomplete_config(f"{root}.local{ext}")
+    return _merge_autocomplete_context(base.get("context", {}), local.get("context", {}))
 
 
 def split_command_argv(command: str) -> list[str]:
@@ -627,21 +972,26 @@ def is_command_allowed(command: str) -> tuple[bool, str]:
     if allowed is None:
         return True, ""  # no file or empty file = unrestricted
 
+    synthetic_postfilter, postfilter_error = parse_synthetic_postfilter(command)
+    if postfilter_error:
+        return False, postfilter_error
+    command_to_validate = synthetic_postfilter["base_command"] if synthetic_postfilter else command
+
     # Block shell chaining/redirection operators outright when restrictions are active
-    if SHELL_CHAIN_RE.search(command):
+    if not synthetic_postfilter and SHELL_CHAIN_RE.search(command):
         return False, "Shell operators (&&, |, ;, >, etc.) are not permitted."
 
-    if _PATH_DATA_RE.search(command):
+    if _PATH_DATA_RE.search(command_to_validate):
         return False, "Access to /data is not permitted."
-    if _PATH_TMP_RE.search(command):
+    if _PATH_TMP_RE.search(command_to_validate):
         return False, "Access to /tmp is not permitted."
-    if _LOOPBACK_RE.search(command):
+    if _LOOPBACK_RE.search(command_to_validate):
         return False, "Connections to the local host are not permitted."
 
-    cmd_lower = command.strip().lower()
+    cmd_lower = command_to_validate.strip().lower()
 
     # Deny prefixes take priority — checked before allow list
-    if denied and _is_denied(command.strip(), denied):
+    if denied and _is_denied(command_to_validate.strip(), denied):
         return False, f"Command not allowed: '{command.strip()}'"
 
     if not any(cmd_lower == prefix or cmd_lower.startswith(prefix + " ")

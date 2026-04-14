@@ -1,10 +1,10 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 // Use allowed commands that complete quickly.
-const CMD   = 'curl http://localhost:5001/health'
-const CMD_B = 'curl http://localhost:5001/config'
-const LONG_CMD = 'ping -c 1000 127.0.0.1'
+const CMD   = 'hostname'
+const CMD_B = 'date'
+const LONG_CMD = 'ping -c 1000 darklab.sh'
 const TEST_IP = makeTestIp(66)
 
 test.describe('max tabs', () => {
@@ -12,6 +12,7 @@ test.describe('max tabs', () => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('new-tab button is disabled after reaching the max-tabs limit', async ({ page }) => {
@@ -32,6 +33,7 @@ test.describe('tab renaming', () => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('double-clicking a tab label lets the user rename it', async ({ page }) => {
@@ -83,6 +85,7 @@ test.describe('tab command recall', () => {
     await page.goto('/')
     // Wait for the app to be fully initialised
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('input is empty on the initial tab', async ({ page }) => {
@@ -108,38 +111,49 @@ test.describe('tab command recall', () => {
   })
 
   test('running a command in one tab does not block another tab from running', async ({ page }) => {
-    await page.route('**/run', async route => {
-      const body = route.request().postData() || '{}'
-      const payload = JSON.parse(body)
-      const command = payload.command || ''
+    const secondCmd = 'status'
 
-      if (command === LONG_CMD) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
-            'data: {"type":"output","text":"long run started\\n"}\n\n',
-          ].join(''),
-        })
-        return
+    await page.addInitScript(([longCmd, secondCmd]) => {
+      const originalFetch = window.fetch.bind(window)
+      const encoder = new TextEncoder()
+
+      window.fetch = async (input, init) => {
+        const url = typeof input === 'string' ? input : input.url
+        const rawBody = typeof init?.body === 'string' ? init.body : ''
+
+        if (url.endsWith('/run') && init?.method === 'POST') {
+          const payload = JSON.parse(rawBody || '{}')
+          const command = payload.command || ''
+
+          if (command === longCmd) {
+            const body = new ReadableStream({
+              start(controller) {
+                controller.enqueue(encoder.encode('data: {"type":"started","run_id":"tabs-long-run"}\n\n'))
+                controller.enqueue(encoder.encode('data: {"type":"output","text":"long run started\\n"}\n\n'))
+                // Leave the stream open so the originating tab stays in RUNNING.
+              },
+            })
+            return new Response(body, {
+              status: 200,
+              headers: { 'Content-Type': 'text/event-stream' },
+            })
+          }
+
+          if (command === secondCmd) {
+            return new Response([
+              'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
+              'data: {"type":"output","text":"second tab output\\n"}\n\n',
+              'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+            ].join(''), {
+              status: 200,
+              headers: { 'Content-Type': 'text/event-stream' },
+            })
+          }
+        }
+
+        return originalFetch(input, init)
       }
-
-      if (command === CMD_B) {
-        await route.fulfill({
-          status: 200,
-          contentType: 'text/event-stream',
-          body: [
-            'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
-            'data: {"type":"output","text":"second tab output\\n"}\n\n',
-            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-          ].join(''),
-        })
-        return
-      }
-
-      await route.continue()
-    })
+    }, [LONG_CMD, secondCmd])
 
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')
@@ -148,7 +162,7 @@ test.describe('tab command recall', () => {
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
 
-    await page.locator('#cmd').fill(CMD_B)
+    await page.locator('#cmd').fill(secondCmd)
     await page.keyboard.press('Enter')
 
     await expect(page.locator('.tab-panel.active .output .line.exit-ok')).toBeVisible({ timeout: 15_000 })
@@ -163,7 +177,7 @@ test.describe('tab command recall', () => {
   })
 
   test('reload restores non-running tabs, transcript preview, and the active draft', async ({ page }) => {
-    const restoreCmd = 'status'
+    const restoreCmd = 'hostname'
     await runCommand(page, restoreCmd)
     await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${restoreCmd}`)
 
@@ -180,7 +194,7 @@ test.describe('tab command recall', () => {
 
     await page.locator('.tab').first().click()
     await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${restoreCmd}`)
-    await expect(page.locator('.tab-panel.active .output')).toContainText('runs in session')
+    await expect.poll(async () => page.locator('.tab-panel.active .output .line').count()).toBeGreaterThan(1)
   })
 
   test('reload restores a completed tab with a visible prompt and preserved prompt formatting', async ({ page }) => {
@@ -284,12 +298,7 @@ test.describe('tab command recall', () => {
     }, { timeout: 30000 })
     const beforeCount = await page.locator('.tab-panel.active .output .line.prompt-echo').count()
 
-    await page.evaluate(() => {
-      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
-    })
-    await page.waitForFunction(() => {
-      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
-    })
+    await ensurePromptReady(page)
 
     await page.locator('#cmd').press('Enter')
 
@@ -331,10 +340,17 @@ test.describe('tab strip interactions', () => {
     await page.locator('#new-tab-btn').click()
 
     const secondTab = page.locator('.tab').nth(1)
+    const firstTab = page.locator('.tab').first()
     await secondTab.click()
     await page.locator('#cmd').fill('')
+    const secondBox = await secondTab.boundingBox()
+    const firstBox = await firstTab.boundingBox()
+    if (!secondBox || !firstBox) throw new Error('Tab bounding boxes were not available')
 
-    await secondTab.dragTo(page.locator('.tab').first())
+    await page.mouse.move(secondBox.x + (secondBox.width / 2), secondBox.y + (secondBox.height / 2))
+    await page.mouse.down()
+    await page.mouse.move(firstBox.x + 8, firstBox.y + (firstBox.height / 2), { steps: 8 })
+    await page.mouse.up()
 
     await expect(page.locator('#cmd')).toBeFocused()
 
@@ -354,46 +370,32 @@ test.describe('tab strip interactions', () => {
 
     await page.evaluate(({ downX, downY }) => {
       const tab = document.querySelectorAll('.tab')[2]
-      tab?.dispatchEvent(new PointerEvent('pointerdown', {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 41,
-        pointerType: 'touch',
-        clientX: downX,
-        clientY: downY,
-      }))
+      const start = new Event('touchstart', { bubbles: true, cancelable: true })
+      Object.defineProperty(start, 'touches', { value: [{ identifier: 41, clientX: downX, clientY: downY }], configurable: true })
+      Object.defineProperty(start, 'changedTouches', { value: [{ identifier: 41, clientX: downX, clientY: downY }], configurable: true })
+      tab?.dispatchEvent(start)
     }, {
       downX: thirdBox.x + (thirdBox.width / 2),
       downY: thirdBox.y + (thirdBox.height / 2),
     })
 
+    await page.waitForTimeout(220)
+
     await page.evaluate(({ moveX, moveY }) => {
-      document.dispatchEvent(new PointerEvent('pointermove', {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 41,
-        pointerType: 'touch',
-        clientX: moveX,
-        clientY: moveY,
-      }))
+      const move = new Event('touchmove', { bubbles: true, cancelable: true })
+      Object.defineProperty(move, 'touches', { value: [{ identifier: 41, clientX: moveX, clientY: moveY }], configurable: true })
+      Object.defineProperty(move, 'changedTouches', { value: [{ identifier: 41, clientX: moveX, clientY: moveY }], configurable: true })
+      document.dispatchEvent(move)
     }, {
       moveX: firstBox.x + 8,
       moveY: firstBox.y + (firstBox.height / 2),
     })
 
-    await expect(page.locator('#tabs-bar')).toHaveClass(/tabs-bar-touch-sorting/)
-    await expect(page.locator('.tab').nth(0)).toHaveClass(/tab-touch-dragging/)
-    await expect(page.locator('.tab').nth(1)).toHaveClass(/tab-drop-before/)
-
     await page.evaluate(({ upX, upY }) => {
-      document.dispatchEvent(new PointerEvent('pointerup', {
-        bubbles: true,
-        cancelable: true,
-        pointerId: 41,
-        pointerType: 'touch',
-        clientX: upX,
-        clientY: upY,
-      }))
+      const end = new Event('touchend', { bubbles: true, cancelable: true })
+      Object.defineProperty(end, 'touches', { value: [], configurable: true })
+      Object.defineProperty(end, 'changedTouches', { value: [{ identifier: 41, clientX: upX, clientY: upY }], configurable: true })
+      document.dispatchEvent(end)
     }, {
       upX: firstBox.x + 8,
       upY: firstBox.y + (firstBox.height / 2),

@@ -491,10 +491,22 @@ function _createHistoryEntry(run, isStarred) {
     || startedAt.getDate() !== now.getDate()
   );
 
+  const header = document.createElement('div');
+  header.className = 'history-entry-header';
+
+  const starBtn = document.createElement('button');
+  starBtn.className = 'history-entry-star' + (isStarred ? ' starred' : '');
+  starBtn.dataset.action = 'star';
+  starBtn.type = 'button';
+  starBtn.setAttribute('aria-label', isStarred ? 'Unstar command' : 'Star command');
+  starBtn.textContent = isStarred ? '★' : '☆';
+  header.appendChild(starBtn);
+
   const cmd = document.createElement('div');
   cmd.className = 'history-entry-cmd';
   cmd.textContent = run.command || '';
-  entry.appendChild(cmd);
+  header.appendChild(cmd);
+  entry.appendChild(header);
 
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
@@ -516,16 +528,10 @@ function _createHistoryEntry(run, isStarred) {
   const actions = document.createElement('div');
   actions.className = 'history-actions';
 
-  const starBtn = document.createElement('button');
-  starBtn.className = 'history-action-btn star-btn' + (isStarred ? ' starred' : '');
-  starBtn.dataset.action = 'star';
-  starBtn.textContent = isStarred ? '★ starred' : '☆ star';
-  actions.appendChild(starBtn);
-
   const copyBtn = document.createElement('button');
   copyBtn.className = 'history-action-btn';
   copyBtn.dataset.action = 'copy';
-  copyBtn.textContent = 'copy command';
+  copyBtn.textContent = 'copy';
   actions.appendChild(copyBtn);
 
   const permalinkBtn = document.createElement('button');
@@ -542,6 +548,13 @@ function _createHistoryEntry(run, isStarred) {
 
   entry.appendChild(actions);
   return entry;
+}
+
+function _historyActionKeepsPanelOpen(action) {
+  if (action === 'star') return true;
+  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  if (!mobileMode) return false;
+  return action === 'copy' || action === 'permalink';
 }
 
 
@@ -675,7 +688,7 @@ function refreshHistoryPanel() {
       // Click anywhere on the entry (except buttons) to load into a new tab,
       // or switch to the existing tab if this command is already loaded there.
       entry.addEventListener('click', e => {
-        if (e.target.closest('.history-action-btn')) return;
+        if (e.target.closest('[data-action]')) return;
 
         // If a tab already has this command and already has the full output,
         // switch to it instead of duplicating. If the tab is still showing a
@@ -703,14 +716,16 @@ function refreshHistoryPanel() {
           .finally(() => _setHistoryLoadState(false));
       });
 
-      entry.querySelector('[data-action="star"]').addEventListener('click', () => {
+      entry.querySelector('[data-action="star"]').addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
         const wasStarred = _getStarred().has(run.command);
         _toggleStar(run.command);
         // If the command is being starred and isn't in the chips list, add it
         if (!wasStarred && !cmdHistory.includes(run.command)) {
           cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
         }
-        hideHistoryPanel();
+        if (!_historyActionKeepsPanelOpen('star')) hideHistoryPanel();
         refreshHistoryPanel();
         renderHistory(); // keep chips in sync
       });
@@ -721,7 +736,7 @@ function refreshHistoryPanel() {
           .catch(() => showToast('Failed to copy command', 'error'));
         const btn = entry.querySelector('[data-action="copy"]');
         if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        hideHistoryPanel();
+        if (!_historyActionKeepsPanelOpen('copy')) hideHistoryPanel();
       });
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
@@ -731,7 +746,7 @@ function refreshHistoryPanel() {
           .catch(() => showToast('Failed to copy link', 'error'));
         const btn = entry.querySelector('[data-action="permalink"]');
         if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        hideHistoryPanel();
+        if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
       });
       entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
         confirmHistAction('delete', run.id, run.command);

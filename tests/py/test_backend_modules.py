@@ -30,7 +30,7 @@ import commands  # noqa: F401 — used as mock.patch("commands.X") target
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
-    load_mobile_welcome_hints, load_autocomplete,
+    load_mobile_welcome_hints, load_autocomplete, load_autocomplete_context,
     load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
@@ -550,6 +550,7 @@ class TestThemeRegistry:
                 result = load_all_faq("darklab shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
+        assert "https://example.invalid/README.md" in result[0]["answer"]
         assert "https://example.invalid/README.md" in result[0]["answer_html"]
 
     def test_load_all_faq_clarifies_snapshot_vs_run_permalink(self):
@@ -572,6 +573,27 @@ class TestThemeRegistry:
         assert "share snapshot" in tabs_html
         assert "run permalink" in tabs_html
         assert "share snapshot for the active tab" in shortcuts_html
+
+    def test_load_all_faq_describes_built_in_shell_features(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        by_question = {item["question"]: item for item in result}
+        built_in_html = by_question["What built-in shell features are supported?"]["answer_html"]
+        assert "Built-in commands" in built_in_html
+        assert "help</code>" in built_in_html
+        assert "history</code>" in built_in_html
+        assert "command | grep pattern" in built_in_html
+        assert "command | head -n 20" in built_in_html
+        assert "command | tail -n 20" in built_in_html
+        assert "command | wc -l" in built_in_html
+        assert "Only one supported pipe stage can be used per command" in built_in_html
+        assert "General shell piping, chaining, and redirection are still blocked" in built_in_html
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
@@ -997,39 +1019,39 @@ class TestMobileWelcomeHintLoading:
 # ── load_autocomplete ─────────────────────────────────────────────────────────
 
 class TestAutocompleteLoading:
-    def test_missing_file_returns_empty_list(self):
-        with mock.patch("commands.AUTOCOMPLETE_FILE", "/nonexistent/auto_complete.txt"):
+    def test_missing_yaml_returns_empty_list(self):
+        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nonexistent/autocomplete_context.yaml"):
             result = load_autocomplete()
         assert result == []
 
-    def test_valid_entries_returned(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("nmap -sV\nping -c 4\ndig @1.1.1.1\n")
+    def test_valid_entries_returned_from_flat_suggestions(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            flat_suggestions:
+              - nmap -sV
+              - ping -c 4
+              - dig @1.1.1.1
+            """))
             path = f.name
         try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
                 result = load_autocomplete()
         finally:
             os.unlink(path)
         assert result == ["nmap -sV", "ping -c 4", "dig @1.1.1.1"]
 
-    def test_comment_lines_filtered(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("# this is a comment\nnmap -sV\n# another comment\n")
+    def test_blank_yaml_entries_filtered(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            flat_suggestions:
+              - ping -c 4
+              - ""
+              - "   "
+              - dig google.com
+            """))
             path = f.name
         try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
-                result = load_autocomplete()
-        finally:
-            os.unlink(path)
-        assert result == ["nmap -sV"]
-
-    def test_blank_lines_filtered(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("ping -c 4\n\n\ndig google.com\n")
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
                 result = load_autocomplete()
         finally:
             os.unlink(path)
@@ -1037,15 +1059,106 @@ class TestAutocompleteLoading:
 
     def test_local_overlay_appends_unique_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "auto_complete.txt")
-            local_path = os.path.join(tmp, "auto_complete.local.txt")
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
             with open(base_path, "w") as f:
-                f.write("nmap -sV\nping -c 4\n")
+                f.write(textwrap.dedent("""
+                flat_suggestions:
+                  - nmap -sV
+                  - ping -c 4
+                """))
             with open(local_path, "w") as f:
-                f.write("ping -c 4\ncurl http://localhost:5001/health\n")
-            with mock.patch("commands.AUTOCOMPLETE_FILE", base_path):
+                f.write(textwrap.dedent("""
+                flat_suggestions:
+                  - ping -c 4
+                  - curl http://localhost:5001/health
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
                 result = load_autocomplete()
         assert result == ["nmap -sV", "ping -c 4", "curl http://localhost:5001/health"]
+
+class TestAutocompleteContextLoading:
+    def test_missing_context_file_returns_empty_mapping(self):
+        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nonexistent/autocomplete_context.yaml"):
+            result = load_autocomplete_context()
+        assert result == {}
+
+    def test_valid_context_entries_are_normalized(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              nmap:
+                flags:
+                  - value: -sV
+                    description: Service detection
+                  - -Pn
+                expects_value:
+                  - -p
+                arg_hints:
+                  "-p":
+                    - value: "<ports>"
+                      description: Port list
+              wc:
+                pipe_command: true
+                pipe_insert_value: wc -l
+                pipe_label: wc -l
+                pipe_description: Count lines
+            """))
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
+        finally:
+            os.unlink(path)
+        assert result["nmap"]["flags"][0] == {"value": "-sV", "description": "Service detection"}
+        assert result["nmap"]["flags"][1] == {"value": "-Pn", "description": ""}
+        assert result["nmap"]["expects_value"] == ["-p"]
+        assert result["nmap"]["arg_hints"]["-p"][0]["value"] == "<ports>"
+        assert result["wc"]["pipe_command"] is True
+        assert result["wc"]["pipe_insert_value"] == "wc -l"
+        assert result["wc"]["pipe_label"] == "wc -l"
+        assert result["wc"]["pipe_description"] == "Count lines"
+
+    def test_local_overlay_merges_unique_context_entries(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  nmap:
+                    flags:
+                      - -sV
+                    expects_value:
+                      - -p
+                  wc:
+                    pipe_command: true
+                    pipe_insert_value: wc -l
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  nmap:
+                    flags:
+                      - -Pn
+                    expects_value:
+                      - --top-ports
+                  ffuf:
+                    flags:
+                      - -u
+                  wc:
+                    pipe_label: wc -l
+                    pipe_description: Count lines
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+        assert [item["value"] for item in result["nmap"]["flags"]] == ["-sV", "-Pn"]
+        assert result["nmap"]["expects_value"] == ["-p", "--top-ports"]
+        assert [item["value"] for item in result["ffuf"]["flags"]] == ["-u"]
+        assert result["wc"]["pipe_command"] is True
+        assert result["wc"]["pipe_insert_value"] == "wc -l"
+        assert result["wc"]["pipe_label"] == "wc -l"
+        assert result["wc"]["pipe_description"] == "Count lines"
 
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────

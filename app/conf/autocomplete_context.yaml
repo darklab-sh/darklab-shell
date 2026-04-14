@@ -1,0 +1,1070 @@
+# Unified autocomplete configuration.
+#
+# This file is now the single runtime source for both:
+# - flat whole-command suggestions
+# - command-root-aware contextual suggestions
+#
+# Top-level shape:
+# flat_suggestions:
+#   - "nmap -sV target"
+#   - "curl -I https://example.com"
+#
+# context:
+#   <command-root>:
+#     flags:
+#       - value: <flag-or-token>
+#         description: <short help text>
+#     expects_value:
+#       - <flag-that-consumes-the-next-token>
+#     arg_hints:
+#       "<flag>":
+#         - value: <suggested-value>
+#           description: <short help text>
+#       "__positional__":
+#         - value: <positional-placeholder-or-example>
+#           description: <short help text>
+#
+# Meaning:
+# - flat_suggestions:
+#   the old whole-command dropdown corpus. Use this for helper commands, full
+#   example invocations, and simple prefix suggestions.
+#
+# - context:
+#   token-aware suggestions that activate once the command root is known.
+#
+# - flags:
+#   suggestions shown when the current token looks like a flag position for the
+#   command root, e.g. `nmap -` or `ffuf -`.
+#
+# - expects_value:
+#   flags whose next token should be treated as a value slot rather than another
+#   flag slot. Example:
+#     curl -o <cursor>
+#   If `-o` is listed here, autocomplete uses arg_hints["-o"] instead of
+#   continuing to suggest more curl flags.
+#
+# - arg_hints:
+#   optional value hints shown after a specific flag, or generic positional
+#   hints exposed through the special key "__positional__".
+#
+# Authoring rules:
+# - Prefer flat_suggestions for:
+#   - helper commands (`help`, `status`, `history`)
+#   - full command examples
+#   - simple discovery where token-aware logic adds little value
+# - Prefer context entries for:
+#   - flag-heavy tools like `nmap`, `curl`, `wget`, `ffuf`
+#   - commands where the next useful token depends on the current flag
+#   - commands that benefit from a visible positional hint after `command `
+# - Use expects_value when the next token should stop showing more flags and
+#   instead show value hints for the active flag.
+# - Use arg_hints["__positional__"] for normal unflagged arguments such as
+#   targets, hosts, URLs, domains, or CIDR ranges.
+# - For arg_hints values, prefer:
+#   - concrete examples when prefix matching should work (`https://`, `/dev/null`)
+#   - placeholders when the goal is explanatory guidance (`<target>`, `<domain>`)
+# - Positional placeholders are now shown alongside flags at `command `, so
+#   `__positional__` can be explanatory without relying only on prefix matches.
+#
+# "__positional__" means:
+#   use these hints when the current token is a normal non-flag argument and no
+#   more specific flag-value hint is taking priority. Examples:
+#     dig <cursor>        -> use dig.arg_hints["__positional__"]
+#     nmap example.com    -> use nmap.arg_hints["__positional__"]
+#     curl https://<c>    -> use curl.arg_hints["__positional__"]
+#   It is also shown alongside flags when the user is at `command ` so the
+#   required positional argument stays discoverable before typing begins.
+#
+# Example patterns:
+#
+# Minimal flag-only command:
+# context:
+#   demo:
+#     flags:
+#       - value: --json
+#         description: Output JSON
+#
+# Flag expecting a value:
+# context:
+#   curl:
+#     flags:
+#       - value: -H
+#         description: Add request header
+#     expects_value:
+#       - -H
+#     arg_hints:
+#       "-H":
+#         - value: "Authorization: Bearer <token>"
+#           description: Example auth header
+#
+# Positional hints:
+# context:
+#   dig:
+#     arg_hints:
+#       "__positional__":
+#         - value: "<domain>"
+#           description: Domain name to query
+#
+# Narrow built-in pipe support:
+# context:
+#   grep:
+#     pipe_command: true
+#     pipe_description: Filter lines by pattern
+#     flags:
+#       - value: -i
+#         description: Ignore case
+#
+# `pipe_command: true` means the entry is also suggested after `command |`.
+# `pipe_insert_value` can override what gets inserted there. For example,
+# `wc` can suggest `wc -l` directly because that is the only supported form.
+
+flat_suggestions:
+  - "autocomplete"
+  - "banner"
+  - "clear"
+  - "date"
+  - "env"
+  - "faq"
+  - "fortune"
+  - "groups"
+  - "help"
+  - "history"
+  - "hostname"
+  - "id"
+  - "ip a"
+  - "jobs"
+  - "last"
+  - "limits"
+  - "ls"
+  - "tty"
+  - "version"
+  - "who"
+  - "which curl"
+  - "which history"
+  - "type curl"
+  - "type history"
+  - "pwd"
+  - "ps"
+  - "ps aux"
+  - "ps -ef"
+  - "retention"
+  - "route"
+  - "shortcuts"
+  - "status"
+  - "df -h"
+  - "free -h"
+  - "uname"
+  - "uname -a"
+  - "uptime"
+  - "whoami"
+  - "man banner"
+  - "man clear"
+  - "man curl"
+  - "man date"
+  - "man dig"
+  - "man dnsenum"
+  - "man dnsrecon"
+  - "man env"
+  - "man faq"
+  - "man fierce"
+  - "man fortune"
+  - "man fping"
+  - "man groups"
+  - "man help"
+  - "man history"
+  - "man host"
+  - "man hostname"
+  - "man id"
+  - "man last"
+  - "man limits"
+  - "man ls"
+  - "man man"
+  - "man mtr"
+  - "man nc"
+  - "man nmap"
+  - "man nslookup"
+  - "man ping"
+  - "man ps"
+  - "man pwd"
+  - "man retention"
+  - "man shortcuts"
+  - "man status"
+  - "man tcptraceroute"
+  - "man testssl"
+  - "man traceroute"
+  - "man tty"
+  - "man type"
+  - "man uname"
+  - "man uptime"
+  - "man version"
+  - "man wget"
+  - "man which"
+  - "man who"
+  - "man whoami"
+  - "man whois"
+  - "ping -h"
+  - "ping -c 4 darklab.sh"
+  - "ping -c 10 darklab.sh"
+  - "ping -i 0.5 -c 20 darklab.sh"
+  - "ping -i 0.5 -c 20 darklab.sh | grep ttl"
+  - "ping -i 0.5 -c 20 darklab.sh | head -n 5"
+  - "ping -i 0.5 -c 20 darklab.sh | tail -n 5"
+  - "ping -i 0.5 -c 20 darklab.sh | wc -l"
+  - "nc -zv ip.darklab.sh 80"
+  - "nc -zv ip.darklab.sh 443 80"
+  - "nc -zv 1.1.1.1 53 80"
+  - "dig -h"
+  - "dig A ip.darklab.sh"
+  - "dig MX ip.darklab.sh"
+  - "dig TXT ip.darklab.sh"
+  - "dig NS ip.darklab.sh"
+  - "dig AAAA ip.darklab.sh"
+  - "dig ANY ip.darklab.sh"
+  - "dig +short A ip.darklab.sh"
+  - "dig +short MX ip.darklab.sh"
+  - "dig @8.8.8.8 A ip.darklab.sh"
+  - "dig +trace A ip.darklab.sh"
+  - "dig AXFR ip.darklab.sh @ns1.ip.darklab.sh"
+  - "nslookup -type=A ip.darklab.sh"
+  - "nslookup -type=MX ip.darklab.sh"
+  - "nslookup -type=TXT ip.darklab.sh"
+  - "nslookup -type=NS ip.darklab.sh"
+  - "host -t A ip.darklab.sh"
+  - "host -t MX darklab.sh"
+  - "host -t TXT ip.darklab.sh"
+  - "host -t NS ip.darklab.sh"
+  - "whois 8.8.8.8"
+  - "traceroute --help"
+  - "traceroute ip.darklab.sh"
+  - "traceroute -n ip.darklab.sh"
+  - "traceroute -m 30 ip.darklab.sh"
+  - "tcptraceroute ip.darklab.sh"
+  - "tcptraceroute -n ip.darklab.sh"
+  - "mtr --help"
+  - "mtr ip.darklab.sh"
+  - "mtr -c 20 ip.darklab.sh"
+  - "mtr -n ip.darklab.sh"
+  - "mtr -n -c 20 ip.darklab.sh"
+  - "curl -h"
+  - "curl -I https://ip.darklab.sh"
+  - "curl -v https://ip.darklab.sh"
+  - "curl -L https://ip.darklab.sh"
+  - "curl -o /dev/null -s -w \"%{http_code}\" https://ip.darklab.sh"
+  - "curl -H \"User-Agent: Mozilla/5.0\" https://ip.darklab.sh"
+  - "curl -k https://ip.darklab.sh"
+  - "curl --max-time 10 https://ip.darklab.sh"
+  - "curl -I https://ip.darklab.sh | grep server"
+  - "wget --help"
+  - "wget -q -O /dev/null --server-response https://ip.darklab.sh"
+  - "wget --spider https://ip.darklab.sh"
+  - "nmap -h"
+  - "nmap -sT ip.darklab.sh"
+  - "nmap -sT -p 80,443 ip.darklab.sh"
+  - "nmap -sT -p 1-1000 ip.darklab.sh"
+  - "nmap -sV -sT ip.darklab.sh"
+  - "nmap -A -sT ip.darklab.sh"
+  - "nmap -sT --script http-headers ip.darklab.sh"
+  - "nmap -sT --script ssl-cert ip.darklab.sh"
+  - "nmap -sT --script ssl-enum-ciphers ip.darklab.sh"
+  - "nmap -sT --script vuln ip.darklab.sh"
+  - "nmap -sT --script http-title ip.darklab.sh"
+  - "nmap -Pn -sT ip.darklab.sh"
+  - "testssl --help"
+  - "testssl https://ip.darklab.sh"
+  - "testssl --fast https://ip.darklab.sh"
+  - "testssl --severity HIGH https://ip.darklab.sh"
+  - "testssl --full https://ip.darklab.sh"
+  - "testssl --sneaky https://ip.darklab.sh"
+  - "testssl -p https://ip.darklab.sh"
+  - "testssl --heartbleed https://ip.darklab.sh"
+  - "testssl --poodle https://ip.darklab.sh"
+  - "testssl --beast https://ip.darklab.sh"
+  - "dnsrecon -h"
+  - "dnsrecon -d ip.darklab.sh"
+  - "dnsrecon -d ip.darklab.sh -t std"
+  - "dnsrecon -d ip.darklab.sh -t axfr"
+  - "dnsrecon -d ip.darklab.sh -t brt"
+  - "dnsrecon -d ip.darklab.sh -t srv"
+  - "dnsrecon -d ip.darklab.sh -t zonewalk"
+  - "dnsrecon -d ip.darklab.sh -t crt"
+  - "nikto -Help"
+  - "nikto -h ip.darklab.sh"
+  - "nikto -h ip.darklab.sh -p 443 -ssl"
+  - "nikto -h ip.darklab.sh -p 8080"
+  - "nikto -h ip.darklab.sh -Tuning 1"
+  - "nikto -h ip.darklab.sh -Tuning 4"
+  - "nikto -h ip.darklab.sh -maxtime 120"
+  - "wpscan --help"
+  - "wpscan --url https://ip.darklab.sh"
+  - "wpscan --url https://ip.darklab.sh --enumerate p"
+  - "wpscan --url https://ip.darklab.sh --enumerate u"
+  - "wpscan --url https://ip.darklab.sh --enumerate t"
+  - "wpscan --url https://ip.darklab.sh --enumerate vp"
+  - "wpscan --url https://ip.darklab.sh --enumerate ap"
+  - "wpscan --url https://ip.darklab.sh --detection-mode aggressive"
+  - "wpscan --url https://ip.darklab.sh --force"
+  - "nuclei -h"
+  - "nuclei -u https://ip.darklab.sh"
+  - "nuclei -u https://ip.darklab.sh -t http/"
+  - "nuclei -u https://ip.darklab.sh -t ssl/"
+  - "nuclei -u https://ip.darklab.sh -t dns/"
+  - "nuclei -u https://ip.darklab.sh -t network/"
+  - "nuclei -u https://ip.darklab.sh -severity low,medium,high,critical"
+  - "nuclei -u https://ip.darklab.sh -severity high,critical"
+  - "nuclei -u https://ip.darklab.sh -as"
+  - "subfinder -h"
+  - "subfinder -d ip.darklab.sh"
+  - "subfinder -d ip.darklab.sh -silent"
+  - "subfinder -d ip.darklab.sh -recursive"
+  - "pd-httpx -h"
+  - "pd-httpx -u https://ip.darklab.sh"
+  - "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect"
+  - "pd-httpx -u https://ip.darklab.sh -status-code"
+  - "pd-httpx -u https://ip.darklab.sh -follow-redirects"
+  - "dnsx -h"
+  - "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+  - "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp"
+  - "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp"
+  - "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -cname -resp"
+  - "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -mx -resp"
+  - "fping -h"
+  - "fping darklab.sh"
+  - "fping -c 4 darklab.sh"
+  - "fping -s darklab.sh"
+  - "fping -e darklab.sh"
+  - "amass -h"
+  - "assetfinder --help"
+  - "fierce --help"
+  - "fierce --domain darklab.sh"
+  - "fierce --domain darklab.sh --dns-servers 8.8.8.8"
+  - "fierce --domain darklab.sh --traverse 5"
+  - "dnsenum --help"
+  - "dnsenum ip.darklab.sh"
+  - "dnsenum --noreverse ip.darklab.sh"
+  - "dnsenum --enum ip.darklab.sh"
+  - "dnsenum --dnsserver 8.8.8.8 ip.darklab.sh"
+  - "ffuf -h"
+  - "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+  - "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt"
+  - "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt -mc 200,301,302"
+  - "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -e .php,.html,.txt"
+  - "ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H \"Host: FUZZ.ip.darklab.sh\""
+  - "gobuster -h"
+  - "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+  - "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt"
+  - "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt"
+  - "gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+
+context:
+  grep:
+    pipe_command: true
+    pipe_description: Filter lines by pattern
+    flags:
+      - value: -i
+        description: Ignore case
+      - value: -v
+        description: Invert match
+      - value: -E
+        description: Extended regex
+    arg_hints:
+      "__positional__":
+        - value: "<pattern>"
+          description: Text or regex to match
+
+  head:
+    pipe_command: true
+    pipe_description: Show the first lines
+    flags:
+      - value: -n
+        description: Show the first N lines
+    expects_value:
+      - -n
+    arg_hints:
+      "-n":
+        - value: "5"
+          description: Show the first 5 lines
+        - value: "10"
+          description: Show the first 10 lines
+        - value: "20"
+          description: Show the first 20 lines
+        - value: "50"
+          description: Show the first 50 lines
+
+  tail:
+    pipe_command: true
+    pipe_description: Show the last lines
+    flags:
+      - value: -n
+        description: Show the last N lines
+    expects_value:
+      - -n
+    arg_hints:
+      "-n":
+        - value: "5"
+          description: Show the last 5 lines
+        - value: "10"
+          description: Show the last 10 lines
+        - value: "20"
+          description: Show the last 20 lines
+        - value: "50"
+          description: Show the last 50 lines
+
+  wc:
+    pipe_command: true
+    pipe_insert_value: "wc -l"
+    pipe_label: "wc -l"
+    pipe_description: Count lines
+    flags:
+      - value: -l
+        description: Count lines
+
+  nmap:
+    flags:
+      - value: -sT
+        description: TCP connect scan
+      - value: -sV
+        description: Service/version detection
+      - value: -Pn
+        description: Skip host discovery
+      - value: -p
+        description: Ports to scan
+      - value: --script
+        description: Run NSE script or script category
+      - value: --top-ports
+        description: Scan common ports
+      - value: -T4
+        description: Faster timing template
+      - value: -A
+        description: Aggressive detection bundle
+      - value: -n
+        description: Do not resolve DNS names
+      - value: -vv
+        description: More verbose output
+    expects_value:
+      - -p
+      - --script
+      - --top-ports
+    arg_hints:
+      "-p":
+        - value: "80,443"
+          description: Common web ports
+        - value: "1-1000"
+          description: First thousand TCP ports
+        - value: "<ports>"
+          description: Comma-separated ports or ranges
+      "--script":
+        - value: "http-headers"
+          description: Fetch HTTP response headers
+        - value: "http-title"
+          description: Fetch HTTP page title
+        - value: "ssl-cert"
+          description: Inspect the TLS certificate
+        - value: "ssl-enum-ciphers"
+          description: Enumerate supported TLS ciphers
+        - value: "vuln"
+          description: Run vulnerability-focused scripts
+      "--top-ports":
+        - value: "100"
+          description: Top hundred ports
+        - value: "1000"
+          description: Top thousand ports
+        - value: "<number>"
+          description: Number of top ports to scan
+      "__positional__":
+        - value: "<target>"
+          description: Hostname, IP, or CIDR
+
+  ffuf:
+    flags:
+      - value: -u
+        description: Target URL with FUZZ marker
+      - value: -w
+        description: Wordlist path
+      - value: -mc
+        description: Match status codes
+      - value: -fc
+        description: Filter status codes
+      - value: -H
+        description: Add request header
+      - value: -t
+        description: Concurrent threads
+    expects_value:
+      - -u
+      - -w
+      - -mc
+      - -fc
+      - -H
+      - -t
+    arg_hints:
+      "-u":
+        - value: "<url-with-FUZZ>"
+          description: Target URL including FUZZ
+      "-w":
+        - value: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+          description: Common web-content wordlist
+      "__positional__":
+        - value: "<target-url>"
+          description: Usually provided through -u
+
+  curl:
+    flags:
+      - value: -I
+        description: HEAD request only
+      - value: -s
+        description: Silent mode
+      - value: -v
+        description: Verbose request and response details
+      - value: -o
+        description: Write body to file
+      - value: -w
+        description: Write selected metadata after the transfer
+      - value: -H
+        description: Add request header
+      - value: -L
+        description: Follow redirects
+      - value: -k
+        description: Skip TLS verification
+      - value: --max-time
+        description: Maximum transfer time in seconds
+    expects_value:
+      - -o
+      - -w
+      - -H
+      - --max-time
+    arg_hints:
+      "-o":
+        - value: "/dev/null"
+          description: Discard body and keep metadata
+      "-w":
+        - value: "\"%{http_code}\""
+          description: Print the final HTTP status code
+        - value: "\"%{remote_ip} %{http_code}\""
+          description: Print remote IP and status code
+      "-H":
+        - value: "\"User-Agent: Mozilla/5.0\""
+          description: Example browser-style user agent
+        - value: "\"Authorization: Bearer <token>\""
+          description: Example bearer token header
+      "--max-time":
+        - value: "10"
+          description: Ten-second transfer limit
+      "__positional__":
+        - value: "https://"
+          description: Start an HTTP or HTTPS URL
+
+  dig:
+    flags:
+      - value: +short
+        description: Short answer output
+      - value: +trace
+        description: Trace delegation path
+      - value: "@8.8.8.8"
+        description: Query a specific resolver
+      - value: AXFR
+        description: Attempt zone transfer
+      - value: AAAA
+        description: IPv6 address lookup
+      - value: MX
+        description: Mail exchanger lookup
+    arg_hints:
+      "__positional__":
+        - value: "<domain>"
+          description: Domain name to query
+
+  nuclei:
+    flags:
+      - value: -u
+        description: Single target URL
+      - value: -l
+        description: File with targets
+      - value: -t
+        description: Template or template directory
+      - value: -severity
+        description: Filter by severity
+      - value: -tags
+        description: Filter by tags
+      - value: -rl
+        description: Rate limit requests
+    expects_value:
+      - -u
+      - -l
+      - -t
+      - -severity
+      - -tags
+      - -rl
+    arg_hints:
+      "-severity":
+        - value: "low,medium,high,critical"
+          description: Comma-separated severities
+      "__positional__":
+        - value: "<target>"
+          description: Usually provided through -u or -l
+
+  ping:
+    flags:
+      - value: -c
+        description: Stop after count replies
+      - value: -i
+        description: Wait interval seconds between probes
+      - value: -W
+        description: Per-packet timeout in seconds
+      - value: -w
+        description: Deadline before ping exits
+    expects_value:
+      - -c
+      - -i
+      - -W
+      - -w
+    arg_hints:
+      "-c":
+        - value: "4"
+          description: Send four probes
+        - value: "10"
+          description: Send ten probes
+      "-i":
+        - value: "0.5"
+          description: Half-second probe interval
+      "__positional__":
+        - value: "<host>"
+          description: Hostname or IP address to probe
+
+  nc:
+    flags:
+      - value: -z
+        description: Zero-I/O mode for port scanning
+      - value: -v
+        description: Verbose connection results
+      - value: -w
+        description: Timeout before giving up
+    expects_value:
+      - -w
+    arg_hints:
+      "-w":
+        - value: "3"
+          description: Short timeout in seconds
+      "__positional__":
+        - value: "<host>"
+          description: Hostname or IP followed by one or more ports
+
+  nslookup:
+    flags:
+      - value: -type=A
+        description: IPv4 address lookup
+      - value: -type=AAAA
+        description: IPv6 address lookup
+      - value: -type=MX
+        description: Mail exchanger lookup
+      - value: -type=TXT
+        description: TXT record lookup
+      - value: -type=NS
+        description: Name server lookup
+      - value: -type=CNAME
+        description: Canonical name lookup
+      - value: -debug
+        description: Print extra resolver details
+    arg_hints:
+      "__positional__":
+        - value: "<domain>"
+          description: Domain name to query
+
+  host:
+    flags:
+      - value: -t
+        description: Select DNS record type
+    expects_value:
+      - -t
+    arg_hints:
+      "-t":
+        - value: "A"
+          description: IPv4 address lookup
+        - value: "AAAA"
+          description: IPv6 address lookup
+        - value: "MX"
+          description: Mail exchanger lookup
+        - value: "TXT"
+          description: TXT record lookup
+        - value: "NS"
+          description: Name server lookup
+      "__positional__":
+        - value: "<domain>"
+          description: Domain name to query
+
+  traceroute:
+    flags:
+      - value: -n
+        description: Do not resolve hop addresses
+      - value: -m
+        description: Set maximum hop count
+      - value: -w
+        description: Wait timeout per probe
+      - value: -q
+        description: Number of probes per hop
+      - value: -f
+        description: Set the first hop TTL
+      - value: -I
+        description: Use ICMP ECHO probes
+      - value: -T
+        description: Use TCP SYN probes
+    expects_value:
+      - -f
+      - -m
+      - -w
+      - -q
+    arg_hints:
+      "-f":
+        - value: "1"
+          description: Start probing from the first hop
+      "-m":
+        - value: "30"
+          description: Common maximum hop count
+      "-w":
+        - value: "2"
+          description: Two-second per-hop timeout
+      "-q":
+        - value: "3"
+          description: Three probes per hop
+      "__positional__":
+        - value: "<host>"
+          description: Hostname or IP to trace
+
+  mtr:
+    flags:
+      - value: -n
+        description: Do not resolve hostnames
+      - value: -c
+        description: Stop after count pings
+      - value: -r
+        description: Report mode summary
+      - value: -w
+        description: Wide report output
+    expects_value:
+      - -c
+    arg_hints:
+      "-c":
+        - value: "20"
+          description: Twenty probes before exit
+      "__positional__":
+        - value: "<host>"
+          description: Hostname or IP to trace
+
+  wget:
+    flags:
+      - value: --spider
+        description: Check URL without downloading
+      - value: -q
+        description: Quiet output
+      - value: -O
+        description: Write output to a specific file
+      - value: --server-response
+        description: Print server response headers
+      - value: --timeout
+        description: Network timeout in seconds
+      - value: --tries
+        description: Number of retry attempts
+      - value: --no-check-certificate
+        description: Skip TLS certificate validation
+    expects_value:
+      - -O
+      - --timeout
+      - --tries
+    arg_hints:
+      "-O":
+        - value: "/dev/null"
+          description: Discard response body
+      "--timeout":
+        - value: "10"
+          description: Ten-second network timeout
+      "--tries":
+        - value: "1"
+          description: Single attempt only
+      "__positional__":
+        - value: "https://"
+          description: Start an HTTP or HTTPS URL
+
+  testssl:
+    flags:
+      - value: --fast
+        description: Faster, lighter scan profile
+      - value: --severity
+        description: Restrict findings by severity
+      - value: --full
+        description: Full test suite
+      - value: --sneaky
+        description: Slower, quieter checks
+      - value: -p
+        description: Protocol checks only
+      - value: --heartbleed
+        description: Check for Heartbleed
+      - value: --poodle
+        description: Check for POODLE
+      - value: --beast
+        description: Check for BEAST
+    expects_value:
+      - --severity
+    arg_hints:
+      "--severity":
+        - value: "HIGH"
+          description: High-severity findings only
+        - value: "LOW"
+          description: Low-severity findings only
+      "__positional__":
+        - value: "https://"
+          description: HTTPS target URL
+
+  dnsrecon:
+    flags:
+      - value: -d
+        description: Target domain
+      - value: -t
+        description: Discovery mode
+      - value: -n
+        description: Specific name server to query
+      - value: -D
+        description: Wordlist for brute force mode
+    expects_value:
+      - -d
+      - -t
+      - -n
+      - -D
+    arg_hints:
+      "-d":
+        - value: "<domain>"
+          description: Target domain to enumerate
+      "-t":
+        - value: "std"
+          description: Standard DNS record checks
+        - value: "axfr"
+          description: Attempt zone transfer
+        - value: "brt"
+          description: Brute-force subdomains
+        - value: "srv"
+          description: Enumerate SRV records
+        - value: "zonewalk"
+          description: Attempt DNSSEC zone walk
+        - value: "crt"
+          description: Query certificate transparency data
+      "__positional__":
+        - value: "<domain>"
+          description: Usually provided through -d
+
+  dnsenum:
+    flags:
+      - value: --noreverse
+        description: Skip reverse lookups
+      - value: --enum
+        description: Run full enumeration set
+      - value: --dnsserver
+        description: Query a specific resolver
+      - value: --threads
+        description: Number of worker threads
+    expects_value:
+      - --dnsserver
+      - --threads
+    arg_hints:
+      "--dnsserver":
+        - value: "8.8.8.8"
+          description: Example public resolver
+      "__positional__":
+        - value: "<domain>"
+          description: Domain name to enumerate
+
+  dnsx:
+    flags:
+      - value: -d
+        description: Target domain
+      - value: -w
+        description: Wordlist for brute force
+      - value: -resp
+        description: Show DNS responses
+      - value: -a
+        description: Query A records
+      - value: -cname
+        description: Query CNAME records
+      - value: -mx
+        description: Query MX records
+    expects_value:
+      - -d
+      - -w
+    arg_hints:
+      "-d":
+        - value: "<domain>"
+          description: Target domain to enumerate
+      "-w":
+        - value: "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+          description: Common subdomain wordlist
+      "__positional__":
+        - value: "<domain>"
+          description: Usually provided through -d
+
+  fierce:
+    flags:
+      - value: --domain
+        description: Target domain
+      - value: --dns-servers
+        description: Resolver or name server to use
+      - value: --traverse
+        description: Maximum recursive traversal depth
+    expects_value:
+      - --domain
+      - --dns-servers
+      - --traverse
+    arg_hints:
+      "--domain":
+        - value: "<domain>"
+          description: Target domain to enumerate
+      "--dns-servers":
+        - value: "8.8.8.8"
+          description: Example resolver address
+
+  subfinder:
+    flags:
+      - value: -d
+        description: Target domain
+      - value: -silent
+        description: Minimal output
+      - value: -recursive
+        description: Recurse through discovered subdomains
+      - value: -all
+        description: Use all available sources
+    expects_value:
+      - -d
+    arg_hints:
+      "-d":
+        - value: "<domain>"
+          description: Target domain to enumerate
+
+  pd-httpx:
+    flags:
+      - value: -u
+        description: Single target URL
+      - value: -title
+        description: Show page title
+      - value: -status-code
+        description: Show HTTP status code
+      - value: -tech-detect
+        description: Detect technologies
+      - value: -follow-redirects
+        description: Follow redirects
+    expects_value:
+      - -u
+    arg_hints:
+      "-u":
+        - value: "https://"
+          description: Start an HTTP or HTTPS URL
+
+  nikto:
+    flags:
+      - value: -h
+        description: Target host or URL
+      - value: -p
+        description: Target port
+      - value: -ssl
+        description: Force SSL mode
+      - value: -Tuning
+        description: Select tuning category set
+      - value: -maxtime
+        description: Maximum scan duration
+    expects_value:
+      - -h
+      - -p
+      - -Tuning
+      - -maxtime
+    arg_hints:
+      "-h":
+        - value: "<host>"
+          description: Target host, hostname, or URL
+      "-p":
+        - value: "443"
+          description: Common HTTPS port
+        - value: "8080"
+          description: Common alternate HTTP port
+      "-Tuning":
+        - value: "1"
+          description: Interesting file checks
+        - value: "4"
+          description: Injection checks
+
+  wpscan:
+    flags:
+      - value: --url
+        description: Target WordPress URL
+      - value: --enumerate
+        description: Enumerate selected object types
+      - value: --detection-mode
+        description: Detection mode strategy
+      - value: --force
+        description: Scan even if WordPress is not detected
+    expects_value:
+      - --url
+      - --enumerate
+      - --detection-mode
+    arg_hints:
+      "--url":
+        - value: "https://"
+          description: Target WordPress URL
+      "--enumerate":
+        - value: "p"
+          description: Enumerate plugins
+        - value: "u"
+          description: Enumerate users
+        - value: "t"
+          description: Enumerate themes
+        - value: "vp"
+          description: Enumerate vulnerable plugins
+        - value: "ap"
+          description: Enumerate all plugins
+      "--detection-mode":
+        - value: "aggressive"
+          description: Aggressive detection mode
+
+  gobuster:
+    flags:
+      - value: dir
+        description: Directory or file brute force mode
+      - value: vhost
+        description: Virtual host brute force mode
+      - value: -u
+        description: Target URL
+      - value: -w
+        description: Wordlist path
+      - value: -x
+        description: File extensions to append
+      - value: -k
+        description: Skip TLS certificate verification
+    expects_value:
+      - -u
+      - -w
+      - -x
+    arg_hints:
+      "-u":
+        - value: "https://"
+          description: Target base URL
+      "-w":
+        - value: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+          description: Common web-content wordlist
+        - value: "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+          description: Common virtual-host wordlist
+      "-x":
+        - value: "php,html,txt"
+          description: Common extension list
+
+  fping:
+    flags:
+      - value: -c
+        description: Count and summary mode
+      - value: -s
+        description: Print summary only
+      - value: -e
+        description: Show elapsed time
+      - value: -t
+        description: Timeout per target
+    expects_value:
+      - -c
+      - -t
+    arg_hints:
+      "-c":
+        - value: "4"
+          description: Send four probes
+      "__positional__":
+        - value: "<host>"
+          description: Hostname or IP to probe

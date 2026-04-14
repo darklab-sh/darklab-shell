@@ -67,6 +67,17 @@ test.describe('history drawer', () => {
     await expect(page.locator('.hist-chip')).toHaveCount(0)
   })
 
+  test('toggling the history star keeps the desktop drawer open', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    await openHistoryWithEntries(page)
+    const firstEntry = page.locator('.history-entry').first()
+    await firstEntry.locator('[data-action="star"]').click()
+
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await expect(firstEntry).toHaveClass(/starred/)
+  })
+
   test('clear all history removes all chips including starred ones', async ({ page }) => {
     await runCommand(page, CMD_A)
     await page.waitForTimeout(1200)
@@ -77,7 +88,6 @@ test.describe('history drawer', () => {
     await openHistoryWithEntries(page)
     let entries = page.locator('.history-entry')
     await entries.nth(0).locator('[data-action="star"]').click()
-    await openHistory(page)
     entries = page.locator('.history-entry')
     await entries.nth(1).locator('[data-action="star"]').click()
     await closeHistory(page)
@@ -138,5 +148,25 @@ test.describe('history drawer', () => {
     await expect(page.locator('.hist-chip')).toHaveCount(1)
     await expect(page.locator('.history-entry')).toHaveCount(1)
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
+  })
+
+  test('loading a synthetic tail run from history restores the filtered transcript', async ({ page }) => {
+    await runCommand(page, 'help | tail -n 3')
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().click()
+
+    const output = page.locator('.tab-panel.active .output')
+    await expect(output).toContainText('head')
+    await expect(output).toContainText('command | head -n <count>')
+    await expect(output).toContainText('tail')
+    await expect(output).toContainText('command | tail -n <count>')
+    await expect(output).toContainText('wc -l')
+    await expect(output).not.toContainText('which <cmd>')
+    await expect(output).not.toContainText('banner')
+    await expect(page.locator('#cmd')).toHaveValue('')
   })
 })

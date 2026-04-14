@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'hostname'
 const TEST_IP = makeTestIp(64)
@@ -9,6 +9,7 @@ test.describe('command execution', () => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('output appears in the terminal after running a command', async ({ page }) => {

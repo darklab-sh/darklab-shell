@@ -16,9 +16,11 @@ A web-based shell for running network diagnostic and vulnerability scanning comm
 - [Logical Runtime Layers](#logical-runtime-layers)
 - [Runtime Topology](#runtime-topology)
 - [Primary Request Flows](#primary-request-flows)
+- [HTTP Route Inventory](#http-route-inventory)
 - [Frontend Composition](#frontend-composition)
 - [Persistence Model](#persistence-model)
 - [Logging](#logging)
+- [Runtime Security Model](#runtime-security-model)
 - [Test Suite](#test-suite)
 - [Testing Architecture](#testing-architecture)
 - [Database](#database)
@@ -32,7 +34,7 @@ At a mid to high level, darklab shell works like this:
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
-- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser session storage now also holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
+- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser cookies hold persistent user preferences such as timestamps, line numbers, welcome-intro mode, and the default share-snapshot redaction choice. Browser session storage holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
 
 ## Logical Runtime Layers
@@ -154,6 +156,34 @@ There are three core request classes:
 
 That split is reflected directly in the blueprint structure.
 
+## HTTP Route Inventory
+
+This route list belongs in the architecture document because it describes the application surface that contributors maintain, not the operator workflow.
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/` | Serves the Flask-rendered shell UI shell and theme bootstrap |
+| `GET` | `/favicon.ico` | Serves the site favicon |
+| `GET` | `/config` | Returns browser-facing runtime config as JSON |
+| `GET` | `/allowed-commands` | Returns the current allowlist as JSON |
+| `GET` | `/autocomplete` | Returns flat suggestions plus structured command-context autocomplete data as JSON |
+| `GET` | `/faq` | Returns the canonical FAQ dataset as JSON: built-in entries plus any custom `faq.yaml` items |
+| `GET` | `/welcome` | Returns welcome command samples from `welcome.yaml` as JSON |
+| `GET` | `/welcome/ascii` | Returns the desktop welcome ASCII banner from `ascii.txt` as plain text |
+| `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome banner from `ascii_mobile.txt` as plain text |
+| `GET` | `/welcome/hints` | Returns rotating desktop welcome footer hints from `app_hints.txt` as JSON |
+| `GET` | `/welcome/hints-mobile` | Returns rotating mobile welcome footer hints from `app_hints_mobile.txt` as JSON |
+| `GET` | `/history` | Returns the most recent completed runs for the current session as JSON |
+| `GET` | `/history/active` | Returns active-run metadata for the current session so reload can rebuild in-flight tabs |
+| `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
+| `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>` (`?json` for raw JSON) |
+| `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
+| `POST` | `/run` | Validates, rewrites, executes, and streams a command over SSE |
+| `POST` | `/kill` | Kills a running process by `run_id` |
+| `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
+| `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}`; `redis` is `null` when Redis is not configured |
+| `GET` | `/diag` | IP-gated operator diagnostics page or JSON summary; 404 unless the resolved client IP is in `diagnostics_allowed_cidrs` |
+
 ## Frontend Composition
 
 ```mermaid
@@ -198,6 +228,8 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 - `config.js` and `app.js` handle bootstrap concerns, while `controller.js` is the composition root and last loader
 
 The important recent architectural change is that prompt ownership now lives in `composerState`, not in whichever DOM input happened to update last.
+
+The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, and snapshot redaction defaults all sit in the frontend layer rather than in `config.yaml`.
 
 ## Persistence Model
 
@@ -307,25 +339,30 @@ The current event inventory is:
 | DEBUG | `RESPONSE` | `after_request` | ip, method, path, status, size |
 | DEBUG | `KILL_MISS` | `kill_command` | ip, run_id |
 | DEBUG | `HEALTH_OK` | `health()` | — |
+| DEBUG | `ACTIVE_RUNS_VIEWED` | `get_active_history_runs` | ip, session, count |
+| DEBUG | `HISTORY_DELETE_MISS` | `delete_run` | ip, run_id, session |
+| DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
+| DEBUG | `CMD_PIPE` | `run_command` | ip, session, cmd, pipe_to |
 | INFO  | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO  | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
-| INFO  | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd |
-| INFO  | `RUN_END` | `generate()` | ip, run_id, session, exit_code, elapsed, cmd |
+| INFO  | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
+| INFO  | `RUN_END` | `generate()` | ip, run_id, session, exit_code, elapsed, cmd, cmd_type |
 | INFO  | `RUN_KILL` | `kill_command` | ip, run_id, pid, pgid |
 | INFO  | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
 | INFO  | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO  | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
-| DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
-| INFO  | `SHARE_CREATED` | `save_share` | ip, share_id, label |
-| INFO  | `SHARE_VIEWED` | `get_share` | ip, share_id, label |
+| INFO  | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted |
+| INFO  | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
 | INFO  | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
-| INFO  | `HISTORY_VIEWED` | `get_history` | ip, session, count |
+| INFO  | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, command_root, exit_code_filter, date_range |
 | INFO  | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
 | INFO  | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
+| INFO  | `DIAG_VIEWED` | `diag()` | ip |
 | WARN  | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
 | WARN  | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
 | WARN  | `CMD_DENIED` | `run_command` | ip, session, cmd, reason |
-| INFO  | `DIAG_VIEWED` | `diag()` | ip |
+| WARN  | `CMD_MISSING` | `run_command` | ip, session, cmd |
+| WARN  | `CLIENT_ERROR` | `client_log` | ip, session, context, message |
 | WARN  | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN  | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN  | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
@@ -344,6 +381,51 @@ The current event inventory is:
 - run lifecycle logs intentionally carry `ip`, `session`, and `run_id` so start/end/kill/failure events can be correlated without reconstructing request flow from surrounding lines
 - diagnostics, history, permalink, and share routes each emit their own events so operator-visible surfaces remain observable outside the `/run` path
 - proxy-aware identity resolution is shared across logging, rate limiting, and diagnostics gating, so the logged `ip` field tracks the same resolved client identity used elsewhere in the runtime
+
+## Runtime Security Model
+
+The runtime security model is layered across process ownership, command validation, and container-level controls.
+
+### User Separation
+
+The container uses two unprivileged system users:
+
+- `appuser`
+  - owns the Flask/Gunicorn web process
+  - owns `./data` and can read or write the SQLite database and artifact metadata
+- `scanner`
+  - owns all user-submitted command processes
+  - does not get write access to `./data`
+  - runs with `HOME=/tmp` so tools that expect config/cache directories stay inside tmpfs rather than a persistent home directory
+
+The container starts as root only long enough for `entrypoint.sh` to fix `/data` ownership after volume mount, set `/tmp` to `1777`, pre-create `/tmp/.config` and `/tmp/.cache` for `scanner`, and then drop to `appuser` via `gosu`.
+
+### Validation And Network Guards
+
+- command validation blocks filesystem references to `/data` and `/tmp` before subprocess launch
+- loopback targets such as `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked at both the client and server
+- when the allowlist is active, shell operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution stay blocked so users cannot chain into disallowed commands
+- `entrypoint.sh` also adds an OS-level rule blocking the `scanner` user from making outbound TCP connections back to the app port
+
+### Cross-User Signalling And Multi-Worker Kill
+
+Because commands run as `scanner` and Gunicorn runs as `appuser`, the web worker cannot directly signal `scanner`-owned processes. The kill path therefore uses `sudo -u scanner kill -TERM -<pgid>` so the signal is sent by the user that owns the process group.
+
+This gets more important with multiple Gunicorn workers. The worker that receives `POST /kill` may not be the worker that launched the process. To solve that:
+
+- `pid_register(run_id, pid)` writes the process id to Redis with a 4-hour TTL
+- `pid_pop(run_id)` uses Redis `GETDEL` so lookup and removal are atomic
+- any worker can therefore resolve and kill the correct process group without relying on shared in-memory state
+
+### nmap Capability Model
+
+`nmap` needs raw-socket-related Linux capabilities for SYN scans, OS fingerprinting, and similar features. Those are applied directly to the binary with file capabilities:
+
+```bash
+setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
+```
+
+The app also injects `--privileged` into `nmap` commands during rewrite so the binary uses its available capability set. At the container layer, `docker-compose.yml` adds `NET_RAW` and `NET_ADMIN` so the kernel makes those capabilities available inside the container in the first place.
 
 ## Command Auto-Rewrites
 
@@ -372,24 +454,15 @@ External dependencies: local vendor routes backed by build-time font downloads a
 
 ### Shell Prompt Model
 
-The visible command surface is terminal-native:
+The prompt architecture is built around one editing state and two render surfaces:
 
-- a hidden real `#cmd` input remains the source of truth for browser/mobile keyboard input, selection, and focus
-- a rendered prompt row is mounted into the active tab output and mirrors the hidden input value/caret/selection
-- the prompt unmounts while a command is running and remounts when the run finishes/fails/is killed
-- submitted commands are echoed as styled prompt lines in output so transcript flow reads like a real shell
-- blank/whitespace `Enter` does not call `/run`; it appends a new prompt line
-- `Ctrl+C` maps to shell-like behavior: open kill confirm while running, otherwise emit a fresh prompt line
+- the hidden real `#cmd` input remains the canonical editing source for browser focus, selection, and keyboard semantics
+- the rendered prompt line inside the active output pane is only a visual mirror of that state
+- on touch-sized viewports, `#mobile-cmd` becomes the visible editing surface, but it still syncs into the same shared composer state instead of creating a second command model
+- the mobile edit bar is a thin action layer over that same shared composer state, so word-jump and delete helpers reuse the same selection/update path as desktop keyboard shortcuts instead of forking mobile-specific command state
+- prompt rows that appear in transcript history are rendered output records, not live editable DOM
 
-On mobile, the prompt surface is split into a dedicated visible composer:
-
-- `#mobile-cmd` is the visible source-of-truth input on touch-sized viewports
-- the helper row with `Home`, `←`, `→`, `End`, and `Del Word` appears only while the mobile keyboard is open
-- command chips, autocomplete acceptance, and the Run/Enter paths all sync back to the visible mobile input so the desktop mirror stays in step
-- the desktop and mobile Run buttons stay disabled together while any command in the active tab is running, preventing duplicate submits from either surface
-- mobile keyboard-open state is driven by the visible mobile input when it exists, with a viewport-offset fallback for the legacy/mobile-shell test harness path
-
-This keeps browser editing semantics and accessibility predictable without relying on `contenteditable`.
+This split keeps browser editing semantics predictable without relying on `contenteditable`, while still letting the app present a terminal-like prompt inside the transcript.
 
 ### Tab State
 
@@ -402,9 +475,9 @@ Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLine
 - `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
 - `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
 - `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
-- `draftInput` — unsaved command text that the user was composing in this tab; flushed from `cmdInput.value` on tab switch and restored via `setComposerValue(..., { dispatch: false })` when the tab is reactivated. Not saved for running tabs (the command was already submitted). The `controller.js` input handler also keeps this field live on every keystroke so the flush at switch time is always consistent, and the reload-restore path reapplies saved drafts after tab creation so non-active drafts survive the full session restore sequence.
+- `draftInput` — unsaved command text for that tab; restored from browser session state for non-running tabs during reload continuity
 
-Tab switching is draft-preserving: `activateTab` in `tabs.js` saves the leaving tab's current input as `draftInput`, then restores the arriving tab's saved draft into the prompt without triggering an input event (which would reopen autocomplete). It also calls `acHide()` and resets `acFiltered = []` so stale suggestions from the leaving tab's session cannot bleed into the arriving tab. `resetCmdHistoryNav()` is also called on switch to clear the command-history cursor. During full session restore, draft-flush side effects are suppressed until the saved tabs have been fully rebuilt so the final active-tab selection cannot wipe a non-active tab's saved draft.
+Tab activation is intentionally stateful rather than stateless rendering. `activateTab()` preserves the leaving tab's draft, restores the arriving tab's draft without reopening autocomplete, and resets transient input-mode state such as history-navigation and autocomplete selection. During full session restore, draft-flush side effects are suppressed until the saved tab set has been rebuilt so non-active drafts cannot be overwritten by the final active-tab selection.
 
 ### Live Output Rendering
 
@@ -412,86 +485,35 @@ Fast output bursts are rendered in small batches instead of forcing a full DOM u
 
 ### Output Prefixes: Line Numbers And Timestamps
 
-Elapsed and clock timestamps are shown on output lines without rebuilding those line nodes. Each appended `.line` receives two timestamp `data-` attributes plus a synchronized `data-prefix` string:
+Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes and a synchronized `data-prefix` string, while `syncOutputPrefixes()` recomputes shared prefix width whenever rows are added or the prefix mode changes. That keeps prompt rows, output rows, and exit rows aligned without rerendering the transcript body.
 
-- `data-ts-e` — elapsed offset from `tab.runStart` (e.g. `+12.3s`)
-- `data-ts-c` — wall-clock time (e.g. `14:32:01`)
-- `data-prefix` — compact shared prefix text such as `12 +3.4s`, `12 14:32:01`, or just `12`
+Welcome rows are excluded from normal prefix numbering, and `tab.runStart` is captured after the submitted prompt line is appended so elapsed timing applies only to run output.
 
-`appendLine()` stores the timestamp metadata at insert time, and `syncOutputPrefixes()` in `output.js` recomputes `data-prefix` plus a shared `--output-prefix-width` per output container whenever rows are appended or the timestamp / line-number mode changes. CSS still renders the visible prefix through `::before`, but the actual text composition happens in JavaScript so line numbers, timestamps, prompt rows, and exit rows all stay aligned as digit widths change.
+### Welcome Bootstrap Flow
 
-Welcome-animation rows are excluded from prefix numbering entirely. They keep their original boot-sequence layout, and the first real output line after welcome still becomes line `1`.
+`welcome.js` owns a staged boot flow that is separate from normal run output. The important architectural points are:
 
-`tab.runStart` is set *after* the `$ cmd` prompt line is appended so the prompt itself has no `data-ts-e` attribute and shows no elapsed stamp.
+- welcome state is tab-scoped, so clearing or running commands in another tab cannot tear down the active welcome tab
+- desktop and mobile share the same timing/config pipeline but can read different banner/hint assets
+- the browser fetches narrow typed endpoints such as `/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`, and `/config` rather than reading raw files directly
+- the same frontend-owned preference layer that controls timestamps and line numbers also controls welcome-intro behavior
 
-### Welcome Animation
+The detailed user-visible welcome behavior belongs in the README. Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special `/run` transcript.
 
-`welcome.js` exposes `runWelcome()`, `cancelWelcome(tabId?)`, `requestWelcomeSettle(tabId?)`, and tab-ownership helpers around a single startup experience that runs after `app.js` creates the initial tab. The current sequence is broader than the original typeout, and it has a desktop branch plus a mobile branch:
+### Input State Machines
 
-1. fetch `/welcome/ascii` and stream the ASCII banner from `conf/ascii.txt`
-2. render fake startup-status rows using `APP_CONFIG.welcome_status_labels`
-3. pause briefly using `welcome_post_status_pause_ms` so the boot phase lands before the example phase begins
-4. fetch `/welcome` and sample a curated set of commands from `conf/welcome.yaml` using `welcome_sample_count`
-5. show the first prompt, let it idle for at least `welcome_first_prompt_idle_ms`, then type the featured example
-6. attach click and keyboard handlers to the sampled command text and the featured `TRY THIS FIRST` badge so they load into the prompt without executing
-7. fetch `/welcome/hints` and rotate footer hints while the welcome tab is still idle, using `welcome_hint_interval_ms` and `welcome_hint_rotations` (`0` keeps rotating until interrupted; `1` keeps the first hint static)
+Command editing is split into separate state machines rather than one overloaded dropdown path:
 
-On touch-sized viewports the same timing/config pipeline runs with `/welcome/ascii-mobile` and `conf/ascii_mobile.txt`, but the sampled-command phase is skipped so the mobile welcome stays abbreviated while still showing the desktop-style status and rotating hint rows.
+- normal autocomplete combines two data shapes from `/autocomplete`, both sourced from `autocomplete_context.yaml`:
+  - `flat_suggestions` for whole-command matches
+  - `context` for structured command-context hints
+- reverse-history search owns its own pre-draft, query, selection, and exit paths
+- `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
+- navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
 
-The implementation still types character-by-character using short timed waits, but it now mixes in overlapping loading spinners for the status rows, a staged handoff into the first prompt, and hint rotation that continues until the user interrupts it or the configured limit is reached.
+The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
 
-Welcome ownership is tab-scoped. `runWelcome()` records a `welcomeTabId`, and teardown only happens when the action targets that same tab. That avoids the old cross-tab bug where running a command or clearing output in some other tab could wipe the welcome content. `runCommand()` checks whether the active tab is the welcome owner before clearing, and clear/close actions do the same.
-
-Welcome settle behavior is intentionally keyboard-friendly: printable typing, `Escape`, and `Enter` all fast-forward the active welcome sequence to its settled state.
-
-`load_welcome()` now accepts richer blocks from `conf/welcome.yaml`:
-
-- `cmd` — required
-- `out` — optional sample output, trimmed with `.rstrip()` so leading indentation survives
-- `group` — optional category bucket used for curated sampling
-- `featured` — optional boolean used to bias the primary sample and show the badge
-
-The route shape is intentional. Frontend-facing config content is exposed through narrow, typed endpoints rather than a generic “serve files from `conf/`” handler:
-
-- `/faq` for the canonical FAQ dataset (built-ins first, then `faq.yaml` entries)
-- `/autocomplete` for `auto_complete.txt`
-- `/welcome` for sampled command metadata from `welcome.yaml`
-- `/welcome/ascii` for plain-text banner art from `ascii.txt`
-- `/welcome/ascii-mobile` for the mobile banner art from `ascii_mobile.txt`
-- `/welcome/hints` for hint strings from `app_hints.txt`
-- `/config` for normalized values from `config.yaml`
-
-That keeps parsing and validation on the server side and lets the file format evolve without coupling the browser directly to raw config files.
-
-### Starring / Favorites
-
-Starred commands are stored in `localStorage['starred']` as a JSON array of command strings treated as a Set. Star state is keyed by command text (not run ID) so starring "nmap -sV google.com" applies to every run of that command in both the history chips row and the full history drawer.
-
-`_toggleStar(cmd)` loads the set, adds or removes the entry, and saves it back. `renderHistory()` (chips) and `refreshHistoryPanel()` (drawer) both sort starred entries to the top before rendering. The `☆` / `★` icons in chips and the `☆ star` / `★ starred` buttons in the drawer update optimistically without a full re-render.
-
-When starring a command from the history drawer, if the command is not already in `cmdHistory` (the in-memory chips list), it is prepended and the list is trimmed to `recent_commands_limit`. This means a command that was never run in the current session — e.g. one from a previous container session that only appears in the SQLite history — becomes immediately accessible as a chip after being starred, without requiring the user to run it first.
-
-`cmdHistory` is also hydrated on startup from `/history` via `hydrateCmdHistory()` in `history.js`. That matters for keyboard recall: blank-input `ArrowUp` / `ArrowDown` navigation now works on first load from persisted history, not only after a command has been run in the current browser tab.
-
-### Ctrl+R Reverse-History Search
-
-`Ctrl+R` in the command prompt activates a reverse-i-search mode backed by `history.js`. The implementation is a self-contained section of four functions exported as globals (keeping the classic-script architecture):
-
-- `enterHistSearch()` — saves the current input as `_histSearchPreDraft`, clears the prompt (without dispatching an input event so autocomplete does not reopen), and shows `#hist-search-dropdown`.
-- `exitHistSearch(accept, { keepCurrent })` — if `accept` is true, fills the prompt with the selected match; if `keepCurrent` is true, leaves whatever is in the prompt; otherwise restores `_histSearchPreDraft`. Always calls `acHide()` to ensure autocomplete cannot reopen regardless of the exit path.
-- normal command autocomplete stays on a separate path from hist-search. `handleComposerInputChange()` filters the flat suggestion list from `/autocomplete`, while `Tab` handling in `controller.js` now behaves more like a shell: it expands to the longest shared prefix first, then cycles the current matches forward or backward (`Shift+Tab`) without immediately accepting a multi-match result. `Enter` remains the explicit accept key for the highlighted autocomplete item.
-- `handleHistSearchInput(value)` — updates `_histSearchQuery` and re-renders the dropdown. Does **not** call `setComposerValue` during typing — the typed query stays in the prompt, the dropdown shows matching history entries.
-- `handleHistSearchKey(e)` — full key handler: `Escape`/`Ctrl+G` restores the pre-search draft; `Enter` accepts the selected match (or runs the typed query when there are no matches) and calls `submitComposerCommand`; `Tab` accepts without running; `ArrowDown`/`ArrowUp` step through matches and fill the prompt with the highlighted entry; `Ctrl+R` cycles to the next match; `Ctrl+C` exits with `keepCurrent: true` so the typed query remains and the pre-draft is not restored. Returns `true` to signal handled.
-
-`controller.js` routes `Ctrl+R` to `enterHistSearch()` and, while in search mode, sends all `keydown` events through `handleHistSearchKey` first and all `input` events through `handleHistSearchInput` before the normal handlers run.
-
-DOM: `#hist-search-dropdown` in `index.html`; `histSearchDropdown` reference in `dom.js`; CSS in the modular stylesheet set (loaded through `styles.css`).
-
-### Autocomplete Dropdown Ordering and Navigation
-
-The suggestion list always renders items top-to-bottom in their natural `acFiltered` order regardless of whether the dropdown appears above or below the prompt. Earlier code reversed the list and flipped `ArrowDown`/`ArrowUp` direction when the `ac-up` CSS class was present; that logic was removed so navigation direction is consistent in both positions.
-
-Navigation wraps around: `ArrowDown` at the last item cycles back to the first (`(acIndex + 1) % acFiltered.length`); `ArrowUp` at the first item or with no selection (`acIndex <= 0`) cycles to the last (`acFiltered.length - 1`). The Ctrl+R hist-search dropdown uses identical wrap logic.
+Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
 
 ### The KILLED Race Condition
 
@@ -505,40 +527,17 @@ Without the `killed` flag, the `-15` exit code causes the exit handler to set st
 
 ### Config Loading
 
-The frontend fetches `/config` on page load and stores it in `APP_CONFIG`. This is used for `app_name`, `prompt_prefix`, `default_theme`, `motd`, `recent_commands_limit`, `max_output_lines`, the welcome timing values, `welcome_first_prompt_idle_ms`, `welcome_post_status_pause_ms`, `welcome_sample_count`, `welcome_status_labels`, `welcome_hint_interval_ms`, and `welcome_hint_rotations`. The MOTD no longer renders as persistent shell chrome; when present, it is injected into the welcome banner as a centered operator notice so downtime/change announcements stay visible during the startup flow without taking permanent layout space. The same bootstrap payload also exposes the built-in `project_readme` constant for footer/help links, but it is no longer operator-configurable through YAML. Theme is only applied from config if no `localStorage` preference exists — user choice always wins. Keeping `project_readme` as a built-in constant ensures the shipped FAQ and synthetic README-style helper output stay aligned with the upstream documentation.
+The frontend fetches `/config` on page load and stores the normalized payload in `APP_CONFIG`. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than `config.yaml`; backend-only persistence and storage controls do not cross that boundary.
 
-Theme styling is resolved from the named YAML variants under `app/conf/themes/`, loaded by `app/config.py`, injected into the page through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by the CSS, runtime theme selector modal, `/themes` endpoint, and export helpers. On desktop the selector now opens as a right-side drawer so most of the shell remains visible while you compare themes; on mobile it remains a full-screen chooser with a two-column preview layout on wider phones so the preview cards stay readable while keeping each grouped section the same width. Each YAML variant may provide optional `label:`, `group:`, `sort:`, and `color_scheme:` metadata. `label:` is what the selector preview card shows, `group:` controls the modal section header, `sort:` controls the order inside the preview grid, and `color_scheme:` selects whether missing keys inherit from the built-in dark or light default family. Theme values can also reference other resolved theme vars with CSS `var(--name)` syntax, and the browser resolves those references after injection. The `default_theme` setting in `app/conf/config.yaml` uses the full filename for operator copy/paste convenience, and the loader normalizes it to the registry entry. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are generated from `_THEME_DEFAULTS` in `app/config.py`; they are reference artifacts only and are not part of the runtime selector. Runtime theme resolution prefers `localStorage.theme`, then `default_theme` from `app/conf/config.yaml`, and finally the baked-in default family in `app/config.py` if the theme is missing or malformed. The result is a single theme source of truth for both live rendering and downloadable HTML snapshots, including the simplified mobile composer shell, the diagnostics/permalink pages, and the exported permalink HTML, which now all use the same injected panel/bar variables instead of hardcoded dark CSS or raw base-palette fallbacks. The same resolution step also infers a best-effort document `color-scheme` hint from the resolved theme background and pushes it into the templates and runtime theme switcher so browsers that honor standards-based scheme hints have less reason to auto-darken light themes. This completed theme externalization work belongs to the v1.4 line. See [THEME.md](THEME.md) for the full walkthrough and the complete appendix of theme keys.
+Theme styling is resolved server-side from the named YAML variants under `app/conf/themes/`, injected through `theme_vars_style.html` and `theme_vars_script.html`, and then consumed by live CSS, the runtime theme selector, `/themes`, permalink rendering, and export helpers. The important architectural property is that the same resolved theme values drive every presentation surface, rather than each surface owning its own palette logic.
 
 ### Theme System
 
-The theme implementation is intentionally split so the operator-facing config, live UI, permalink pages, and exported HTML all read from the same resolved values:
-
-1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes.
-2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated reference templates only and are not loaded into the runtime selector.
-3. `app/config.py` merges those YAML overrides with `_THEME_DEFAULTS`, exposes the current theme as runtime CSS vars, and builds the selectable theme registry. If a theme file has a `label:` field, that becomes the friendly selector label; otherwise the filename stem is humanized. The registry keeps the stem as the persisted theme name, but also exposes the filename so `default_theme` can be written as a full `*.yaml` path fragment in config. Theme values are passed through as literal CSS strings, so `var(--...)` references and other CSS functions survive the YAML load unchanged and resolve in the browser.
-4. `app/templates/theme_vars_style.html` injects the resolved variables as CSS custom properties so the ordered stylesheet set (via `styles.css`) can use `var(--name)` everywhere.
-5. `app/templates/theme_vars_script.html` publishes the same resolved values plus the registry as `window.ThemeRegistry` and `window.ThemeCssVars` so browser-side theme selection and export helpers can build downloadable HTML without a duplicate hardcoded palette.
-6. `app/app.py` exposes `/themes` so the frontend and tests can inspect the available registry.
-7. `app/static/js/app.js` exposes the theme helpers and `app/static/js/controller.js` applies the selected theme on the fly via the dedicated theme selector modal preview cards, updates cookies/localStorage, and keeps the shell chrome consistent while switching.
-8. `app/static/js/export_html.js` consumes the injected values and embeds them into saved HTML exports, keeping the downloaded file portable and theme-consistent.
+Theme values are resolved server-side from named YAML variants in `app/conf/themes/` and injected into every presentation surface — live shell, permalink pages, runtime selector, and exported HTML — through a single shared palette. No surface maintains its own independent palette logic. See [THEME.md](THEME.md) for the full architecture, token reference, and authoring workflow.
 
 ### Dependency Version Tracking
 
-Dependency freshness is handled separately from runtime config:
-
-1. `scripts/check_versions.sh` gives a quick local snapshot of pinned Python requirements versus the newest published version it can find, Node devDependencies from `package.json` / `package-lock.json`, plus the Docker base image line read directly from `Dockerfile` while ignoring prerelease tags like alpha and rc builds.
-2. The same script also checks pinned Go, pip, and gem tool versions inside `Dockerfile` so build-time tools can be compared against the Go module proxy, PyPI, and RubyGems without having to read the file by hand. For `go install .../cmd/...` lines, it resolves the Go module root from the Dockerfile import path before querying the proxy. The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`, `--pip-only`, `--gem-only`, and `--debug` so you can isolate a single surface while debugging version drift.
-3. Docker Scout is the last step for the built image itself, since base-image freshness is easiest to verify after the image is built.
-
-The goal is to keep local inspection easy while still having a container-image-specific check for deployments.
-
-In GitLab CI, the `dependency-version-check` job is exposed as a manual run in pipelines and stores the output as a short-lived artifact, which makes it easy to spot stale base images or pinned Python packages during routine maintenance.
-
-After a Dockerfile or package upgrade, `tests/py/test_container_smoke_test.py` (invoked via `scripts/container_smoke_test.sh`) is the primary verification step. The fixture reads the root `docker-compose.yml`, resolves build paths, builds a unique base image with `docker build --pull`, creates a temporary runtime container from that image, copies the repo `app/` tree plus a generated `config.local.yaml` into `/app`, commits that as a runtime image, and writes a temporary compose file that runs the committed image with no client-side bind mounts. That generated compose also strips fixed `container_name` values so locally running stacks do not collide with the test Redis or shell services. The wrapper performs a startup gate first and stops immediately if build, compose startup, or health checks fail; only then does the fixture start the full command corpus. It discovers the real published host port with `docker compose port`, waits for `/health`, and submits every command from `app/conf/auto_complete.txt` through `/run`, checking each against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. Focused unit regressions in the same module verify `_docker_reach_host()`, compose-port parsing, and the early-kill contract so DinD jobs keep probing the daemon host, the actual published port, and the stop-on-expected-output path instead of hard-coding `127.0.0.1` or guessing a free localhost port from the wrong namespace. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. If a tool's output has intentionally changed, re-capture the baseline first with `scripts/capture_container_smoke_test_outputs.sh` against a known-good running container.
-
-GitLab CI mirrors that same smoke test in the `container-smoke-test` job, which is exposed as a manual run in pipelines when you want to verify a fresh image before merging dependency or Dockerfile changes.
-
-This design replaced the older pattern of duplicating theme values in separate template/JS snippets. The current arrangement keeps the live shell, permalink pages, and export HTML aligned without making the export depend on the app being online after download. This completed v1.4 theme refactor is documented in [THEME.md](THEME.md), which contains the full appendix of configurable keys and defaults.
+`scripts/check_versions.sh` reports drift across pinned Python, Node, Docker, Go, pip, and gem versions. The CI `dependency-version-check` job runs it as a manual step and stores the output as a short-lived artifact. See [tests/README.md](tests/README.md) for the container smoke test workflow and [DECISIONS.md](DECISIONS.md) for the rationale behind the image-validation path.
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_mb` stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB value is converted to bytes internally before any artifact truncation logic runs.
 
@@ -558,10 +557,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 806
-- `vitest`: 328
-- `playwright`: 141
-- total: 1,275
+- `pytest`: 845
+- `vitest`: 360
+- `playwright`: 150
+- total: 1,355
 
 ### Testing Architecture
 
@@ -570,12 +569,18 @@ This split exists to keep each risk at the cheapest useful layer:
 - backend behavior stays fast and deterministic in `pytest`
 - browser-module logic is isolated in `Vitest` without changing the classic-script frontend architecture
 - browser-only integration risks such as real focus, scroll, SSE timing, and mobile layout behavior stay in `Playwright`
+- browser-visible autocomplete behavior now spans three contexts:
+  - flat whole-command suggestions
+  - command-root-aware flag/value suggestions
+  - the narrow single-stage built-in pipe context after `command |`
 
 The browser test harness mirrors production constraints rather than abstracting them away:
 
 - the frontend remains a no-build classic-script app, so `Vitest` uses extraction helpers instead of converting the runtime to ES modules
-- `Playwright` runs with `workers: 1` because `/run` rate limiting is session-scoped and parallel browser workers would create false failures
+- `Playwright` now uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects
+- each parallel browser project gets its own Flask server port plus isolated `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
+- the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI
 
 Keep the detailed suite appendix, focused run commands, and maintenance notes in [tests/README.md](tests/README.md). Keep the rationale behind this layered split in [DECISIONS.md](DECISIONS.md).
 
@@ -586,11 +591,11 @@ Keep the detailed suite appendix, focused run commands, and maintenance notes in
 `./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews now store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
-- `/history` — session-scoped history API used by the drawer. It now supports filtering by command text, command root, exit status, and recent date range, and also returns a distinct `roots` list so the command-root filter can use app-owned autocomplete suggestions without tying the suggestion set to the currently narrowed result list.
-- `/history/active` — session-scoped in-flight run metadata used only for reload continuity. It returns running `run_id`, `command`, and `started` values so the browser can restore placeholder tabs, keep kill available, preserve prompt-echo formatting for the submitted command, and poll until the run becomes a normal completed history row.
-- browser `sessionStorage` snapshot — session-scoped idle workspace state used only for reload continuity of non-running tabs. It stores labels, transcript previews, status, draft input, and active-tab selection so the browser can remount a usable prompt immediately without replaying welcome.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
+- Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
+  - `/history/active` covers in-flight runs owned by the server/session
+  - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
 
 The storage model is intentionally split:
 
@@ -633,3 +638,13 @@ Production-specific behavior is layered in through overrides such as `examples/d
 - enables Docker GELF transport for both containers
 
 Application log format still remains an application-level choice, so operators must pair the Docker GELF transport with `log_format: gelf` in `config.yaml` or `config.local.yaml` when they want end-to-end GELF output.
+
+---
+
+## Related Docs
+
+- [README.md](README.md)
+- [CONTRIBUTORS.md](CONTRIBUTORS.md)
+- [DECISIONS.md](DECISIONS.md)
+- [tests/README.md](tests/README.md)
+- [THEME.md](THEME.md)

@@ -372,6 +372,35 @@
   body.mobile-terminal-mode .terminal-actions .term-action-btn {
     min-height: 32px;
   }
+  body.mobile-terminal-mode .history-entry {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  body.mobile-terminal-mode .history-entry-header {
+    gap: 10px;
+  }
+  body.mobile-terminal-mode .history-entry-star {
+    width: auto;
+    height: auto;
+    flex-basis: auto;
+    font-size: 30px;
+    padding-right: 2px;
+  }
+  body.mobile-terminal-mode .history-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+  body.mobile-terminal-mode .history-action-btn {
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
   body.mobile-terminal-mode .terminal-actions.terminal-actions-has-visible-kill .term-action-btn {
     min-height: 42px;
     align-self: stretch;
@@ -605,19 +634,20 @@
 
   #mobile-edit-bar {
     display: none;
-    flex-wrap: nowrap;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
-    overflow-x: auto;
+    overflow: visible;
     scrollbar-width: none;
   }
 
   body.mobile-keyboard-open #mobile-edit-bar {
-    display: flex;
+    display: grid;
   }
 
   #mobile-edit-bar button {
-    flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    min-height: 34px;
     appearance: none;
     -webkit-appearance: none;
     background: transparent;
@@ -625,12 +655,13 @@
     color: var(--muted);
     font-family: var(--font-mono);
     font-size: 12px;
-    padding: 4px 2px;
+    padding: 6px 4px;
     border-radius: 3px;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   #mobile-edit-bar button:active {
@@ -653,6 +684,11 @@
     line-height: 1;
     padding-top: 2px;
     padding-bottom: 2px;
+  }
+
+  #mobile-edit-bar button[data-mobile-edit="word-left"],
+  #mobile-edit-bar button[data-mobile-edit="word-right"] {
+    font-size: 11px;
   }
 
 

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const TEST_IP = makeTestIp(70)
@@ -22,6 +22,7 @@ test.describe('keyboard shortcuts', () => {
     })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('macOS Option+T opens a new tab without inserting a symbol into the prompt', async ({ page }) => {

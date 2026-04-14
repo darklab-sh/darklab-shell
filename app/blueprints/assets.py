@@ -12,7 +12,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from commands import command_root, load_allowed_commands
 from config import APP_VERSION, CFG, THEME_REGISTRY_MAP, get_theme_entry
 from database import db_connect
-from helpers import get_client_ip, ip_is_in_cidrs
+from helpers import get_client_ip, get_session_id, ip_is_in_cidrs
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -43,6 +43,21 @@ _VENDOR_FONT_FILES = frozenset({
     "Syne-700.ttf",
     "Syne-800.ttf",
 })
+
+
+@assets_bp.route("/log", methods=["POST"])
+def client_log():
+    """Receive client-side error reports and emit them as server log entries."""
+    data = request.get_json(silent=True) or {}
+    context = str(data.get("context") or "")[:200]
+    message = str(data.get("message") or "")[:500]
+    log.warning("CLIENT_ERROR", extra={
+        "ip": get_client_ip(),
+        "session": get_session_id(),
+        "context": context,
+        "message": message,
+    })
+    return jsonify({"ok": True})
 
 
 @assets_bp.route("/vendor/ansi_up.js")

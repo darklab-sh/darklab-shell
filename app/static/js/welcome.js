@@ -13,6 +13,25 @@ const _welcomeStatusFrames = ['initializing /', 'initializing -', 'initializing 
 const _welcomeStatusPendingText = 'initializing...';
 const _welcomeStatusReadyText = 'initialized';
 
+function _getWelcomeIntroMode() {
+  if (typeof getWelcomeIntroPreference === 'function') {
+    return getWelcomeIntroPreference();
+  }
+  return 'animated';
+}
+
+function _getEffectiveWelcomeStatusLabels() {
+  const statusLabels = Array.isArray(APP_CONFIG.welcome_status_labels)
+    ? APP_CONFIG.welcome_status_labels
+        .map(label => String(label || '').trim().toUpperCase())
+        .filter(Boolean)
+        .slice(0, 6)
+    : [];
+  return statusLabels.length
+    ? statusLabels
+    : ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'];
+}
+
 function _shouldUseMobileWelcomeSequence() {
   if (typeof useMobileTerminalViewportMode === 'function') {
     return useMobileTerminalViewportMode();
@@ -158,16 +177,7 @@ async function _runWelcomeAnimation(tabId, {
   _renderWelcomeAsciiStream(tabId, asciiArt);
   if (!_welcomeActive) return false;
 
-  const statusLabels = Array.isArray(APP_CONFIG.welcome_status_labels)
-    ? APP_CONFIG.welcome_status_labels
-        .map(label => String(label || '').trim().toUpperCase())
-        .filter(Boolean)
-        .slice(0, 6)
-    : [];
-
-  const effectiveStatusLabels = statusLabels.length
-    ? statusLabels
-    : ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'];
+  const effectiveStatusLabels = _getEffectiveWelcomeStatusLabels();
   const introBlocks = includeBlocks ? blocks : [];
   _welcomePlan = {
     asciiArt,
@@ -775,8 +785,35 @@ function settleWelcome(tabId = activeTabId) {
   return true;
 }
 
+function _renderSettledWelcome(tabId, {
+  asciiArt = '',
+  blocks = [],
+  hints = [],
+  includeBlocks = true,
+} = {}) {
+  const out = getOutput(tabId);
+  if (!out || !_welcomeActive) return false;
+  const introBlocks = includeBlocks ? blocks : [];
+  _welcomePlan = {
+    asciiArt,
+    statusLabels: _getEffectiveWelcomeStatusLabels(),
+    blocks: introBlocks,
+    hints,
+  };
+  return settleWelcome(tabId);
+}
+
 async function runWelcome() {
   const tabId = activeTabId;
+  const introMode = _getWelcomeIntroMode();
+  if (introMode === 'remove') {
+    _welcomeBootPending = false;
+    _welcomeActive = false;
+    _welcomeDone = false;
+    _welcomeTabId = null;
+    if (tabId === activeTabId) mountShellPrompt(tabId);
+    return;
+  }
   _welcomeBootPending = true;
   _welcomeActive = true;
   _welcomeDone = false;
@@ -796,6 +833,15 @@ async function runWelcome() {
       }),
     ]);
     const hints = (hintData && Array.isArray(hintData.items)) ? hintData.items : [];
+    if (introMode === 'disable_animation') {
+      _renderSettledWelcome(tabId, {
+        asciiArt,
+        blocks: [],
+        hints,
+        includeBlocks: false,
+      });
+      return;
+    }
     await _runWelcomeAnimation(tabId, {
       asciiArt,
       blocks: [],
@@ -834,6 +880,15 @@ async function runWelcome() {
   const SAMPLE_COUNT   = Math.max(0, Number(APP_CONFIG.welcome_sample_count ?? 5) || 0);
   const sampledBlocks = SAMPLE_COUNT > 0 ? _sampleWelcomeBlocks(data, SAMPLE_COUNT) : [];
   const hints = (hintData && Array.isArray(hintData.items)) ? hintData.items : [];
+  if (introMode === 'disable_animation') {
+    _renderSettledWelcome(tabId, {
+      asciiArt,
+      blocks: sampledBlocks,
+      hints,
+      includeBlocks: true,
+    });
+    return;
+  }
   await _runWelcomeAnimation(tabId, {
     asciiArt,
     blocks: sampledBlocks,

@@ -10,6 +10,7 @@ import os
 import threading
 import logging
 import json
+from typing import Any, cast
 
 from config import CFG
 
@@ -51,6 +52,30 @@ _pid_lock = threading.Lock()
 # PID entries expire after 4 hours as a safety net for orphaned entries
 # left behind if a worker crashes mid-stream.
 _PID_TTL = 14400
+
+
+def _load_active_run_payload(raw: object) -> dict[str, Any] | None:
+    """Best-effort parse of a Redis-stored active-run JSON payload."""
+    if not isinstance(raw, (str, bytes, bytearray)):
+        return None
+    try:
+        payload = json.loads(raw)
+    except Exception:
+        return None
+    return cast(dict[str, Any], payload) if isinstance(payload, dict) else None
+
+
+def _redis_smembers_strings(key: str) -> list[str]:
+    """Return a normalized list of Redis set members as strings."""
+    if not redis_client:
+        return []
+    try:
+        raw_members = redis_client.smembers(key)
+    except Exception:
+        return []
+    if not isinstance(raw_members, (set, list, tuple)):
+        return []
+    return [str(member) for member in raw_members]
 
 
 def pid_register(run_id: str, pid: int) -> None:
@@ -100,10 +125,8 @@ def active_run_remove(run_id: str) -> None:
         meta_key = f"procmeta:{run_id}"
         raw = redis_client.get(meta_key)
         if raw:
-            try:
-                session_id = json.loads(raw).get("session_id", "")
-            except Exception:
-                session_id = ""
+            payload = _load_active_run_payload(raw)
+            session_id = str(payload.get("session_id", "")) if payload else ""
             if session_id:
                 redis_client.srem(f"sessionprocs:{session_id}", run_id)
         redis_client.delete(meta_key)
@@ -125,7 +148,7 @@ def active_runs_for_session(session_id: str) -> list[dict]:
 
     if redis_client:
         session_key = f"sessionprocs:{session_id}"
-        run_ids = sorted(redis_client.smembers(session_key) or ())
+        run_ids = sorted(_redis_smembers_strings(session_key))
         items = []
         stale = []
         for run_id in run_ids:
@@ -133,9 +156,8 @@ def active_runs_for_session(session_id: str) -> list[dict]:
             if not raw:
                 stale.append(run_id)
                 continue
-            try:
-                payload = json.loads(raw)
-            except Exception:
+            payload = _load_active_run_payload(raw)
+            if not payload:
                 stale.append(run_id)
                 continue
             if str(payload.get("session_id", "")) != session_id:

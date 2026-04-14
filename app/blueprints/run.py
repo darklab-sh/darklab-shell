@@ -7,18 +7,21 @@ The /run route is rate-limited per-IP via the shared limiter singleton.
 import json
 import logging
 import os
+import re
 import select
 import shutil
 import signal
 import subprocess  # nosec B404
 import threading
 import uuid
+from collections import deque
 from datetime import datetime, timezone
 
 from flask import Blueprint, Response, jsonify, request
 
 from commands import (
     is_command_allowed,
+    parse_synthetic_postfilter,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -26,7 +29,11 @@ from commands import (
 from config import CFG, SCANNER_PREFIX
 from database import db_connect
 from extensions import limiter
-from fake_commands import execute_fake_command, resolve_fake_command
+from fake_commands import (
+    execute_fake_command,
+    resolve_fake_command,
+    resolves_exact_special_fake_command,
+)
 from helpers import get_client_ip, get_session_id
 from process import active_run_register, active_run_remove, pid_pop, pid_register
 from run_output_store import RunOutputCapture
@@ -102,12 +109,13 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
         })
 
 
-def _finalize_completed_run(run_id, session_id, client_ip, original_command, run_started, exit_code, capture):
+def _finalize_completed_run(run_id, session_id, client_ip, original_command, run_started, exit_code, capture, *, cmd_type="real"):
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
     log.info("RUN_END", extra={
         "run_id": run_id, "session": session_id, "ip": client_ip,
         "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+        "cmd_type": cmd_type,
     })
     _save_completed_run(
         run_id, session_id, original_command, run_started,
@@ -120,7 +128,7 @@ def _timeout_notice(command_timeout):
     return f"[timeout] Command exceeded {command_timeout}s limit and was killed."
 
 
-def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0):
+def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0, *, cmd_type="builtin"):
     # Synthetic commands deliberately reuse the same persistence/logging path as
     # real commands so the shell treats them as first-class runs.
     run_id      = str(uuid.uuid4())
@@ -129,7 +137,7 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
 
     log.info("RUN_START", extra={
         "run_id": run_id, "session": session_id, "ip": client_ip,
-        "pid": 0, "cmd": original_command,
+        "pid": 0, "cmd": original_command, "cmd_type": cmd_type,
     })
 
     def generate():
@@ -146,7 +154,7 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
                         ts_clock=line_dt.strftime("%H:%M:%S"),
                         ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                     )
-                    yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10)})}\n\n"
+                    yield f"data: {json.dumps({'type': 'output', 'text': line + chr(10), 'cls': str(event.get('cls', ''))})}\n\n"
                 elif event.get("type") == "clear":
                     yield f"data: {json.dumps({'type': 'clear'})}\n\n"
 
@@ -155,6 +163,7 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
             log.info("RUN_END", extra={
                 "run_id": run_id, "session": session_id, "ip": client_ip,
                 "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
+                "cmd_type": cmd_type,
             })
             yield f"data: {json.dumps({
                 'type': 'exit',
@@ -183,6 +192,72 @@ def _fake_run_response(original_command, session_id, client_ip):
     return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
 
+class _SyntheticPostFilterProcessor:
+    """Apply one narrow app-native post-filter stage without enabling pipes."""
+
+    def __init__(self, spec):
+        self.spec = spec or {}
+        self.kind = self.spec.get("kind")
+        self._count = 0
+        self._emitted = 0
+        self._tail_buffer = deque(maxlen=int(self.spec.get("count", 0) or 0))
+        self._grep_match = None
+
+        if self.kind == "grep":
+            pattern = self.spec["pattern"]
+            flags = re.IGNORECASE if self.spec.get("ignore_case") else 0
+            if self.spec.get("extended"):
+                try:
+                    compiled = re.compile(pattern, flags)
+                except re.error as exc:
+                    raise ValueError(f"Invalid synthetic grep regex: {exc}") from exc
+
+                def _matches(line):
+                    return bool(compiled.search(line))
+            else:
+                needle = pattern.lower() if self.spec.get("ignore_case") else pattern
+
+                def _matches(line):
+                    haystack = line.lower() if self.spec.get("ignore_case") else line
+                    return needle in haystack
+
+            if self.spec.get("invert_match"):
+                self._grep_match = lambda line: not _matches(line)
+            else:
+                self._grep_match = _matches
+
+    def process_output_line(self, line: str) -> list[str]:
+        if not self.kind:
+            return [line]
+
+        normalized = str(line).rstrip("\n")
+        if self.kind == "grep":
+            return [line] if self._grep_match and self._grep_match(normalized) else []
+
+        if self.kind == "head":
+            if self._emitted >= int(self.spec.get("count", 0) or 0):
+                return []
+            self._emitted += 1
+            return [line]
+
+        if self.kind == "tail":
+            self._tail_buffer.append(line)
+            return []
+
+        if self.kind == "wc_l":
+            self._count += 1
+            return []
+
+        return [line]
+
+    def finalize_output_lines(self) -> list[str]:
+        if self.kind == "tail":
+            return list(self._tail_buffer)
+        if self.kind == "wc_l":
+            return [str(self._count)]
+        return []
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @run_bp.route("/run", methods=["POST"])
@@ -203,9 +278,41 @@ def run_command():
     original_command = original_command.strip()
     if not original_command:
         return jsonify({"error": "No command provided"}), 400
-
-    if resolve_fake_command(original_command):
+    if resolves_exact_special_fake_command(original_command):
         return _fake_run_response(original_command, session_id, client_ip)
+    postfilter_spec, postfilter_error = parse_synthetic_postfilter(original_command)
+    if postfilter_error:
+        log.warning("CMD_DENIED", extra={
+            "ip": client_ip, "session": session_id,
+            "cmd": original_command, "reason": postfilter_error,
+        })
+        return jsonify({"error": postfilter_error}), 403
+    execution_command = postfilter_spec["base_command"] if postfilter_spec else original_command
+    if postfilter_spec:
+        log.debug("CMD_PIPE", extra={
+            "ip": client_ip, "session": session_id,
+            "cmd": original_command, "kind": postfilter_spec.get("kind"),
+        })
+    try:
+        postfilter = _SyntheticPostFilterProcessor(postfilter_spec)
+    except ValueError as exc:
+        return jsonify({"error": str(exc)}), 403
+
+    if resolve_fake_command(execution_command):
+        events, exit_code = execute_fake_command(execution_command, session_id)
+        filtered_events = []
+        for event in events:
+            if event.get("type") != "output":
+                filtered_events.append(event)
+                continue
+            for filtered_line in postfilter.process_output_line(str(event.get("text", ""))):
+                filtered_event = dict(event)
+                filtered_event["text"] = filtered_line.rstrip("\n")
+                filtered_events.append(filtered_event)
+        for filtered_line in postfilter.finalize_output_lines():
+            filtered_events.append({"type": "output", "text": filtered_line.rstrip("\n")})
+        events = filtered_events
+        return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
     allowed, reason = is_command_allowed(original_command)
     if not allowed:
@@ -215,20 +322,25 @@ def run_command():
         })
         return jsonify({"error": reason}), 403
 
-    command, notice = rewrite_command(original_command)
-    if command != original_command:
+    command, notice = rewrite_command(execution_command)
+    if command != execution_command:
         log.info("CMD_REWRITE", extra={
             "ip": client_ip, "original": original_command, "rewritten": command,
         })
 
     missing_runtime = runtime_missing_command_name(command)
     if missing_runtime:
+        log.warning("CMD_MISSING", extra={
+            "ip": client_ip, "session": session_id,
+            "cmd": original_command, "missing": missing_runtime,
+        })
         return _synthetic_run_response(
             original_command,
             session_id,
             client_ip,
             [{"type": "output", "text": runtime_missing_command_message(missing_runtime)}],
             127,
+            cmd_type="missing",
         )
 
     run_id      = str(uuid.uuid4())
@@ -259,7 +371,7 @@ def run_command():
     active_run_register(run_id, proc.pid, session_id, original_command, run_started)
     log.info("RUN_START", extra={
         "run_id": run_id, "session": session_id, "ip": client_ip,
-        "pid": proc.pid, "cmd": original_command,
+        "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
     })
 
     # Heartbeat interval in seconds — keeps the SSE connection alive through
@@ -304,17 +416,27 @@ def run_command():
                 if ready:
                     line = proc.stdout.readline()
                     if line:
-                        line_dt = datetime.now(timezone.utc)
-                        capture.add_line(
-                            line,
-                            ts_clock=line_dt.strftime("%H:%M:%S"),
-                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                        )
+                        filtered_lines = postfilter.process_output_line(line)
+                        for filtered_line in filtered_lines:
+                            line_dt = datetime.now(timezone.utc)
+                            capture.add_line(
+                                filtered_line,
+                                ts_clock=line_dt.strftime("%H:%M:%S"),
+                                ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                            )
                     else:
                         break
                 else:
                     if proc.poll() is not None:
                         break
+
+            for filtered_line in postfilter.finalize_output_lines():
+                line_dt = datetime.now(timezone.utc)
+                capture.add_line(
+                    filtered_line,
+                    ts_clock=line_dt.strftime("%H:%M:%S"),
+                    ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                )
 
             proc.stdout.close()
             proc.wait()
@@ -378,13 +500,15 @@ def run_command():
                 if ready:
                     line = proc.stdout.readline()
                     if line:
-                        line_dt = datetime.now(timezone.utc)
-                        capture.add_line(
-                            line,
-                            ts_clock=line_dt.strftime("%H:%M:%S"),
-                            ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
-                        )
-                        yield f"data: {json.dumps({'type': 'output', 'text': line})}\n\n"
+                        filtered_lines = postfilter.process_output_line(line)
+                        for filtered_line in filtered_lines:
+                            line_dt = datetime.now(timezone.utc)
+                            capture.add_line(
+                                filtered_line,
+                                ts_clock=line_dt.strftime("%H:%M:%S"),
+                                ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                            )
+                            yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
                     else:
                         # EOF — process has finished
                         break
@@ -394,6 +518,15 @@ def run_command():
                     if proc.poll() is not None:
                         break
                     yield ": heartbeat\n\n"
+
+            for filtered_line in postfilter.finalize_output_lines():
+                line_dt = datetime.now(timezone.utc)
+                capture.add_line(
+                    filtered_line,
+                    ts_clock=line_dt.strftime("%H:%M:%S"),
+                    ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                )
+                yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
 
             proc.stdout.close()
             proc.wait()

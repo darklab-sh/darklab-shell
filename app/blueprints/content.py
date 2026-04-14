@@ -14,10 +14,12 @@ from commands import (
     load_ascii_art,
     load_ascii_mobile_art,
     load_autocomplete,
+    load_autocomplete_context,
     load_mobile_welcome_hints,
     load_welcome,
     load_welcome_hints,
 )
+from fake_commands import get_special_command_keys
 from helpers import get_client_ip, get_session_id, ip_is_in_cidrs
 
 log = logging.getLogger("shell")
@@ -192,10 +194,12 @@ def faq():
 
 @content_bp.route("/autocomplete")
 def autocomplete():
-    """Return the list of autocomplete suggestions from auto_complete.txt."""
+    """Return unified flat and contextual autocomplete data from autocomplete_context.yaml."""
     suggestions = load_autocomplete()
+    context = load_autocomplete_context()
+    special_commands = get_special_command_keys()
     _log_content_view("/autocomplete", count=len(suggestions))
-    return jsonify({"suggestions": suggestions})
+    return jsonify({"suggestions": suggestions, "context": context, "special_commands": special_commands})
 
 
 @content_bp.route("/welcome")

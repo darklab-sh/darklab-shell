@@ -32,6 +32,8 @@ async function loadAppFns({
   activeTabId = 'tab-1',
   acFiltered: acFilteredOverride = [],
   acSuggestions: acSuggestionsOverride = [],
+  acContextRegistry: acContextRegistryOverride = {},
+  getAutocompleteMatches: getAutocompleteMatchesOverride = null,
   acIndex: acIndexOverride = -1,
   acShow: acShowOverride = () => {},
   acHide: acHideOverride = () => {},
@@ -66,10 +68,13 @@ async function loadAppFns({
         <div id="mobile-composer-host">
           <div id="mobile-edit-bar">
             <button data-edit-action="home"></button>
+            <button data-edit-action="word-left"></button>
             <button data-edit-action="left"></button>
-            <button data-edit-action="right"></button>
-            <button data-edit-action="end"></button>
             <button data-edit-action="delete-word"></button>
+            <button data-edit-action="end"></button>
+            <button data-edit-action="word-right"></button>
+            <button data-edit-action="right"></button>
+            <button data-edit-action="delete-line"></button>
           </div>
           <div id="mobile-composer-row">
             <span class="mobile-prompt-label">$</span>
@@ -147,6 +152,16 @@ async function loadAppFns({
       <option value="clock">clock</option>
       </select>
       <input id="options-ln-toggle" type="checkbox" />
+      <select id="options-welcome-select">
+        <option value="animated">animated</option>
+        <option value="disable_animation">disable_animation</option>
+        <option value="remove">remove</option>
+      </select>
+      <select id="options-share-redaction-select">
+        <option value="unset">unset</option>
+        <option value="redacted">redacted</option>
+        <option value="raw">raw</option>
+      </select>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
       </div>
@@ -240,6 +255,8 @@ async function loadAppFns({
     searchCloseBtn: document.getElementById('search-close-btn'),
     optionsTsSelect: document.getElementById('options-ts-select'),
     optionsLnToggle: document.getElementById('options-ln-toggle'),
+    optionsWelcomeSelect: document.getElementById('options-welcome-select'),
+    optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
@@ -396,6 +413,8 @@ async function loadAppFns({
     pendingKillTabId,
     acHide: acHideOverride,
     acSuggestions: acSuggestionsOverride,
+    acContextRegistry: acContextRegistryOverride,
+    getAutocompleteMatches: getAutocompleteMatchesOverride,
     acFiltered: acFilteredOverride,
     acIndex: acIndexOverride,
     acShow: acShowOverride,
@@ -488,6 +507,8 @@ async function loadAppFns({
     closeKillOverlay,
     confirmPermalinkRedactionChoice,
     getRememberedShareRedactionChoice,
+    getWelcomeIntroPreference,
+    getShareRedactionDefaultPreference,
     resolveShareRedactionChoice,
     cancelShareRedactionChoice,
     isShareRedactionOverlayOpen,
@@ -556,7 +577,7 @@ async function loadAppFns({
 
 describe('app helpers', () => {
   beforeEach(() => {
-    ;['pref_theme', 'pref_theme_name', 'pref_timestamps', 'pref_line_numbers'].forEach(name => {
+    ;['pref_theme', 'pref_theme_name', 'pref_timestamps', 'pref_line_numbers', 'pref_welcome_intro', 'pref_share_redaction_default'].forEach(name => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
   })
@@ -2105,6 +2126,42 @@ describe('app helpers', () => {
     expect(document.getElementById('ac-dropdown').style.display).toBe('none')
   })
 
+  it('prefers contextual autocomplete suggestions after the command root', async () => {
+    const acShow = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      getAutocompleteMatches: () => [
+        { value: '-sV', description: 'Service detection', replaceStart: 5, replaceEnd: 6 },
+        { value: '-Pn', description: 'Skip host discovery', replaceStart: 5, replaceEnd: 6 },
+      ],
+      acShow,
+    })
+
+    cmdInput.value = 'nmap -'
+    cmdInput.setSelectionRange(6, 6)
+    cmdInput.dispatchEvent(new Event('input'))
+
+    expect(acShow).toHaveBeenCalled()
+    const [items] = acShow.mock.calls.at(-1)
+    expect(items.map(item => item.value)).toEqual(['-sV', '-Pn'])
+  })
+
+  it('suppresses duplicate contextual flags that were already used in the command', async () => {
+    const acShow = vi.fn()
+    const { cmdInput } = await loadAppFns({
+      getAutocompleteMatches: () => [
+        { value: '-sV', description: 'Service detection', replaceStart: 9, replaceEnd: 10 },
+      ],
+      acShow,
+    })
+
+    cmdInput.value = 'nmap -Pn -'
+    cmdInput.setSelectionRange(10, 10)
+    cmdInput.dispatchEvent(new Event('input'))
+
+    const [items] = acShow.mock.calls.at(-1)
+    expect(items.map(item => item.value)).toEqual(['-sV'])
+  })
+
   it('renders cursor and selection state from composer state', async () => {
     const { cmdInput, setComposerState, syncShellPrompt } = await loadAppFns()
     const shellPromptText = document.getElementById('shell-prompt-text')
@@ -2282,14 +2339,56 @@ describe('app helpers', () => {
     press('[data-edit-action="home"]')
     expect(visibleInput.selectionStart).toBe(0)
 
+    press('[data-edit-action="word-right"]')
+    expect(visibleInput.selectionStart).toBe(4)
+
     press('[data-edit-action="right"]')
-    expect(visibleInput.selectionStart).toBe(1)
+    expect(visibleInput.selectionStart).toBe(5)
+
+    press('[data-edit-action="word-left"]')
+    expect(visibleInput.selectionStart).toBe(0)
 
     press('[data-edit-action="end"]')
     expect(visibleInput.selectionStart).toBe(visibleInput.value.length)
 
     press('[data-edit-action="delete-word"]')
     expect(visibleInput.value).toBe('ping -c 4 ')
+
+    press('[data-edit-action="delete-line"]')
+    expect(visibleInput.value).toBe('')
+    expect(visibleInput.selectionStart).toBe(0)
+  })
+
+  it('keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input', async () => {
+    const { getVisibleComposerInput, setComposerState } = await loadAppFns({
+      mobileViewport: { height: 500, offsetTop: 0 },
+    })
+    const press = (selector) => {
+      document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+    }
+
+    document.body.classList.add('mobile-terminal-mode')
+    const mobileCmdInput = document.getElementById('mobile-cmd')
+    const longValue = 'curl https://example.com/healthcheck/with/a/very/long/path?token=abcdef1234567890'
+    mobileCmdInput.value = longValue
+    mobileCmdInput.setSelectionRange(0, 0)
+    mobileCmdInput.scrollLeft = 0
+    Object.defineProperty(mobileCmdInput, 'clientWidth', { value: 140, configurable: true })
+    setComposerState({
+      value: longValue,
+      selectionStart: 0,
+      selectionEnd: 0,
+      activeInput: 'mobile',
+    })
+    const visibleInput = getVisibleComposerInput()
+
+    press('[data-edit-action="end"]')
+    expect(visibleInput.selectionStart).toBe(longValue.length)
+    expect(visibleInput.scrollLeft).toBeGreaterThan(0)
+
+    press('[data-edit-action="home"]')
+    expect(visibleInput.selectionStart).toBe(0)
+    expect(visibleInput.scrollLeft).toBe(0)
   })
 
   it('uses Ctrl+C to open kill confirm when active tab is running', async () => {
@@ -2746,7 +2845,6 @@ describe('app helpers', () => {
       confirmPermalinkRedactionChoice,
       isShareRedactionOverlayOpen,
       getRememberedShareRedactionChoice,
-      sessionStorage,
     } = await loadAppFns()
     const shareRedactionOverlay = document.getElementById('share-redaction-overlay')
     const rememberToggle = document.getElementById('share-redaction-remember-toggle')
@@ -2758,12 +2856,13 @@ describe('app helpers', () => {
     await expect(redactedChoice).resolves.toBe('redacted')
     expect(shareRedactionOverlay.style.display).toBe('none')
     expect(getRememberedShareRedactionChoice()).toBe('redacted')
-    expect(sessionStorage.getItem('share_redaction_choice')).toBe('redacted')
+    expect(document.cookie).toContain('pref_share_redaction_default=redacted')
+    expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
 
     await expect(confirmPermalinkRedactionChoice()).resolves.toBe('redacted')
     expect(shareRedactionOverlay.style.display).toBe('none')
 
-    sessionStorage.removeItem('share_redaction_choice')
+    document.cookie = 'pref_share_redaction_default=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
     const rawChoice = confirmPermalinkRedactionChoice()
     expect(isShareRedactionOverlayOpen()).toBe(true)
     document.getElementById('share-redaction-raw').click()
@@ -2774,6 +2873,20 @@ describe('app helpers', () => {
     shareRedactionOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await expect(cancelChoice).resolves.toBe(null)
     expect(shareRedactionOverlay.style.display).toBe('none')
+  })
+
+  it('uses the persistent share redaction default before showing the modal prompt', async () => {
+    const {
+      confirmPermalinkRedactionChoice,
+      isShareRedactionOverlayOpen,
+      getShareRedactionDefaultPreference,
+    } = await loadAppFns({
+      cookies: { pref_share_redaction_default: 'raw' },
+    })
+
+    await expect(confirmPermalinkRedactionChoice()).resolves.toBe('raw')
+    expect(isShareRedactionOverlayOpen()).toBe(false)
+    expect(getShareRedactionDefaultPreference()).toBe('raw')
   })
 
   it('wires search controls and Escape dismissal correctly', async () => {
@@ -2909,7 +3022,7 @@ describe('app helpers', () => {
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
-    await loadAppFns({
+    const { getWelcomeIntroPreference, getShareRedactionDefaultPreference } = await loadAppFns({
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
@@ -2942,6 +3055,10 @@ describe('app helpers', () => {
     document.getElementById('options-ts-select').dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-ln-toggle').checked = true
     document.getElementById('options-ln-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-welcome-select').value = 'disable_animation'
+    document.getElementById('options-welcome-select').dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-share-redaction-select').value = 'redacted'
+    document.getElementById('options-share-redaction-select').dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -2950,6 +3067,10 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
     expect(document.cookie).toContain('pref_timestamps=elapsed')
     expect(document.cookie).toContain('pref_line_numbers=on')
+    expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
+    expect(document.cookie).toContain('pref_share_redaction_default=redacted')
+    expect(getWelcomeIntroPreference()).toBe('disable_animation')
+    expect(getShareRedactionDefaultPreference()).toBe('redacted')
   })
 
   it('renders backend-driven FAQ items with HTML answers and dynamic sections', async () => {

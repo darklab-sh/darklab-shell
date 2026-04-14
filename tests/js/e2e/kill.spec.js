@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { makeTestIp } from './helpers.js'
+import { ensurePromptReady, makeTestIp } from './helpers.js'
 
 // A long-running command that is in the allowlist and won't exit on its own.
 const LONG_CMD = 'ping -c 1000 127.0.0.1'
@@ -59,12 +59,7 @@ test.describe('kill running command', () => {
     })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
-    await page.evaluate(() => {
-      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
-    })
-    await page.waitForFunction(() => {
-      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
-    })
+    await ensurePromptReady(page)
   })
 
   test('kill button stops a running command and status becomes KILLED', async ({ page }) => {

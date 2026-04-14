@@ -3,5 +3,20 @@
 
 Tap the prompt to open the mobile keyboard quickly.
 Use the mobile menu for search, history, and theme.
+Use built-in pipe support like | grep, | head, | tail, or | wc -l for quick trimming.
+After `nmap ` or `curl -`, autocomplete can offer command-specific flags and argument hints.
 The helper row appears only while the keyboard is open.
+Use Word ← and Word → in the mobile helper row to move through long commands faster.
 Long runs stay in the history panel after the tab settles.
+Use share snapshot from the active tab when you want the current mobile view as a shareable page.
+Run permalink in history copies the canonical link for one saved command.
+If a run is still active after refresh, the tab reconnects and restores the saved result when it finishes.
+Idle tabs and draft text come back after reload in the same browser session.
+The mobile history drawer keeps search visible and hides advanced filters until you need them.
+The filters button shows how many history filters are active.
+Tap a recent chip to reload a command without retyping it.
+Starred history entries stay easier to find when the drawer gets crowded.
+Use the search bar to scan long output without leaving the current tab.
+Timestamps and line numbers make copied mobile output easier to reference later.
+If output is scrolled away from the tail, use jump to live to snap back down.
+Theme changes apply to the full mobile shell, not just the picker preview.

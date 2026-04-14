@@ -6,24 +6,6 @@
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
-### Now
-
-- **Context-aware autocomplete**
-  - Move beyond a flat suggestion list and tailor completions by command root and prior tokens.
-  - Especially useful for long scanner commands with many flags.
-
-- **Synthetic `grep` post-filter**
-  - Support `command | grep ...` as an app-native filtered-output feature without enabling general shell pipes.
-  - Phase 1: support a narrow grep-only syntax such as `grep`, `grep -i`, `grep -v`, and `grep -E`, with the filtered output treated as the canonical transcript for that run.
-  - Phase 2: optionally preserve raw output alongside the filtered view so history, permalinks, and exports can expose both filtered and unfiltered variants without widening subprocess capabilities.
-
-- **Synthetic shell post-filters**
-  - Extend the same app-native post-filter model beyond `grep` to high-value shell tools like `head`, `tail`, and `wc -l`.
-  - Keep the scope narrow: one supported post-filter stage, no general shell piping or chaining.
-
-- **Shell aliases**
-  - Allow operator-defined aliases that resolve before validation, so common shortcuts feel more shell-native without exposing unrestricted composition.
-
 ### Next
 
 - **Share annotations**
@@ -62,14 +44,8 @@ These are product ideas and possible enhancements, not committed TODOs or planne
 
 ### Mobile-Focused Ideas
 
-- **More mobile-native history actions**
-  - Larger tap targets and less drawer churn for common actions like copy command and permalink.
-
 - **Mobile share flow**
   - Better native share-sheet integration where the platform allows it.
-
-- **Mobile keyboard enhancements**
-  - Optional compact edit presets, faster cursor movement, or gesture-friendly editing helpers.
 
 ### Safety / Policy Ideas
 

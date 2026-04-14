@@ -1366,13 +1366,17 @@ class TestAutocompleteRoute:
         data = json.loads(client.get("/autocomplete").data)
         assert "suggestions" in data
         assert isinstance(data["suggestions"], list)
+        assert "context" in data
+        assert isinstance(data["context"], dict)
 
     def test_returns_configured_suggestions(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
+        with mock.patch("blueprints.content.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]), \
+             mock.patch("blueprints.content.load_autocomplete_context", return_value={"nmap": {"flags": []}}):
             data = json.loads(client.get("/autocomplete").data)
         assert "nmap -sV" in data["suggestions"]
         assert "ping -c 4" in data["suggestions"]
+        assert "nmap" in data["context"]
 
 
 # ── /history session isolation ────────────────────────────────────────────────

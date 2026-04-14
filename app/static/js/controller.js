@@ -252,6 +252,12 @@ optionsTsSelect?.addEventListener('change', e => {
 optionsLnToggle?.addEventListener('change', e => {
   applyLineNumberPreference(e.target.checked ? 'on' : 'off');
 });
+optionsWelcomeSelect?.addEventListener('change', e => {
+  applyWelcomeIntroPreference(e.target.value);
+});
+optionsShareRedactionSelect?.addEventListener('change', e => {
+  applyShareRedactionDefaultPreference(e.target.value);
+});
 
 apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   allowedCommandsFaqData = data;
@@ -270,6 +276,8 @@ apiFetch('/faq').then(r => r.json()).then(data => {
 setupTabScrollControls();
 applyTimestampPreference(getPreference('pref_timestamps') || 'off', false);
 applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
+applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
+applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
 
 Promise.all([
   apiFetch('/history').then(r => r.json()).catch(err => {
@@ -708,6 +716,8 @@ if (typeof document !== 'undefined') {
 // ── Autocomplete ──
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
+  acContextRegistry = data.context || {};
+  acSpecialCommands = data.special_commands || [];
 }).catch(err => {
   logClientError('failed to load /autocomplete', err);
 });

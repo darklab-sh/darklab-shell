@@ -26,6 +26,7 @@ from commands import (
 )
 from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
+from process import active_runs_for_session
 
 
 _STARTED_AT = datetime.now(timezone.utc)
@@ -56,82 +57,126 @@ _CURRENT_SHORTCUTS = [
     ("Option+B/F or Alt+B/F", "move backward / forward by word"),
 ]
 _SNARKY_SUDO_RESPONSES = [
-    "sudo: confidence noted. Privilege escalation is still not happening.",
-    "sudo: that's a local habit, not a capability.",
+    "sudo: i asked the kernel. the kernel said no.",
+    "sudo: root is occupied. please leave a message after the 403.",
+    "sudo: this is still a shell, not a coup.",
+    "sudo: administrative confidence detected; administrative power not found.",
+    "sudo: this shell respects your ambition and ignores it completely.",
+    "sudo: the stack has reviewed your request and chosen comedy.",
+    "sudo: root privileges are currently in another castle.",
+    "sudo: kernel says no, browser says also no.",
+    "sudo: privilege escalation blocked at layer 8.",
     "sudo: request denied by the web shell's sense of self-preservation.",
-    "sudo: the operator badge is decorative here.",
-    "sudo: this browser tab does not recognize your authority.",
-    "sudo: close, but still no root access.",
 ]
 _SNARKY_SUDO_TARGET_RESPONSES = [
-    "sudo: '{target}' is not happening today.",
-    "sudo: '{target}' is still not a privilege escalation strategy.",
-    "sudo: '{target}' has been denied by the browser court.",
-    "sudo: '{target}' will remain a non-event.",
+    "sudo: '{target}' is not listed in the threat model, but still no.",
+    "sudo: '{target}' has been forwarded to /dev/null for executive review.",
+    "sudo: ran '{target}' through the web shell authorization matrix. verdict: absolutely not.",
+    "sudo: '{target}' would require a kernel, a real tty, and a better plan.",
+    "sudo: '{target}' has been denied by a bipartisan coalition of guardrails.",
+    "sudo: '{target}' would make a great postmortem title.",
+    "sudo: '{target}' was intercepted by responsible adults.",
+    "sudo: '{target}' has failed the vibe check.",
+    "sudo: '{target}' has been denied for the continued health of the infrastructure.",
     "sudo: nice try with '{target}', but no.",
-    "sudo: '{target}' is still just a wish with shell syntax.",
-    "sudo: the answer to '{target}' is firmly no.",
-    "sudo: '{target}' will remain below the line.",
     "sudo: '{target}' was rejected before it could become a plan.",
 ]
 _SNARKY_REBOOT_RESPONSES = [
-    "reboot: bold choice.",
-    "reboot: not with this browser tab.",
+    "reboot: the uptime counter would like a word.",
+    "reboot: that's a 4am pager alert in text form. still no.",
+    "reboot: graceful shutdown initiated... just kidding.",
+    "reboot: systemd is not listening to you right now.",
+    "reboot: denied. the server prefers consciousness.",
+    "reboot: if you need closure, may I suggest 'clear'?",
+    "reboot: that's one way to hide the evidence, but still no.",
     "reboot: the server is not taking user suggestions for downtime.",
     "reboot: let's not turn a diagnostic console into a blackout.",
-    "reboot: all I can offer is a dramatic sigh.",
-    "reboot: have you tried turning your expectations off and on again?",
+]
+_SNARKY_POWEROFF_RESPONSES = [
+    "poweroff: the uptime counter would like a word.",
+    "poweroff: that's a 4am pager alert in text form. still no.",
+    "poweroff: graceful power-down initiated... just kidding.",
+    "poweroff: systemd is not listening to you right now.",
+    "poweroff: denied. the server prefers consciousness.",
+    "poweroff: if you need closure, may I suggest 'clear'?",
+    "poweroff: that's one way to hide the evidence, but still no.",
+    "poweroff: the server is not taking user suggestions for downtime.",
+    "poweroff: let's not turn a diagnostic console into a blackout.",
 ]
 _SNARKY_RM_ROOT_RESPONSES = [
-    "rm: nice try.",
-    "rm: the web shell prefers not to become a cautionary tale.",
-    "rm: not even for dramatic effect.",
-    "rm: that's a hard no from the entire stack.",
-    "rm: the filesystem would like to keep existing, thanks.",
-    "rm: asking for `/` is a little too committed.",
+    "rm: no filesystem was harmed in the running of this command.",
+    "rm: this is a web shell. the / you're reaching for is a container. the container says no.",
+    "rm: truly, a classic. still no.",
+    "rm: operation blocked by the 'i like having a root filesystem' policy.",
+    "rm: you'll have to cause your own outage the old-fashioned way.",
+    "rm: the / would like to remain.",
 ]
+_SNARKY_SU_RESPONSES = [
+    "su: root login is not available in this shell.",
+    "su: this browser tab does not come with a root shell.",
+    "su: no tty, no pam, no chance.",
+    "su: root remains a management problem for another machine.",
+    "su: request denied by the continued health of the infrastructure.",
+]
+_FORK_BOMB_RE = re.compile(r"^:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:$")
 _SPECIAL_FAKE_COMMANDS = {
+    ":(){ :|:& };:": "fork_bomb",
+    "coffee": "coffee",
+    "halt": "poweroff",
+    "ip a": "ip_addr",
+    "poweroff": "poweroff",
     "rm -fr /": "rm_root",
     "rm -rf /": "rm_root",
-}
-_FAKE_COMMANDS = {
-    "banner", "clear", "date", "env", "help", "history", "hostname",
-    "id", "last", "limits", "ls", "man", "ps", "pwd", "retention",
-    "shortcuts", "status", "sudo", "type", "uname", "uptime", "which",
-    "who", "whoami", "groups", "tty", "version", "faq",
-    "fortune", "reboot",
+    "rm -r -f /": "rm_root",
+    "rm -f -r /": "rm_root",
+    "shutdown now": "poweroff",
+    "sudo -s": "su_shell",
+    "sudo su": "su_shell",
+    "su": "su_shell",
+    "xyzzy": "xyzzy",
 }
 _BACKSPACE_RE = re.compile(r".\x08")
-_FAKE_COMMAND_HELP = [
-    ("banner", "Print the configured ASCII banner without replaying welcome."),
-    ("clear", "Clear the current terminal tab output."),
-    ("date", "Show the current server time."),
-    ("env", "Show the web shell environment variables."),
-    ("faq", "Show configured FAQ entries inside the terminal."),
-    ("fortune", "Print a short operator-themed one-liner."),
-    ("groups", "Show the web shell group membership."),
-    ("help", "Show web shell helpers available in this app."),
-    ("history", "Show recent commands from this session."),
-    ("hostname", "Show the instance hostname/app name."),
-    ("id", "Show a web shell app identity."),
-    ("last", "Show recent completed runs with timestamps and exit codes."),
-    ("limits", "Show configured runtime and retention limits."),
-    ("ls", "List the current allowed command catalog."),
-    ("man <cmd>", "Show the real man page for an allowed command."),
-    ("ps", "Show the current ps helper plus recent session commands."),
-    ("pwd", "Show the web shell workspace path."),
-    ("retention", "Show retention and full-output persistence settings."),
-    ("shortcuts", "Show current keyboard shortcuts."),
-    ("status", "Summarize the current session and instance settings."),
-    ("tty", "Show the web terminal device path."),
-    ("type <cmd>", "Describe whether a command is a helper command, real command, or missing."),
-    ("uname -a", "Describe the web shell environment."),
-    ("uptime", "Show app uptime since process start."),
-    ("version", "Show web shell, app, Flask, and Python version details."),
-    ("which <cmd>", "Locate a web helper or real command."),
-    ("who", "Show the current web shell user/session."),
-    ("whoami", "Describe this project and link to the README."),
+_DOCUMENTED_FAKE_COMMANDS = [
+    {"name": "autocomplete", "description": "Explain context-aware autocomplete for known command roots.",
+     "root": "autocomplete"},
+    {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
+    {"name": "clear", "description": "Clear the current terminal tab output.", "root": "clear"},
+    {"name": "date", "description": "Show the current server time.", "root": "date"},
+    {"name": "df -h", "description": "Show a compact filesystem summary.", "root": "df"},
+    {"name": "env", "description": "Show core environment values for this shell.", "root": "env"},
+    {"name": "faq", "description": "Show configured FAQ entries inside the terminal with question and answer formatting.",
+     "root": "faq"},
+    {"name": "fortune", "description": "Print a short operator-themed one-liner.", "root": "fortune"},
+    {"name": "free -h", "description": "Show a compact memory summary.", "root": "free"},
+    {"name": "groups", "description": "Show the shell group membership.", "root": "groups"},
+    {"name": "help", "description": "List the built-in commands available in this shell.", "root": "help"},
+    {"name": "history", "description": "List recent commands from this session.", "root": "history"},
+    {"name": "hostname", "description": "Show the configured shell instance name.", "root": "hostname"},
+    {"name": "id", "description": "Show the shell identity.", "root": "id"},
+    {"name": "ip a", "description": "Show a minimal shell network interface view.", "exact": "ip a"},
+    {"name": "jobs", "description": "List active jobs for this session.", "root": "jobs"},
+    {"name": "last", "description": "Show recent completed runs with timestamps and exit codes.", "root": "last"},
+    {"name": "limits", "description": "Show configured runtime, history, and retention limits.", "root": "limits"},
+    {"name": "ls", "description": "List the current allowed command catalog.", "root": "ls"},
+    {"name": "man <cmd>", "description": "Show the real man page for an allowed command.", "root": "man"},
+    {"name": "ps", "description": "Show the current shell process view plus recent session commands.", "root": "ps"},
+    {"name": "pwd", "description": "Show the web shell workspace path.", "root": "pwd"},
+    {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
+    {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
+    {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
+    {"name": "status", "description": "Show the current session and shell configuration summary.", "root": "status"},
+    {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},
+    {"name": "type <cmd>", "description": "Describe whether a command is built in, installed, or missing.", "root": "type"},
+    {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
+    {"name": "uptime", "description": "Show app uptime since process start.", "root": "uptime"},
+    {"name": "version", "description": "Show shell, app, Flask, and Python version details.", "root": "version"},
+    {"name": "which <cmd>", "description": "Locate a built-in command or allowed runtime command.", "root": "which"},
+    {"name": "who", "description": "Show the current shell user and session.", "root": "who"},
+    {"name": "whoami", "description": "Describe this shell and link to the project README.", "root": "whoami"},
 ]
+_FAKE_COMMAND_HELP = [(entry["name"], entry["description"]) for entry in _DOCUMENTED_FAKE_COMMANDS]
+_DOCUMENTED_FAKE_COMMAND_ROOTS = {entry["root"] for entry in _DOCUMENTED_FAKE_COMMANDS if "root" in entry}
+_FAKE_COMMANDS = _DOCUMENTED_FAKE_COMMAND_ROOTS | {"reboot", "sudo"}
 
 
 def _split_command(command: str) -> list[str]:
@@ -140,10 +185,19 @@ def _split_command(command: str) -> list[str]:
     return split_command_argv(command)
 
 
-def resolve_fake_command(command: str) -> str | None:
+def _resolve_special_fake_command(command: str) -> str | None:
     normalized = " ".join(command.strip().lower().split())
     if normalized in _SPECIAL_FAKE_COMMANDS:
         return _SPECIAL_FAKE_COMMANDS[normalized]
+    if _FORK_BOMB_RE.fullmatch(command.strip()):
+        return "fork_bomb"
+    return None
+
+
+def resolve_fake_command(command: str) -> str | None:
+    special = _resolve_special_fake_command(command)
+    if special is not None:
+        return special
     parts = _split_command(command)
     if not parts:
         return None
@@ -151,7 +205,21 @@ def resolve_fake_command(command: str) -> str | None:
     return root if root in _FAKE_COMMANDS else None
 
 
+def resolves_exact_special_fake_command(command: str) -> bool:
+    return _resolve_special_fake_command(command) is not None
+
+
+def get_special_command_keys() -> list[str]:
+    """Return the normalized exact-match keys for special built-in commands.
+
+    The JS client uses this list to exempt these commands from the client-side
+    shell-operator validation check before they reach the server.
+    """
+    return list(_SPECIAL_FAKE_COMMANDS.keys())
+
+
 _FAKE_COMMAND_DISPATCH = {
+    "autocomplete": lambda cmd, sid: _run_fake_autocomplete(),
     "banner":    lambda cmd, sid: _run_fake_banner(),
     "clear":     lambda cmd, sid: _run_fake_clear(),
     "date":      lambda cmd, sid: _run_fake_date(),
@@ -163,18 +231,23 @@ _FAKE_COMMAND_DISPATCH = {
     "history":   lambda cmd, sid: _run_fake_history(sid),
     "hostname":  lambda cmd, sid: _run_fake_hostname(),
     "id":        lambda cmd, sid: _run_fake_id(),
+    "ip_addr":   lambda cmd, sid: _run_fake_ip_addr(),
+    "jobs":      lambda cmd, sid: _run_fake_jobs(sid),
     "last":      lambda cmd, sid: _run_fake_last(sid),
     "limits":    lambda cmd, sid: _run_fake_limits(),
     "ls":        lambda cmd, sid: _run_fake_ls(cmd),
     "man":       lambda cmd, sid: _run_fake_man(cmd),
     "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_fake_pwd(),
+    "poweroff":  lambda cmd, sid: _run_fake_poweroff(),
     "reboot":    lambda cmd, sid: _run_fake_reboot(),
     "retention": lambda cmd, sid: _run_fake_retention(),
     "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
+    "route":     lambda cmd, sid: _run_fake_route(),
     "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
     "status":    lambda cmd, sid: _run_fake_status(sid),
     "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
+    "su_shell":  lambda cmd, sid: _run_fake_su(cmd),
     "tty":       lambda cmd, sid: _run_fake_tty(),
     "type":      lambda cmd, sid: _run_fake_type(cmd),
     "uname":     lambda cmd, sid: _run_fake_uname(cmd),
@@ -183,6 +256,11 @@ _FAKE_COMMAND_DISPATCH = {
     "which":     lambda cmd, sid: _run_fake_which(cmd),
     "who":       lambda cmd, sid: _run_fake_who(sid),
     "whoami":    lambda cmd, sid: _run_fake_whoami(),
+    "xyzzy":     lambda cmd, sid: _run_fake_xyzzy(),
+    "coffee":    lambda cmd, sid: _run_fake_coffee(),
+    "fork_bomb": lambda cmd, sid: _run_fake_fork_bomb(),
+    "df":        lambda cmd, sid: _run_fake_df(cmd),
+    "free":      lambda cmd, sid: _run_fake_free(cmd),
 }
 
 
@@ -263,29 +341,65 @@ def _format_clock(value: str | None) -> str:
     return dt.astimezone().strftime("%H:%M:%S")
 
 
+def _format_terminal_link(url: str, label: str) -> str:
+    safe_url = str(url or "").strip()
+    safe_label = str(label or "").strip() or safe_url
+    if not safe_url:
+        return safe_label
+    return f"\x1b]8;;{safe_url}\x07{safe_label}\x1b]8;;\x07"
+
+
 def _text_lines(lines: list[str]) -> list[dict[str, str]]:
     return [{"type": "output", "text": line} for line in lines]
 
 
+def _output_line(text: str, cls: str = "") -> dict[str, str]:
+    return {"type": "output", "text": text, "cls": cls}
+
+
+def _format_native_record(label: str, value: str, width: int) -> str:
+    return f"\x1b[36m{label:<{width}}\x1b[0m  {value}"
+
+
 def _run_fake_help() -> list[dict[str, str]]:
-    lines = ["Web shell helpers:"]
-    for name, description in _FAKE_COMMAND_HELP:
-        lines.append(f"  {name:<10} {description}")
-    return _text_lines(lines)
+    sorted_help = sorted(_FAKE_COMMAND_HELP, key=lambda item: item[0].lower())
+    width = max(len(name) for name, _ in sorted_help)
+    pipe_examples = [
+        ("grep", "command | grep <pattern>  e.g. ping darklab.sh | grep ttl"),
+        ("head", "command | head -n <count>  e.g. ping darklab.sh | head -n 5"),
+        ("tail", "command | tail -n <count>  e.g. ping darklab.sh | tail -n 5"),
+        ("wc -l", "command | wc -l  e.g. ping darklab.sh | wc -l"),
+    ]
+    pipe_width = max(len(name) for name, _ in pipe_examples)
+    lines = [_output_line("Built-in commands:", "fake-section")]
+    for name, description in sorted_help:
+        lines.append(_output_line(f"  {name:<{width}}  {description}", "fake-help-row"))
+    lines.extend([
+        _output_line("", "fake-spacer"),
+        _output_line("Commands with built-in pipe support:", "fake-section"),
+        _output_line("  Use one supported pipe stage after a command.", "fake-help-note"),
+    ])
+    for name, example in pipe_examples:
+        lines.append(_output_line(f"  {name:<{pipe_width}}  {example}", "fake-help-row"))
+    return lines
 
 
 def _run_fake_shortcuts() -> list[dict[str, str]]:
-    lines = ["Current shortcuts:"]
+    width = max(len(name) for name, _ in _CURRENT_SHORTCUTS)
+    lines = [_output_line("Current shortcuts:", "fake-section")]
     for name, description in _CURRENT_SHORTCUTS:
-        lines.append(f"  {name:<26} {description}")
-    lines.append("")
-    lines.append("Note: on macOS, use Option for app-safe tab shortcuts; browser Command shortcuts remain environment-dependent.")
-    return _text_lines(lines)
+        lines.append(_output_line(_format_native_record(name, description, width), "fake-shortcut"))
+    lines.append(_output_line("", "fake-spacer"))
+    lines.append(_output_line(
+        "Note: on macOS, use Option for app-safe tab shortcuts; browser Command shortcuts remain environment-dependent.",
+        "fake-note",
+    ))
+    return lines
 
 
 def _run_fake_man_for_synthetic_topic(topic: str) -> list[dict[str, str]]:
     topic_help = {
-        "man": "Show the real man page for an allowed command, or web helper help for a fake command.",
+        "man": "Show the real man page for an allowed command, or built-in help for a native command.",
         "uname": "Describe the web shell environment.",
     }
     for name, description in _FAKE_COMMAND_HELP:
@@ -294,7 +408,7 @@ def _run_fake_man_for_synthetic_topic(topic: str) -> list[dict[str, str]]:
             roots.add("uname")
         if topic in roots:
             return _text_lines([
-                "Web shell helpers:",
+                "Built-in commands:",
                 f"  {name:<10} {topic_help.get(topic, description)}",
             ])
     return _run_fake_help()
@@ -318,12 +432,13 @@ def _run_fake_date() -> list[dict[str, str]]:
 
 def _run_fake_env(session_id: str) -> list[dict[str, str]]:
     lines = [
-        f"APP_NAME={CFG['app_name']}",
-        f"SESSION_ID={session_id or 'anonymous'}",
-        "SHELL=/bin/bash",
-        "TERM=xterm-256color",
+        _output_line("Environment:", "fake-section"),
+        _output_line(f"APP_NAME={CFG['app_name']}", "fake-plain"),
+        _output_line(f"SESSION_ID={session_id or 'anonymous'}", "fake-plain"),
+        _output_line("SHELL=/bin/bash", "fake-plain"),
+        _output_line("TERM=xterm-256color", "fake-plain"),
     ]
-    return _text_lines(lines)
+    return lines
 
 
 def _run_fake_faq() -> list[dict[str, str]]:
@@ -331,21 +446,21 @@ def _run_fake_faq() -> list[dict[str, str]]:
     if not entries:
         return _text_lines([
             "No configured FAQ entries are available in the web shell.",
-            f"README: see the project README at {PROJECT_README}",
+            f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}",
         ])
 
-    lines = ["Configured FAQ entries:"]
+    lines = [_output_line("Configured FAQ entries:", "fake-section")]
     for entry in entries:
         question = str(entry.get("question", "")).strip()
         answer = str(entry.get("answer", "")).strip()
         if question:
-            lines.append(f"Q: {question}")
+            lines.append(_output_line(f"Q  {question}", "fake-faq-q"))
         if answer:
-            lines.append(f"A: {answer}")
-        lines.append("")
-    if lines[-1] == "":
+            lines.append(_output_line(f"A  {answer}", "fake-faq-a"))
+        lines.append(_output_line("", "fake-spacer"))
+    if lines and lines[-1].get("text", "") == "":
         lines.pop()
-    return _text_lines(lines)
+    return lines
 
 
 def _run_fake_fortune() -> list[dict[str, str]]:
@@ -423,19 +538,22 @@ def _run_fake_groups() -> list[dict[str, str]]:
 
 def _run_fake_ls(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
-    lines: list[str] = []
+    lines: list[dict[str, str]] = []
     if len(parts) > 1:
-        lines.append(f"ls in {CFG['app_name']} shows the allowed command catalog; flags and paths are ignored here.")
+        lines.append(_output_line(
+            f"ls in {CFG['app_name']} shows the allowed command catalog; flags and paths are ignored here.",
+            "fake-note",
+        ))
 
     grouped = load_allowed_commands_grouped()
     if grouped:
         for group in grouped:
             if lines:
-                lines.append("")
+                lines.append(_output_line("", "fake-spacer"))
             name = group.get("name") or "General"
-            lines.append(f"[{name}]")
-            lines.extend(group.get("commands", []))
-        return _text_lines(lines)
+            lines.append(_output_line(f"[{name}]", "fake-section"))
+            lines.extend(_output_line(f"  {cmd}", "fake-catalog-item") for cmd in group.get("commands", []))
+        return lines
 
     allowed, _ = load_allowed_commands()
     if allowed is None:
@@ -503,11 +621,22 @@ def _run_fake_man(command: str) -> list[dict[str, str]]:
 
 
 def _run_fake_whoami() -> list[dict[str, str]]:
-    return _text_lines([
-        CFG["app_name"],
-        "A web terminal for remote diagnostics and security tooling against allowed commands.",
-        f"README: see the project README at {PROJECT_README}",
-    ])
+    return [
+        _output_line("Shell identity:", "fake-section"),
+        _output_line(CFG["app_name"], "fake-identity"),
+        _output_line("A web terminal for remote diagnostics and security tooling against allowed commands.", "fake-plain"),
+        _output_line("", "fake-spacer"),
+        _output_line(f"README: see the project README at {PROJECT_README}", "fake-note"),
+    ]
+
+
+def _run_fake_autocomplete() -> list[dict[str, str]]:
+    return [
+        _output_line("Autocomplete:", "fake-section"),
+        _output_line("Tab expands shared prefixes before it cycles suggestions.", "fake-plain"),
+        _output_line("Known command roots can suggest flags, values, and positional hints.", "fake-plain"),
+        _output_line("Built-in pipe support can also suggest grep, head, tail, and wc -l after `command |`.", "fake-plain"),
+    ]
 
 
 def _run_fake_history(session_id: str) -> list[dict[str, str]]:
@@ -516,10 +645,10 @@ def _run_fake_history(session_id: str) -> list[dict[str, str]]:
         return [{"type": "output", "text": "No history for this session yet."}]
 
     width = len(str(len(rows)))
-    return [
-        {"type": "output", "text": f"{index:>{width}}  {str(row['command']).strip()}"}
-        for index, row in enumerate(rows, start=1)
-    ]
+    lines = [_output_line("Recent commands:", "fake-section")]
+    for index, row in enumerate(rows, start=1):
+        lines.append(_output_line(f"{index:>{width}}  {str(row['command']).strip()}", "fake-history-row"))
+    return lines
 
 
 def _run_fake_hostname() -> list[dict[str, str]]:
@@ -531,50 +660,139 @@ def _run_fake_id() -> list[dict[str, str]]:
     return [{"type": "output", "text": text}]
 
 
+def _run_fake_ip_addr() -> list[dict[str, str]]:
+    return _text_lines([
+        "1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000",
+        "    link/loopback 00:00:00:00:00:00 brd 00:00:00:00:00:00",
+        "    inet 127.0.0.1/8 scope host lo",
+        "2: eth0: <BROADCAST,MULTICAST,UP,LOWER_UP> mtu 1500 qdisc mq state UP group default qlen 1000",
+        "    link/ether 02:42:ac:11:00:02 brd ff:ff:ff:ff:ff:ff",
+        "    inet 172.18.0.2/16 brd 172.18.255.255 scope global eth0",
+    ])
+
+
+def _run_fake_jobs(session_id: str) -> list[dict[str, str]]:
+    jobs = active_runs_for_session(session_id)
+    if not jobs:
+        return [{"type": "output", "text": "No current jobs."}]
+
+    lines = []
+    total = len(jobs)
+    for index, job in enumerate(jobs, start=1):
+        marker = "+" if index == total else "-"
+        command = str(job.get("command", "")).strip()
+        lines.append(_output_line(f"[{index}]{marker}  Running                 {command}", "fake-plain"))
+    return lines
+
+
 def _run_fake_last(session_id: str) -> list[dict[str, str]]:
     rows = _recent_runs(session_id, limit=10)
     if not rows:
         return [{"type": "output", "text": "No completed runs for this session yet."}]
 
-    lines = []
+    lines = [_output_line("Recent runs:", "fake-section")]
     for row in rows:
         started = _parse_dt(row["started"]).astimezone().strftime("%Y-%m-%d %H:%M:%S")
         exit_code = row["exit_code"]
         exit_label = "?" if exit_code is None else str(exit_code)
-        lines.append(f"{started}  [{exit_label}]  {str(row['command']).strip()}")
-    return _text_lines(lines)
+        cls = "fake-last-row"
+        if exit_code == 0:
+            cls += " fake-last-ok"
+        elif exit_code is not None:
+            cls += " fake-last-fail"
+        lines.append(_output_line(f"{started}  [{exit_label}]  {str(row['command']).strip()}", cls))
+    return lines
 
 
 def _run_fake_limits() -> list[dict[str, str]]:
-    return _text_lines([
-        "Configured limits:",
-        f"  command timeout      {CFG['command_timeout_seconds'] or 0}s (0 = unlimited)",
-        f"  live preview lines   {CFG['max_output_lines']}",
-        f"  full output save     {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"  full output max      {CFG.get('full_output_max_mb', 0)} MB (0 = unlimited)",
-        f"  history panel limit  {CFG['history_panel_limit']}",
-        f"  recent commands      {CFG['recent_commands_limit']}",
-        f"  tab limit            {CFG['max_tabs'] or 0} (0 = unlimited)",
-        f"  retention            {CFG['permalink_retention_days']} days (0 = unlimited)",
-        f"  rate limit           {CFG['rate_limit_per_minute']}/min, {CFG['rate_limit_per_second']}/sec",
-    ])
+    width = 20
+    return [
+        _output_line("Configured limits:", "fake-section"),
+        _output_line(
+            _format_native_record(
+                "command timeout",
+                f"{CFG['command_timeout_seconds'] or 0}s (0 = unlimited)",
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(_format_native_record("live preview lines", str(CFG['max_output_lines']), width), "fake-kv"),
+        _output_line(
+            _format_native_record(
+                "full output save",
+                _format_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "full output max",
+                f"{CFG.get('full_output_max_mb', 0)} MB (0 = unlimited)",
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(_format_native_record("history panel limit", str(CFG['history_panel_limit']), width), "fake-kv"),
+        _output_line(_format_native_record("recent commands", str(CFG['recent_commands_limit']), width), "fake-kv"),
+        _output_line(_format_native_record("tab limit", f"{CFG['max_tabs'] or 0} (0 = unlimited)", width), "fake-kv"),
+        _output_line(
+            _format_native_record(
+                "retention",
+                f"{CFG['permalink_retention_days']} days (0 = unlimited)",
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "rate limit",
+                f"{CFG['rate_limit_per_minute']}/min, {CFG['rate_limit_per_second']}/sec",
+                width,
+            ),
+            "fake-kv",
+        ),
+    ]
 
 
 def _run_fake_retention() -> list[dict[str, str]]:
-    return _text_lines([
-        "Retention policy:",
-        f"  run preview retention  {_format_limit_value(CFG['permalink_retention_days'])} days",
-        f"  full output save       {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"  full output max        {_format_limit_value(CFG.get('full_output_max_mb'))} MB",
-    ])
+    width = 22
+    return [
+        _output_line("Retention policy:", "fake-section"),
+        _output_line(
+            _format_native_record(
+                "run preview retention",
+                f"{_format_limit_value(CFG['permalink_retention_days'])} days",
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "full output save",
+                _format_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "full output max",
+                f"{_format_limit_value(CFG.get('full_output_max_mb'))} MB",
+                width,
+            ),
+            "fake-kv",
+        ),
+    ]
 
 
 def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
     rows = _recent_runs(session_id)
     current = command.strip() or "ps"
     lines = [
-        "  PID TTY      EXIT START    END      CMD",
-        f"{9000:5d} pts/0    -    -        -        {current}",
+        _output_line("Process view:", "fake-section"),
+        _output_line("  PID TTY      EXIT START    END      CMD", "fake-ps-header"),
+        _output_line(f"{9000:5d} pts/0    -    -        -        {current}", "fake-ps-row"),
     ]
     for row in rows:
         cmd = str(row["command"]).strip()
@@ -582,12 +800,19 @@ def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
         exit_label = "?" if exit_code is None else str(exit_code)
         started_clock = _format_clock(row["started"])
         finished_clock = _format_clock(row["finished"]) if row["finished"] else "-"
-        lines.append(f"{'':5} pts/0    {exit_label:<4} {started_clock:<8} {finished_clock:<8} {cmd}")
-    return _text_lines(lines)
+        lines.append(_output_line(
+            f"{'':5} pts/0    {exit_label:<4} {started_clock:<8} {finished_clock:<8} {cmd}",
+            "fake-ps-row",
+        ))
+    return lines
 
 
 def _run_fake_pwd() -> list[dict[str, str]]:
     return [{"type": "output", "text": f"/app/{CFG['app_name']}/bin"}]
+
+
+def _run_fake_poweroff() -> list[dict[str, str]]:
+    return [{"type": "output", "text": random.choice(_SNARKY_POWEROFF_RESPONSES)}]
 
 
 def _run_fake_reboot() -> list[dict[str, str]]:
@@ -598,15 +823,33 @@ def _run_fake_rm_root() -> list[dict[str, str]]:
     return [{"type": "output", "text": random.choice(_SNARKY_RM_ROOT_RESPONSES)}]
 
 
-def _run_fake_status(session_id: str) -> list[dict[str, str]]:
+def _run_fake_route() -> list[dict[str, str]]:
     return _text_lines([
-        f"app                 {CFG['app_name']}",
-        f"session             {session_id or 'anonymous'}",
-        f"runs in session     {_session_run_count(session_id)}",
-        f"full output save    {_format_yes_no(bool(CFG.get('persist_full_run_output', False)))}",
-        f"tab limit           {_format_limit_value(CFG['max_tabs'])}",
-        f"retention           {_format_limit_value(CFG['permalink_retention_days'])}",
+        "Kernel IP routing table",
+        "Destination     Gateway         Genmask         Flags Metric Ref    Use Iface",
+        "0.0.0.0         172.18.0.1      0.0.0.0         UG    0      0        0 eth0",
+        "172.18.0.0      0.0.0.0         255.255.0.0     U     0      0        0 eth0",
     ])
+
+
+def _run_fake_status(session_id: str) -> list[dict[str, str]]:
+    width = 18
+    return [
+        _output_line("Shell status:", "fake-section"),
+        _output_line(_format_native_record("app", CFG['app_name'], width), "fake-kv"),
+        _output_line(_format_native_record("session", session_id or 'anonymous', width), "fake-kv"),
+        _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "fake-kv"),
+        _output_line(
+            _format_native_record(
+                "full output save",
+                _format_yes_no(bool(CFG.get('persist_full_run_output', False))),
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(_format_native_record("tab limit", _format_limit_value(CFG['max_tabs']), width), "fake-kv"),
+        _output_line(_format_native_record("retention", _format_limit_value(CFG['permalink_retention_days']), width), "fake-kv"),
+    ]
 
 
 def _run_fake_tty() -> list[dict[str, str]]:
@@ -622,6 +865,12 @@ def _run_fake_sudo(command: str) -> list[dict[str, str]]:
     return [{"type": "output", "text": template.format(target=target)}]
 
 
+def _run_fake_su(command: str) -> list[dict[str, str]]:
+    prefix = "sudo" if command.strip().lower().startswith("sudo") else "su"
+    text = random.choice(_SNARKY_SU_RESPONSES).replace("su:", f"{prefix}:")
+    return [{"type": "output", "text": text}]
+
+
 def _run_fake_type(command: str) -> list[dict[str, str]]:
     parts = _split_command(command)
     if len(parts) != 2:
@@ -630,9 +879,9 @@ def _run_fake_type(command: str) -> list[dict[str, str]]:
     target = parts[1]
     kind, resolved = _describe_command(target)
     if kind == "helper":
-        text = f"{target} is a helper command"
+        text = f"{target} is a built-in command"
     elif kind == "real":
-        text = f"{target} is a real command ({resolved})"
+        text = f"{target} is an installed command ({resolved})"
     else:
         text = f"{target} is missing"
     return [{"type": "output", "text": text}]
@@ -650,18 +899,56 @@ def _run_fake_uptime() -> list[dict[str, str]]:
     return [{"type": "output", "text": f"up {_format_duration(elapsed)}"}]
 
 
+def _run_fake_xyzzy() -> list[dict[str, str]]:
+    return [{"type": "output", "text": "Nothing happens."}]
+
+
+def _run_fake_coffee() -> list[dict[str, str]]:
+    return _text_lines([
+        "HTTP/1.1 418 I'm a teapot",
+        "Content-Type: text/plain",
+        "",
+        "Brewing coffee with a teapot is unsupported.",
+    ])
+
+
+def _run_fake_fork_bomb() -> list[dict[str, str]]:
+    return _text_lines([
+        "bash: fork bomb politely declined",
+        "system remains operational",
+    ])
+
+
+def _run_fake_df(command: str) -> list[dict[str, str]]:
+    return _text_lines([
+        "Filesystem      Size  Used Avail Use% Mounted on",
+        "overlay          16G  1.2G   15G   8% /",
+        "tmpfs            64M     0   64M   0% /dev",
+        "tmpfs           256M     0  256M   0% /tmp",
+    ])
+
+
+def _run_fake_free(command: str) -> list[dict[str, str]]:
+    return _text_lines([
+        "               total        used        free      shared  buff/cache   available",
+        "Mem:           512Mi       124Mi       188Mi       4.0Mi       200Mi       362Mi",
+        "Swap:             0B          0B          0B",
+    ])
+
+
 def _run_fake_version() -> list[dict[str, str]]:
     try:
         flask_version = package_version("flask")
     except PackageNotFoundError:
         flask_version = "unknown"
     lines = [
-        f"{CFG['app_name']} web shell",
-        f"App {APP_VERSION}",
-        f"Flask {flask_version}",
-        f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}",
+        _output_line("Version info:", "fake-section"),
+        _output_line(f"{CFG['app_name']} web shell", "fake-plain"),
+        _output_line(f"App {APP_VERSION}", "fake-plain"),
+        _output_line(f"Flask {flask_version}", "fake-plain"),
+        _output_line(f"Python {sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}", "fake-plain"),
     ]
-    return _text_lines(lines)
+    return lines
 
 
 def _run_fake_which(command: str) -> list[dict[str, str]]:
@@ -672,7 +959,7 @@ def _run_fake_which(command: str) -> list[dict[str, str]]:
     target = parts[1]
     kind, resolved = _describe_command(target)
     if kind == "helper":
-        text = f"{target}: helper command"
+        text = f"{target}: built-in command"
     elif kind == "real":
         text = resolved or target
     else:

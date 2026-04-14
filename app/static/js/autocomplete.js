@@ -1,5 +1,226 @@
 // ── Shared autocomplete logic ──
 
+function _acItemText(item) {
+  if (item && typeof item === 'object') {
+    return String(item.label || item.value || '').trim();
+  }
+  return String(item || '').trim();
+}
+
+function _acItemInsertValue(item) {
+  if (item && typeof item === 'object') {
+    return String(item.insertValue || item.value || item.label || '').trim();
+  }
+  return String(item || '').trim();
+}
+
+function _acItemDescription(item) {
+  if (!item || typeof item !== 'object') return '';
+  return String(item.description || '').trim();
+}
+
+function _tokenContextFromText(value, cursorPos, offset = 0) {
+  const text = String(value || '');
+  const cursor = Math.max(0, Math.min(typeof cursorPos === 'number' ? cursorPos : text.length, text.length));
+  const tokens = [];
+  const tokenRe = /\S+/g;
+  let match;
+  while ((match = tokenRe.exec(text)) !== null) {
+    tokens.push({
+      value: match[0],
+      start: match.index,
+      end: match.index + match[0].length,
+    });
+  }
+
+  const containing = tokens.find(token => cursor > token.start && cursor <= token.end)
+    || tokens.find(token => cursor === token.start && cursor === token.end);
+  const atWhitespace = !containing;
+  const tokenStart = containing ? containing.start : cursor;
+  const tokenEnd = containing ? containing.end : cursor;
+  const currentToken = containing ? containing.value : '';
+  const beforeTokens = tokens.filter(token => token.end <= tokenStart);
+  const previousToken = beforeTokens.length ? beforeTokens[beforeTokens.length - 1].value : null;
+  const commandRoot = tokens.length ? String(tokens[0].value || '').toLowerCase() : '';
+  return {
+    text,
+    cursor,
+    tokens,
+    currentToken,
+    tokenStart: tokenStart + offset,
+    tokenEnd: tokenEnd + offset,
+    previousToken,
+    commandRoot,
+    atWhitespace,
+  };
+}
+
+function _autocompleteTokenContext(value, cursorPos) {
+  return _tokenContextFromText(value, cursorPos, 0);
+}
+
+function _autocompletePipeContext(value, cursorPos) {
+  const text = String(value || '');
+  const cursor = Math.max(0, Math.min(typeof cursorPos === 'number' ? cursorPos : text.length, text.length));
+  const pipeIndex = text.indexOf('|');
+  if (pipeIndex < 0 || cursor <= pipeIndex) return null;
+  if (text.indexOf('|', pipeIndex + 1) !== -1) return null;
+
+  const baseCommand = text.slice(0, pipeIndex).trim();
+  if (!baseCommand) return null;
+
+  const stageOffset = pipeIndex + 1;
+  const stageText = text.slice(stageOffset);
+  const stageCursor = Math.max(0, cursor - stageOffset);
+  const ctx = _tokenContextFromText(stageText, stageCursor, stageOffset);
+  return {
+    ...ctx,
+    baseCommand,
+    pipeIndex,
+  };
+}
+
+function _buildAutocompleteItem({ value, description = '', replaceStart, replaceEnd, insertValue = null, label = null }) {
+  return {
+    value,
+    label: label || value,
+    description,
+    replaceStart,
+    replaceEnd,
+    insertValue: insertValue || value,
+  };
+}
+
+function _filterAutocompleteItems(items, query) {
+  const q = String(query || '').toLowerCase();
+  if (!q) return items.slice();
+  return items.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
+}
+
+function _buildContextAutocomplete(ctx) {
+  const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+  const spec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
+  if (!spec) return [];
+
+  const currentLower = ctx.currentToken.toLowerCase();
+  const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');
+  const expectsValue = Array.isArray(spec.expects_value) ? spec.expects_value : [];
+  const argHints = spec.arg_hints || {};
+  const previousLower = String(ctx.previousToken || '').toLowerCase();
+
+  const directHints = Object.prototype.hasOwnProperty.call(argHints, ctx.previousToken || '')
+    ? argHints[ctx.previousToken || '']
+    : (Object.prototype.hasOwnProperty.call(argHints, previousLower) ? argHints[previousLower] : null);
+  if (directHints && expectsValue.some(token => String(token).toLowerCase() === previousLower)) {
+    return _filterAutocompleteItems(
+      directHints.map(item => _buildAutocompleteItem({
+        value: item.value,
+        description: item.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+      })),
+      ctx.currentToken,
+    );
+  }
+
+  const positionalHints = Object.prototype.hasOwnProperty.call(argHints, '__positional__')
+    ? argHints.__positional__
+    : [];
+
+  if (!ctx.currentToken || currentIsFlag) {
+    const usedFlags = new Set(
+      ctx.tokens
+        .filter(token => token.start !== ctx.tokenStart)
+        .map(token => String(token.value || '').toLowerCase())
+        .filter(token => token.startsWith('-') || token.startsWith('+'))
+    );
+    const flags = (spec.flags || [])
+      .filter(flag => !usedFlags.has(String(flag.value || '').toLowerCase()))
+      .map(flag => _buildAutocompleteItem({
+        value: flag.value,
+        description: flag.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+        insertValue: flag.value + (ctx.atWhitespace ? '' : ''),
+      }));
+    const filteredFlags = _filterAutocompleteItems(flags, ctx.currentToken);
+    if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length) {
+      const positionalItems = positionalHints.map(item => _buildAutocompleteItem({
+        value: item.value,
+        description: item.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+      }));
+      return filteredFlags.concat(positionalItems);
+    }
+    return filteredFlags;
+  }
+
+  if (positionalHints.length) {
+    return _filterAutocompleteItems(
+      positionalHints.map(item => _buildAutocompleteItem({
+        value: item.value,
+        description: item.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+      })),
+      ctx.currentToken,
+    );
+  }
+  return [];
+}
+
+function _buildPipeCommandAutocomplete(ctx, registry) {
+  const items = Object.entries(registry)
+    .filter(([, spec]) => spec && spec.pipe_command)
+    .map(([root, spec]) => _buildAutocompleteItem({
+      value: spec.pipe_insert_value || root,
+      label: spec.pipe_label || spec.pipe_insert_value || root,
+      description: spec.pipe_description || '',
+      replaceStart: ctx.tokenStart,
+      replaceEnd: ctx.tokenEnd,
+      insertValue: spec.pipe_insert_value || root,
+    }));
+  return _filterAutocompleteItems(items, ctx.currentToken);
+}
+
+function _buildPipeAutocomplete(ctx) {
+  const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+  if (!ctx.commandRoot) return _buildPipeCommandAutocomplete(ctx, registry);
+
+  const spec = registry[ctx.commandRoot];
+  if (!spec || !spec.pipe_command) return [];
+  return _buildContextAutocomplete(ctx);
+}
+
+function _buildFlatAutocomplete(value) {
+  const q = String(value || '').trim().toLowerCase();
+  if (!q) return [];
+  return ((typeof acSuggestions !== 'undefined' && acSuggestions) || [])
+    .filter(s => String(s || '').toLowerCase().startsWith(q))
+    .slice(0, 24);
+}
+
+function getAutocompleteMatches(value, cursorPos) {
+  const text = String(value || '');
+  const ctx = _autocompleteTokenContext(text, cursorPos);
+  const pipeCtx = _autocompletePipeContext(text, cursorPos);
+  let items = pipeCtx ? _buildPipeAutocomplete(pipeCtx) : _buildContextAutocomplete(ctx);
+  if (!items.length && !pipeCtx) items = _buildFlatAutocomplete(text);
+
+  if (!items.length) return [];
+  if (typeof items[0] === 'string') {
+    const q = text.trim().toLowerCase();
+    if (items.some(item => String(item).toLowerCase() === q)) return [];
+    return items;
+  }
+
+  if (items.length === 1 && _acItemInsertValue(items[0]).toLowerCase() === ctx.currentToken.toLowerCase()) {
+    return [];
+  }
+  return items;
+}
+
 function _positionAutocomplete(itemsCount) {
   // Desktop anchors the dropdown to the prompt row; mobile anchors it above the
   // simplified composer so suggestions never hide behind the keyboard.
@@ -102,17 +323,33 @@ function acShow(items) {
   const currentValue = (typeof getComposerValue === 'function')
     ? getComposerValue()
     : cmdInput.value;
+  const currentCursor = (typeof getComposerState === 'function')
+    ? getComposerState().selectionStart
+    : (cmdInput && typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : currentValue.length);
+  const tokenCtx = _autocompleteTokenContext(currentValue, currentCursor);
+  const matchValue = (items.length && typeof items[0] === 'object') ? tokenCtx.currentToken : currentValue;
   items.forEach((s, i) => {
     const div = document.createElement('div');
     div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '');
-    const val = currentValue;
-    const idx = s.toLowerCase().indexOf(val.toLowerCase());
+    const label = _acItemText(s);
+    const description = _acItemDescription(s);
+    const val = String(matchValue || '');
+    const idx = val ? label.toLowerCase().indexOf(val.toLowerCase()) : -1;
+    const main = document.createElement('span');
+    main.className = 'ac-item-main';
     if (idx >= 0 && val) {
-      div.innerHTML = escapeHtml(s.slice(0, idx))
-        + '<span class="ac-match">' + escapeHtml(s.slice(idx, idx + val.length)) + '</span>'
-        + escapeHtml(s.slice(idx + val.length));
+      main.innerHTML = escapeHtml(label.slice(0, idx))
+        + '<span class="ac-match">' + escapeHtml(label.slice(idx, idx + val.length)) + '</span>'
+        + escapeHtml(label.slice(idx + val.length));
     } else {
-      div.textContent = s;
+      main.textContent = label;
+    }
+    div.appendChild(main);
+    if (description) {
+      const desc = document.createElement('span');
+      desc.className = 'ac-item-desc';
+      desc.textContent = description;
+      div.appendChild(desc);
     }
     div.addEventListener('mousedown', e => { e.preventDefault(); acAccept(s); });
     div.addEventListener('touchstart', e => { e.preventDefault(); acAccept(s); }, { passive: false });
@@ -130,9 +367,9 @@ function acHide() {
 
 function _getAutocompleteSharedPrefix(items) {
   if (!Array.isArray(items) || !items.length) return '';
-  const first = typeof items[0] === 'string' ? items[0] : '';
+  const first = _acItemInsertValue(items[0]);
   if (!first) return '';
-  const lowerItems = items.map(item => (typeof item === 'string' ? item.toLowerCase() : ''));
+  const lowerItems = items.map(item => _acItemInsertValue(item).toLowerCase());
   let end = first.length;
   for (let i = 1; i < lowerItems.length; i += 1) {
     const candidate = lowerItems[i];
@@ -150,8 +387,21 @@ function acExpandSharedPrefix(items) {
   const currentValue = (typeof getComposerValue === 'function')
     ? getComposerValue()
     : (cmdInput ? cmdInput.value || '' : '');
+  const firstItem = items[0];
   const sharedPrefix = _getAutocompleteSharedPrefix(items);
   if (!sharedPrefix) return false;
+  if (firstItem && typeof firstItem === 'object') {
+    const replaceStart = Number(firstItem.replaceStart);
+    const replaceEnd = Number(firstItem.replaceEnd);
+    if (!Number.isFinite(replaceStart) || !Number.isFinite(replaceEnd)) return false;
+    const currentToken = currentValue.slice(replaceStart, replaceEnd);
+    if (sharedPrefix.length <= currentToken.length) return false;
+    if (!sharedPrefix.toLowerCase().startsWith(currentToken.toLowerCase())) return false;
+    const next = currentValue.slice(0, replaceStart) + sharedPrefix + currentValue.slice(replaceEnd);
+    const caret = replaceStart + sharedPrefix.length;
+    setComposerValue(next, caret, caret);
+    return true;
+  }
   if (sharedPrefix.length <= currentValue.length) return false;
   if (!sharedPrefix.toLowerCase().startsWith(currentValue.toLowerCase())) return false;
   setComposerValue(sharedPrefix, sharedPrefix.length, sharedPrefix.length);
@@ -159,8 +409,23 @@ function acExpandSharedPrefix(items) {
 }
 
 function acAccept(s) {
-  setComposerValue(s, s.length, s.length);
+  if (s && typeof s === 'object') {
+    const currentValue = (typeof getComposerValue === 'function')
+      ? getComposerValue()
+      : (cmdInput ? cmdInput.value || '' : '');
+    const insertValue = _acItemInsertValue(s);
+    const replaceStart = Number(s.replaceStart);
+    const replaceEnd = Number(s.replaceEnd);
+    if (Number.isFinite(replaceStart) && Number.isFinite(replaceEnd)) {
+      const next = currentValue.slice(0, replaceStart) + insertValue + currentValue.slice(replaceEnd);
+      const caret = replaceStart + insertValue.length;
+      setComposerValue(next, caret, caret);
+    } else {
+      setComposerValue(insertValue, insertValue.length, insertValue.length);
+    }
+  } else {
+    setComposerValue(s, s.length, s.length);
+  }
   acHide();
   if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
-  acSuppressInputOnce = true;
 }

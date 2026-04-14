@@ -30,4 +30,10 @@ function logClientError(context, err) {
   if (typeof console !== 'undefined' && typeof console.warn === 'function') {
     console.warn(`[client] ${context}`, err);
   }
+  const message = (err && typeof err.message === 'string') ? err.message : String(err || '');
+  apiFetch('/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ context, message }),
+  }).catch(() => {});
 }

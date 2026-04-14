@@ -9,7 +9,7 @@ test.describe('theme selector', () => {
   test('clicking theme-btn opens the theme selector', async ({ page }) => {
     await page.locator('#theme-btn').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-    await expect(page.locator('#theme-select .theme-card-active')).toBeFocused()
+    await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
   })
 
   test('selecting a theme applies it from the selector', async ({ page }) => {

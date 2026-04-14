@@ -264,3 +264,13 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 - Most values are safe to tweak live as long as they remain valid CSS values.
 - The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three surfaces.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
+
+---
+
+## Related Docs
+
+- [README.md](README.md)
+- [CONTRIBUTORS.md](CONTRIBUTORS.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [DECISIONS.md](DECISIONS.md)
+- [tests/README.md](tests/README.md)

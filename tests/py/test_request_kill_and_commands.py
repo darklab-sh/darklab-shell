@@ -11,7 +11,12 @@ import uuid
 import unittest.mock as mock
 
 import app as shell_app
-from fake_commands import resolve_fake_command
+from fake_commands import (
+    _DOCUMENTED_FAKE_COMMANDS,
+    _FAKE_COMMAND_DISPATCH,
+    _SPECIAL_FAKE_COMMANDS,
+    resolve_fake_command,
+)
 from commands import (
     load_allowed_commands_grouped,
     load_autocomplete,
@@ -170,12 +175,18 @@ class TestAllowedCommandsGroupingEdges:
 
 
 class TestAutocompleteLoadingEdges:
-    def test_ignores_blank_and_comment_lines(self):
-        with tempfile.NamedTemporaryFile("w", delete=False) as f:
-            f.write("# comment\n\nping\ncurl darklab.sh\n")
+    def test_ignores_blank_yaml_entries(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            flat_suggestions:
+              - ping
+              - ""
+              - "   "
+              - curl darklab.sh
+            """))
             path = f.name
         try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
                 result = load_autocomplete()
         finally:
             os.unlink(path)
@@ -183,7 +194,7 @@ class TestAutocompleteLoadingEdges:
         assert result == ["ping", "curl darklab.sh"]
 
     def test_missing_file_returns_empty_list(self):
-        with mock.patch("commands.AUTOCOMPLETE_FILE", "/nope.txt"):
+        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nope.yaml"):
             assert load_autocomplete() == []
 
 
@@ -255,8 +266,18 @@ class TestIsCommandAllowedEdges:
 
 
 class TestFakeCommandResolution:
+    def test_documented_fake_commands_are_backed_by_runtime_dispatch(self):
+        for entry in _DOCUMENTED_FAKE_COMMANDS:
+            if "root" in entry:
+                assert entry["root"] in _FAKE_COMMAND_DISPATCH
+            if "exact" in entry:
+                exact = entry["exact"]
+                assert exact in _SPECIAL_FAKE_COMMANDS
+                assert _SPECIAL_FAKE_COMMANDS[exact] in _FAKE_COMMAND_DISPATCH
+
     def test_resolves_supported_fake_commands(self):
         assert resolve_fake_command("banner") == "banner"
+        assert resolve_fake_command("autocomplete") == "autocomplete"
         assert resolve_fake_command("clear") == "clear"
         assert resolve_fake_command("date") == "date"
         assert resolve_fake_command("env") == "env"
@@ -275,6 +296,8 @@ class TestFakeCommandResolution:
         assert resolve_fake_command("reboot") == "reboot"
         assert resolve_fake_command("retention") == "retention"
         assert resolve_fake_command("rm -fr /") == "rm_root"
+        assert resolve_fake_command(":(){ :|:& };:") == "fork_bomb"
+        assert resolve_fake_command(":(){:|:&};:") == "fork_bomb"
         assert resolve_fake_command("status") == "status"
         assert resolve_fake_command("sudo") == "sudo"
         assert resolve_fake_command("tty") == "tty"

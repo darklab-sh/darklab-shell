@@ -5,6 +5,22 @@ const { _formatElapsed } = fromScript(
   'app/static/js/runner.js',
   '_formatElapsed',
 )
+const { _isSyntheticGrepCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticGrepCommand',
+)
+const { _isSyntheticHeadCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticHeadCommand',
+)
+const { _isSyntheticTailCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticTailCommand',
+)
+const { _isSyntheticWcLineCountCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticWcLineCountCommand',
+)
 
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
@@ -32,6 +48,37 @@ describe('_formatElapsed', () => {
 
   it('formats hour + minutes + seconds', () => {
     expect(_formatElapsed(3812.3)).toBe('1h 3m 32.3s')
+  })
+})
+
+describe('_isSyntheticGrepCommand', () => {
+  it('accepts the narrow phase-1 grep form', () => {
+    expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl')).toBe(true)
+    expect(_isSyntheticGrepCommand('ping darklab.sh | grep -iv ttl')).toBe(true)
+    expect(_isSyntheticGrepCommand("ping darklab.sh | grep -E 'ttl|time'")).toBe(true)
+  })
+
+  it('rejects unsupported shell operator forms', () => {
+    expect(_isSyntheticGrepCommand('ping darklab.sh | cat')).toBe(false)
+    expect(_isSyntheticGrepCommand('ping darklab.sh | grep -n ttl')).toBe(false)
+    expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl file.txt')).toBe(false)
+    expect(_isSyntheticGrepCommand('ping darklab.sh || grep ttl')).toBe(false)
+  })
+})
+
+describe('other synthetic post-filters', () => {
+  it('accepts the narrow head/tail/wc forms', () => {
+    expect(_isSyntheticHeadCommand('ping darklab.sh | head')).toBe(true)
+    expect(_isSyntheticHeadCommand('ping darklab.sh | head -n 5')).toBe(true)
+    expect(_isSyntheticTailCommand('ping darklab.sh | tail')).toBe(true)
+    expect(_isSyntheticTailCommand('ping darklab.sh | tail -n 5')).toBe(true)
+    expect(_isSyntheticWcLineCountCommand('ping darklab.sh | wc -l')).toBe(true)
+  })
+
+  it('rejects unsupported forms', () => {
+    expect(_isSyntheticHeadCommand('ping darklab.sh | head -5')).toBe(false)
+    expect(_isSyntheticTailCommand('ping darklab.sh | tail -n five')).toBe(false)
+    expect(_isSyntheticWcLineCountCommand('ping darklab.sh | wc -c')).toBe(false)
   })
 })
 
@@ -362,6 +409,57 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill fail')
   })
 
+  it('runCommand allows phase-1 synthetic grep through to the API', () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) } }))
+    const appendLine = vi.fn()
+    const { runCommand, status } = loadRunnerFns({
+      cmdValue: 'ping darklab.sh | grep ttl',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+
+    expect(apiFetch).toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalledWith('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(status.className).not.toBe('status-pill fail')
+  })
+
+  it('runCommand allows other synthetic post-filters through to the API', () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) } }))
+    const appendLine = vi.fn()
+    const { runCommand, status } = loadRunnerFns({
+      cmdValue: 'ping darklab.sh | tail -n 5',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+
+    expect(apiFetch).toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalledWith('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(status.className).not.toBe('status-pill fail')
+  })
+
+  it('runCommand allows exact special built-in commands with shell punctuation through to the API', () => {
+    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) } }))
+    const appendLine = vi.fn()
+    const { runCommand, status } = loadRunnerFns({
+      cmdValue: ':(){ :|:& };:',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    runCommand()
+
+    expect(apiFetch).toHaveBeenCalled()
+    expect(appendLine).not.toHaveBeenCalledWith('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(status.className).not.toBe('status-pill fail')
+  })
+
   it('runCommand on blank or whitespace input creates a new empty prompt line', () => {
     const apiFetch = vi.fn(() => Promise.resolve())
     const appendLine = vi.fn()
@@ -630,6 +728,46 @@ describe('runner helpers', () => {
       'tab-1',
     )
     expect(loaded.tabs[0].historyRunId).toBe('run-man')
+  })
+
+  it('runCommand preserves output classes from streamed events', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      status: 200,
+      body: {
+        getReader: () => {
+          let done = false
+          return {
+            read: () => {
+              if (done) return Promise.resolve({ done: true, value: undefined })
+              done = true
+              const payload = [
+                'data: {"type":"started","run_id":"run-faq"}',
+                'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
+                'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
+                'data: {"type":"exit","code":0,"elapsed":0.1}',
+              ].join('\n\n') + '\n\n'
+              return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+            },
+          }
+        },
+      },
+    }))
+    const loaded = loadRunnerFns({
+      cmdValue: 'faq',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    loaded.runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).toHaveBeenCalledWith('Q  Example question', 'fake-faq-q', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'fake-faq-a', 'tab-1')
   })
 
   it('doKill shows a notice when the kill request fails', async () => {

@@ -17,6 +17,7 @@ function loadAutocompleteFns() {
     mobileCmdInput,
     getComposerValue: () => cmdInput.value,
     acSuggestions: [],
+    acContextRegistry: {},
     acFiltered: [],
     acIndex: -1,
     acSuppressInputOnce: false,
@@ -25,6 +26,7 @@ function loadAutocompleteFns() {
     acHide,
     acAccept,
     acExpandSharedPrefix,
+    getAutocompleteMatches,
     _getAutocompleteSharedPrefix,
     _setAcIndex: (value) => { acIndex = value; },
   }`)
@@ -75,6 +77,7 @@ describe('autocomplete helpers', () => {
       mobileCmdInput: document.getElementById('mobile-cmd'),
       getComposerValue: () => 'pi',
       acSuggestions: [],
+      acContextRegistry: {},
       acFiltered: [],
       acIndex: -1,
       acSuppressInputOnce: false,
@@ -97,6 +100,17 @@ describe('autocomplete helpers', () => {
     const items = document.querySelectorAll('.ac-item')
     expect(items[0].className).toBe('ac-item')
     expect(items[1].className).toBe('ac-item ac-active')
+  })
+
+  it('renders contextual suggestions with descriptions', () => {
+    const { acShow } = loadAutocompleteFns()
+    document.getElementById('cmd').value = 'nmap -'
+
+    acShow([{ value: '-sV', description: 'Service detection', replaceStart: 5, replaceEnd: 6 }])
+
+    const item = document.querySelector('.ac-item')
+    expect(item?.querySelector('.ac-item-main')?.textContent).toBe('-sV')
+    expect(item?.querySelector('.ac-item-desc')?.textContent).toBe('Service detection')
   })
 
   it('acAccept updates the input, hides the dropdown, and refocuses the input', () => {
@@ -130,6 +144,17 @@ describe('autocomplete helpers', () => {
     expect(desktopFocusSpy).not.toHaveBeenCalled()
   })
 
+  it('acAccept replaces only the current token for contextual suggestions', () => {
+    const { acAccept } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'nmap -'
+    input.setSelectionRange(6, 6)
+
+    acAccept({ value: '-sV', replaceStart: 5, replaceEnd: 6 })
+
+    expect(input.value).toBe('nmap -sV')
+  })
+
   it('computes the shared prefix across multiple suggestions', () => {
     const { _getAutocompleteSharedPrefix } = loadAutocompleteFns()
 
@@ -157,6 +182,243 @@ describe('autocomplete helpers', () => {
 
     expect(expanded).toBe(true)
     expect(input.value).toBe('ping ')
+  })
+
+  it('expands the shared prefix for contextual token suggestions in place', () => {
+    const { acExpandSharedPrefix } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'nmap -'
+    input.setSelectionRange(6, 6)
+
+    const expanded = acExpandSharedPrefix([
+      { value: '-sS', replaceStart: 5, replaceEnd: 6 },
+      { value: '-sV', replaceStart: 5, replaceEnd: 6 },
+      { value: '-sn', replaceStart: 5, replaceEnd: 6 },
+    ])
+
+    expect(expanded).toBe(true)
+    expect(input.value).toBe('nmap -s')
+  })
+
+  it('returns root-aware contextual matches and suppresses already-used flags', () => {
+    const { getAutocompleteMatches } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'nmap -Pn -',
+      acSuggestions: ['nmap -h'],
+      acContextRegistry: {
+        nmap: {
+          flags: [
+            { value: '-Pn', description: 'Skip host discovery' },
+            { value: '-sV', description: 'Service detection' },
+          ],
+          expects_value: [],
+          arg_hints: {},
+        },
+      },
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      getAutocompleteMatches,
+    }`)
+
+    const items = getAutocompleteMatches('nmap -Pn -', 10)
+    expect(items).toHaveLength(1)
+    expect(items[0].value).toBe('-sV')
+  })
+
+  it('shows positional hints alongside flag hints at command-root whitespace', () => {
+    const { getAutocompleteMatches } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'nmap ',
+      acSuggestions: ['nmap -h'],
+      acContextRegistry: {
+        nmap: {
+          flags: [
+            { value: '-sV', description: 'Service detection' },
+            { value: '-Pn', description: 'Skip host discovery' },
+          ],
+          expects_value: [],
+          arg_hints: {
+            __positional__: [
+              { value: '<target>', description: 'Hostname, IP, or CIDR' },
+            ],
+          },
+        },
+      },
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      getAutocompleteMatches,
+    }`)
+
+    const items = getAutocompleteMatches('nmap ', 5)
+    expect(items.map(item => item.value)).toEqual(['-sV', '-Pn', '<target>'])
+    expect(items[2].description).toBe('Hostname, IP, or CIDR')
+  })
+
+  it('returns value hints after a value-taking flag and trailing space', () => {
+    const { getAutocompleteMatches } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'curl -o ',
+      acSuggestions: ['curl -I https://darklab.sh'],
+      acContextRegistry: {
+        curl: {
+          flags: [
+            { value: '-o', description: 'Write output to file' },
+          ],
+          expects_value: ['-o'],
+          arg_hints: {
+            '-o': [
+              { value: '/dev/null', description: 'Discard body output' },
+            ],
+          },
+        },
+      },
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      getAutocompleteMatches,
+    }`)
+
+    const items = getAutocompleteMatches('curl -o ', 8)
+    expect(items.map(item => item.value)).toEqual(['/dev/null'])
+    expect(items[0].description).toBe('Discard body output')
+  })
+
+  it('suggests built-in pipe commands after a supported command pipe', () => {
+    const { getAutocompleteMatches } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'help | ',
+      acSuggestions: [],
+      acContextRegistry: {
+        grep: { pipe_command: true, pipe_description: 'Filter lines by pattern' },
+        head: { pipe_command: true, pipe_description: 'Show the first lines' },
+        tail: { pipe_command: true, pipe_description: 'Show the last lines' },
+        wc: { pipe_command: true, pipe_insert_value: 'wc -l', pipe_label: 'wc -l', pipe_description: 'Count lines' },
+      },
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      getAutocompleteMatches,
+    }`)
+
+    const items = getAutocompleteMatches('help | ', 7)
+    expect(items.map(item => item.value)).toEqual(['grep', 'head', 'tail', 'wc -l'])
+    expect(items[3].description).toBe('Count lines')
+  })
+
+  it('returns pipe-stage flag hints for grep', () => {
+    const { getAutocompleteMatches } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'help | grep -',
+      acSuggestions: [],
+      acContextRegistry: {
+        grep: {
+          pipe_command: true,
+          flags: [
+            { value: '-i', description: 'Ignore case' },
+            { value: '-v', description: 'Invert match' },
+            { value: '-E', description: 'Extended regex' },
+          ],
+          arg_hints: {
+            __positional__: [{ value: '<pattern>', description: 'Text or regex to match' }],
+          },
+        },
+      },
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      getAutocompleteMatches,
+    }`)
+
+    const items = getAutocompleteMatches('help | grep -', 13)
+    expect(items.map(item => item.value)).toEqual(['-i', '-v', '-E'])
+  })
+
+  it('returns pipe-stage count hints after head -n and wc flag hints after wc space', () => {
+    const { getAutocompleteMatches } = fromDomScripts([
+      'app/static/js/utils.js',
+      'app/static/js/autocomplete.js',
+    ], {
+      document,
+      cmdInput: document.getElementById('cmd'),
+      acDropdown: document.getElementById('ac'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      getComposerValue: () => 'help | head -n ',
+      acSuggestions: [],
+      acContextRegistry: {
+        head: {
+          pipe_command: true,
+          flags: [{ value: '-n', description: 'Show the first N lines' }],
+          expects_value: ['-n'],
+          arg_hints: {
+            '-n': [
+              { value: '5', description: 'Show the first 5 lines' },
+              { value: '10', description: 'Show the first 10 lines' },
+            ],
+          },
+        },
+        wc: {
+          pipe_command: true,
+          pipe_insert_value: 'wc -l',
+          pipe_label: 'wc -l',
+          pipe_description: 'Count lines',
+          flags: [{ value: '-l', description: 'Count lines' }],
+        },
+      },
+      acFiltered: [],
+      acIndex: -1,
+      acSuppressInputOnce: false,
+    }, `{
+      getAutocompleteMatches,
+    }`)
+
+    const headItems = getAutocompleteMatches('help | head -n ', 16)
+    expect(headItems.map(item => item.value)).toEqual(['5', '10'])
+
+    const wcItems = getAutocompleteMatches('help | wc ', 10)
+    expect(wcItems.map(item => item.value)).toEqual(['-l'])
   })
 
   it('mousedown on a suggestion accepts it without blurring the input', () => {

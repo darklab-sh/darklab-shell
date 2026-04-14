@@ -46,11 +46,14 @@
     <div id="mobile-composer-host" aria-hidden="true">
       <div id="mobile-composer">
         <div id="mobile-edit-bar" aria-label="Mobile edit controls">
-          <button type="button" data-mobile-edit="home" aria-label="Move to start">Home</button>
-          <button type="button" data-mobile-edit="left" aria-label="Move left">←</button>
-          <button type="button" data-mobile-edit="right" aria-label="Move right">→</button>
-          <button type="button" data-mobile-edit="end" aria-label="Move to end">End</button>
-          <button type="button" data-mobile-edit="delete-word" aria-label="Delete word">Del Word</button>
+          <button type="button" data-mobile-edit="home" data-edit-action="home" aria-label="Move to start">Home</button>
+          <button type="button" data-mobile-edit="word-left" data-edit-action="word-left" aria-label="Move left by word">Word ←</button>
+          <button type="button" data-mobile-edit="left" data-edit-action="left" aria-label="Move left">←</button>
+          <button type="button" data-mobile-edit="delete-word" data-edit-action="delete-word" aria-label="Delete word">Del Word</button>
+          <button type="button" data-mobile-edit="end" data-edit-action="end" aria-label="Move to end">End</button>
+          <button type="button" data-mobile-edit="word-right" data-edit-action="word-right" aria-label="Move right by word">Word →</button>
+          <button type="button" data-mobile-edit="right" data-edit-action="right" aria-label="Move right">→</button>
+          <button type="button" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
         </div>
         <div id="mobile-composer-row">
           <span class="mobile-prompt-label">$</span>
@@ -229,7 +232,7 @@
       <div class="faq-a options-fieldset">
         <label class="options-choice">
           <input type="checkbox" id="share-redaction-remember-toggle">
-          <span>Remember this choice for this browser session</span>
+          <span>Set this as my default share-snapshot choice</span>
         </label>
       </div>
     </div>
@@ -293,9 +296,29 @@
         </div>
       </div>
       <div class="faq-item">
+        <div class="faq-q">Welcome Intro</div>
+        <div class="faq-a">
+          <select id="options-welcome-select" class="options-select" aria-label="Welcome intro mode">
+            <option value="animated">Animated</option>
+            <option value="disable_animation">Disable Animation</option>
+            <option value="remove">Remove Completely</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Share Snapshot Redaction</div>
+        <div class="faq-a">
+          <select id="options-share-redaction-select" class="options-select" aria-label="Share snapshot redaction default">
+            <option value="unset">Prompt Until Set</option>
+            <option value="redacted">Default To Redacted</option>
+            <option value="raw">Default To Raw</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item">
         <div class="faq-q">Persistence</div>
         <div class="faq-a">
-          These display preferences are saved in cookies for future sessions on this browser.
+          These display and sharing preferences are saved in cookies for future sessions on this browser.
         </div>
       </div>
     </div>

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const TEST_IP = makeTestIp(65)
@@ -137,8 +137,8 @@ test.describe('output follow helper', () => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page, { cancelWelcome: true })
     await page.evaluate(() => {
-      cancelWelcome()
       clearTab(activeTabId)
       for (let i = 0; i < 600; i += 1) appendLine(`line ${i} ${'x'.repeat(60)}`, '', activeTabId)
     })

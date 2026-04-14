@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 806
-- `vitest`: 328
-- `playwright`: 141
-- total: 1,275
+- `pytest`: 845
+- `vitest`: 360
+- `playwright`: 150
+- total: 1,355
 
 This document is organized in two parts:
 
@@ -36,7 +36,7 @@ You need different local dependencies depending on which suite you want to run:
 | --- | --- | --- |
 | `pytest` | Python, repo virtualenv, Python dev dependencies | Normal backend coverage does not require Docker |
 | `Vitest` | Node.js, npm dependencies | Runs in jsdom; no Flask server required |
-| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser and starts the Flask app through `playwright.config.js` |
+| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `playwright.config.js` is the single-project editor/debug config and `playwright.parallel.config.js` is the isolated parallel CLI config |
 | Container Smoke Test | Docker + Docker Compose | Opt-in verification path for image/tooling changes |
 
 Recommended local baseline:
@@ -83,6 +83,12 @@ npm run test:unit -- tests/js/unit/history.test.js tests/js/unit/runner.test.js
 npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 ```
 
+Playwright notes:
+
+- `npm run test:e2e` uses [playwright.parallel.config.js](../playwright.parallel.config.js), which currently fans out across 5 isolated Chromium projects
+- plain `npx playwright test` uses [playwright.config.js](../playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
+- each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
+
 ## Recommended Workflow
 
 Use the smallest useful layer first:
@@ -118,6 +124,33 @@ The sections below stay intentionally short. The exhaustive per-test appendix fo
 ### Playwright
 
 `tests/js/e2e/` covers the integrated browser UI against a live Flask server, including mobile behavior, kill/history/search/share flows, browser-visible output behavior, and startup resilience.
+
+The browser layer now uses a split config model:
+
+- [playwright.config.js](../playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
+- [playwright.parallel.config.js](../playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
+
+### Container Smoke Test
+
+`scripts/container_smoke_test.sh` builds the container, runs every command in the `flat_suggestions` section of `app/conf/autocomplete_context.yaml`, and compares the output against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. It is not part of the default fast loop and should be run after Dockerfile, packaged-tool, or base-image changes.
+
+The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately.
+
+Run the smoke test directly:
+
+```bash
+./scripts/container_smoke_test.sh
+```
+
+If a tool's output has intentionally changed, run the capture script to get a browser-driven baseline written to `/tmp`:
+
+```bash
+./scripts/capture_container_smoke_test_outputs.sh
+```
+
+This script runs the same `flat_suggestions` commands in a browser and writes the raw output to `/tmp`. It does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json` — use it as a reference to make those edits manually.
+
+GitLab CI mirrors the smoke test in the `container-smoke-test` job, which is exposed as a manual run when you want to verify a fresh image before merging dependency or Dockerfile changes.
 
 ## Choosing The Right Test Layer
 
@@ -674,6 +707,12 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestRunStreaming.test_run_returns_500_when_spawn_fails` | Checks that run returns 500 when spawn fails. |
 | `TestRunStreaming.test_run_emits_heartbeat_when_silent` | Checks that run emits heartbeat when silent. |
 | `TestRunStreaming.test_run_persists_completed_run_to_history` | Checks that run persists completed run to history. |
+| `TestRunStreaming.test_run_filters_output_through_synthetic_grep` | Checks that a synthetic grep run streams and persists only matching lines. |
+| `TestRunStreaming.test_run_supports_invert_match_synthetic_grep` | Checks that synthetic grep supports `-v` invert matching. |
+| `TestRunStreaming.test_run_filters_output_through_synthetic_head` | Checks that synthetic head limits the persisted transcript to the first matching lines. |
+| `TestRunStreaming.test_run_filters_output_through_synthetic_tail` | Checks that synthetic tail persists only the buffered trailing lines once the run completes. |
+| `TestRunStreaming.test_run_filters_output_through_synthetic_wc_line_count` | Checks that synthetic `wc -l` replaces the transcript with the final line-count output. |
+| `TestRunStreaming.test_run_rejects_invalid_synthetic_grep_regex` | Checks that invalid synthetic `grep -E` regexes fail as user-facing errors. |
 | `TestRunStreaming.test_run_emits_timeout_notice_when_command_exceeds_limit` | Checks that run emits timeout notice when command exceeds limit. |
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
 | `TestRunStreaming.test_fake_ls_streams_allowed_commands_and_persists_history` | Checks that fake ls streams allowed commands and persists history. |
@@ -692,8 +731,13 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestRunStreaming.test_fake_sudo_reports_web_shell_restriction` | Checks that fake sudo reports web shell restriction. |
 | `TestRunStreaming.test_fake_sudo_without_arguments_uses_the_snark_pool` | Checks that fake sudo without arguments uses the snark pool. |
 | `TestRunStreaming.test_fake_reboot_reports_web_shell_restriction` | Checks that fake reboot reports web shell restriction. |
+| `TestRunStreaming.test_fake_poweroff_variants_use_poweroff_snark_pool` | Checks that `poweroff`, `halt`, and `shutdown now` use the shared power-off snark pool. |
+| `TestRunStreaming.test_fake_su_variants_use_shell_escalation_pool` | Checks that `su`, `sudo su`, and `sudo -s` use the shell-escalation denial pool. |
 | `TestRunStreaming.test_fake_rm_root_refuses_exact_root_delete_pattern` | Checks that fake rm root refuses exact root delete pattern. |
 | `TestRunStreaming.test_fake_date_hostname_and_uptime_render_shell_style_information` | Checks that fake date hostname and uptime render shell style information. |
+| `TestRunStreaming.test_fake_ip_route_df_and_free_render_shell_style_summaries` | Checks that `ip a`, `route`, `df -h`, and `free -h` render shell-style summary output. |
+| `TestRunStreaming.test_fake_jobs_lists_active_session_runs` | Checks that `jobs` lists active runs for the current session. |
+| `TestRunStreaming.test_fake_jobs_reports_when_no_active_jobs_exist` | Checks that `jobs` reports cleanly when the current session has no active jobs. |
 | `TestRunStreaming.test_fake_man_renders_real_page_for_allowed_topic` | Checks that fake man renders real page for allowed topic. |
 | `TestRunStreaming.test_fake_man_does_not_clip_to_max_output_lines` | Checks that fake man does not clip to max output lines. |
 | `TestRunStreaming.test_fake_man_reports_when_helper_binary_is_unavailable` | Checks that fake man reports when helper binary is unavailable. |
@@ -704,6 +748,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestRunStreaming.test_fake_history_lists_recent_session_commands` | Checks that fake history lists recent session commands. |
 | `TestRunStreaming.test_fake_pwd_returns_synthetic_path` | Checks that fake pwd returns synthetic path. |
 | `TestRunStreaming.test_fake_uname_a_returns_web_shell_environment` | Checks that fake uname a returns web shell environment. |
+| `TestRunStreaming.test_fake_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
+| `TestRunStreaming.test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs` | Checks that the undocumented `xyzzy`, `coffee`, and fork-bomb easter eggs return their special responses. |
 | `TestRunStreaming.test_fake_id_returns_synthetic_identity` | Checks that fake id returns synthetic identity. |
 | `TestRunStreaming.test_fake_whoami_streams_project_description` | Checks that fake whoami streams project description. |
 | `TestRunStreaming.test_fake_ps_lists_recent_session_commands` | Checks that fake ps lists recent session commands. |
@@ -728,6 +774,10 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestShellOperators.test_redirect_out` | Checks redirect out handling. |
 | `TestShellOperators.test_redirect_append` | Checks redirect append handling. |
 | `TestShellOperators.test_redirect_in` | Checks redirect in handling. |
+| `TestShellOperators.test_synthetic_grep_pipe_allowed` | Checks that the narrow synthetic grep pipe is allowed while general pipes remain blocked. |
+| `TestShellOperators.test_synthetic_head_pipe_allowed` | Checks that the narrow synthetic head pipe is allowed while general pipes remain blocked. |
+| `TestShellOperators.test_synthetic_tail_pipe_allowed` | Checks that the narrow synthetic tail pipe is allowed while general pipes remain blocked. |
+| `TestShellOperators.test_synthetic_wc_pipe_allowed` | Checks that the narrow synthetic `wc -l` pipe is allowed while general pipes remain blocked. |
 | `TestPathBlocking.test_data_path` | Checks /data path handling. |
 | `TestPathBlocking.test_tmp_path` | Checks /tmp path handling. |
 | `TestPathBlocking.test_url_with_data_segment` | Checks that URL with /data segment. |
@@ -746,6 +796,18 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestAllowlist.test_prefix_must_have_space` | Checks that prefix must have space. |
 | `TestAllowlist.test_unrestricted_when_no_file` | Checks that unrestricted when no file. |
 | `TestAllowlist.test_case_insensitive` | Checks case insensitive handling. |
+| `TestSyntheticGrepParsing.test_parses_basic_synthetic_grep` | Checks that the basic synthetic grep form is parsed into a base command plus grep options. |
+| `TestSyntheticGrepParsing.test_parses_combined_flags` | Checks that combined `-iv` synthetic grep flags are accepted. |
+| `TestSyntheticGrepParsing.test_parses_extended_regex_pattern` | Checks that `-E` synthetic grep patterns are parsed correctly. |
+| `TestSyntheticGrepParsing.test_rejects_missing_pattern` | Checks that synthetic grep rejects a missing pattern. |
+| `TestSyntheticGrepParsing.test_rejects_unsupported_flags` | Checks that unsupported synthetic grep flags are rejected. |
+| `TestSyntheticGrepParsing.test_rejects_extra_operands` | Checks that synthetic grep rejects extra operands beyond one pattern. |
+| `TestSyntheticPostFilterParsing.test_parses_default_head` | Checks that synthetic head defaults to a 10-line limit when no count is supplied. |
+| `TestSyntheticPostFilterParsing.test_parses_tail_with_explicit_count` | Checks that synthetic tail accepts `-n <count>` and preserves the base command. |
+| `TestSyntheticPostFilterParsing.test_parses_wc_line_count` | Checks that synthetic `wc -l` is recognized as the only supported wc helper. |
+| `TestSyntheticPostFilterParsing.test_rejects_invalid_head_flags` | Checks that unsupported synthetic head forms are rejected. |
+| `TestSyntheticPostFilterParsing.test_rejects_non_numeric_tail_count` | Checks that synthetic tail rejects non-numeric counts. |
+| `TestSyntheticPostFilterParsing.test_rejects_wc_modes_other_than_line_count` | Checks that synthetic wc rejects modes other than `-l`. |
 | `TestDenyPrefix.test_deny_takes_priority` | Checks deny takes priority handling. |
 | `TestDenyPrefix.test_allow_still_works_without_denied_flag` | Checks that allow still works without denied flag. |
 | `TestDenyPrefix.test_deny_exact_match` | Checks deny exact match handling. |
@@ -857,7 +919,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `supports ctrl+e to move to the end of the line` | Verifies that supports ctrl+e to move to the end of the line. |
 | `supports Alt+B and Alt+F to move by word` | Verifies that supports Alt+B and Alt+F to move by word. |
 | `supports macOS Option+B and Option+F word movement via physical key codes` | Verifies that supports macOS Option+B and Option+F word movement via physical key codes. |
-| `supports the mobile edit bar actions` | Verifies that supports the mobile edit bar actions. |
+| `supports the mobile edit bar actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
 | `uses Ctrl+C to open kill confirm when active tab is running` | Verifies that uses Ctrl+C to open kill confirm when active tab is running. |
 | `uses Ctrl+C to jump to a new prompt line when no command is running` | Verifies that uses Ctrl+C to jump to a new prompt line when no command is running. |
 | `supports Alt+T to create a new tab from the terminal prompt` | Verifies that supports Alt+T to create a new tab from the terminal prompt. |
@@ -879,7 +941,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `wires the history delete modal buttons and backdrop correctly` | Verifies that wires the history delete modal buttons and backdrop correctly. |
 | `wires the kill modal buttons and backdrop correctly` | Verifies that wires the kill modal buttons and backdrop correctly. |
 | `does not refocus the mobile composer when closing the kill confirmation modal` | Verifies that does not refocus the mobile composer when closing the kill confirmation modal. |
-| `wires the share redaction modal buttons, remember choice, and backdrop correctly` | Verifies that the permalink share-redaction modal can choose raw vs redacted sharing, remember a session choice, and cancel from the backdrop. |
+| `wires the share redaction modal buttons, remember choice, and backdrop correctly` | Verifies that the permalink share-redaction modal can choose raw vs redacted sharing, persist that choice into the shared Options default when requested, and cancel from the backdrop. |
+| `uses the persistent share redaction default before showing the modal prompt` | Verifies that a persistent raw/redacted preference suppresses the prompt before any modal choice is needed. |
 | `wires search controls and Escape dismissal correctly` | Verifies that wires search controls and Escape dismissal correctly. |
 | `refocuses the visible mobile composer after closing search with Escape` | Verifies that refocuses the visible mobile composer after closing search with Escape. |
 | `opens and closes the FAQ overlay through the wired controls` | Verifies that opens and closes the FAQ overlay through the wired controls. |
@@ -899,11 +962,20 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `renders suggestions and highlights the matched substring` | Verifies that renders suggestions and highlights the matched substring. |
 | `renders suggestions from the shared composer value accessor when present` | Verifies that renders suggestions from the shared composer value accessor when present. |
 | `applies the active class to the indexed suggestion` | Verifies that applies the active class to the indexed suggestion. |
+| `renders contextual suggestions with descriptions` | Verifies that contextual suggestions can render a separate description alongside the inserted value. |
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
+| `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
 | `expands through the shared trailing space when suggestions only diverge after the command root` | Verifies that expands through the shared trailing space when suggestions only diverge after the command root. |
+| `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
+| `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
+| `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space. |
+| `returns value hints after a value-taking flag and trailing space` | Verifies that value hints appear after accepting or typing a value-taking flag such as `curl -o `. |
+| `suggests built-in pipe commands after a supported command pipe` | Verifies that typing `command | ` can switch autocomplete into the narrow built-in pipe stage. |
+| `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
+| `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
 | `positions dropdown above when space below is tight and preserves item order` | Verifies that positions dropdown above when space below is tight and preserves item order. |
 | `clamps the below-mode dropdown height so it does not extend past the viewport edge` | Verifies that clamps the below-mode dropdown height so it does not extend past the viewport edge. |
@@ -943,6 +1015,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
 | `refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject` | Verifies that refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject. |
 | `closes the history panel when a history action button is clicked` | Verifies that closes the history panel when a history action button is clicked. |
+| `keeps common history actions open on mobile and only closes for delete` | Verifies that mobile history actions like star, copy, and permalink keep the drawer open while delete still hands off to the destructive flow. |
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
 | `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
@@ -1172,6 +1245,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `runWelcome falls back to the static hint when /welcome/hints fails` | Verifies that runWelcome falls back to the static hint when /welcome/hints fails. |
 | `runWelcome respects welcome_sample_count of 0` | Verifies that runWelcome respects welcome_sample_count of 0. |
 | `runWelcome treats welcome_hint_rotations of 0 as infinite and 1 as static` | Verifies that runWelcome treats welcome_hint_rotations of 0 as infinite and 1 as static. |
+| `runWelcome renders the settled intro immediately when animation is disabled` | Verifies that the welcome intro can render in its final state immediately when the animation preference is disabled. |
+| `runWelcome can remove the intro completely and mount the prompt immediately` | Verifies that the welcome intro can be skipped entirely while still mounting a usable prompt. |
 | `settleWelcome renders the remaining intro immediately` | Verifies that settleWelcome renders the remaining intro immediately. |
 | `requestWelcomeSettle fast-forwards the intro even before the welcome plan is built` | Verifies that requestWelcomeSettle fast-forwards the intro even before the welcome plan is built. |
 | `requestWelcomeSettle ignores non-owner tabs` | Verifies that requestWelcomeSettle ignores non-owner tabs. |
@@ -1187,8 +1262,11 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 
 | Test | Description |
 | --- | --- |
-| `Tab expands to the shared prefix and Enter accepts the highlighted suggestion` | Verifies that Tab expands to the shared prefix and Enter accepts the highlighted suggestion. |
+| `Tab expands to the shared prefix and Enter accepts a reselected suggestion` | Verifies that Tab expands to the shared prefix and Enter accepts a reselected suggestion. |
 | `clicking outside the prompt hides autocomplete without changing the input` | Verifies that clicking outside the prompt hides autocomplete without changing the input. |
+| `context-aware autocomplete replaces only the active token for command flags` | Verifies that context-aware autocomplete replaces only the active token for command flags. |
+| `context-aware autocomplete shows positional hints alongside flags after a known command root` | Verifies that contextual autocomplete can surface positional guidance like `<target>` alongside command-specific flags after a known root such as `nmap `. |
+| `built-in pipe support suggests the supported pipe commands after a pipe` | Verifies that typing `command | ` exposes the narrow built-in pipe commands in the normal autocomplete dropdown. |
 
 #### `boot-resilience.spec.js`
 
@@ -1223,10 +1301,12 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `loading a run from history opens output in a tab without repopulating command input` | Verifies that loading a run from history opens output in a tab without repopulating command input. |
 | `clicking a history entry that is already open switches to that tab` | Verifies that clicking a history entry that is already open switches to that tab. |
 | `deleting a starred entry removes it from the chip bar` | Verifies that deleting a starred entry removes it from the chip bar. |
+| `toggling the history star keeps the desktop drawer open` | Verifies that desktop starring behaves like a toggle and does not collapse the drawer while you are working through history entries. |
 | `clear all history removes all chips including starred ones` | Verifies that clear all history removes all chips including starred ones. |
 | `clicking outside the drawer closes the history panel` | Verifies that clicking outside the drawer closes the history panel. |
 | `pressing Escape closes the history panel` | Verifies that pressing Escape closes the history panel. |
 | `Delete Non-Favorites keeps starred runs and removes the rest` | Delete Non-Favorites keeps starred runs and removes the rest. |
+| `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 
 #### `kill.spec.js`
 
@@ -1247,7 +1327,9 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `mobile startup uses the mobile welcome and keeps the composer visible` | Verifies that mobile startup uses the mobile welcome and keeps the composer visible. |
 | `mobile edit bar appears when the mobile command input is focused` | Verifies that mobile edit bar appears when the mobile command input is focused. |
 | `tapping the mobile command input opens the keyboard without jumping the page` | Verifies that tapping the mobile command input opens the keyboard without jumping the page. |
+| `reloading on mobile restores the active output pane at the bottom` | Verifies that reloading on mobile restores the active tab transcript to the live bottom instead of reopening at the top. |
 | `mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused` | Verifies that mobile autocomplete accepts a suggestion by tap and keeps the mobile composer focused. |
+| `mobile contextual autocomplete shows value hints after accepting a value-taking flag` | Verifies that mobile contextual autocomplete continues into follow-up value hints such as `curl -o ` -> `/dev/null`. |
 | `clicking the mobile transcript closes the keyboard and helper row` | Verifies that clicking the mobile transcript closes the keyboard and helper row. |
 | `mobile tab action buttons still work while the keyboard is open` | Verifies that mobile tab action buttons still work while the keyboard is open. |
 | `creating a new mobile tab does not force composer focus` | Verifies that creating a new mobile tab does not force composer focus. |
@@ -1265,16 +1347,17 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `mobile recent chips collapse to one row and overflow opens history` | Verifies that mobile recent chips collapse to one row and overflow opens history. |
 | `mobile recent chips can load a visible command back into the prompt` | Verifies that mobile recent chips can load a visible command back into the prompt. |
 | `mobile history restore works from a newly created session via the mobile menu` | Verifies that mobile history restore works from a newly created session via the mobile menu. |
-| `mobile run button disables while a command is running` | Verifies that mobile run button disables while a command is running. |
-| `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that mobile permalink copies via the fallback path when clipboard writeText is unavailable. |
-| `mobile edit bar moves the caret and deletes a word` | Verifies that mobile edit bar moves the caret and deletes a word. |
+| `mobile history copy and permalink actions keep the drawer open` | Verifies that common mobile history actions do not dismiss the drawer after each tap, reducing repeated reopen churn. |
+| `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
+| `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
+| `mobile edit bar moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
 
 #### `output.spec.js`
 
 | Test | Description |
 | --- | --- |
-| `copy button shows the ` | Verifies that copy button shows the. |
+| `copy button shows the "Copied" toast` | Verifies that copying tab output shows the expected success toast. |
 | `copy button falls back when clipboard writeText rejects` | Verifies that copy button falls back when clipboard writeText rejects. |
 | `clear button removes all output from the active tab` | Verifies that clear button removes all output from the active tab. |
 | `status reverts to idle after clearing output` | Verifies that status reverts to idle after clearing output. |
@@ -1403,14 +1486,24 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | --- | --- |
 | `running a command cancels the welcome animation and clears partial output` | Verifies that running a command cancels the welcome animation and clears partial output. |
 | `welcome finishes with a hint row after the intro and command blocks` | Verifies that welcome finishes with a hint row after the intro and command blocks. |
+| `typing into the prompt settles the remaining welcome intro immediately` | Verifies that typing into the prompt settles the remaining welcome intro immediately. |
+| `pressing Space in the prompt settles the remaining welcome intro immediately` | Verifies that pressing Space in the prompt settles the remaining welcome intro immediately. |
+| `pressing Escape in the prompt settles welcome without changing input text` | Verifies that pressing Escape in the prompt settles welcome without changing input text. |
+
+#### `welcome-interactions.spec.js`
+
+| Test | Description |
+| --- | --- |
 | `clicking a sampled welcome command text loads it into the prompt` | Verifies that clicking a sampled welcome command text loads it into the prompt. |
 | `pressing Enter on a sampled welcome command text loads it into the prompt` | Verifies that pressing Enter on a sampled welcome command text loads it into the prompt. |
 | `clicking the try this first badge loads the featured command into the prompt` | Verifies that clicking the try this first badge loads the featured command into the prompt. |
 | `pressing Space on the try this first badge loads the featured command into the prompt` | Verifies that pressing Space on the try this first badge loads the featured command into the prompt. |
-| `typing into the prompt settles the remaining welcome intro immediately` | Verifies that typing into the prompt settles the remaining welcome intro immediately. |
-| `pressing Space in the prompt settles the remaining welcome intro immediately` | Verifies that pressing Space in the prompt settles the remaining welcome intro immediately. |
-| `pressing Escape in the prompt settles welcome without changing input text` | Verifies that pressing Escape in the prompt settles welcome without changing input text. |
 | `pressing Ctrl+C while welcome is active settles the intro without opening kill confirmation` | Verifies that pressing Ctrl+C while welcome is active settles the intro without opening kill confirmation. |
+
+#### `welcome-context.spec.js`
+
+| Test | Description |
+| --- | --- |
 | `running a command in another tab does not tear down the original welcome tab` | Verifies that running a command in another tab does not tear down the original welcome tab. |
 | `clearing a non-welcome tab does not remove the original welcome UI` | Verifies that clearing a non-welcome tab does not remove the original welcome UI. |
 | `switches to the mobile welcome path with the mobile banner` | Verifies that switches to the mobile welcome path with the mobile banner. |
@@ -1427,5 +1520,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 ## Related Docs
 
 - [README.md](../README.md)
+- [CONTRIBUTORS.md](../CONTRIBUTORS.md)
 - [ARCHITECTURE.md](../ARCHITECTURE.md)
 - [DECISIONS.md](../DECISIONS.md)
+- [THEME.md](../THEME.md)

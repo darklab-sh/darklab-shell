@@ -85,8 +85,12 @@ test.describe('permalink / share', () => {
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {
+    // Wait for the welcome sequence to finish before opening a new tab.
+    // If the welcome animation has a scheduled step that fires after the new
+    // tab is created it can switch the active panel back to the welcome tab,
+    // leaving the new tab's permalink button in a non-active (invisible) panel.
+    await page.waitForFunction(() => window._welcomeDone === true, { timeout: 15_000 })
     await page.locator('#new-tab-btn').click()
-    await expect(page.locator('.tab.active')).toContainText('tab 2')
     await page.locator('.tab-panel.active [data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output')

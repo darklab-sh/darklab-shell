@@ -183,6 +183,7 @@ def get_active_history_runs():
     """Return currently running commands for this session."""
     session_id = get_session_id()
     runs = active_runs_for_session(session_id)
+    log.debug("ACTIVE_RUNS_VIEWED", extra={"ip": get_client_ip(), "session": session_id, "count": len(runs)})
     return jsonify({"runs": runs})
 
 
@@ -289,6 +290,10 @@ def delete_run(run_id):
         log.info("HISTORY_DELETED", extra={
             "ip": get_client_ip(), "run_id": run_id, "session": session_id,
         })
+    else:
+        log.debug("HISTORY_DELETE_MISS", extra={
+            "ip": get_client_ip(), "run_id": run_id, "session": session_id,
+        })
     return jsonify({"ok": True})
 
 
@@ -351,7 +356,8 @@ def save_share():
         )
         conn.commit()
     log.info("SHARE_CREATED", extra={
-        "ip": get_client_ip(), "share_id": share_id, "label": label,
+        "ip": get_client_ip(), "session": session_id, "share_id": share_id,
+        "label": label, "redacted": apply_redaction,
     })
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
 
@@ -367,7 +373,8 @@ def get_share(share_id):
     snap = dict(row)
     content_lines = json.loads(snap["content"]) if snap["content"] else []
     log.info("SHARE_VIEWED", extra={
-        "ip": get_client_ip(), "share_id": share_id, "label": snap["label"],
+        "ip": get_client_ip(), "session": get_session_id(), "share_id": share_id,
+        "label": snap["label"],
     })
 
     if "json" in request.args:

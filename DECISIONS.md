@@ -12,6 +12,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
 - [Security And Isolation Decisions](#security-and-isolation-decisions)
 - [Deployment And Packaging Decisions](#deployment-and-packaging-decisions)
 - [Frontend Decisions](#frontend-decisions)
+  - [Dedicated Mobile Shell](#dedicated-mobile-shell)
 - [Known Gotchas & Lessons Learned](#known-gotchas--lessons-learned)
 
 ## Runtime And Coordination Decisions
@@ -157,7 +158,7 @@ The browser scripts share a single state layer in `app/static/js/state.js`. That
 
 That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, then prepend `ui_helpers.js` before DOM-bound modules so the extracted scripts see the same helper globals as production without rewriting the production call sites.
 
-## Dedicated Mobile Shell
+### Dedicated Mobile Shell
 
 The mobile UI still uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The difference now is that the shell was deliberately simplified back to a normal-flow layout after a focused repro proved the Firefox mobile bug was coming from the app’s integration layer, not from the browser itself.
 
@@ -211,3 +212,13 @@ This keeps the mobile surface structured without needing a separate frontend bun
 **Command timeout must fire during continuous output.** The original timeout check was inside the `select()` idle branch — it only ran when no output had arrived for `HEARTBEAT_INTERVAL` seconds. A command producing a constant stream of output (e.g. a flood scan before deny rules were added) would never hit the idle branch and therefore never time out. Fix: moved the timeout check to the top of the `while True:` loop so it runs on every iteration regardless of output activity. The start time is parsed once outside the loop (`datetime.fromisoformat(run_started)`) to avoid repeated parsing overhead.
 
 **HTTP/1.1 browser connection limit (local development only).** Browsers cap concurrent HTTP/1.1 connections per origin at 6. Each running command holds one persistent SSE connection. With multiple app UI tabs each running a command, it's possible to saturate the limit, causing new page loads (JS files etc.) to stall. In production this is a non-issue — nginx-proxy terminates HTTPS, and HTTP/2 multiplexes all requests over a single connection with no per-origin cap. In local development (bare Gunicorn, no proxy, HTTP/1.1), you can hit this limit with enough concurrent tabs. A local Caddy proxy (`brew install caddy`) resolves it if needed.
+
+---
+
+## Related Docs
+
+- [README.md](README.md)
+- [CONTRIBUTORS.md](CONTRIBUTORS.md)
+- [ARCHITECTURE.md](ARCHITECTURE.md)
+- [tests/README.md](tests/README.md)
+- [THEME.md](THEME.md)

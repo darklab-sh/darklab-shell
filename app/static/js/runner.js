@@ -337,6 +337,90 @@ function doKill(tabId) {
 //   'settle'  — empty input during welcome; caller should focus without clearing
 //   true      — command submitted; caller should clear input and focus
 //   false     — rejected or blocked; caller should leave input as-is
+function _parseSyntheticPostFilterCommand(cmd) {
+  if (!cmd || !cmd.includes('|')) return false;
+  if (cmd.includes('`') || cmd.includes('$(')) return null;
+  const tokens = [];
+  const re = /"[^"]*"|'[^']*'|&&|\|\|?|;;?|>>?|<|[^\s|&;<>]+/g;
+  let match = re.exec(cmd);
+  while (match) {
+    tokens.push(match[0]);
+    match = re.exec(cmd);
+  }
+  if (!tokens.length) return null;
+  if (tokens.filter(token => token === '|').length !== 1) return null;
+  if (tokens.some(token => ['&&', '||', ';', ';;', '>', '>>', '<', '&'].includes(token))) return null;
+  const pipeIndex = tokens.indexOf('|');
+  const stageTokens = tokens.slice(pipeIndex + 1);
+  if (pipeIndex <= 0 || !stageTokens.length) return null;
+  const helper = String(stageTokens[0]).toLowerCase();
+
+  if (helper === 'grep') {
+    let patternSeen = false;
+    for (const token of stageTokens.slice(1)) {
+      if (!patternSeen && /^-[^-]/.test(token)) {
+        for (const flag of token.slice(1)) {
+          if (!['i', 'v', 'E'].includes(flag)) return null;
+        }
+        continue;
+      }
+      if (patternSeen) return null;
+      patternSeen = true;
+    }
+    return patternSeen ? { kind: 'grep' } : null;
+  }
+
+  if (helper === 'head' || helper === 'tail') {
+    if (stageTokens.length === 1) return { kind: helper };
+    if (stageTokens.length !== 3 || stageTokens[1] !== '-n' || !/^\d+$/.test(stageTokens[2])) {
+      return null;
+    }
+    return { kind: helper, count: Number(stageTokens[2]) };
+  }
+
+  if (helper === 'wc') {
+    if (stageTokens.length === 2 && stageTokens[1] === '-l') {
+      return { kind: 'wc_l' };
+    }
+    return null;
+  }
+
+  return null;
+}
+
+function _isSyntheticPostFilterCommand(cmd) {
+  return !!_parseSyntheticPostFilterCommand(cmd);
+}
+
+function _isSyntheticGrepCommand(cmd) {
+  const parsed = _parseSyntheticPostFilterCommand(cmd);
+  return !!(parsed && parsed.kind === 'grep');
+}
+
+function _isSyntheticHeadCommand(cmd) {
+  const parsed = _parseSyntheticPostFilterCommand(cmd);
+  return !!(parsed && parsed.kind === 'head');
+}
+
+function _isSyntheticTailCommand(cmd) {
+  const parsed = _parseSyntheticPostFilterCommand(cmd);
+  return !!(parsed && parsed.kind === 'tail');
+}
+
+function _isSyntheticWcLineCountCommand(cmd) {
+  const parsed = _parseSyntheticPostFilterCommand(cmd);
+  return !!(parsed && parsed.kind === 'wc_l');
+}
+
+function _isExactSpecialBuiltInCommand(cmd) {
+  const normalized = String(cmd || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const known = (typeof acSpecialCommands !== 'undefined' && acSpecialCommands) || [];
+  if (known.includes(normalized)) return true;
+  // Fork bomb variants use non-standard whitespace; match the regex as a fallback
+  // for the brief window before acSpecialCommands loads from /autocomplete.
+  return /^:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:$/.test(String(cmd || '').trim());
+}
+
 function submitCommand(rawCmd) {
   // This is the main run path: validate local state, open the SSE stream, then
   // feed output into the active tab while mirroring completion into persistence.
@@ -373,7 +457,7 @@ function submitCommand(rawCmd) {
 
   // Client-side validation mirrors server-side checks for immediate feedback
   const shellOps = /&&|\|\|?|;;?|`|\$\(|>>?|</;
-  if (shellOps.test(cmd)) {
+  if (shellOps.test(cmd) && !_isSyntheticPostFilterCommand(cmd) && !_isExactSpecialBuiltInCommand(cmd)) {
     appendCommandEcho(cmd);
     appendLine('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied');
     setStatus('fail');
@@ -491,7 +575,7 @@ function submitCommand(rawCmd) {
                 if (t) t.syntheticClear = true;
               } else if (msg.type === 'output') {
                 msg.text.split('\n').forEach((line, i, arr) => {
-                  if (i < arr.length - 1 || line) appendLine(line, '', tabId);
+                  if (i < arr.length - 1 || line) appendLine(line, msg.cls || '', tabId);
                 });
               } else if (msg.type === 'exit') {
                 _clearStalledTimeout(tabId);

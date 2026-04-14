@@ -13,7 +13,7 @@ import json
 import os
 
 
-DATA_DIR = "/data" if os.path.isdir("/data") else "/tmp"  # nosec B108
+DATA_DIR = os.environ.get("APP_DATA_DIR") or ("/data" if os.path.isdir("/data") else "/tmp")  # nosec B108
 RUN_OUTPUT_DIR = os.path.join(DATA_DIR, "run-output")
 
 

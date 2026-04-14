@@ -261,6 +261,7 @@ header .version {
 }
 
 .shell-prompt-caret {
+  display: inline-block;
   width: 8px;
   height: 1.15em;
   margin-left: 2px;
@@ -269,6 +270,10 @@ header .version {
   box-shadow: 0 0 8px var(--green-glow);
   opacity: 1;
   flex-shrink: 0;
+  align-self: flex-start;
+  transform: translateY(2px);
+  font-size: inherit;
+  line-height: inherit;
   animation: caret-blink 1s steps(1, end) infinite;
 }
 
@@ -295,7 +300,8 @@ header .version {
   border-radius: 1px;
   background: var(--green);
   box-shadow: 0 0 8px var(--green-glow);
-  vertical-align: text-bottom;
+  vertical-align: baseline;
+  transform: translateY(2px);
   font-size: inherit;
   line-height: inherit;
 }
@@ -379,13 +385,21 @@ header .version {
   font-size: 14px;
   min-height: 44px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 
 .ac-dropdown.ac-mobile .ac-item::before {
   display: none;
+}
+
+.ac-dropdown.ac-mobile .ac-item-desc {
+  margin-left: 0;
+  font-size: 11px;
+  white-space: normal;
 }
 
 .ac-dropdown.ac-up {
@@ -416,6 +430,24 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   transition: color 0.1s;
 }
 
+.ac-item-main,
+.ac-item-desc {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.ac-item-main {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ac-item-desc {
+  margin-left: 10px;
+  color: var(--muted);
+  opacity: 0.9;
+}
+
 .ac-item::before {
   content: '  ';
   white-space: pre;
@@ -433,6 +465,11 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 .ac-item .ac-match {
   color: var(--green);
   font-weight: 700;
+}
+
+.ac-item:hover .ac-item-desc,
+.ac-item.ac-active .ac-item-desc {
+  color: var(--text);
 }
 
 /* ── Ctrl+R history search dropdown ── */

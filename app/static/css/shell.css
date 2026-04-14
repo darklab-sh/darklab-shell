@@ -1043,6 +1043,59 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--red);
 }
 
+.faq-limits-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.faq-limits-row {
+  display: grid;
+  gap: 6px 18px;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.faq-limits-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.faq-limits-label {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.faq-limits-value {
+  color: var(--muted);
+  line-height: 1.7;
+  min-width: 0;
+}
+
+.faq-limits-value strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.faq-limits-note {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+@media (max-width: 720px) {
+  .faq-limits-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 .allowed-group {
   margin-top: 14px;
 }
@@ -1084,6 +1137,86 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .line.denied { color: var(--amber); font-weight: 700; margin-top: 4px; }
 .line.notice { color: var(--blue); font-style: italic; margin-bottom: 4px; }
+.line.fake-section {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+.line.fake-kv .line-content {
+  white-space: pre-wrap;
+}
+.line.fake-kv .line-content,
+.line.fake-shortcut .line-content {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.line.fake-help-row,
+.line.fake-catalog-item,
+.line.fake-plain,
+.line.fake-ps-row,
+.line.fake-history-row,
+.line.fake-last-row {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.line.fake-help-row {
+  margin: 1px 0;
+}
+.line.fake-help-note {
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 2px;
+}
+.line.fake-catalog-item {
+  color: color-mix(in srgb, var(--text) 94%, var(--blue));
+}
+.line.fake-identity {
+  color: var(--green);
+  font-weight: 700;
+  margin-top: 1px;
+}
+.line.fake-ps-header {
+  color: var(--blue);
+  font-weight: 700;
+  white-space: pre-wrap;
+}
+.line.fake-ps-row {
+  color: var(--text);
+}
+.line.fake-history-row {
+  color: color-mix(in srgb, var(--text) 96%, var(--blue));
+}
+.line.fake-last-row {
+  color: var(--text);
+}
+.line.fake-last-ok {
+  color: color-mix(in srgb, var(--text) 88%, var(--green));
+}
+.line.fake-last-fail {
+  color: color-mix(in srgb, var(--text) 88%, var(--red));
+}
+.line.fake-shortcut {
+  margin: 1px 0;
+}
+.line.fake-note {
+  color: var(--blue);
+  font-style: italic;
+  margin-top: 4px;
+}
+.line.fake-faq-q {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 8px;
+}
+.line.fake-faq-a {
+  color: var(--text);
+  padding-left: 1.5rem;
+  white-space: pre-wrap;
+}
+.line.fake-spacer {
+  min-height: 0.45rem;
+}
 
 /* ── Theme overrides
    Body-scoped selectors apply --theme-* variables with higher specificity

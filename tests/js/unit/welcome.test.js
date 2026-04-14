@@ -17,6 +17,7 @@ function loadWelcomeFns({
   appendLine = () => {},
   setTimeoutImpl = null,
   mobile = false,
+  welcomeIntroPreference = 'animated',
 } = {}) {
   document.body.innerHTML = `<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>`
   const out = document.getElementById('out')
@@ -83,6 +84,7 @@ function loadWelcomeFns({
       renderMotd: (text) => String(text).replace(/\n/g, '<br>'),
       logClientError: () => {},
       useMobileTerminalViewportMode: () => mobile,
+      getWelcomeIntroPreference: () => welcomeIntroPreference,
       requestAnimationFrame: (fn) => fn(),
       Math: Object.create(Math, {
         random: { value: () => 0 },
@@ -222,6 +224,37 @@ describe('welcome helpers', () => {
 
     expect(staticScenario.out.querySelectorAll('.welcome-hint')).toHaveLength(1)
     expect(staticScenario.out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
+  })
+
+  it('runWelcome renders the settled intro immediately when animation is disabled', async () => {
+    const { runWelcome, out, mountShellPrompt } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
+      hintItems: ['Hint one'],
+      welcomeIntroPreference: 'disable_animation',
+    })
+
+    await runWelcome()
+
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
+    expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
+    expect(out.querySelector('.welcome-command')?.textContent).toContain('ping darklab.sh')
+    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
+    expect(mountShellPrompt).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('runWelcome can remove the intro completely and mount the prompt immediately', async () => {
+    const { runWelcome, out, apiFetch, mountShellPrompt, _isWelcomeActive, _isWelcomeDone } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
+      welcomeIntroPreference: 'remove',
+    })
+
+    await runWelcome()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(out.children).toHaveLength(0)
+    expect(mountShellPrompt).toHaveBeenCalledWith('tab-1')
+    expect(_isWelcomeActive()).toBe(false)
+    expect(_isWelcomeDone()).toBe(false)
   })
 
   it('settleWelcome renders the remaining intro immediately', async () => {

@@ -11,6 +11,8 @@ import unittest.mock as mock
 from commands import (
     command_root,
     is_command_allowed,
+    parse_synthetic_postfilter,
+    parse_synthetic_grep,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -70,6 +72,22 @@ class TestShellOperators:
     def test_redirect_in(self):
         ok, _ = _check("curl darklab.sh < /etc/passwd")
         assert not ok
+
+    def test_synthetic_grep_pipe_allowed(self):
+        ok, _ = _check("ping darklab.sh | grep ttl")
+        assert ok
+
+    def test_synthetic_head_pipe_allowed(self):
+        ok, _ = _check("ping darklab.sh | head -n 5")
+        assert ok
+
+    def test_synthetic_tail_pipe_allowed(self):
+        ok, _ = _check("ping darklab.sh | tail")
+        assert ok
+
+    def test_synthetic_wc_pipe_allowed(self):
+        ok, _ = _check("ping darklab.sh | wc -l")
+        assert ok
 
 
 # ── Path blocking ─────────────────────────────────────────────────────────────
@@ -158,6 +176,93 @@ class TestAllowlist:
     def test_case_insensitive(self):
         ok, _ = _check("PING google.com")
         assert ok
+
+
+class TestSyntheticGrepParsing:
+    def test_parses_basic_synthetic_grep(self):
+        spec, err = parse_synthetic_grep("ping darklab.sh | grep ttl")
+        assert err is None
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["pattern"] == "ttl"
+        assert spec["ignore_case"] is False
+        assert spec["invert_match"] is False
+        assert spec["extended"] is False
+
+    def test_parses_combined_flags(self):
+        spec, err = parse_synthetic_grep("ping darklab.sh | grep -iv ttl")
+        assert err is None
+        assert spec is not None
+        assert spec["ignore_case"] is True
+        assert spec["invert_match"] is True
+
+    def test_parses_extended_regex_pattern(self):
+        spec, err = parse_synthetic_grep("ping darklab.sh | grep -E 'ttl|time'")
+        assert err is None
+        assert spec is not None
+        assert spec["extended"] is True
+        assert spec["pattern"] == "ttl|time"
+
+    def test_rejects_missing_pattern(self):
+        spec, err = parse_synthetic_grep("ping darklab.sh | grep -i")
+        assert spec is None
+        assert err == "Synthetic grep requires a pattern."
+
+    def test_rejects_unsupported_flags(self):
+        spec, err = parse_synthetic_grep("ping darklab.sh | grep -n ttl")
+        assert spec is None
+        assert err == "Synthetic grep supports only -i, -v, and -E in phase 1."
+
+    def test_rejects_extra_operands(self):
+        spec, err = parse_synthetic_grep("ping darklab.sh | grep ttl file.txt")
+        assert spec is None
+        assert err == "Synthetic grep only supports a single pattern argument."
+
+
+class TestSyntheticPostFilterParsing:
+    def test_parses_default_head(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | head")
+        assert err is None
+        assert spec is not None
+        assert spec == {
+            "kind": "head",
+            "count": 10,
+            "base_command": "ping darklab.sh",
+        }
+
+    def test_parses_tail_with_explicit_count(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -n 25")
+        assert err is None
+        assert spec is not None
+        assert spec == {
+            "kind": "tail",
+            "count": 25,
+            "base_command": "ping darklab.sh",
+        }
+
+    def test_parses_wc_line_count(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | wc -l")
+        assert err is None
+        assert spec is not None
+        assert spec == {
+            "kind": "wc_l",
+            "base_command": "ping darklab.sh",
+        }
+
+    def test_rejects_invalid_head_flags(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | head -5")
+        assert spec is None
+        assert err == "Synthetic head supports only `-n <count>` in phase 1."
+
+    def test_rejects_non_numeric_tail_count(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -n five")
+        assert spec is None
+        assert err == "Synthetic tail requires a non-negative numeric count."
+
+    def test_rejects_wc_modes_other_than_line_count(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | wc -c")
+        assert spec is None
+        assert err == "Synthetic wc supports only `wc -l` in phase 1."
 
 
 # ── Deny prefix (!) ───────────────────────────────────────────────────────────

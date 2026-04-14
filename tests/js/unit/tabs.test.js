@@ -9,6 +9,13 @@ function touchPointerEvent(type, init) {
   return event
 }
 
+function touchEvent(type, touches = [], changedTouches = touches) {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'touches', { value: touches, configurable: true })
+  Object.defineProperty(event, 'changedTouches', { value: changedTouches, configurable: true })
+  return event
+}
+
 function loadTabsFns({
   maxTabs = 3,
   maxOutputLines = 100,
@@ -1074,6 +1081,7 @@ describe('tabs helpers', () => {
   })
 
   it('reorders tabs through touch pointer dragging on mobile', () => {
+    vi.useFakeTimers()
     const { createTab, _getTabs } = loadTabsFns()
     const firstId = createTab('tab 1')
     const secondId = createTab('tab 2')
@@ -1101,36 +1109,74 @@ describe('tabs helpers', () => {
       height: 40,
     })
     tabsBar.scrollBy = vi.fn()
+    document.body.classList.add('mobile-terminal-mode')
 
     const dragged = document.querySelector(`.tab[data-id="${thirdId}"]`)
-    dragged.dispatchEvent(touchPointerEvent('pointerdown', {
-      pointerId: 7,
-      pointerType: 'touch',
-      clientX: 250,
-      clientY: 12,
-    }))
-    document.dispatchEvent(touchPointerEvent('pointermove', {
-      pointerId: 7,
-      pointerType: 'touch',
-      clientX: 20,
-      clientY: 12,
-    }))
+    dragged.dispatchEvent(touchEvent('touchstart', [{ identifier: 7, clientX: 250, clientY: 12 }]))
+    vi.advanceTimersByTime(200)
+    document.dispatchEvent(touchEvent('touchmove', [{ identifier: 7, clientX: 20, clientY: 12 }]))
 
     expect(dragged.classList.contains('tab-touch-dragging')).toBe(true)
     expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(true)
     expect(document.querySelector(`.tab[data-id="${firstId}"]`)?.classList.contains('tab-drop-before')).toBe(true)
 
+    document.dispatchEvent(touchEvent('touchend', [], [{ identifier: 7, clientX: 20, clientY: 12 }]))
+
+    expect(_getTabs().map(tab => tab.id)).toEqual([thirdId, firstId, secondId])
+    expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
+    expect(document.getElementById('cmd').focus).toHaveBeenCalled()
+    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(false)
+    expect(document.querySelector('.tab-drop-before, .tab-drop-after')).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('reorders desktop tabs through pointer dragging', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    const firstId = createTab('tab 1')
+    const secondId = createTab('tab 2')
+    const thirdId = createTab('tab 3')
+
+    const tabs = [...document.querySelectorAll('.tab')]
+    tabs.forEach((tab, index) => {
+      const left = index * 100
+      tab.getBoundingClientRect = () => ({
+        left,
+        right: left + 90,
+        top: 0,
+        bottom: 36,
+        width: 90,
+        height: 36,
+      })
+    })
+
+    const dragged = document.querySelector(`.tab[data-id="${thirdId}"]`)
+    dragged.dispatchEvent(touchPointerEvent('pointerdown', {
+      pointerId: 9,
+      pointerType: 'mouse',
+      button: 0,
+      clientX: 250,
+      clientY: 12,
+    }))
+    document.dispatchEvent(touchPointerEvent('pointermove', {
+      pointerId: 9,
+      pointerType: 'mouse',
+      clientX: 20,
+      clientY: 12,
+    }))
+
+    expect(dragged.classList.contains('tab-pointer-dragging')).toBe(true)
+    expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
+    expect(document.querySelector(`.tab[data-id="${firstId}"]`)?.classList.contains('tab-drop-before')).toBe(true)
+
     document.dispatchEvent(touchPointerEvent('pointerup', {
-      pointerId: 7,
-      pointerType: 'touch',
+      pointerId: 9,
+      pointerType: 'mouse',
       clientX: 20,
       clientY: 12,
     }))
 
     expect(_getTabs().map(tab => tab.id)).toEqual([thirdId, firstId, secondId])
     expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
-    expect(document.getElementById('cmd').focus).toHaveBeenCalled()
-    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(false)
     expect(document.querySelector('.tab-drop-before, .tab-drop-after')).toBeNull()
   })
 })
