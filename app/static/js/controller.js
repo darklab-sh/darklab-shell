@@ -22,6 +22,17 @@ themeBtn.addEventListener('click', () => {
   openThemeSelector();
 });
 
+function openWorkflows() {
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  showWorkflowsOverlay();
+}
+
+function closeWorkflows() {
+  hideWorkflowsOverlay();
+  refocusTerminalInput();
+}
+
 function openFaq() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
@@ -125,6 +136,8 @@ function setupMobileSheetDragClose() {
 
   bindMobileSheetDragClose(mobileMenu, () => hideMobileMenu());
   bindMobileSheetDragClose(historyPanel, () => hideHistoryPanel());
+  const workflowsModal = document.getElementById('workflows-modal');
+  bindMobileSheetDragClose(workflowsModal, () => closeWorkflows());
   bindMobileSheetDragClose(faqModal, () => closeFaq());
   bindMobileSheetDragClose(optionsModal, () => closeOptions());
   bindMobileSheetDragClose(killModal, () => closeKillOverlay());
@@ -226,10 +239,18 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn =
     }
     if (action === 'options') openOptions();
     if (action === 'theme') openThemeSelector();
+    if (action === 'workflows') openWorkflows();
     if (action === 'faq') openFaq();
     if (action === 'diag') window.location.href = '/diag';
   });
 });
+
+// ── Workflows ──
+workflowsBtn?.addEventListener('click', openWorkflows);
+_uiOverlayRefs.workflowsOverlay?.addEventListener('click', e => {
+  if (e.target === _uiOverlayRefs.workflowsOverlay) closeWorkflows();
+});
+workflowsCloseBtn?.addEventListener('click', closeWorkflows);
 
 // ── FAQ ──
 faqBtn.addEventListener('click', openFaq);
@@ -270,6 +291,12 @@ apiFetch('/faq').then(r => r.json()).then(data => {
   renderFaqItems(data.items || []);
 }).catch(err => {
   logClientError('failed to load /faq', err);
+});
+
+apiFetch('/workflows').then(r => r.json()).then(data => {
+  renderWorkflowItems(data.items || []);
+}).catch(err => {
+  logClientError('failed to load /workflows', err);
 });
 
 // ── Tabs ──
@@ -537,6 +564,7 @@ document.addEventListener('keydown', e => {
     return;
   }
   if (e.key === 'Escape') {
+    closeWorkflows();
     closeFaq();
     closeOptions();
     closeThemeSelector();
@@ -556,7 +584,7 @@ document.addEventListener('keydown', e => {
     && !isEditableTarget(e.target)
     && !(e.target && e.target.closest && e.target.closest('button, a, select'))
     && cmdInput
-    && !isFaqOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
+    && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
     && !isKillOverlayOpen()
     && !isShareRedactionOverlayOpen()
   ) {
@@ -745,9 +773,9 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isShareRedactionOverlayOpen()) {
+  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isShareRedactionOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeOptions(); closeThemeSelector(); cancelShareRedactionChoice();
+      closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector(); cancelShareRedactionChoice();
       refocusTerminalInput();
       e.preventDefault();
     }

@@ -185,6 +185,7 @@ body #faq-btn,
 body #theme-btn,
 body #options-btn,
 body #hist-btn,
+body #workflows-btn,
 body #diag-btn,
 body #search-toggle-btn,
 body #ts-btn,
@@ -202,6 +203,7 @@ body #faq-btn:hover,
 body #theme-btn:hover,
 body #options-btn:hover,
 body #hist-btn:hover,
+body #workflows-btn:hover,
 body #diag-btn:hover,
 body #search-toggle-btn:hover,
 body #ts-btn:hover,
@@ -913,6 +915,7 @@ body #hist-btn,
 body #faq-btn,
 body #theme-btn,
 body #options-btn,
+body #workflows-btn,
 body #diag-btn {
   background: color-mix(in srgb, var(--theme-toolbar-button-bg) 58%, color-mix(in srgb, var(--surface) 96%, transparent));
   border: 1px solid color-mix(in srgb, var(--border-bright) 94%, transparent);
@@ -929,6 +932,7 @@ body #hist-btn:hover,
 body #faq-btn:hover,
 body #theme-btn:hover,
 body #options-btn:hover,
+body #workflows-btn:hover,
 body #diag-btn:hover {
   border-color: color-mix(in srgb, var(--green-dim) 86%, var(--border-bright));
   color: var(--green);

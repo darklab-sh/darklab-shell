@@ -10,7 +10,7 @@ RUN apt-get upgrade -y
 RUN apt-get install -y  man-db procps net-tools curl wget iputils-ping nmap dnsutils traceroute netcat-traditional \
                         mtr whois tcptraceroute testssl.sh dnsrecon git libnet-ssleay-perl golang-go rubygems \
                         libxml-writer-perl libjson-perl ruby-dev build-essential fping python3-requests fierce \
-                        dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables
+                        dnsenum libcap2-bin sudo gosu groff-base bsdextrautils iptables sslscan wafw00f masscan libpcap-dev
 
 # Update the man page database
 RUN mandb -c
@@ -28,6 +28,8 @@ RUN go install -v github.com/projectdiscovery/subfinder/v2/cmd/subfinder@v2.13.0
 RUN go install -v github.com/projectdiscovery/httpx/cmd/httpx@v1.9.0 && \
     mv /usr/local/bin/httpx /usr/local/bin/pd-httpx
 RUN go install -v github.com/projectdiscovery/dnsx/cmd/dnsx@v1.2.3
+RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.5.0
+RUN go install -v github.com/projectdiscovery/katana/cmd/katana@v1.5.0
 
 # Install additional reconnaissance binaries via Go.
 RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1
@@ -51,6 +53,18 @@ RUN ln -s /opt/Nikto/program/nikto.pl /usr/local/bin/nikto
 
 # Upgrade pip to ensure latest versions of dependencies can be installed
 RUN pip install --upgrade pip
+
+# Install sslyze via pip.
+RUN pip install --upgrade setuptools wheel
+RUN pip install --upgrade sslyze==6.3.1
+
+# Install rustscan from the official GitHub releases.
+WORKDIR /tmp
+RUN wget https://github.com/bee-san/RustScan/releases/download/2.4.1/x86_64-linux-rustscan.tar.gz.zip
+RUN unzip x86_64-linux-rustscan.tar.gz.zip && \
+    tar xzf x86_64-linux-rustscan.tar.gz && \
+    mv rustscan /usr/local/bin/rustscan && \
+    rm -rf x86_64-linux-rustscan*
 
 # Install wpscan via RubyGems.
 RUN gem install wpscan -v 3.8.28
@@ -88,11 +102,12 @@ RUN set -eux; \
 RUN groupadd -r appuser && useradd -r -g appuser appuser && \
     groupadd -r scanner && useradd -r -g scanner -s /usr/sbin/nologin scanner
 
-# Grant nmap raw socket capabilities so the scanner user can use OS
-# fingerprinting and other features that require elevated network access,
-# without giving the scanner user full root privileges.
+# Grant raw socket capabilities to tools that require elevated network access,
+# so the scanner user can use them without full root privileges.
 
 RUN setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap && \
+    setcap cap_net_raw,cap_net_admin+eip /usr/bin/masscan && \
+    setcap cap_net_raw,cap_net_admin+eip /usr/local/bin/naabu && \
     echo "appuser ALL=(scanner) NOPASSWD: ALL" >> /etc/sudoers
 
 # Pre-create /data owned by appuser with 700 permissions.

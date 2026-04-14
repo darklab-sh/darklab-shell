@@ -64,13 +64,14 @@ export async function ensurePromptReady(page, { cancelWelcome = false, timeout =
     return style.display !== 'none' && style.visibility !== 'hidden'
   }, { timeout })
 
-  // Wait for the /autocomplete fetch to populate both flat suggestions and the
-  // context registry.  setComposerValueForTest calls getAutocompleteMatches
-  // synchronously, so if the registry is still empty it returns no items and
-  // immediately hides the dropdown — leaving expect.poll with nothing to poll.
+  // Wait for the /autocomplete fetch to populate the context registry.
+  // setComposerValueForTest calls getAutocompleteMatches synchronously, so if
+  // the registry is still empty it returns no items and immediately hides the
+  // dropdown — leaving expect.poll with nothing to poll.
+  // Note: acSuggestions (flat suggestions) was removed; the registry is the
+  // sole signal that the autocomplete fetch has completed.
   await page.waitForFunction(() => {
     return (
-      typeof acSuggestions !== 'undefined' && acSuggestions.length > 0 &&
       typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
     )
   }, { timeout })

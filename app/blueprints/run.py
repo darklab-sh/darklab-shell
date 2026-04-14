@@ -202,6 +202,7 @@ class _SyntheticPostFilterProcessor:
         self._emitted = 0
         self._tail_buffer = deque(maxlen=int(self.spec.get("count", 0) or 0))
         self._grep_match = None
+        self._line_buffer = []
 
         if self.kind == "grep":
             pattern = self.spec["pattern"]
@@ -248,6 +249,10 @@ class _SyntheticPostFilterProcessor:
             self._count += 1
             return []
 
+        if self.kind in ("sort", "uniq"):
+            self._line_buffer.append(line)
+            return []
+
         return [line]
 
     def finalize_output_lines(self) -> list[str]:
@@ -255,6 +260,55 @@ class _SyntheticPostFilterProcessor:
             return list(self._tail_buffer)
         if self.kind == "wc_l":
             return [str(self._count)]
+
+        if self.kind == "sort":
+            numeric = self.spec.get("numeric", False)
+
+            def _sort_key(ln):
+                s = ln.rstrip("\n").lstrip()
+                if numeric:
+                    m = re.match(r'^[-+]?\d+\.?\d*', s)
+                    return float(m.group(0)) if m else float("-inf")
+                return s.lower()
+
+            result = sorted(self._line_buffer, key=_sort_key,
+                            reverse=self.spec.get("reverse", False))
+            if self.spec.get("unique"):
+                seen: set = set()
+                deduped = []
+                for ln in result:
+                    key = ln.rstrip("\n")
+                    if key not in seen:
+                        seen.add(key)
+                        deduped.append(ln)
+                result = deduped
+            return result
+
+        if self.kind == "uniq":
+            result = []
+            prev = None
+            if self.spec.get("count"):
+                groups: list[tuple[int, str]] = []
+                cnt = 0
+                for ln in self._line_buffer:
+                    n = ln.rstrip("\n")
+                    if n == prev:
+                        cnt += 1
+                    else:
+                        if prev is not None:
+                            groups.append((cnt, prev))
+                        prev = n
+                        cnt = 1
+                if prev is not None:
+                    groups.append((cnt, prev))
+                return [f"{c:7d} {ln}\n" for c, ln in groups]
+            for ln in self._line_buffer:
+                n = ln.rstrip("\n")
+                if n != prev:
+                    result.append(ln)
+                    prev = n
+            return result
+
         return []
 
 

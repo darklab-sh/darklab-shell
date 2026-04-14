@@ -7,7 +7,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..', '..')
-const AUTOCOMPLETE_CONFIG_FILE = path.join(ROOT, 'app', 'conf', 'autocomplete_context.yaml')
+const SMOKE_TEST_COMMANDS_FILE = path.join(ROOT, 'scripts', 'smoke_test_commands.txt')
 const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab-shell-container-smoke-test-corpus')
 
 function parseArgs(argv) {
@@ -110,37 +110,14 @@ function slugify(command) {
 }
 
 async function loadCommands() {
-  const content = await readFile(AUTOCOMPLETE_CONFIG_FILE, 'utf8')
+  const content = await readFile(SMOKE_TEST_COMMANDS_FILE, 'utf8')
   const commands = []
-  let inFlatSuggestions = false
-
   for (const rawLine of content.split(/\r?\n/)) {
-    if (!inFlatSuggestions) {
-      if (rawLine.trim() === 'flat_suggestions:') {
-        inFlatSuggestions = true
-      }
+    const line = rawLine.trim()
+    if (!line || line.startsWith('#')) {
       continue
     }
-
-    if (/^\S/.test(rawLine)) {
-      break
-    }
-
-    const match = rawLine.match(/^\s*-\s+(.*)\s*$/)
-    if (!match) {
-      continue
-    }
-
-    let value = match[1].trim()
-    if (
-      (value.startsWith('"') && value.endsWith('"')) ||
-      (value.startsWith("'") && value.endsWith("'"))
-    ) {
-      value = value.slice(1, -1)
-    }
-    if (value) {
-      commands.push(value)
-    }
+    commands.push(line)
   }
   return commands
 }
@@ -376,7 +353,7 @@ async function main() {
   const commands = await loadCommands()
 
   if (!commands.length) {
-    throw new Error(`No commands found in ${AUTOCOMPLETE_CONFIG_FILE}`)
+    throw new Error(`No commands found in ${SMOKE_TEST_COMMANDS_FILE}`)
   }
 
   await mkdir(args.outDir, { recursive: true })
@@ -397,7 +374,7 @@ async function main() {
       : 0
 
     if (args.resumeFromCommand && startIndex === -1) {
-      throw new Error(`Could not find start command in autocomplete_context.yaml: ${args.resumeFromCommand}`)
+      throw new Error(`Could not find start command in smoke_test_commands.txt: ${args.resumeFromCommand}`)
     }
 
     for (let index = startIndex; index < commands.length; index += 1) {

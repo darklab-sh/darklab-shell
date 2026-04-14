@@ -31,6 +31,7 @@
     <button id="hist-btn" title="Run history">⧖ history</button>
     <button id="options-btn" title="Display and preference options">≡ options</button>
     <button id="theme-btn" title="Theme selector">◑ theme</button>
+    <button id="workflows-btn" title="Guided workflows">⊡ workflows</button>
     <button id="faq-btn">? FAQ</button>
     <a id="diag-btn" href="/diag" title="Operator diagnostics" class="u-hidden" target="_blank" rel="noopener noreferrer">⊕ diag</a>
   </div>
@@ -74,6 +75,7 @@
       <button data-action="ln">line numbers: off</button>
       <button data-action="ts">timestamps: off</button>
       <button data-action="theme">◑ theme</button>
+      <button data-action="workflows">⊡ workflows</button>
       <button data-action="faq">? FAQ</button>
       <button data-action="diag" class="u-hidden">⊕ diag</button>
       <a class="mobile-menu-wordmark" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">
@@ -241,6 +243,17 @@
       <button id="share-redaction-raw" class="modal-secondary modal-secondary-neutral" type="button">Share Raw</button>
       <button id="share-redaction-confirm" class="modal-primary modal-primary-accent" type="button">Share Redacted</button>
     </div>
+  </div>
+</div>
+
+<!-- Workflows Modal -->
+<div id="workflows-overlay">
+  <div id="workflows-modal">
+    <div class="faq-header">
+      <span class="faq-title">WORKFLOWS</span>
+      <button class="workflows-close" aria-label="Close workflows">✕</button>
+    </div>
+    <div class="workflows-body"></div>
   </div>
 </div>
 

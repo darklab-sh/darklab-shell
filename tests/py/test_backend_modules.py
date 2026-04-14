@@ -590,7 +590,9 @@ class TestThemeRegistry:
         assert "history</code>" in built_in_html
         assert "command | grep pattern" in built_in_html
         assert "command | head -n 20" in built_in_html
+        assert "command | head -20" in built_in_html
         assert "command | tail -n 20" in built_in_html
+        assert "command | tail -20" in built_in_html
         assert "command | wc -l" in built_in_html
         assert "Only one supported pipe stage can be used per command" in built_in_html
         assert "General shell piping, chaining, and redirection are still blocked" in built_in_html

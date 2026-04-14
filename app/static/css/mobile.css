@@ -407,6 +407,7 @@
   }
 
   /* Mobile overlays: bottom sheet layout for FAQ and options */
+  body.mobile-terminal-mode #workflows-overlay,
   body.mobile-terminal-mode #faq-overlay,
   body.mobile-terminal-mode #theme-overlay,
   body.mobile-terminal-mode #options-overlay {
@@ -417,6 +418,7 @@
     align-items: stretch;
     justify-content: stretch;
   }
+  body.mobile-terminal-mode #workflows-modal,
   body.mobile-terminal-mode #faq-modal,
   body.mobile-terminal-mode #theme-modal,
   body.mobile-terminal-mode #options-modal,
@@ -456,6 +458,7 @@
     box-shadow: none;
     overflow: hidden;
   }
+  body.mobile-terminal-mode #workflows-modal::before,
   body.mobile-terminal-mode #faq-modal::before,
   body.mobile-terminal-mode #theme-modal::before,
   body.mobile-terminal-mode #options-modal::before,

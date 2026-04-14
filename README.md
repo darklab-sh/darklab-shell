@@ -2,9 +2,15 @@
 
 A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history, run previews, and permalinks. Completed runs can also persist full output as compressed artifacts for later inspection. The project is built to run in Docker by default, but also supports local development without containers.
 
-![darklab shell screenshot](docs/readme-app.png)
+<div align="center"><table><tr>
+<td align="center">Desktop UI</td>
+<td align="center">Mobile UI</td>
+</tr><tr>
+<td><img src="docs/readme-app.png" alt="darklab shell — desktop" height="480"></td>
+<td><img src="docs/readme-app-mobile.png" alt="darklab shell — mobile" height="480"></td>
+</tr></table></div>
 
-_This screenshot is refreshed by the Playwright e2e suite and can be regenerated directly with `npm run capture:readme-screenshot`._
+_Screenshots are refreshed by the Playwright e2e suite and can be regenerated with `npm run capture:readme-screenshot` (desktop) or `npm run capture:readme-screenshot-mobile` (mobile)._
 
 ## Table of Contents
 - [Architecture At A Glance](#architecture-at-a-glance)
@@ -429,6 +435,12 @@ The following tools are installed in the Docker image and available for use:
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
 | `ffuf` | Fast web fuzzer for directory, file, and vhost discovery. Wordlists at `/usr/share/wordlists/seclists/` |
+| `naabu` | Fast port scanner with service discovery (ProjectDiscovery) |
+| `katana` | JavaScript-aware web crawler for attack surface mapping (ProjectDiscovery) |
+| `wafw00f` | WAF detection — identifies web application firewalls from HTTP fingerprints |
+| `sslscan` | TLS/SSL cipher and certificate scanner — reports supported ciphers, protocol versions, and cert details |
+| `sslyze` | Fast TLS configuration analyser — Heartbleed, ROBOT, CRIME, renegotiation, and certificate chain checks |
+| `rustscan` | High-speed port discovery; optionally pipes results into nmap for service detection |
 
 ---
 
@@ -809,6 +821,14 @@ To work around this, the app automatically rewrites any `mtr` command to use `--
 ### nmap
 
 nmap's `--privileged` flag is automatically injected into every nmap command, telling nmap to use raw socket access (which it has via file capabilities set in the Dockerfile). This enables OS fingerprinting, SYN scans, and other features that would otherwise require running as root. Users do not need to add `--privileged` manually.
+
+### naabu
+
+naabu defaults to raw SYN packet scanning via libpcap/gopacket, which requires privileges that are not reliably available inside the container even with file capabilities. The app automatically injects `-scan-type c` into every naabu command that doesn't already include `-scan-type` or `-st`, switching to TCP connect mode (equivalent to `nmap -sT`). Results are identical; the only difference is the scanning method. If you explicitly want raw SYN mode and have confirmed it works in your environment, pass `-scan-type s` and the rewrite will not fire.
+
+### masscan
+
+masscan is a raw-packet-only scanner with no TCP connect fallback. It requires `CAP_NET_RAW`/`CAP_NET_ADMIN` and libpcap access. These are granted via `setcap` in the Dockerfile and `cap_add` in `docker-compose.yml`, but deep packet injection may still be restricted by the host kernel or container runtime. If masscan fails with an interface error, `rustscan` is a good alternative — it uses TCP connect scanning and works without raw socket access.
 
 ### wapiti
 

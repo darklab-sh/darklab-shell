@@ -372,6 +372,9 @@ function _parseSyntheticPostFilterCommand(cmd) {
 
   if (helper === 'head' || helper === 'tail') {
     if (stageTokens.length === 1) return { kind: helper };
+    if (stageTokens.length === 2 && /^-\d+$/.test(stageTokens[1])) {
+      return { kind: helper, count: Number(stageTokens[1].slice(1)) };
+    }
     if (stageTokens.length !== 3 || stageTokens[1] !== '-n' || !/^\d+$/.test(stageTokens[2])) {
       return null;
     }
@@ -385,11 +388,41 @@ function _parseSyntheticPostFilterCommand(cmd) {
     return null;
   }
 
+  if (helper === 'sort') {
+    if (stageTokens.length === 1) return { kind: 'sort' };
+    if (stageTokens.length === 2) {
+      const flag = stageTokens[1];
+      if (/^-[rnu]+$/.test(flag) && new Set(flag.slice(1)).size === flag.length - 1) {
+        const chars = new Set(flag.slice(1));
+        if ([...chars].every(c => 'rnu'.includes(c))) {
+          return { kind: 'sort', reverse: chars.has('r'), numeric: chars.has('n'), unique: chars.has('u') };
+        }
+      }
+    }
+    return null;
+  }
+
+  if (helper === 'uniq') {
+    if (stageTokens.length === 1) return { kind: 'uniq' };
+    if (stageTokens.length === 2 && stageTokens[1] === '-c') return { kind: 'uniq', count: true };
+    return null;
+  }
+
   return null;
 }
 
 function _isSyntheticPostFilterCommand(cmd) {
   return !!_parseSyntheticPostFilterCommand(cmd);
+}
+
+function _isSyntheticSortCommand(cmd) {
+  const parsed = _parseSyntheticPostFilterCommand(cmd);
+  return !!(parsed && parsed.kind === 'sort');
+}
+
+function _isSyntheticUniqCommand(cmd) {
+  const parsed = _parseSyntheticPostFilterCommand(cmd);
+  return !!(parsed && parsed.kind === 'uniq');
 }
 
 function _isSyntheticGrepCommand(cmd) {

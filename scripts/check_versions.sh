@@ -32,6 +32,7 @@ NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
 GO_INSTALL_PATTERN = re.compile(r"go install(?:\s+-v)?\s+([^\s@]+)@([^\s\\]+)")
 PIP_INSTALL_PATTERN = re.compile(r"pip install(?:\s+--no-cache-dir)?\s+([A-Za-z0-9_.\-\[\]]+)==([^\s\\]+)")
 GEM_INSTALL_PATTERN = re.compile(r"gem install\s+([A-Za-z0-9_.-]+)\s+-v\s+([^\s\\]+)")
+GITHUB_RELEASE_PATTERN = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/releases/download/([^/\s]+)/")
 GO_STABLE_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
 
 
@@ -157,6 +158,23 @@ def _latest_golang_version(module: str, debug: bool = False) -> str:
         print(f"  debug: go proxy versions={len(raw_versions)} sample={sample}")
         print(f"  debug: go proxy selected={best_version}")
     return best_version
+
+
+def _latest_github_release_version(owner: str, repo: str) -> str:
+    url = f"https://api.github.com/repos/{urllib.parse.quote(owner, safe='')}/{urllib.parse.quote(repo, safe='')}/releases/latest"
+    req = urllib.request.Request(url, headers={"Accept": "application/vnd.github+json", "User-Agent": "check_versions.sh"})
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:
+            payload = json.loads(resp.read().decode("utf-8"))
+    except (urllib.error.URLError, TimeoutError, ValueError):
+        return "unknown"
+    tag = payload.get("tag_name")
+    return tag if isinstance(tag, str) and tag else "unknown"
+
+
+def _strip_v(version: str) -> str:
+    """Strip leading 'v' for version comparison (e.g. v2.4.1 == 2.4.1)."""
+    return version[1:] if version.startswith("v") else version
 
 
 def _load_json(path: pathlib.Path) -> dict:
@@ -322,12 +340,18 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
             ("go", GO_INSTALL_PATTERN),
             ("pip", PIP_INSTALL_PATTERN),
             ("gem", GEM_INSTALL_PATTERN),
+            ("github", GITHUB_RELEASE_PATTERN),
         ):
             if labels is not None and label not in labels:
                 continue
             match = pattern.search(line)
             if match:
-                package, version = match.groups()
+                groups = match.groups()
+                if label == "github":
+                    owner, repo, version = groups
+                    package = f"{owner}/{repo}"
+                else:
+                    package, version = groups
                 pins.append((lineno, label, package, version, line))
     if not pins:
         return
@@ -339,11 +363,14 @@ def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) 
             latest = _latest_pypi_version(package)
         elif label == "gem":
             latest = _latest_rubygems_version(package)
+        elif label == "github":
+            owner, repo = package.split("/", 1)
+            latest = _latest_github_release_version(owner, repo)
         else:
             latest = "unknown"
         if latest == "unknown":
             status = "unknown"
-        elif latest == version:
+        elif _strip_v(latest) == _strip_v(version):
             status = "up-to-date"
         else:
             status = "behind"
@@ -403,6 +430,7 @@ def main() -> int:
     parser.add_argument("--go-only", action="store_true", help="Only report Go tool pins from Dockerfile")
     parser.add_argument("--pip-only", action="store_true", help="Only report pip tool pins from Dockerfile")
     parser.add_argument("--gem-only", action="store_true", help="Only report gem tool pins from Dockerfile")
+    parser.add_argument("--github-only", action="store_true", help="Only report GitHub release pins from Dockerfile")
     parser.add_argument("--debug", action="store_true", help="Print registry lookup details for Go pins")
     args = parser.parse_args()
 
@@ -413,10 +441,11 @@ def main() -> int:
         args.go_only,
         args.pip_only,
         args.gem_only,
+        args.github_only,
     )) > 1:
-        parser.error("--python-only, --node-only, --docker-only, --go-only, --pip-only, and --gem-only are mutually exclusive")
+        parser.error("--python-only, --node-only, --docker-only, --go-only, --pip-only, --gem-only, and --github-only are mutually exclusive")
 
-    if not any((args.python_only, args.node_only, args.docker_only, args.go_only, args.pip_only, args.gem_only)):
+    if not any((args.python_only, args.node_only, args.docker_only, args.go_only, args.pip_only, args.gem_only, args.github_only)):
         _print_python_requirements()
         _print_node_dependencies()
         _print_docker_image()
@@ -434,14 +463,17 @@ def main() -> int:
         _print_dockerfile_pins(labels={"pip"}, debug=args.debug)
     elif args.gem_only:
         _print_dockerfile_pins(labels={"gem"}, debug=args.debug)
+    elif args.github_only:
+        _print_dockerfile_pins(labels={"github"}, debug=args.debug)
 
     print("\nNotes:")
     print("- `pip index versions <package>` requires network access, so unavailable lookups are reported as unknown.")
     print("- The Go check uses the public Go module proxy and only considers stable release tags.")
     print("- The Node check reads package.json/package-lock.json devDependencies and compares them against the npm registry.")
     print("- The Docker check reads the current base image directly from Dockerfile and ignores prerelease tags like alpha and rc builds.")
-    print("- Dockerfile pinned tool versions are reported as inventory, not checked against upstream latest versions.")
-    print("- Use --python-only, --node-only, --docker-only, --go-only, --pip-only, or --gem-only to narrow the output to a single section; add --debug when you want Go proxy lookup details.")
+    print("- Dockerfile pinned tool versions are checked against upstream: go→proxy.golang.org, pip→pypi.org, gem→rubygems.org, github→GitHub releases API.")
+    print("- Version comparisons normalise leading 'v' so v2.4.1 and 2.4.1 are treated as equal.")
+    print("- Use --python-only, --node-only, --docker-only, --go-only, --pip-only, --gem-only, or --github-only to narrow the output; add --debug for Go proxy lookup details.")
     return 0
 
 

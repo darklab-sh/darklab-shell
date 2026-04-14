@@ -146,6 +146,9 @@ async function loadAppFns({
     <div id="options-overlay"></div>
     <button class="options-close"></button>
     <div id="options-modal"></div>
+    <div id="workflows-overlay"></div>
+    <button id="workflows-btn"></button>
+    <button class="workflows-close"></button>
     <select id="options-ts-select">
       <option value="off">off</option>
       <option value="elapsed">elapsed</option>
@@ -294,6 +297,9 @@ async function loadAppFns({
     shareRedactionOverlay: document.getElementById('share-redaction-overlay'),
     faqOverlay: document.getElementById('faq-overlay'),
     optionsOverlay: document.getElementById('options-overlay'),
+    workflowsOverlay: document.getElementById('workflows-overlay'),
+    workflowsBtn: document.getElementById('workflows-btn'),
+    workflowsCloseBtn: document.querySelector('.workflows-close'),
     permalinkToast: document.getElementById('permalink-toast'),
     runTimer: document.getElementById('run-timer'),
     searchCaseBtn: document.getElementById('search-case-btn'),
@@ -462,6 +468,9 @@ async function loadAppFns({
     mobileMenu: document.getElementById('mobile-menu'),
     faqOverlay: document.getElementById('faq-overlay'),
     optionsOverlay: document.getElementById('options-overlay'),
+    workflowsOverlay: document.getElementById('workflows-overlay'),
+    workflowsBtn: document.getElementById('workflows-btn'),
+    workflowsCloseBtn: document.querySelector('.workflows-close'),
     permalinkToast: document.getElementById('permalink-toast'),
     mobileComposerHostEl,
     acDropdown,
@@ -1008,6 +1017,7 @@ describe('app helpers', () => {
       <div id="faq-overlay"></div>
       <button class="faq-close"></button>
       <div class="faq-body"></div>
+      <div id="workflows-overlay"></div>
       <input id="cmd" />
       <div id="history-panel"></div>
       <div id="history-list"></div>

@@ -100,7 +100,23 @@ function _filterAutocompleteItems(items, query) {
 function _buildContextAutocomplete(ctx) {
   const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
   const spec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
-  if (!spec) return [];
+
+  if (!spec) {
+    // Unknown command root — suggest matching command roots from the registry
+    // while the user is still typing the first token (no trailing space yet).
+    if (ctx.tokens.length <= 1 && !ctx.atWhitespace && ctx.commandRoot) {
+      const q = ctx.commandRoot.toLowerCase();
+      return Object.keys(registry)
+        .filter(root => root.toLowerCase().startsWith(q))
+        .map(root => _buildAutocompleteItem({
+          value: root,
+          description: '',
+          replaceStart: ctx.tokenStart,
+          replaceEnd: ctx.tokenEnd,
+        }));
+    }
+    return [];
+  }
 
   const currentLower = ctx.currentToken.toLowerCase();
   const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');

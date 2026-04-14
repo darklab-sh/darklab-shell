@@ -89,6 +89,9 @@ test.describe('FAQ modal', () => {
 
     await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
     await expect(page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first()).toBeVisible()
+
+    // The allowed-commands section is inside a collapsed accordion — expand it first
+    await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
   })
 })

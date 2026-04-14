@@ -182,6 +182,7 @@ body.mobile-terminal-mode { padding: 0; gap: 0; }
 .output,
 .ac-dropdown,
 .faq-body,
+.workflows-body,
 #history-list,
 body.permalink-page .permalink-output {
   scrollbar-width: thin;
@@ -193,6 +194,7 @@ body.permalink-page .permalink-output {
 .output::-webkit-scrollbar,
 .ac-dropdown::-webkit-scrollbar,
 .faq-body::-webkit-scrollbar,
+.workflows-body::-webkit-scrollbar,
 #history-list::-webkit-scrollbar,
 body.permalink-page .permalink-output::-webkit-scrollbar {
   width: 10px;
@@ -202,6 +204,7 @@ body.permalink-page .permalink-output::-webkit-scrollbar {
 .output::-webkit-scrollbar-track,
 .ac-dropdown::-webkit-scrollbar-track,
 .faq-body::-webkit-scrollbar-track,
+.workflows-body::-webkit-scrollbar-track,
 #history-list::-webkit-scrollbar-track,
 body.permalink-page .permalink-output::-webkit-scrollbar-track {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
@@ -210,6 +213,7 @@ body.permalink-page .permalink-output::-webkit-scrollbar-track {
 .output::-webkit-scrollbar-thumb,
 .ac-dropdown::-webkit-scrollbar-thumb,
 .faq-body::-webkit-scrollbar-thumb,
+.workflows-body::-webkit-scrollbar-thumb,
 #history-list::-webkit-scrollbar-thumb,
 body.permalink-page .permalink-output::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--muted) 44%, var(--border-bright));
@@ -220,6 +224,7 @@ body.permalink-page .permalink-output::-webkit-scrollbar-thumb {
 .output::-webkit-scrollbar-thumb:hover,
 .ac-dropdown::-webkit-scrollbar-thumb:hover,
 .faq-body::-webkit-scrollbar-thumb:hover,
+.workflows-body::-webkit-scrollbar-thumb:hover,
 #history-list::-webkit-scrollbar-thumb:hover,
 body.permalink-page .permalink-output::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--text) 38%, var(--border-bright));
@@ -519,6 +524,7 @@ body.mobile-terminal-mode .output-follow-btn {
 #faq-btn,
 #theme-btn,
 #options-btn,
+#workflows-btn,
 #diag-btn {
   background: transparent;
   border: 1px solid var(--border-bright);
@@ -535,6 +541,7 @@ body.mobile-terminal-mode .output-follow-btn {
 #faq-btn:hover,
 #theme-btn:hover,
 #options-btn:hover,
+#workflows-btn:hover,
 #diag-btn:hover { border-color: var(--green-dim); color: var(--green); }
 
 /* ── Modals ── */
@@ -570,6 +577,7 @@ body.mobile-terminal-mode .output-follow-btn {
 
 #faq-modal {
   width: min(960px, 92vw);
+  height: 85vh;
 }
 
 #options-modal {
@@ -735,7 +743,8 @@ body.mobile-terminal-mode .output-follow-btn {
   transition: color 0.15s;
 }
 
-.faq-body {
+.faq-body,
+.workflows-body {
   overflow-y: auto;
   padding: 20px;
   display: flex;
@@ -1252,3 +1261,144 @@ body .faq-a code { background: var(--theme-faq-code-bg); }
 body .allowed-chip { background: var(--theme-allowed-chip-bg); }
 body .options-select { background: var(--theme-options-select-bg); }
 body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
+
+/* ── FAQ accordion ────────────────────────────────────────────────── */
+#faq-modal .faq-body .faq-item .faq-q {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+  gap: 16px;
+}
+#faq-modal .faq-body .faq-item .faq-q::after {
+  content: '+';
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--green-dim);
+  min-width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+#faq-modal .faq-body .faq-item.faq-open .faq-q::after {
+  content: '−';
+  color: var(--green);
+}
+#faq-modal .faq-body .faq-item .faq-q:hover {
+  color: var(--text);
+}
+#faq-modal .faq-body .faq-item .faq-q:hover::after {
+  color: var(--green);
+}
+#faq-modal .faq-body .faq-item .faq-a {
+  display: none;
+  margin-top: 10px;
+}
+#faq-modal .faq-body .faq-item.faq-open .faq-a {
+  display: block;
+}
+
+/* ── Workflows overlay & modal ────────────────────────────────────── */
+#workflows-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--theme-overlay-backdrop-bg);
+  z-index: 320;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(3px);
+}
+#workflows-overlay.open { display: flex; }
+
+#workflows-modal {
+  width: min(960px, 92vw);
+  background: var(--theme-faq-modal-bg);
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 6px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px var(--theme-panel-shadow);
+}
+
+.workflows-close {
+  margin-left: auto;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px 6px;
+  transition: color 0.15s;
+}
+.workflows-close:hover { color: var(--text); }
+
+/* ── Workflow cards ───────────────────────────────────────────────── */
+.workflow-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+
+.workflow-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.workflow-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.workflow-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  counter-reset: workflow-step;
+}
+
+.workflow-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 10px;
+  counter-increment: workflow-step;
+}
+
+.workflow-step::before {
+  content: counter(workflow-step) '.';
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  min-width: 14px;
+  padding-top: 3px;
+  flex-shrink: 0;
+}
+
+.workflow-step-cmd {
+  flex-shrink: 0;
+}
+
+.workflow-step-note {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  padding-top: 2px;
+}

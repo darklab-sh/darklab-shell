@@ -113,6 +113,7 @@ const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && perma
 const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay ? killOverlay.parentElement : null;
 const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
 const _shareRedactionOverlayHomeParent = typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay.parentElement : null;
+const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
@@ -187,6 +188,7 @@ const _mobileUiLayoutRefs = _getMobileUiLayoutRefs();
 const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
+  workflowsOverlay: typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay : null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
@@ -273,7 +275,8 @@ const _mobileShellOverlayNodes = [
   { node: shareRedactionOverlay, homeParent: _shareRedactionOverlayHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
-  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: null },
+  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
+  { node: workflowsOverlay, homeParent: _workflowsOverlayHomeParent, desktopAnchor: null },
 ];
 
 function syncMobileShellChromeLayout(useMobile, mobileShellChromeMount) {
@@ -494,6 +497,7 @@ function applyShareRedactionDefaultPreference(mode, persist = true) {
 
 function _closeMajorOverlays() {
   if (isHistoryPanelOpen()) hideHistoryPanel();
+  if (isWorkflowsOverlayOpen()) hideWorkflowsOverlay();
   if (isFaqOverlayOpen()) hideFaqOverlay();
   if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
@@ -1636,7 +1640,8 @@ function renderFaqLimits(cfg) {
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
   setComposerValue(cmd + ' ');
-  closeFaq();
+  _closeMajorOverlays();
+  refocusTerminalInput();
 }
 
 function wireFaqCommandChips(root = faqBody) {
@@ -1731,12 +1736,83 @@ function renderFaqItems(items) {
       a.textContent = item.answer || '';
     }
 
+    q.setAttribute('role', 'button');
+    q.setAttribute('tabindex', '0');
+    q.setAttribute('aria-expanded', 'false');
+    q.addEventListener('click', () => {
+      const open = div.classList.toggle('faq-open');
+      q.setAttribute('aria-expanded', String(open));
+    });
+    q.addEventListener('keydown', e => {
+      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); q.click(); }
+    });
+
     div.appendChild(q);
     div.appendChild(a);
     faqBody.appendChild(div);
   });
 
+  const firstItem = faqBody.querySelector('.faq-item');
+  if (firstItem) {
+    firstItem.classList.add('faq-open');
+    const firstQ = firstItem.querySelector('.faq-q');
+    if (firstQ) firstQ.setAttribute('aria-expanded', 'true');
+  }
+
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);
   wireFaqCommandChips(faqBody);
+}
+
+function renderWorkflowItems(items) {
+  const body = document.querySelector('.workflows-body');
+  if (!body) return;
+  body.innerHTML = '';
+  (items || []).forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'workflow-card';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'workflow-title';
+    titleEl.textContent = item.title || '';
+    card.appendChild(titleEl);
+
+    if (item.description) {
+      const desc = document.createElement('div');
+      desc.className = 'workflow-desc';
+      desc.textContent = item.description;
+      card.appendChild(desc);
+    }
+
+    const steps = item.steps || [];
+    if (steps.length) {
+      const stepsEl = document.createElement('ol');
+      stepsEl.className = 'workflow-steps';
+      steps.forEach(step => {
+        const li = document.createElement('li');
+        li.className = 'workflow-step';
+
+        const chip = document.createElement('span');
+        chip.className = 'allowed-chip faq-chip workflow-step-cmd';
+        chip.textContent = step.cmd || '';
+        chip.title = 'Click to load into prompt';
+        chip.dataset.faqCommand = step.cmd || '';
+        li.appendChild(chip);
+
+        if (step.note) {
+          const note = document.createElement('span');
+          note.className = 'workflow-step-note';
+          note.textContent = step.note;
+          li.appendChild(note);
+        }
+
+        stepsEl.appendChild(li);
+      });
+      card.appendChild(stepsEl);
+    }
+
+    body.appendChild(card);
+  });
+
+  wireFaqCommandChips(body);
 }

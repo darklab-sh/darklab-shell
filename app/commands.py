@@ -16,8 +16,9 @@ import yaml
 _HERE = os.path.dirname(__file__)
 _CONF = os.path.join(_HERE, "conf")
 ALLOWED_COMMANDS_FILE = os.path.join(_CONF, "allowed_commands.txt")
-AUTOCOMPLETE_CONTEXT_FILE = os.path.join(_CONF, "autocomplete_context.yaml")
+AUTOCOMPLETE_CONTEXT_FILE = os.path.join(_CONF, "autocomplete.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
+WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
 ASCII_FILE            = os.path.join(_CONF, "ascii.txt")
 ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
@@ -64,8 +65,10 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 " These are provided directly by the shell.<br><br>"
                 "<strong>Commands with built-in pipe support</strong> let you trim output with one "
                 "supported pipe stage, for example <code>command | grep pattern</code>, "
-                "<code>command | head -n 20</code>, <code>command | tail -n 20</code>, or "
-                "<code>command | wc -l</code>.<br><br>"
+                "<code>command | head -n 20</code>, <code>command | head -20</code>, "
+                "<code>command | tail -n 20</code>, <code>command | tail -20</code>, "
+                "<code>command | wc -l</code>, <code>command | sort -rn</code>, or "
+                "<code>command | uniq -c</code>.<br><br>"
                 "Only one supported pipe stage can be used per command. General shell piping, "
                 "chaining, and redirection are still blocked."
             ),
@@ -246,6 +249,21 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "isn't available in a web shell. It automatically runs in <code>--report-wide</code> "
                 "mode here, printing 10 probe cycles and a summary table. You can change the cycle "
                 "count with <code>-c</code>, e.g. <code class=\"faq-example\">mtr -c 20 google.com</code>"
+            ),
+        },
+        {
+            "question": "Why does naabu use connect scan mode?",
+            "answer": (
+                "naabu defaults to raw SYN scanning which requires libpcap and elevated privileges "
+                "not reliably available inside the container. It automatically runs with -scan-type c "
+                "instead, using TCP connect scanning like nmap -sT. Results are the same."
+            ),
+            "answer_html": (
+                "<code>naabu</code> defaults to raw SYN packet scanning via libpcap, which requires "
+                "privileges that aren't reliably available in this environment. It automatically runs "
+                "with <code>-scan-type c</code>, switching to TCP connect mode (equivalent to "
+                "<code>nmap -sT</code>). Open ports are detected the same way — only the underlying "
+                "method differs."
             ),
         },
     ]
@@ -429,7 +447,7 @@ def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, s
 
 
 def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
-    """Parse narrow app-native head/tail helpers with default count or -n."""
+    """Parse narrow app-native head/tail helpers with default count, -n, or -<number>."""
     command_name = stage_tokens[0].lower()
     if command_name not in {"head", "tail"}:
         return None, None
@@ -437,8 +455,12 @@ def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | No
     count = 10
     if len(stage_tokens) == 1:
         return {"kind": command_name, "count": count}, None
+
+    if len(stage_tokens) == 2 and stage_tokens[1].startswith('-') and stage_tokens[1][1:].isdigit():
+        return {"kind": command_name, "count": int(stage_tokens[1][1:])}, None
+
     if len(stage_tokens) != 3 or stage_tokens[1] != "-n":
-        return None, f"Synthetic {command_name} supports only `-n <count>` in phase 1."
+        return None, f"Synthetic {command_name} supports only `-n <count>` or `-<count>` in phase 1."
     if not stage_tokens[2].isdigit():
         return None, f"Synthetic {command_name} requires a non-negative numeric count."
 
@@ -452,6 +474,35 @@ def _parse_synthetic_wc_stage(stage_tokens: list[str]) -> tuple[dict | None, str
     if stage_tokens[1:] == ["-l"]:
         return {"kind": "wc_l"}, None
     return None, "Synthetic wc supports only `wc -l` in phase 1."
+
+
+_SORT_VALID_FLAGS = frozenset("rnu")
+
+
+def _parse_synthetic_sort_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    """Parse the narrow app-native sort helper. Supports -r, -n, -u in any combination."""
+    if stage_tokens[0].lower() != "sort":
+        return None, None
+    if len(stage_tokens) == 1:
+        return {"kind": "sort", "reverse": False, "numeric": False, "unique": False}, None
+    if len(stage_tokens) == 2:
+        flag = stage_tokens[1]
+        if flag.startswith('-') and flag[1:] and set(flag[1:]).issubset(_SORT_VALID_FLAGS):
+            chars = set(flag[1:])
+            return {"kind": "sort", "reverse": "r" in chars,
+                    "numeric": "n" in chars, "unique": "u" in chars}, None
+    return None, "Synthetic sort supports only -r, -n, and -u flags in phase 1."
+
+
+def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    """Parse the narrow app-native uniq helper. Supports uniq and uniq -c."""
+    if stage_tokens[0].lower() != "uniq":
+        return None, None
+    if len(stage_tokens) == 1:
+        return {"kind": "uniq", "count": False}, None
+    if len(stage_tokens) == 2 and stage_tokens[1] == "-c":
+        return {"kind": "uniq", "count": True}, None
+    return None, "Synthetic uniq supports only -c in phase 1."
 
 
 def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
@@ -489,6 +540,8 @@ def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
         _parse_synthetic_grep_stage,
         _parse_synthetic_head_tail_stage,
         _parse_synthetic_wc_stage,
+        _parse_synthetic_sort_stage,
+        _parse_synthetic_uniq_stage,
     ):
         spec, error = parser(stage_tokens)
         if spec or error:
@@ -584,6 +637,97 @@ def load_faq():
 def load_all_faq(app_name="darklab shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
     return [*(deepcopy(_builtin_faq(app_name, project_readme))), *load_faq()]
+
+
+def _builtin_workflows():
+    return [
+        {
+            "title": "DNS Troubleshooting",
+            "description": "Diagnose why a domain isn't resolving or returns unexpected results.",
+            "steps": [
+                {"cmd": "dig darklab.sh A",          "note": "Does it resolve? Check the ANSWER section."},
+                {"cmd": "dig darklab.sh NS",          "note": "Which nameservers are authoritative?"},
+                {"cmd": "dig @8.8.8.8 darklab.sh A", "note": "Does a public resolver see it differently?"},
+                {"cmd": "dig darklab.sh +trace",      "note": "Trace delegation step by step from the root."},
+                {"cmd": "dig darklab.sh MX",          "note": "Check mail exchanger records."},
+            ],
+        },
+        {
+            "title": "TLS / HTTPS Check",
+            "description": "Verify a domain's certificate, chain, and TLS configuration.",
+            "steps": [
+                {"cmd": "curl -Iv https://darklab.sh",
+                 "note": "Check response headers and certificate details."},
+                {"cmd": "openssl s_client -connect darklab.sh:443",
+                 "note": "Inspect the raw TLS handshake and certificate chain."},
+                {"cmd": "testssl darklab.sh",
+                 "note": "Run a full TLS audit including ciphers and known vulnerabilities."},
+            ],
+        },
+        {
+            "title": "HTTP Triage",
+            "description": "Investigate what a web server is returning.",
+            "steps": [
+                {"cmd": "curl -sIL https://darklab.sh",
+                 "note": "Follow redirects and inspect the final response headers."},
+                {"cmd": "curl -sv -o /dev/null https://darklab.sh| head -60",
+                 "note": "Verbose output with timing, TLS detail, and headers."},
+                {"cmd": "wget -S --spider https://darklab.sh",
+                 "note": "Spider check with full server response headers."},
+            ],
+        },
+        {
+            "title": "Quick Reachability Check",
+            "description": "Confirm a host is up and identify which ports are open.",
+            "steps": [
+                {"cmd": "ping -c 4 darklab.sh",    "note": "Is the host reachable? Check latency and packet loss."},
+                {"cmd": "nc -zv darklab.sh 443",   "note": "Is HTTPS open and accepting connections?"},
+                {"cmd": "nmap -F darklab.sh",      "note": "Fast scan of the 100 most common ports."},
+            ],
+        },
+        {
+            "title": "Email Server Check",
+            "description": "Verify mail delivery configuration for a domain.",
+            "steps": [
+                {"cmd": "dig darklab.sh MX",       "note": "Which mail servers handle email for this domain?"},
+                {"cmd": "dig darklab.sh TXT",      "note": "Check SPF, DKIM policy, and other TXT records."},
+                {"cmd": "nc -zv darklab.sh 25",    "note": "Is SMTP port 25 open?"},
+                {"cmd": "nc -zv darklab.sh 587",   "note": "Is the submission port 587 open?"},
+            ],
+        },
+    ]
+
+
+def load_workflows():
+    """Read workflows.yaml and return a list of workflow dicts."""
+    data = _load_yaml_list_with_local(WORKFLOWS_FILE)
+    if not data:
+        return []
+    result = []
+    for entry in data:
+        if not isinstance(entry, dict):
+            continue
+        title = str(entry.get("title") or "").strip()
+        description = str(entry.get("description") or "").strip()
+        steps = entry.get("steps") or []
+        if not title or not isinstance(steps, list):
+            continue
+        clean_steps = []
+        for step in steps:
+            if not isinstance(step, dict):
+                continue
+            cmd = str(step.get("cmd") or "").strip()
+            note = str(step.get("note") or "").strip()
+            if cmd:
+                clean_steps.append({"cmd": cmd, "note": note})
+        if clean_steps:
+            result.append({"title": title, "description": description, "steps": clean_steps})
+    return result
+
+
+def load_all_workflows():
+    """Return the built-in workflows followed by any custom workflows.yaml entries."""
+    return [*_builtin_workflows(), *load_workflows()]
 
 
 def load_welcome():
@@ -786,16 +930,15 @@ def _normalize_autocomplete_context(data):
         pipe_label = str(raw_spec.get("pipe_label") or "").strip() or pipe_insert_value
         pipe_description = str(raw_spec.get("pipe_description") or "").strip()
 
-        if flags or expects_value or arg_hints or pipe_command or pipe_insert_value or pipe_label or pipe_description:
-            normalized[root] = {
-                "flags": flags,
-                "expects_value": expects_value,
-                "arg_hints": arg_hints,
-                "pipe_command": pipe_command,
-                "pipe_insert_value": pipe_insert_value,
-                "pipe_label": pipe_label,
-                "pipe_description": pipe_description,
-            }
+        normalized[root] = {
+            "flags": flags,
+            "expects_value": expects_value,
+            "arg_hints": arg_hints,
+            "pipe_command": pipe_command,
+            "pipe_insert_value": pipe_insert_value,
+            "pipe_label": pipe_label,
+            "pipe_description": pipe_description,
+        }
     return normalized
 
 
@@ -916,7 +1059,17 @@ def _flag_matches_token(flag: str, token: str) -> bool:
     if flag.startswith("--"):
         return token == flag
     if len(flag) == 2 and flag[0] == '-' and flag[1].isalpha():
-        return token.startswith('-') and not token.startswith('--') and flag[1] in token[1:]
+        if token == flag:
+            return True
+        # Combined short-flag group matching: `-ve` matches `-e`, `-sOL` matches `-O`.
+        # Only applies when the token looks like a POSIX short-flag bundle:
+        # single dash, all-alphabetic, at most 4 chars (e.g. -ef, -sVT).
+        # Tokens of 5+ chars (e.g. -host, -timeout, -list) are long-form single-dash
+        # options used by many non-POSIX tools and must match exactly.
+        if (token.startswith('-') and not token.startswith('--')
+                and len(token) <= 4 and token[1:].isalpha()):
+            return flag[1] in token[1:]
+        return False
     return token == flag
 
 
@@ -1031,5 +1184,12 @@ def rewrite_command(command: str) -> tuple[str, str | None]:
         if not re.search(r'\-o\b|--output\b', stripped):
             notice = "Note: wapiti output is being redirected to the terminal (-f txt -o /dev/stdout)."
             return stripped + ' -f txt -o /dev/stdout', notice
+
+    # naabu: force connect scan mode so it uses TCP connect() instead of raw SYN packets.
+    # Raw packet scanning via libpcap/gopacket requires elevated privileges that are
+    # not reliably available inside the container; connect mode works like nmap -sT.
+    if re.match(r'^naabu\b', stripped, re.IGNORECASE):
+        if not re.search(r'-scan-type\b|-st\b', stripped):
+            return re.sub(r'^naabu\b', 'naabu -scan-type c', stripped, flags=re.IGNORECASE), None
 
     return stripped, None

@@ -9,6 +9,7 @@ from flask import Blueprint, Response, jsonify, render_template, request
 import config as _config
 from commands import (
     load_all_faq,
+    load_all_workflows,
     load_allowed_commands,
     load_allowed_commands_grouped,
     load_ascii_art,
@@ -189,6 +190,14 @@ def faq():
     """Return built-in FAQ entries plus any custom faq.yaml entries."""
     items = load_all_faq(_config.CFG["app_name"], _config.PROJECT_README)
     _log_content_view("/faq", count=len(items))
+    return jsonify({"items": items})
+
+
+@content_bp.route("/workflows")
+def workflows():
+    """Return built-in workflow entries plus any custom workflows.yaml entries."""
+    items = load_all_workflows()
+    _log_content_view("/workflows", count=len(items))
     return jsonify({"items": items})
 
 

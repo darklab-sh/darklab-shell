@@ -21,6 +21,14 @@ const { _isSyntheticWcLineCountCommand } = fromScript(
   'app/static/js/runner.js',
   '_isSyntheticWcLineCountCommand',
 )
+const { _isSyntheticSortCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticSortCommand',
+)
+const { _isSyntheticUniqCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticUniqCommand',
+)
 
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
@@ -58,6 +66,11 @@ describe('_isSyntheticGrepCommand', () => {
     expect(_isSyntheticGrepCommand("ping darklab.sh | grep -E 'ttl|time'")).toBe(true)
   })
 
+  it('accepts no-space pipe variants', () => {
+    expect(_isSyntheticGrepCommand('ping darklab.sh|grep ttl')).toBe(true)
+    expect(_isSyntheticGrepCommand('ping darklab.sh|grep -i ttl')).toBe(true)
+  })
+
   it('rejects unsupported shell operator forms', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | cat')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -n ttl')).toBe(false)
@@ -70,15 +83,65 @@ describe('other synthetic post-filters', () => {
   it('accepts the narrow head/tail/wc forms', () => {
     expect(_isSyntheticHeadCommand('ping darklab.sh | head')).toBe(true)
     expect(_isSyntheticHeadCommand('ping darklab.sh | head -n 5')).toBe(true)
+    expect(_isSyntheticHeadCommand('ping darklab.sh | head -5')).toBe(true)
     expect(_isSyntheticTailCommand('ping darklab.sh | tail')).toBe(true)
     expect(_isSyntheticTailCommand('ping darklab.sh | tail -n 5')).toBe(true)
+    expect(_isSyntheticTailCommand('ping darklab.sh | tail -5')).toBe(true)
     expect(_isSyntheticWcLineCountCommand('ping darklab.sh | wc -l')).toBe(true)
   })
 
+  it('accepts no-space pipe variants', () => {
+    expect(_isSyntheticHeadCommand('ping darklab.sh|head')).toBe(true)
+    expect(_isSyntheticHeadCommand('ping darklab.sh|head -n 5')).toBe(true)
+    expect(_isSyntheticHeadCommand('ping darklab.sh|head -5')).toBe(true)
+    expect(_isSyntheticTailCommand('ping darklab.sh|tail')).toBe(true)
+    expect(_isSyntheticTailCommand('ping darklab.sh|tail -n 5')).toBe(true)
+    expect(_isSyntheticTailCommand('ping darklab.sh|tail -5')).toBe(true)
+    expect(_isSyntheticWcLineCountCommand('ping darklab.sh|wc -l')).toBe(true)
+  })
+
   it('rejects unsupported forms', () => {
-    expect(_isSyntheticHeadCommand('ping darklab.sh | head -5')).toBe(false)
+    expect(_isSyntheticHeadCommand('ping darklab.sh | head -abc')).toBe(false)
     expect(_isSyntheticTailCommand('ping darklab.sh | tail -n five')).toBe(false)
     expect(_isSyntheticWcLineCountCommand('ping darklab.sh | wc -c')).toBe(false)
+  })
+})
+
+describe('sort and uniq synthetic post-filters', () => {
+  it('accepts sort with no flags', () => {
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh|sort')).toBe(true)
+  })
+
+  it('accepts sort with valid flag combinations', () => {
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -r')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -n')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -u')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -rn')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -ru')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -nu')).toBe(true)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -rnu')).toBe(true)
+  })
+
+  it('rejects invalid sort flags', () => {
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -x')).toBe(false)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -rk')).toBe(false)
+    expect(_isSyntheticSortCommand('ping darklab.sh | sort -n 5')).toBe(false)
+  })
+
+  it('accepts uniq with no flags', () => {
+    expect(_isSyntheticUniqCommand('ping darklab.sh | uniq')).toBe(true)
+    expect(_isSyntheticUniqCommand('ping darklab.sh|uniq')).toBe(true)
+  })
+
+  it('accepts uniq -c', () => {
+    expect(_isSyntheticUniqCommand('ping darklab.sh | uniq -c')).toBe(true)
+    expect(_isSyntheticUniqCommand('ping darklab.sh|uniq -c')).toBe(true)
+  })
+
+  it('rejects unsupported uniq flags', () => {
+    expect(_isSyntheticUniqCommand('ping darklab.sh | uniq -d')).toBe(false)
+    expect(_isSyntheticUniqCommand('ping darklab.sh | uniq -u')).toBe(false)
   })
 })
 

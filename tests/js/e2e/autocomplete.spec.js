@@ -10,24 +10,30 @@ test.describe('autocomplete', () => {
 
   test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({ page }) => {
     const input = page.locator('#cmd')
-    await input.fill('nmap')
+    // Start with a partial flag so contextual suggestions are visible
+    await setComposerValueForTest(page, 'nmap -')
 
     const dropdown = page.locator('#ac-dropdown')
-    await expect(dropdown).toBeVisible()
-    await expect(dropdown).toContainText('nmap -h')
+    await expect.poll(async () => ({
+      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
+      text: (await dropdown.textContent()) || '',
+    })).toEqual(expect.objectContaining({
+      hidden: false,
+      text: expect.stringContaining('-sT'),
+    }))
     await expect(dropdown).not.toContainText('man nmap')
 
     await page.keyboard.press('ArrowDown')
-    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('nmap -h')
+    await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('-h')
 
+    // Tab tries shared prefix expansion; prefix is already '-' so it cycles
+    // the selection forward by one to -sT instead
     await page.keyboard.press('Tab')
     await expect(input).toHaveValue('nmap -')
     await expect(dropdown).toBeVisible()
-    await expect(dropdown).toContainText('-sV')
-
-    await page.keyboard.press('ArrowDown')
     await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('-sT')
 
+    // Accept the reselected suggestion
     await page.keyboard.press('Enter')
     await expect(input).toHaveValue('nmap -sT')
     await expect(dropdown).toBeHidden()
@@ -43,7 +49,7 @@ test.describe('autocomplete', () => {
       text: (await dropdown.textContent()) || '',
     })).toEqual(expect.objectContaining({
       hidden: false,
-      text: expect.stringContaining('whois 8.8.8.8'),
+      text: expect.stringContaining('whois'),
     }))
 
     await page.mouse.click(8, 8)
@@ -67,6 +73,7 @@ test.describe('autocomplete', () => {
     await expect(dropdown).toContainText('Service/version detection')
     await expect(dropdown).not.toContainText('man nmap')
 
+    await page.keyboard.press('ArrowDown')
     await page.keyboard.press('ArrowDown')
     await expect(dropdown.locator('.ac-item.ac-active').first()).toContainText('-sT')
 

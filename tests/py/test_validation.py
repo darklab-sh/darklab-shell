@@ -249,10 +249,20 @@ class TestSyntheticPostFilterParsing:
             "base_command": "ping darklab.sh",
         }
 
-    def test_rejects_invalid_head_flags(self):
+    def test_parses_head_with_short_count_flag(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | head -5")
+        assert err is None
+        assert spec == {"kind": "head", "count": 5, "base_command": "ping darklab.sh"}
+
+    def test_parses_tail_with_short_count_flag(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -20")
+        assert err is None
+        assert spec == {"kind": "tail", "count": 20, "base_command": "ping darklab.sh"}
+
+    def test_rejects_invalid_head_flags(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | head -n")
         assert spec is None
-        assert err == "Synthetic head supports only `-n <count>` in phase 1."
+        assert err == "Synthetic head supports only `-n <count>` or `-<count>` in phase 1."
 
     def test_rejects_non_numeric_tail_count(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -n five")
@@ -263,6 +273,51 @@ class TestSyntheticPostFilterParsing:
         spec, err = parse_synthetic_postfilter("ping darklab.sh | wc -c")
         assert spec is None
         assert err == "Synthetic wc supports only `wc -l` in phase 1."
+
+    def test_parses_sort_default(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | sort")
+        assert err is None
+        assert spec == {"kind": "sort", "reverse": False, "numeric": False, "unique": False,
+                        "base_command": "ping darklab.sh"}
+
+    def test_parses_sort_flags(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -rn")
+        assert err is None
+        assert spec is not None
+        assert spec["reverse"] is True and spec["numeric"] is True and spec["unique"] is False
+
+    def test_parses_sort_unique(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -u")
+        assert err is None
+        assert spec is not None
+        assert spec["unique"] is True
+
+    def test_parses_sort_all_flags(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -rnu")
+        assert err is None
+        assert spec is not None
+        assert spec["reverse"] is True and spec["numeric"] is True and spec["unique"] is True
+
+    def test_rejects_invalid_sort_flags(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -x")
+        assert spec is None
+        assert err == "Synthetic sort supports only -r, -n, and -u flags in phase 1."
+
+    def test_parses_uniq_default(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq")
+        assert err is None
+        assert spec == {"kind": "uniq", "count": False, "base_command": "ping darklab.sh"}
+
+    def test_parses_uniq_count(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq -c")
+        assert err is None
+        assert spec is not None
+        assert spec["count"] is True
+
+    def test_rejects_invalid_uniq_flags(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq -d")
+        assert spec is None
+        assert err == "Synthetic uniq supports only -c in phase 1."
 
 
 # ── Deny prefix (!) ───────────────────────────────────────────────────────────

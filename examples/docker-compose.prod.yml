@@ -13,6 +13,15 @@ services:
       - WEB_THREADS=${WEB_THREADS:-4}
       - VIRTUAL_HOST=shell.darklab.sh
       - LETSENCRYPT_HOST=shell.darklab.sh
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
+    sysctls:
+      net.ipv4.ip_local_port_range: "1024 65535"   # default is ~32768-60999; wider = more source ports
+      net.ipv4.tcp_tw_reuse: 1                      # you already have this
+      net.ipv4.tcp_fin_timeout: 15                   # you already have this
+      net.ipv4.tcp_max_tw_buckets: 131072            # raise TIME_WAIT ceiling before kernel starts dropping
     logging:
       driver: gelf
       options:

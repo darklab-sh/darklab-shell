@@ -393,6 +393,9 @@
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
   };
   global.isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanel);
+  global.showWorkflowsOverlay = () => showPanelOverlay(workflowsOverlay || null);
+  global.hideWorkflowsOverlay = () => hidePanelOverlay(workflowsOverlay || null);
+  global.isWorkflowsOverlayOpen = () => isPanelOverlayOpen(workflowsOverlay || null);
   global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
   global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
   global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
