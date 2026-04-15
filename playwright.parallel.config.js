@@ -34,6 +34,9 @@ const specWeights = {
   'boot-resilience.spec.js': 4,
   'ui.spec.js': 5,
   'failure-paths.spec.js': 6,
+  // Demo recording specs skip immediately unless RUN_DEMO=1 is set.
+  'demo.spec.js': 1,
+  'demo.mobile.spec.js': 1,
 }
 
 const weightedSpecs = [...allSpecFiles]

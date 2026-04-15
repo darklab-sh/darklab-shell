@@ -35,7 +35,8 @@
 #        scripts/container_smoke_test.sh
 #
 # Usage:
-#   scripts/capture_container_smoke_test_outputs.sh                        # capture all
+#   scripts/capture_container_smoke_test_outputs.sh                        # capture all examples from autocomplete.yaml
+#   scripts/capture_container_smoke_test_outputs.sh --commands-file /tmp/missing.txt  # capture a specific subset
 #   scripts/capture_container_smoke_test_outputs.sh --start-from-command "nmap -h"
 #   scripts/capture_container_smoke_test_outputs.sh --base-url http://localhost:9000
 #

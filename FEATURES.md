@@ -7,6 +7,7 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 ## Contents
 
 - [Shell Prompt](#shell-prompt)
+- [Recent Commands](#recent-commands)
 - [Autocomplete](#autocomplete)
 - [Reverse-History Search](#reverse-history-search)
 - [Keyboard Shortcuts](#keyboard-shortcuts)
@@ -26,10 +27,12 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 - [Welcome Animation](#welcome-animation)
 - [Custom FAQ](#custom-faq)
 - [Theme Selector](#theme-selector)
+- [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
 - [Operator Diagnostics](#operator-diagnostics)
+- [Related Docs](#related-docs)
 
 ---
 
@@ -43,6 +46,12 @@ The shell maintains a terminal-style prompt flow throughout each session:
 - After highlighting transcript text on desktop, **ArrowUp**, **ArrowDown**, **Enter**, and **Ctrl+R** return control to the prompt without clearing the selection
 
 While a command is running the live input prompt hides so output has full focus. Once the command completes the prompt reappears immediately.
+
+---
+
+## Recent Commands
+
+A row of clickable command chips appears below the prompt after the first command is run. Clicking a chip loads that command into the prompt without running it, so you can re-run or edit it quickly. The row shows the most recent distinct commands up to the `recent_commands_limit` configured in `config.yaml` (default 8). The row is hidden until there is at least one command in history and updates live as commands are run.
 
 ---
 
@@ -205,9 +214,12 @@ To update suggestions, edit `conf/autocomplete.yaml` and/or `conf/autocomplete.l
 
 `Ctrl+R` opens an interactive history search mode inline at the prompt:
 
-- Typing filters prior commands in real time without leaving the input
+- The dropdown does not appear until the first character is typed
+- Typing filters commands from the full session history in real time — the search queries the same server-side history the history drawer uses, so commands from earlier in the session or previous days are always reachable
+- Results are capped at 10; narrowing the query further surfaces deeper matches
 - **Enter** accepts the highlighted command and runs it immediately
 - **Tab** accepts the highlighted command without running it, leaving it editable in the prompt
+- **Ctrl+R** again cycles forward through the current matches
 - **Escape** dismisses the search and restores whatever draft was in the prompt before `Ctrl+R` was pressed
 
 ---
@@ -234,6 +246,7 @@ Shipped app-safe shortcuts:
 | `Ctrl+E` | Move cursor to end of line | Readline-style editing |
 | `Ctrl+U` | Delete from cursor to start of line | Readline-style editing |
 | `Ctrl+K` | Delete from cursor to end of line | Readline-style editing |
+| `Ctrl+W` | Delete one word to the left | Readline-style editing |
 | `Option+B` / `Option+F` (`Alt+B` / `Alt+F`) | Move backward / forward by word | Readline-style editing |
 | `Ctrl+R` | Reverse-history search | Type to filter; Enter runs; Tab accepts without running; Escape restores draft |
 
@@ -336,7 +349,7 @@ Three actions are available from the tab action bar:
 
 ## Tabs & Run History
 
-Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed, amber = killed) and is labelled with the last command that was run in it. The prompt input stays neutral when switching tabs (no automatic repopulation), so drafts do not leak across tabs. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, use the tab-scroll arrows or drag tabs to reorder.
+Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed or killed) and is labelled with the last command that was run in it. Double-click a tab label to rename it inline. Draft input is preserved per tab — switching away and back restores whatever you had typed without losing it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, use the tab-scroll arrows or drag tabs to reorder.
 
 The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as a normal styled prompt line followed by the results. Each entry has a toggleable **star** to the left of the command plus three actions: **copy** (copies the command text to the clipboard), **permalink** (copies the canonical `/history/<run_id>` link for that saved run), and **delete**. Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions. Large history restores show an in-drawer loading overlay so slower machines do not look hung while the preview is fetched and rendered.
 
@@ -350,7 +363,7 @@ If the page reloads while a command is still running, the shell restores a runni
 
 Non-running tabs are restored separately from browser `sessionStorage`. That restore path brings back tab labels, transcript previews, statuses, and saved draft input for the current browser session, and restored completed tabs remount a usable live prompt immediately so you can continue working without tab-switching to wake the prompt back up.
 
-On mobile, the search, history, theme, and FAQ buttons are accessible via the **☰** menu in the top-right corner of the header.
+On mobile, the **☰** menu in the top-right corner of the header provides access to all toolbar actions including search, history, options, theme, workflows, and FAQ.
 
 ---
 
@@ -408,7 +421,7 @@ Both types persist across container restarts via the `./data` SQLite volume. The
 
 When creating a share snapshot, the shell can prompt whether to share raw or redacted output. A built-in redaction baseline masks common secrets and infrastructure details; operators can append custom regex rules on top.
 
-Once you choose raw or redacted, that preference can be saved as a persistent default in Options so subsequent share actions skip the prompt and reuse the same choice. The default applies consistently whether sharing is triggered from the prompt flow or the Options modal.
+Once you choose raw or redacted, that preference can be saved as a persistent default in the [Options modal](#options-modal) so subsequent share actions skip the prompt and reuse the same choice. The default applies consistently whether sharing is triggered from the prompt flow or directly from the Options modal.
 
 Redaction applies only to the snapshot — the stored run history is never modified.
 
@@ -419,12 +432,12 @@ Redaction applies only to the snapshot — the stored run history is never modif
 On touch-sized screens the app switches to a dedicated mobile layout:
 
 - **Mobile composer dock** — a visible composer with its own Run button replaces the desktop inline input
-- **Keyboard helper row** — a row of touch targets above the keyboard provides `Home`, `End`, single-character left/right moves, word-left / word-right jumps, and delete-word without requiring a hardware keyboard
+- **Keyboard helper row** — a row of touch targets above the keyboard provides `Home`, `End`, single-character left/right moves, word-left / word-right jumps, delete-word, and delete-line without requiring a hardware keyboard
 - **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible
 - **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions
 - **Shared state** — desktop and mobile Run buttons are kept in sync: both disable together for blank prompts and running tabs
 
-On mobile, the search, history, theme, and FAQ buttons are accessible via the **☰** menu in the top-right corner of the header. The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+On mobile, the **☰** menu in the top-right corner of the header provides access to: search, history, options, line numbers toggle, timestamps toggle, theme, workflows, FAQ, and the diagnostics page (for IPs in `diagnostics_allowed_cidrs`). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
 
 ---
 
@@ -544,7 +557,7 @@ On touch-sized screens the welcome flow uses `app/conf/ascii_mobile.txt` and `ap
 
 If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt`, `app_hints.txt`, `ascii_mobile.txt`, or `app_hints_mobile.txt` are absent, those parts are skipped as well.
 
-An optional message of the day (`motd`) can also be configured in `config.yaml` to display below the welcome sequence. The MOTD supports lightweight formatting and links.
+An optional message of the day (`motd`) can also be configured in `config.yaml` to display below the welcome sequence. It supports `**bold**`, `` `inline code` ``, `[link](url)`, and newlines.
 
 **Format:**
 
@@ -609,6 +622,21 @@ Use `answer_html` if you need exact HTML. Built-in entries can still use richer 
 ## Theme Selector
 
 Click **◑ theme** in the header to open the dedicated theme selector modal. Pick any registered theme variant and the choice is saved in `localStorage` and persists across sessions. The theme applies to the live shell, permalink pages, and HTML exports. For theme authoring details, see [THEME.md](THEME.md).
+
+---
+
+## Options Modal
+
+Click **≡ options** in the header (or the **☰** menu on mobile) to open the Options modal. It exposes per-browser display and sharing preferences that are saved in cookies and applied on every page load:
+
+| Setting | Choices | Description |
+|---------|---------|-------------|
+| **Timestamps** | Off / Elapsed / Clock | Controls the timestamp mode for output lines. Equivalent to the quick toggle in the tab toolbar |
+| **Line Numbers** | on / off | Shows or hides sequential line numbers beside output and the live prompt. Equivalent to the tab toolbar toggle |
+| **Welcome Intro** | Animated / Disable Animation / Remove Completely | Controls whether the welcome animation plays on the first tab: full animated sequence, instant settle, or no welcome tab at all |
+| **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Sets the default redaction choice for snapshot sharing so the prompt is skipped once a preference is saved |
+
+All preferences are stored in browser cookies and persist across sessions on the same device.
 
 ---
 
@@ -717,7 +745,7 @@ curl http://localhost:8888/diag?format=json
 
 - [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
 - [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) — local setup, test workflow, linting, and merge request guidance
+- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
 - [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
 - [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
 - [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

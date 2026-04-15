@@ -654,7 +654,7 @@ describe('tabs helpers', () => {
 
     const promptLine = document.querySelector(`#output-${id} .line.prompt-echo`)
     expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~$')
-    expect(promptLine?.textContent).toBe('anon@darklab:~$ dig darklab.sh')
+    expect(promptLine?.textContent).toBe('anon@darklab:~$dig darklab.sh')
   })
 
   it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {
@@ -938,7 +938,7 @@ describe('tabs helpers', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
   })
 
-  it('saveTab applies configured redaction rules to exported text', async () => {
+  it('saveTab does not apply redaction rules to exported text', async () => {
     let savedBlob = null
     const { createTab, saveTab, _getTabs } = loadTabsFns({
       shareRedactionRules: [
@@ -957,10 +957,10 @@ describe('tabs helpers', () => {
 
     saveTab(id)
 
-    await expect(savedBlob.text()).resolves.toBe('Authorization: Bearer [redacted]')
+    await expect(savedBlob.text()).resolves.toBe('Authorization: Bearer abc123')
   })
 
-  it('exportTabHtml applies configured redaction rules to rendered HTML output', async () => {
+  it('exportTabHtml does not apply redaction rules to rendered HTML output', async () => {
     window.ExportHtmlUtils = {
       escapeExportHtml: s => s,
       renderExportPromptEcho: s => s,
@@ -987,8 +987,8 @@ describe('tabs helpers', () => {
     await exportTabHtml(id)
 
     const html = await savedBlob.text()
-    expect(html).toContain('token=[redacted]')
-    expect(html).not.toContain('token=abc123')
+    expect(html).toContain('token=abc123')
+    expect(html).not.toContain('token=[redacted]')
     delete window.ExportHtmlUtils
   })
 

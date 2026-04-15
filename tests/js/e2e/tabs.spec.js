@@ -179,7 +179,7 @@ test.describe('tab command recall', () => {
   test('reload restores non-running tabs, transcript preview, and the active draft', async ({ page }) => {
     const restoreCmd = 'hostname'
     await runCommand(page, restoreCmd)
-    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${restoreCmd}`)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(restoreCmd)
 
     await page.locator('#new-tab-btn').click()
     await page.locator('#cmd').fill('ffuf -u https://target/FUZZ')
@@ -193,14 +193,14 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
 
     await page.locator('.tab').first().click()
-    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${restoreCmd}`)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(restoreCmd)
     await expect.poll(async () => page.locator('.tab-panel.active .output .line').count()).toBeGreaterThan(1)
   })
 
   test('reload restores a completed tab with a visible prompt and preserved prompt formatting', async ({ page }) => {
     const restoreCmd = 'status'
     await runCommand(page, restoreCmd)
-    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toContainText(`$ ${restoreCmd}`)
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toContainText(restoreCmd)
 
     await page.reload()
     await page.locator('#cmd').waitFor()
@@ -209,7 +209,7 @@ test.describe('tab command recall', () => {
     const promptEcho = page.locator('.tab-panel.active .output .line.prompt-echo').first()
     const livePrompt = page.locator('.tab-panel.active .output #shell-prompt-wrap')
 
-    await expect(activeOutput).toContainText(`$ ${restoreCmd}`)
+    await expect(activeOutput).toContainText(restoreCmd)
     await expect(promptEcho.locator('.prompt-prefix')).toContainText('$')
     await expect(livePrompt).toBeVisible()
 
@@ -259,7 +259,7 @@ test.describe('tab command recall', () => {
     })
 
     await runCommand(page, idleCmd)
-    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${idleCmd}`)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(idleCmd)
 
     await page.locator('#new-tab-btn').click()
     await page.locator('#cmd').fill(activeCmd)
@@ -284,7 +284,7 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('ffuf -u https://target/FUZZ')
 
     await page.locator('.tab').first().click()
-    await expect(page.locator('.tab-panel.active .output')).toContainText(`$ ${idleCmd}`)
+    await expect(page.locator('.tab-panel.active .output')).toContainText(idleCmd)
     await expect(page.locator('.tab-panel.active .output')).toContainText('runs in session')
   })
 

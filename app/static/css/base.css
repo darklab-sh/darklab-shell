@@ -472,6 +472,10 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   color: var(--text);
 }
 
+.ac-item.ac-example .ac-item-desc::before {
+  content: '# ';
+}
+
 /* ── Ctrl+R history search dropdown ── */
 .hist-search-dropdown {
   position: fixed;

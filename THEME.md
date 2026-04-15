@@ -9,11 +9,12 @@ This document is the full reference for the shell theme system. It explains how 
 - [Overview](#overview)
 - [Theme Resolution Order](#theme-resolution-order)
 - [Baked-In Fallback Palette](#baked-in-fallback-palette)
-- [How The Code Works](#how-the-code-works)
+- [How the Code Works](#how-the-code-works)
 - [File Roles](#file-roles)
 - [Runtime Theme Selector](#runtime-theme-selector)
 - [Editing Rules](#editing-rules)
 - [Practical Notes](#practical-notes)
+- [Keeping example files in sync](#keeping-example-files-in-sync)
 - [Theme Key Reference](#theme-key-reference)
 - [Related Docs](#related-docs)
 
@@ -33,23 +34,43 @@ The runtime theme choice is resolved in this order:
 2. `default_theme` from `app/conf/config.yaml`
 3. the baked-in dark fallback palette in `app/config.py`
 
-That means the browser always prefers the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. During the selector migration, legacy `pref_theme_name` / `pref_theme` cookies may still be read for compatibility, but they are not the canonical source of truth.
+That means the browser always prefers the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. Legacy `pref_theme_name` / `pref_theme` cookies are still read for backwards compatibility, but `localStorage.theme` is the canonical value.
 
 ---
 
 ## Baked-In Fallback Palette
 
-The hardcoded fallback lives in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. Those are the built-in base palettes used when a selected theme cannot be loaded, and they are also the source of truth for the generated `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files. The dark example is intentionally aligned with the active `app/conf/themes/darklab_obsidian.yaml` theme file.
+The theme framework has two built-in, hard-coded palettes: a dark palette and a light palette. Both live in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. These are not selectable theme files — they are the compile-time baseline that the loader falls back to for any key a custom theme file does not specify.
 
-The fallback palette includes the full set of supported keys: base colors, typography, terminal chrome, toolbar buttons, chips, tabs, history, modals, dropdowns, FAQ controls, status/toasts, the mobile shell/menu, and welcome/onboarding styling. In other words, every key listed in the appendix below has a baked-in dark default in code. If you need the exact source of truth, inspect `_THEME_DEFAULTS["dark"]` in [app/config.py](app/config.py).
+Every key listed in the [Theme Key Reference](#theme-key-reference) section below has a baked-in value in both palettes. If you need the exact source of truth, inspect `_THEME_DEFAULTS` in [app/config.py](app/config.py).
+
+### Which built-in palette fills in missing keys
+
+Each theme file in `app/conf/themes/` declares its intended palette family with a `color_scheme` field:
+
+```yaml
+color_scheme: dark   # or: light
+```
+
+When `load_theme(name)` merges a custom theme file, it uses `color_scheme` to pick the right built-in as the base:
+
+- `color_scheme: dark` → missing keys are filled from `_THEME_DEFAULTS["dark"]`
+- `color_scheme: light` → missing keys are filled from `_THEME_DEFAULTS["light"]`
+- absent → falls back to `_THEME_DEFAULTS["dark"]`
+
+This means a light-family custom theme only needs to specify the values it actually changes. All unspecified keys automatically inherit the built-in light defaults rather than the dark ones. The two built-in palettes were designed as complementary starting points: all keys have sensible values in both, and any theme file is free to override as many or as few as it needs.
+
+### Generated example files
+
+The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated directly from `_THEME_DEFAULTS` by `scripts/generate_theme_examples.py`. They serve as full annotated references that show every supported key and its built-in default value. The dark example is intentionally aligned with the active `app/conf/themes/darklab_obsidian.yaml` theme file. See [Keeping example files in sync](#keeping-example-files-in-sync) for when to regenerate them.
 
 ---
 
-## How The Code Works
+## How the Code Works
 
 ### 1. Load and merge
 
-`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, merges any values from that file with the built-in defaults, and then applies an optional sibling `app/conf/themes/<name>.local.yaml` overlay if one exists. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. If a key is missing, the built-in default remains in effect.
+`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, reads the `color_scheme` field (`dark` or `light`, defaulting to `dark`), merges the file values on top of the matching `_THEME_DEFAULTS` palette, and then applies an optional sibling `app/conf/themes/<name>.local.yaml` overlay if one exists. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. Any key absent from the file (and from the local overlay) retains the built-in default for the chosen palette family.
 
 ### 2. Export as CSS vars
 
@@ -89,7 +110,7 @@ The fallback palette includes the full set of supported keys: base colors, typog
 
 ## Runtime Theme Selector
 
-The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to cookies and localStorage. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
+The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to `localStorage`. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
 
 The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
 
@@ -97,13 +118,22 @@ The built-in `theme` button is a shortcut to the selector. The preview grid is t
 
 ## Editing Rules
 
-- The example template files are generated from `_THEME_DEFAULTS` in `app/config.py`. Regenerate them with `./.venv/bin/python scripts/generate_theme_examples.py` after changing the built-in defaults. Then copy one into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up. If you want a private overlay for an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges that overlay after the checked-in base file.
+- The example template files (`app/conf/theme_dark.yaml.example`, `app/conf/theme_light.yaml.example`) are generated from `_THEME_DEFAULTS` in `app/config.py`. Regenerate them with `./.venv/bin/python scripts/generate_theme_examples.py` whenever you change the built-in defaults. A regression test (`TestThemeRegistry.test_theme_example_files_match_generated_defaults` in `tests/py/test_backend_modules.py`) detects drift and will fail with the message `theme_dark.yaml.example is out of sync` if you forget — run the script to fix it. See [Keeping example files in sync](#keeping-example-files-in-sync) for the full workflow. Then copy one into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up. If you want a private overlay for an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges that overlay after the checked-in base file.
 - Unknown keys are ignored by `app/config.py`; only keys that exist in `_THEME_DEFAULTS` are accepted.
 - Values may be any valid CSS color, length, gradient, or shadow string, depending on the key. You can also reference other resolved theme variables with CSS `var(--name)` syntax; the browser resolves those references after the vars are injected.
 - If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing the app. That means a bad edit will not take down the runtime selector, but the file should still be fixed before it is considered usable.
 - Restart the container after changing any loaded theme file under `app/conf/themes/` or after changing `config.yaml`. No rebuild is required.
 - Example variants under `app/conf/themes/` and the ad-hoc light-theme files in `app/conf/` can live beside the canonical files as inspiration or starting points. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
-- Theme YAMLs may include optional `label:`, `group:`, and `sort:` fields plus a `color_scheme:` field. `label:` is the visible card name, `group:` becomes the section header in the theme modal, and `sort:` controls ordering between cards and sections. `color_scheme:` should be set to `dark` or `light` so missing keys inherit from the correct built-in fallback family. If `label:` is missing, the selector falls back to a humanized filename stem. If `group:` is missing, the selector uses `Other`. There is no filename-based or palette-based group inference. If `sort:` is missing, the selector orders the entry after any explicitly sorted themes. If `color_scheme:` is missing or invalid, the loader falls back to the dark default family.
+- Theme YAMLs may include four optional metadata fields that control how the theme appears in the selector:
+
+  | Field | Effect | Fallback when absent |
+  |-------|--------|----------------------|
+  | `label` | Visible card name in the theme selector | Humanized filename stem |
+  | `group` | Section header in the theme modal | `Other` |
+  | `sort` | Ordering between cards and sections | Entry sorted after all explicitly sorted themes |
+  | `color_scheme` | Set to `dark` or `light` to control which built-in fallback family supplies missing keys (see [Baked-In Fallback Palette](#baked-in-fallback-palette)) | Dark default family |
+
+  There is no filename-based or palette-based group inference — `group` must be set explicitly if you want the theme to appear under a specific section.
 - If you want one theme value to inherit or derive from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; they are interpreted by the browser, not by YAML parsing.
 - The base palette keys are exposed as normal CSS variables such as `--bg`, `--surface`, `--text`, `--green`, and `--blue`.
 - The component chrome keys are exposed as `--theme-*` variables, for example `--theme-panel-bg`, `--theme-tab-active-text`, and `--theme-toast-border`.
@@ -112,16 +142,41 @@ The built-in `theme` button is a shortcut to the selector. The preview grid is t
 
 ## Practical Notes
 
-- The YAML files are intentionally verbose so operators can tune the shell without touching code.
+- Theme YAML files are explicit and self-contained so operators can tune the shell appearance without touching code.
 - Most values are safe to tweak live as long as they remain valid CSS values.
 - The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three surfaces.
 - If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
 
 ---
 
+## Keeping example files in sync
+
+`app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated files. They must stay in sync with the `_THEME_DEFAULTS` dictionaries in `app/config.py`.
+
+A pytest regression (`TestThemeRegistry.test_theme_example_files_match_generated_defaults`) compares the checked-in files against the output of `scripts/generate_theme_examples.py` on every test run. If the test fails, it means the built-in defaults changed but the example files were not regenerated. Fix it by running:
+
+```bash
+./.venv/bin/python scripts/generate_theme_examples.py
+```
+
+Then commit both updated `.yaml.example` files alongside the `app/config.py` change that triggered the drift.
+
+**When you need to regenerate:**
+
+- You added, removed, or renamed a key in `_THEME_DEFAULTS` in `app/config.py`
+- You changed a default value in `_THEME_DEFAULTS`
+- The test `test_theme_example_files_match_generated_defaults` fails
+
+**When you do not need to regenerate:**
+
+- You created or edited a theme file under `app/conf/themes/` — those are independent of the example files
+- You changed something in `scripts/generate_theme_examples.py` itself (though in that case you should still run it to confirm the output)
+
+---
+
 ## Theme Key Reference
 
-The tables below list every supported theme key from `_THEME_DEFAULTS`. The runtime selector simply applies one resolved theme entry at a time. The extra columns are reference data for theme authors and for the example templates; they are not a runtime mode switch.
+The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row includes the dark and light default values for reference — these are the values used when a key is absent from a theme file, not selectable modes. The runtime selector always applies a single fully resolved theme at a time.
 
 ### Base Palette
 
@@ -288,6 +343,6 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 - [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
 - [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
 - [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) — local setup, test workflow, linting, and merge request guidance
+- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
 - [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
 - [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

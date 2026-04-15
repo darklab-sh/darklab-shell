@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp, waitForHistoryRuns } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const TEST_IP = makeTestIp(70)
@@ -254,9 +254,13 @@ test.describe('Ctrl+R reverse-history search', () => {
 
   test('Tab in hist-search accepts the match into the input without running the command', async ({ page }) => {
     await runCommand(page, 'hostname')
+    // Ensure the run is committed server-side so the debounced fetch finds it
+    await waitForHistoryRuns(page, 1)
     const linesBefore = await page.locator('.tab-panel.active .output .line').count()
     await page.locator('#cmd').press('Control+r')
     await page.locator('#cmd').type('host')
+    // Wait for the dropdown to show the match before accepting with Tab
+    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toContainText('hostname')
     await page.locator('#cmd').press('Tab')
     // dropdown should close, input should have the accepted value
     await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)

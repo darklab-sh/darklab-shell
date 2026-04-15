@@ -849,14 +849,37 @@ let _histSearchMode = false;
 let _histSearchQuery = '';
 let _histSearchIndex = -1;
 let _histSearchPreDraft = '';
+let _histSearchRuns = null;     // null = not yet fetched; string[] = ready
+let _histSearchFetchTimer = null;
 
 function isHistSearchMode() { return _histSearchMode; }
 
 function _histSearchMatches() {
-  if (!cmdHistory.length) return [];
+  if (!_histSearchQuery) return [];
+  if (_histSearchRuns !== null) {
+    // Server already applied the query filter — just slice.
+    return _histSearchRuns.slice(0, 10);
+  }
+  // Fetch in-flight or not yet started — filter cmdHistory client-side as fallback.
   const q = _histSearchQuery.toLowerCase();
-  if (!q) return cmdHistory.slice(0, 20);
-  return cmdHistory.filter(c => c.toLowerCase().includes(q)).slice(0, 20);
+  return cmdHistory.filter(c => c.toLowerCase().includes(q)).slice(0, 10);
+}
+
+// Fetch /history?q=<query> from the server (same endpoint as the drawer).
+// The query filter is applied server-side before LIMIT, so searches match
+// the full history — not just the most-recent-N unfiltered runs.
+function _histSearchFetch(q) {
+  const url = q ? `/history?q=${encodeURIComponent(q)}` : '/history';
+  apiFetch(url).then(r => r.json()).then(data => {
+    if (!_histSearchMode) return;
+    _histSearchRuns = Array.isArray(data.runs)
+      ? [...new Set(data.runs.map(r => r.command))]
+      : [];
+    _histSearchIndex = _histSearchRuns.length > 0 ? 0 : -1;
+    _renderHistSearch();
+  }).catch(() => {
+    if (_histSearchRuns === null) _histSearchRuns = [];
+  });
 }
 
 function _hideHistSearchDropdown() {
@@ -951,6 +974,8 @@ function enterHistSearch() {
     setComposerValue('', 0, 0, { dispatch: false });
   }
   if (typeof acHide === 'function') acHide();
+
+  _histSearchRuns = null;
   _renderHistSearch();
 }
 
@@ -972,17 +997,30 @@ function exitHistSearch(accept, { keepCurrent = false } = {}) {
   _histSearchQuery = '';
   _histSearchIndex = -1;
   _histSearchPreDraft = '';
+  _histSearchRuns = null;
+  if (_histSearchFetchTimer) { clearTimeout(_histSearchFetchTimer); _histSearchFetchTimer = null; }
   if (typeof acHide === 'function') acHide();
 }
 
 function handleHistSearchInput(value) {
   _histSearchQuery = value;
   _histSearchIndex = -1;
-  const matches = _histSearchMatches();
-  if (matches.length > 0) {
-    _histSearchIndex = 0;
+  if (_histSearchFetchTimer) { clearTimeout(_histSearchFetchTimer); _histSearchFetchTimer = null; }
+  if (!value) {
+    _histSearchRuns = null;
+    _renderHistSearch();
+    return;
   }
+  // Initialise index from the current pool (cmdHistory fallback or previous fetch results)
+  // so keyboard navigation works immediately while the server fetch is in-flight.
+  const matches = _histSearchMatches();
+  if (matches.length > 0) _histSearchIndex = 0;
   _renderHistSearch();
+  // Re-fetch with the new query so the server applies the filter before LIMIT.
+  _histSearchFetchTimer = setTimeout(() => {
+    _histSearchFetchTimer = null;
+    _histSearchFetch(value);
+  }, 120);
 }
 
 function handleHistSearchKey(e) {

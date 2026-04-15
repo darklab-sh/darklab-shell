@@ -18,15 +18,37 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 845
-- `vitest`: 360
-- `playwright`: 150
-- total: 1,355
+- `pytest`: 732
+- `vitest`: 369
+- `playwright`: 153
+- total: 1,254
 
 This document is organized in two parts:
 
-1. practical local guidance for running and extending the suites
+1. practical local guidance for running and extending the suites (through [Testing Conventions](#testing-conventions))
 2. a full per-test appendix for reference and maintenance work
+
+---
+
+## Table of Contents
+
+- [What Lives Here](#what-lives-here)
+- [Prerequisites](#prerequisites)
+- [Local Setup](#local-setup)
+- [Running the Suites](#running-the-suites)
+- [Recommended Workflow](#recommended-workflow)
+- [Suite Summaries](#suite-summaries)
+- [Choosing the Right Test Layer](#choosing-the-right-test-layer)
+- [Test Artifacts](#test-artifacts)
+- [Testing Conventions](#testing-conventions)
+- [Full Appendix](#full-appendix)
+  - [Pytest](#pytest)
+  - [Vitest](#vitest)
+  - [Playwright](#playwright)
+  - [Demo Recording Specs](#demo-recording-specs)
+- [Related Docs](#related-docs)
+
+---
 
 ## Prerequisites
 
@@ -45,6 +67,8 @@ Recommended local baseline:
 - Python deps from [app/requirements.txt](../app/requirements.txt) and [requirements-dev.txt](../requirements-dev.txt)
 - Node deps from [package.json](../package.json)
 - Playwright browsers installed through the project npm tooling
+
+---
 
 ## Local Setup
 
@@ -65,7 +89,9 @@ Notes:
 - most day-to-day test work does not require Docker
 - the container smoke test is slower and is intended for Dockerfile, dependency, and toolchain validation rather than the normal fast iteration loop
 
-## Running The Suites
+---
+
+## Running the Suites
 
 Run the full sets:
 
@@ -89,6 +115,8 @@ Playwright notes:
 - plain `npx playwright test` uses [playwright.config.js](../playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 
+---
+
 ## Recommended Workflow
 
 Use the smallest useful layer first:
@@ -108,6 +136,8 @@ A practical local loop is usually:
 2. run the matching focused `Playwright` spec if the behavior is browser-visible
 3. run the full suite slice for the touched layer before pushing
 4. run the container smoke test only when the change can affect the built image or installed tools
+
+---
 
 ## Suite Summaries
 
@@ -130,11 +160,46 @@ The browser layer now uses a split config model:
 - [playwright.config.js](../playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
 - [playwright.parallel.config.js](../playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
 
+### Demo Recording
+
+`tests/js/e2e/demo.spec.js` and `tests/js/e2e/demo.mobile.spec.js` are standalone recording scripts for producing the README demo videos. They are **not part of the normal test suite** — they are excluded from `playwright.config.js` and `playwright.parallel.config.js` and can only be triggered through their dedicated configs:
+
+- `playwright.demo.config.js` — desktop (1280×960, `deviceScaleFactor: 2`)
+- `playwright.demo.mobile.config.js` — mobile (393×852 iPhone 14 Pro profile)
+
+Both specs are also guarded by `test.skip(!process.env.RUN_DEMO, ...)` so they cannot run accidentally in a normal `npx playwright test` invocation.
+
+**Run via the wrapper scripts, not directly:**
+
+```bash
+scripts/record_demo.sh                              # desktop
+scripts/record_demo_mobile.sh                       # mobile
+scripts/record_demo.sh --base-url http://localhost:9000   # custom port
+```
+
+The wrapper scripts health-check the container, set `RUN_DEMO=1`, run the spec, and stitch the captured frames into a video with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The output files are `docs/darklab_shell_demo.mp4` and `docs/darklab_shell_mobile_demo.mp4`.
+
+**How the videos are embedded in README.md:**
+
+GitLab renders repo-hosted videos from markdown image tags — `![alt](path.mp4)` is automatically converted to an inline video player for `.mp4`, `.m4v`, `.mov`, `.webm`, and `.ogv` files. Standard `<video>` HTML tags with external `src` URLs are stripped by GitLab's sanitizer, and its asset proxy rejects files over ~10MB, which rules out hosting GIFs externally. The image-tag syntax with a relative repo path is the only approach that works reliably on GitLab.
+
+**Why `page.screenshot()` instead of Playwright's built-in video recorder:**
+
+Playwright's built-in `video: { mode: 'on' }` recorder ignores `deviceScaleFactor` and always captures at CSS pixel dimensions. `page.screenshot()` respects the factor and returns images at full physical resolution (e.g. 2560×1920 for a 1280×960 viewport at `deviceScaleFactor: 2`). The specs run a concurrent background loop that calls `page.screenshot()` at ~10 fps, writes numbered PNG frames to `test-results/demo-frames/` (or `demo-mobile-frames/`), and the wrapper stitches them with ffmpeg.
+
+**Why the mobile spec injects a fake keyboard image instead of focusing the input:**
+
+Focusing any input in Chromium's headless mobile emulation triggers a gray keyboard-simulation overlay that is painted above all page content regardless of z-index. This overlay cannot be hidden with CSS or JS and also shrinks the visual viewport, making the demo look nothing like a real device. The mobile spec avoids this by typing through the native `HTMLInputElement.prototype.value` setter + `InputEvent` dispatch, never calling `.focus()`. The fake keyboard image (`tests/js/e2e/fixtures/ios-keyboard-dark.png`) is injected as a fixed `div` at the bottom of the page, and `#mobile-shell` gets a matching `padding-bottom` to push the composer above it.
+
+See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the full rationale.
+
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds the container, runs every command in `scripts/smoke_test_commands.txt`, and compares the output against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means a tool is missing, broken, or producing unexpected output in the upgraded image. It is not part of the default fast loop and should be run after Dockerfile, packaged-tool, or base-image changes.
+The container smoke test exists to verify that every user-facing example command in `app/conf/autocomplete.yaml` actually works as advertised. Those examples are what the shell suggests to users — if a tool drifts (renamed flag, changed output format, broken install) without the examples being updated, users get a bad experience. The smoke test catches that drift before it ships.
 
-The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately.
+`scripts/container_smoke_test.sh` builds a fresh container image, runs every example command defined in `app/conf/autocomplete.yaml` (`context.<root>.examples[].value`) through the live app, and compares each command's output against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means an example command is broken, producing unexpected output, or the tool is missing from the image entirely. It is not part of the default fast loop and should be run after Dockerfile, packaged-tool, base-image, or `autocomplete.yaml` example changes.
+
+The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. All test cases run to completion and failures are reported together at the end.
 
 Run the smoke test directly:
 
@@ -142,17 +207,77 @@ Run the smoke test directly:
 ./scripts/container_smoke_test.sh
 ```
 
-If a tool's output has intentionally changed, run the capture script to get a browser-driven baseline written to `/tmp`:
+Pass `-k <pattern>` or `--cmd` to run a focused subset:
+
+```bash
+./scripts/container_smoke_test.sh -k nmap
+./scripts/container_smoke_test.sh --cmd "nmap -h" --cmd "nmap -sV -p 80,443 ip.darklab.sh"
+```
+
+**`scripts/container_smoke_test.sh` flags:**
+
+| Flag | Description |
+| --- | --- |
+| `--cmd <command>` | Run only the named command(s). Repeatable. |
+| `-k <pattern>` | Passed through to pytest to filter by test ID pattern. |
+| Any other flag | Passed through to pytest directly. |
+
+#### Updating expectations
+
+When example commands are added to `autocomplete.yaml` or a tool's output changes intentionally, run the capture script to record a fresh baseline:
 
 ```bash
 ./scripts/capture_container_smoke_test_outputs.sh
 ```
 
-This script runs the same commands from `scripts/smoke_test_commands.txt` in a browser and writes the raw output to `/tmp`. It does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json` — use it as a reference to make those edits manually.
+This launches a browser session against the running container (`http://localhost:8888` by default), runs every example command from `app/conf/autocomplete.yaml`, and writes the raw output files to `/tmp/darklab-shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
+
+The capture script does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`. Use the captured output files as a reference to write or update the expected text snippets in that file manually, then re-run the smoke test to confirm.
+
+To capture only a specific subset (e.g. newly added examples or commands that drifted), write the commands to a plain-text file and pass it with `--commands-file`:
+
+```bash
+./scripts/capture_container_smoke_test_outputs.sh --commands-file /tmp/missing.txt
+```
+
+**`scripts/capture_container_smoke_test_outputs.sh` flags:**
+
+| Flag | Description |
+| --- | --- |
+| `--commands-file <path>` | Plain-text file of commands to capture (one per line, `#` comments ignored). Default: all examples from `autocomplete.yaml`. |
+| `--base-url <url>` | App URL to connect to. Default: `http://localhost:8888`. |
+| `--out-dir <dir>` | Directory to write captured `.txt` files. Default: `/tmp/darklab-shell-container-smoke-test-corpus`. |
+| `--start-from-command <cmd>` | Skip all commands before the first exact match, to resume an interrupted run. |
+| `--pause-ms <ms>` | Pause between commands to avoid rate limits. Default: `500`. |
+| `--settle-ms <ms>` | Minimum wait after a command finishes before saving output. Default: `2500` (longer for heavy tools like `nmap`). |
+| `--stable-ms <ms>` | How long the output line count must be stable before saving. Default: `1000`. |
+| `--command-timeout-ms <ms>` | Maximum time to wait for a command to finish. Default: `300000` (5 min); extended automatically for `nmap`, `masscan`, `nuclei`, etc. |
+| `--save-timeout-ms <ms>` | Timeout for the browser download after clicking save. Default: `10000`. |
+| `--toast-timeout-ms <ms>` | Timeout when waiting for a no-output toast. Default: `2000`. |
+| `--headed` | Launch a visible browser window instead of headless. |
+| `--no-clear-between` | Leave output in the tab between commands instead of clearing. |
+| `--keep-browser-open` | Leave the browser open after capture finishes. |
+
+#### Keeping expectations in sync with autocomplete.yaml
+
+The expectations file only covers commands that appear in `autocomplete.yaml` examples. To check which examples are missing expectations:
+
+```python
+python3 -c "
+import yaml, json
+examples = [ex['value'] for spec in yaml.safe_load(open('app/conf/autocomplete.yaml'))['context'].values() if isinstance(spec, dict) for ex in (spec.get('examples') or [])]
+recorded = {r['command'] for r in json.load(open('tests/py/fixtures/container_smoke_test-expectations.json'))['records']}
+[print(c) for c in examples if c not in recorded]
+"
+```
+
+Any entry in `container_smoke_test-expectations.json` whose command does not appear in `autocomplete.yaml` examples is stale and should be removed.
 
 GitLab CI mirrors the smoke test in the `container-smoke-test` job, which is exposed as a manual run when you want to verify a fresh image before merging dependency or Dockerfile changes.
 
-## Choosing The Right Test Layer
+---
+
+## Choosing the Right Test Layer
 
 Use `pytest` when the change primarily affects:
 
@@ -181,12 +306,15 @@ Use `Playwright` when the change primarily affects:
 
 Use the container smoke test when the change primarily affects:
 
+- `autocomplete.yaml` example commands (adding, removing, or editing examples)
 - Dockerfile contents
 - packaged binaries or scanners
 - runtime image behavior
 - compose/runtime wiring that cannot be trusted from unit tests alone
 
 If a change touches more than one layer, still start with the cheapest one that can fail meaningfully.
+
+---
 
 ## Test Artifacts
 
@@ -207,6 +335,19 @@ Practical note:
 - if the README screenshot changed unexpectedly, inspect `docs/readme-app.png`
 - if the smoke test output changed intentionally, recapture the baseline before treating the diff as expected
 
+---
+
+## Testing Conventions
+
+- Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
+- When a branch depends on a browser API or network error, make the failure deterministic in the harness instead of relying on the environment.
+- For browser tests that interact with history, remember that the server is eventually consistent around run persistence. Retry or re-open the drawer when needed.
+- For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`. Prefer per-test hashing rather than one fixed IP per file so repeated suite runs do not collide in the same limiter bucket.
+- For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
+- When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
+
+---
+
 ## Full Appendix
 
 Use this appendix as the exhaustive reference for the checked-in suites. The test names come directly from the source, and the descriptions are intentionally concise so the appendix can stay accurate as the code evolves.
@@ -214,6 +355,8 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 ### Pytest
 
 #### `test_backend_modules.py`
+
+The `TestThemeRegistry` group covers the theme loading and fallback system. One test in this group is a drift guard: `test_theme_example_files_match_generated_defaults` regenerates the dark and light example files in memory from `_THEME_DEFAULTS` and compares them against the checked-in `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example`. If this test fails it means `_THEME_DEFAULTS` in `app/config.py` was edited without updating the example files — fix it by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing both updated files.
 
 | Test | Description |
 | --- | --- |
@@ -255,7 +398,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `TestThemeRegistry.test_local_theme_overlay_updates_base_theme_and_is_not_listed_separately` | Checks that local theme overlay updates base theme and is not listed separately. |
 | `TestThemeRegistry.test_light_theme_uses_light_defaults_for_missing_keys` | Checks that light theme uses light defaults for missing keys. |
 | `TestThemeRegistry.test_missing_color_scheme_still_falls_back_to_dark_defaults` | Checks that missing color scheme still falls back to dark defaults. |
-| `TestThemeRegistry.test_theme_example_files_match_generated_defaults` | Checks that theme example files match generated defaults. |
+| `TestThemeRegistry.test_theme_example_files_match_generated_defaults` | Detects drift between `_THEME_DEFAULTS` in `app/config.py` and the checked-in `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` files. Fails with `theme_dark.yaml.example is out of sync` if the built-in defaults changed without regenerating the example files. Fix by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing the updated files. |
 | `TestThemeRegistry.test_entries_missing_question_filtered_out` | Checks that entries missing question filtered out. |
 | `TestThemeRegistry.test_non_list_yaml_returns_empty` | Checks that non list YAML returns empty. |
 | `TestThemeRegistry.test_theme_color_scheme_marks_light_backgrounds_as_only_light` | Checks that theme color scheme marks light backgrounds as only light. |
@@ -1105,7 +1248,7 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |
 | `returns true on empty input (blank Enter)` | Verifies that returns true on empty input (blank Enter). |
-| `returns ` | Verifies that returns. |
+| `returns 'settle' on empty input during active welcome` | Verifies that returns 'settle' on empty input during active welcome. |
 | `returns false when shell operators are rejected` | Verifies that returns false when shell operators are rejected. |
 | `returns false when /tmp path is denied` | Verifies that returns false when /tmp path is denied. |
 | `returns true when a valid command is submitted` | Verifies that returns true when a valid command is submitted. |
@@ -1217,9 +1360,6 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `drops invalid rules and preserves supported replacement metadata` | Verifies that normalizeRedactionRules drops invalid rules and preserves supported replacement metadata. |
 | `applies multiple redaction rules in order` | Verifies that applyRedactionRules applies multiple redaction rules in order. |
 | `redacts structured line entries without mutating other fields` | Verifies that redactLineEntries redacts structured line entries without mutating other fields. |
-| `1+1=2` | 1+1=2. |
-| `11=2` | 11=2. |
-| `11=2` | 11=2. |
 | `leaves plain text unchanged` | Verifies that leaves plain text unchanged. |
 | `converts **text** to <strong>` | Verifies that converts **text** to <strong>. |
 | `converts `code` to <code>` | Verifies that converts `code` to <code>. |
@@ -1508,19 +1648,32 @@ Use this appendix as the exhaustive reference for the checked-in suites. The tes
 | `clearing a non-welcome tab does not remove the original welcome UI` | Verifies that clearing a non-welcome tab does not remove the original welcome UI. |
 | `switches to the mobile welcome path with the mobile banner` | Verifies that switches to the mobile welcome path with the mobile banner. |
 
-## Testing Conventions
+### Demo Recording Specs
 
-- Prefer focused tests for specific behavior regressions instead of large all-purpose integration tests.
-- When a branch depends on a browser API or network error, make the failure deterministic in the harness instead of relying on the environment.
-- For browser tests that interact with history, remember that the server is eventually consistent around run persistence. Retry or re-open the drawer when needed.
-- For tests that need isolated rate-limit buckets, use `makeTestIp()` to get a deterministic `198.18.x.x` test-network address in `X-Forwarded-For`. Prefer per-test hashing rather than one fixed IP per file so repeated suite runs do not collide in the same limiter bucket.
-- For browser tests that need a long-running command without hitting the backend limiter, prefer a browser-side `window.fetch` mock that returns an open SSE stream, like the kill-spec coverage.
-- When a browser test needs to exercise a `.catch(...)` branch, prefer aborting the request or rejecting the promise rather than returning a 500 response.
+These specs are not part of the normal test suite. They are excluded from both `playwright.config.js` and `playwright.parallel.config.js`, matched only by `playwright.demo.config.js` and `playwright.demo.mobile.config.js`, and guarded by `test.skip(!process.env.RUN_DEMO, ...)`. Run them via `scripts/record_demo.sh` or `scripts/record_demo_mobile.sh`. See the [Demo Recording](#demo-recording) section above for the full usage guide.
+
+#### `demo.spec.js`
+
+Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `docs/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution.
+
+| Test | Description |
+| --- | --- |
+| `demo` | Full desktop shell demo sequence: ping, DNS/TLS commands, history drawer, theme switching. |
+
+#### `demo.mobile.spec.js`
+
+Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1179×2556) for the 393×852 iPhone 14 Pro viewport.
+
+| Test | Description |
+| --- | --- |
+| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, history drawer, theme switching. |
+
+---
 
 ## Related Docs
 
-- [README.md](../README.md)
-- [CONTRIBUTORS.md](../CONTRIBUTORS.md)
-- [ARCHITECTURE.md](../ARCHITECTURE.md)
-- [DECISIONS.md](../DECISIONS.md)
-- [THEME.md](../THEME.md)
+- [README.md](../README.md) — quick start, feature summary, and operator configuration reference
+- [CONTRIBUTING.md](../CONTRIBUTING.md) — development setup, branch workflow, and merge request process
+- [ARCHITECTURE.md](../ARCHITECTURE.md) — runtime layers, request flow, and persistence schema
+- [DECISIONS.md](../DECISIONS.md) — architectural rationale, tradeoffs, and implementation history
+- [THEME.md](../THEME.md) — theme registry, key reference, and custom theme authoring

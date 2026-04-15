@@ -886,6 +886,18 @@ def _normalize_autocomplete_context(data):
         pipe_label = str(raw_spec.get("pipe_label") or "").strip() or pipe_insert_value
         pipe_description = str(raw_spec.get("pipe_description") or "").strip()
 
+        examples = []
+        seen_examples = set()
+        for raw_ex in raw_spec.get("examples", []) or []:
+            ex = _normalize_context_suggestion(raw_ex)
+            if not ex:
+                continue
+            key = ex["value"].lower()
+            if key in seen_examples:
+                continue
+            seen_examples.add(key)
+            examples.append(ex)
+
         normalized[root] = {
             "flags": flags,
             "expects_value": expects_value,
@@ -894,6 +906,7 @@ def _normalize_autocomplete_context(data):
             "pipe_insert_value": pipe_insert_value,
             "pipe_label": pipe_label,
             "pipe_description": pipe_description,
+            "examples": examples,
         }
     return normalized
 
@@ -911,6 +924,7 @@ def _merge_autocomplete_context(base, overlay):
             "pipe_insert_value": "",
             "pipe_label": "",
             "pipe_description": "",
+            "examples": [],
         })
 
         if spec.get("pipe_command"):
@@ -949,6 +963,14 @@ def _merge_autocomplete_context(base, overlay):
                     continue
                 seen_hints.add(key)
                 bucket.append(hint)
+
+        seen_examples = {item["value"].lower() for item in current.get("examples", []) if isinstance(item, dict)}
+        for ex in spec.get("examples", []) or []:
+            key = ex["value"].lower()
+            if key in seen_examples:
+                continue
+            seen_examples.add(key)
+            current.setdefault("examples", []).append(ex)
     return merged
 
 

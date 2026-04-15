@@ -75,13 +75,6 @@ function updateTabScrollButtons() {
   rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
 }
 
-function shouldScrollActiveTabIntoView() {
-  return !(typeof document !== 'undefined'
-    && document.body
-    && document.body.classList
-    && document.body.classList.contains('mobile-terminal-mode'));
-}
-
 function ensureActiveTabVisible(tabId) {
   const tabEl = _getTabEl(tabId);
   if (!tabEl || typeof tabEl.scrollIntoView !== 'function') return;
@@ -285,7 +278,7 @@ function _onTouchDragEnd(e) {
   if (!moved) return;
   syncTabOrderFromDom();
   updateTabScrollButtons();
-  if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
+  ensureActiveTabVisible(activeTabId);
   _tabDragSuppressClickUntil = Date.now() + (state.source === 'touch' ? 220 : 140);
   if (state.id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
 }
@@ -666,7 +659,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   mountShellPrompt(id);
   const t = getTab(id);
   setStatus(t ? (t.st || 'idle') : 'idle');
-  if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+  ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
   // Hide the autocomplete dropdown and clear the filtered list so stale
@@ -774,6 +767,7 @@ function setTabLabel(id, label) {
   if (lbl) lbl.textContent = label.length > 28 ? label.slice(0, 26) + '…' : label;
   const t = getTab(id);
   if (t) t.label = label;
+  if (id === activeTabId) ensureActiveTabVisible(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
@@ -895,11 +889,6 @@ function _getRedactedLines(lines) {
     : (Array.isArray(lines) ? lines : []);
 }
 
-function _getRedactedExportableRawLines(tab) {
-  const lines = _getExportableRawLines(tab);
-  return _getRedactedLines(lines);
-}
-
 // ── Copy to clipboard ──
 function copyTab(id) {
   const t = getTab(id);
@@ -923,7 +912,7 @@ function copyTab(id) {
 // content and ANSI escape codes don't appear in the saved file.
 function saveTab(id) {
   const t = getTab(id);
-  const lines = _getRedactedExportableRawLines(t);
+  const lines = _getExportableRawLines(t);
   if (!lines.length) {
     showToast('No output to export');
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
@@ -956,7 +945,7 @@ async function exportTabHtml(id) {
   try {
     const appName = APP_CONFIG.app_name || 'darklab shell';
     const exportedAt = new Date().toLocaleString();
-    const lines = _getRedactedLines(t.rawLines);
+    const lines = t.rawLines;
 
     const linesHtml = lines.map(({ text, cls, tsC }) => {
       const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
@@ -1018,7 +1007,7 @@ function startTabRename(id, labelEl) {
     setTabLabel(id, next);
     if (t) t.renamed = true;
     updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+    ensureActiveTabVisible(id);
   }
   function cancel() {
     if (done) return;
@@ -1026,7 +1015,7 @@ function startTabRename(id, labelEl) {
     if (labelEl.contains(input)) labelEl.removeChild(input);
     setTabLabel(id, original);
     updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+    ensureActiveTabVisible(id);
   }
 
   input.addEventListener('keydown', e => {
@@ -1039,7 +1028,7 @@ function startTabRename(id, labelEl) {
   input.addEventListener('input', () => {
     // Renaming can change tab width before commit, which affects scroll affordances.
     updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+    ensureActiveTabVisible(id);
   });
 }
 

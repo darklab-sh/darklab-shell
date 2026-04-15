@@ -82,12 +82,12 @@ if [ -n "$SELECTED_COMMANDS" ]; then
         python3 -m pytest \
         "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
         --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
-        -x -v -s \
+        -v -s \
         "$@"
 fi
 
 exec env RUN_CONTAINER_SMOKE_TEST=1 python3 -m pytest \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
     --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
-    -x -v -s \
+    -v -s \
     "$@"

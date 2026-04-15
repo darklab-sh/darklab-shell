@@ -1,16 +1,24 @@
 # darklab shell
 
-A web-based shell for running network diagnostics and vulnerability scans against remote targets. It combines a Flask backend, a single-page terminal UI, Redis-backed rate limiting and process tracking, and SQLite persistence for history, run previews, and permalinks. Completed runs can also persist full output as compressed artifacts for later inspection. The project is built to run in Docker by default, but also supports local development without containers.
+A full-stack, self-hosted web terminal for running network diagnostics and security reconnaissance against remote targets — built with real production constraints in mind. The backend is a Flask application fronted by Gunicorn, backed by Redis for rate limiting and live PID tracking, and SQLite for persistent run history, previews, snapshots, and full-output artifacts. The frontend is a single-page terminal UI with real-time SSE streaming, multi-tab support, mobile-first layout, and a themeable interface. Every command passes through an allowlist engine with deny-prefix overrides, loopback blocking, and shell metacharacter rejection before it touches a subprocess — scanners run under a dedicated unprivileged user with no write access outside designated tmpfs mounts. Over 30 security tools (nmap, nuclei, ffuf, rustscan, sslyze, katana, and more) ship pre-installed alongside the full SecLists wordlist collection, all sandboxed and ready to use. Completed runs produce shareable permalinks and snapshot exports with a configurable redaction layer for masking secrets and infrastructure details. The project ships with a three-layer test suite: pytest backend unit tests, Vitest component tests, and Playwright end-to-end tests including container smoke tests that verify live tool output against expected fixtures.
 
-<div align="center"><table><tr>
-<td align="center">Desktop UI</td>
-<td align="center">Mobile UI</td>
+<div align="center">
+<table><tr>
+<td align="center"><b>Desktop Demo</b></td>
+<td align="center" width="320"><b>Mobile Demo</b></td>
 </tr><tr>
-<td><img src="docs/readme-app.png" alt="darklab shell — desktop" height="480"></td>
-<td><img src="docs/readme-app-mobile.png" alt="darklab shell — mobile" height="480"></td>
-</tr></table></div>
+<td valign="top">
 
-_Screenshots are refreshed by the Playwright e2e suite and can be regenerated with `npm run capture:readme-screenshot` (desktop) or `npm run capture:readme-screenshot-mobile` (mobile)._
+![Desktop demo](docs/darklab_shell_demo.mp4)
+
+</td>
+<td valign="top" width="320">
+
+![Mobile demo](docs/darklab_shell_mobile_demo.mp4)
+
+</td>
+</tr></table>
+</div>
 
 ---
 
@@ -76,11 +84,11 @@ Before you begin, ensure you have the following pre-requisites:
 - Python 3.12+
 - pip3
 - Linux host or OSX (uses `os.setsid` for process group management; `sudo kill` for cross-user process termination)
-- (Optional) Redis 6.2+ (for `GETDEL` support). If not configured or available, app falls back to in-process mode
+- (Optional) Redis 6.2+ (for `GETDEL` support). If not configured or available, the app falls back to in-process mode
 
-Other Python requirements include Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py, but they will be installed by the steps below.
+Other dependencies (Flask ≥ 2.0, PyYAML, Flask-Limiter[redis], redis-py) are installed automatically by the steps below.
 
-The easiest path is by running:
+The easiest path is to run:
 
 ```bash
 bash examples/run_local.sh
@@ -163,7 +171,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
 | `max_tabs` | `8` | Maximum number of tabs a user can have open at once. `0` = unlimited |
 | `max_output_lines` | `5000` | Max lines retained in the live tab and in the SQLite run preview. Oldest lines are dropped from the top when exceeded. `0` = unlimited |
-| `persist_full_run_output` | `true` | Server-side only. Persist full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
+| `persist_full_run_output` | `true` | Server-side only. Persists full output for completed runs as compressed artifacts while the history drawer and normal run permalink keep using the capped SQLite preview |
 | `full_output_max_mb` | `5 MB` | Server-side only. Hard cap on the uncompressed UTF-8 payload written into a full-output artifact before gzip compression. The app multiplies this value by `1024 * 1024` internally. `0` = unlimited |
 | `command_timeout_seconds` | `3600` | Auto-kill commands that run longer than this many seconds. `0` = disabled |
 | `heartbeat_interval_seconds` | `20` | How often to send an SSE heartbeat on idle connections to prevent proxy timeouts |
@@ -286,8 +294,9 @@ By default wapiti writes its report to a file in `/tmp`, which isn't accessible 
 
 ## Production Deployment
 
-### Environment Variables
+The base `docker-compose.yml` is suitable for local use and testing. For a production deployment, the repo includes an optional Compose overlay at `examples/docker-compose.prod.yml` that adds GELF log transport, a reverse-proxy-aware network model, and container-level network tuning for high-volume scanning workloads. The sections below cover the knobs available to operators before and after applying that overlay.
 
+### Environment Variables
 
 The repo includes a root [`.env`](.env) file with:
 
@@ -310,7 +319,7 @@ If they are unset, the entrypoint defaults remain `4` workers and `4` threads.
 docker compose restart
 ```
 
-### Production override
+### Production Override
 
 The base [docker-compose.yml](docker-compose.yml) is the standalone shape used for local runs. The optional production overlay at [examples/docker-compose.prod.yml](examples/docker-compose.prod.yml) layers in deployment-specific behavior:
 
@@ -330,10 +339,67 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone shape used f
    - still requires `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
 6. Optional runtime sizing:
    - `WEB_CONCURRENCY` and `WEB_THREADS` can be set in [`.env`](.env) so operators can tune Gunicorn without editing `entrypoint.sh`
-7. Network tuning for port scanners:
-   - raises `ulimits.nofile` to 65 535 and sets network-namespace sysctls (`ip_local_port_range`, `tcp_tw_reuse`, `tcp_fin_timeout`, `tcp_max_tw_buckets`) so tools like `naabu` and `masscan` have enough source ports and socket headroom for wider scans
 
-Start Compose with the production overlay:
+#### Network tuning for port scanners
+
+Tools like `naabu` and `masscan` open a large number of sockets in rapid succession. Without tuning, the kernel's default limits on open file descriptors and ephemeral port ranges will throttle or fail wide scans. The prod overlay addresses this at two layers:
+
+**`ulimits.nofile` — open file descriptor limit**
+
+The `ulimits.nofile` setting in the compose file raises the container's file descriptor ceiling to 65 535. However, Docker cannot grant a container a limit higher than what the Docker daemon itself is allowed. If the daemon's own `nofile` limit is still at the system default (typically 1,024), this compose setting will silently have no effect.
+
+Run this on the **host** to raise the daemon's limit for the current session:
+
+```bash
+sudo systemctl edit docker
+```
+
+Add (or verify) these lines under `[Service]`:
+
+```ini
+[Service]
+LimitNOFILE=1048576
+```
+
+Then reload and restart the daemon:
+
+```bash
+sudo systemctl daemon-reload
+sudo systemctl restart docker
+```
+
+This change is written to a drop-in unit file under `/etc/systemd/system/docker.service.d/` and persists across reboots automatically.
+
+**Network-namespace sysctls — source ports and TIME_WAIT headroom**
+
+The sysctls in the overlay are scoped to the container's network namespace and do not require any host changes:
+
+| sysctl | value | why |
+|---|---|---|
+| `net.ipv4.ip_local_port_range` | `1024 65535` | widens the ephemeral port range from the kernel default (~32768–60999), giving scanners ~64k source ports instead of ~28k |
+| `net.ipv4.tcp_tw_reuse` | `1` | allows TIME_WAIT sockets to be reused for new outbound connections |
+| `net.ipv4.tcp_fin_timeout` | `15` | reduces the FIN_WAIT_2 timeout from the 60-second default so sockets are released faster |
+| `net.ipv4.tcp_max_tw_buckets` | `131072` | raises the TIME_WAIT bucket ceiling before the kernel starts silently dropping sockets |
+
+**`nf_conntrack_max` — connection tracking table size**
+
+The Linux kernel's connection tracking table (`nf_conntrack`) records every active and recently-closed connection seen by the firewall. Under a wide port scan the table fills quickly; once full the kernel drops new connections and logs `nf_conntrack: table full, dropping packet`. This is a **host-level** setting — it cannot be set from inside the container — so it must be applied on the Docker host directly.
+
+Apply immediately (takes effect without a reboot):
+
+```bash
+sudo sysctl -w net.netfilter.nf_conntrack_max=131072
+```
+
+Persist across reboots by writing a drop-in sysctl file:
+
+```bash
+echo "net.netfilter.nf_conntrack_max=131072" | sudo tee /etc/sysctl.d/99-conntrack.conf
+```
+
+The file in `/etc/sysctl.d/` is loaded automatically at boot by `systemd-sysctl`, so no further configuration is needed.
+
+Once all configuration is in place, start the stack with the production overlay applied on top of the base:
 
 ```bash
 docker compose -f docker-compose.yml -f examples/docker-compose.prod.yml up --build
@@ -368,7 +434,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 ## Documentation Map
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and deployment notes
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
+- [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
@@ -386,7 +452,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── docker-compose.yml
 ├── Dockerfile
 ├── ARCHITECTURE.md            # Current system structure, diagrams, runtime layers, persistence, and deployment shape
-├── CONTRIBUTORS.md            # Contributor setup, local workflow, and merge request guidance
+├── CONTRIBUTING.md            # Contributor setup, local workflow, and merge request guidance
 ├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
 ├── THEME.md                   # Theme authoring/reference guide and runtime token behavior
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser

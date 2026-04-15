@@ -106,16 +106,47 @@ function _buildContextAutocomplete(ctx) {
     // while the user is still typing the first token (no trailing space yet).
     if (ctx.tokens.length <= 1 && !ctx.atWhitespace && ctx.commandRoot) {
       const q = ctx.commandRoot.toLowerCase();
-      return Object.keys(registry)
-        .filter(root => root.toLowerCase().startsWith(q))
-        .map(root => _buildAutocompleteItem({
-          value: root,
-          description: '',
-          replaceStart: ctx.tokenStart,
-          replaceEnd: ctx.tokenEnd,
-        }));
+      const matchingRoots = Object.keys(registry).filter(root => root.toLowerCase().startsWith(q));
+      // If exactly one command matches and it has examples, show those directly
+      // so the user sees full invocation patterns while still typing the root.
+      if (matchingRoots.length === 1) {
+        const matchedSpec = registry[matchingRoots[0]];
+        if (matchedSpec && matchedSpec.examples && matchedSpec.examples.length) {
+          return _filterAutocompleteItems(
+            matchedSpec.examples.map(ex => Object.assign(_buildAutocompleteItem({
+              value: ex.value,
+              description: ex.description || '',
+              replaceStart: ctx.tokenStart,
+              replaceEnd: ctx.tokenEnd,
+              insertValue: ex.value,
+            }), { isExample: true })),
+            ctx.currentToken,
+          );
+        }
+      }
+      return matchingRoots.map(root => _buildAutocompleteItem({
+        value: root,
+        description: '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+      }));
     }
     return [];
+  }
+
+  // Known command root being typed (no trailing space yet) — show examples so
+  // users can discover full invocation patterns before they start adding flags.
+  if (spec.examples && spec.examples.length && ctx.tokens.length === 1 && !ctx.atWhitespace) {
+    return _filterAutocompleteItems(
+      spec.examples.map(ex => Object.assign(_buildAutocompleteItem({
+        value: ex.value,
+        description: ex.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+        insertValue: ex.value,
+      }), { isExample: true })),
+      ctx.currentToken,
+    );
   }
 
   const currentLower = ctx.currentToken.toLowerCase();
@@ -255,9 +286,12 @@ function _positionAutocomplete(itemsCount) {
       : { top: 0 };
     const rowH = 44;
     const desired = Math.min(8, Math.max(1, itemsCount)) * rowH + 10;
-    const targetHeight = Math.max(88, Math.min(360, desired));
-    const available = Math.max(0, rect.top - 12);
-    const maxHeight = Math.max(0, Math.min(targetHeight, available));
+    // Cap at 360px max but don't further cap by available space — the dropdown
+    // grows upward (bottom: calc(100% + 4px)) and the parent container clips it
+    // if it would go off-screen. This ensures all items are visible without
+    // requiring the user to scroll, which is unreliable on touch due to item
+    // tap handlers competing with the native scroll gesture.
+    const maxHeight = Math.max(88, Math.min(360, desired));
     acDropdown.style.position = 'absolute';
     acDropdown.style.left = '0';
     acDropdown.style.right = '0';
@@ -344,15 +378,18 @@ function acShow(items) {
     : (cmdInput && typeof cmdInput.selectionStart === 'number' ? cmdInput.selectionStart : currentValue.length);
   const tokenCtx = _autocompleteTokenContext(currentValue, currentCursor);
   const matchValue = (items.length && typeof items[0] === 'object') ? tokenCtx.currentToken : currentValue;
+  const maxExampleLabelLen = items.reduce((max, s) =>
+    (s && s.isExample ? Math.max(max, _acItemText(s).length) : max), 0);
   items.forEach((s, i) => {
     const div = document.createElement('div');
-    div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '');
+    div.className = 'ac-item' + (i === acIndex ? ' ac-active' : '') + (s && s.isExample ? ' ac-example' : '');
     const label = _acItemText(s);
     const description = _acItemDescription(s);
     const val = String(matchValue || '');
     const idx = val ? label.toLowerCase().indexOf(val.toLowerCase()) : -1;
     const main = document.createElement('span');
     main.className = 'ac-item-main';
+    if (s && s.isExample && maxExampleLabelLen > 0) main.style.minWidth = maxExampleLabelLen + 'ch';
     if (idx >= 0 && val) {
       main.innerHTML = escapeHtml(label.slice(0, idx))
         + '<span class="ac-match">' + escapeHtml(label.slice(idx, idx + val.length)) + '</span>'
@@ -368,7 +405,21 @@ function acShow(items) {
       div.appendChild(desc);
     }
     div.addEventListener('mousedown', e => { e.preventDefault(); acAccept(s); });
-    div.addEventListener('touchstart', e => { e.preventDefault(); acAccept(s); }, { passive: false });
+    // touchstart must not call preventDefault so the container can scroll.
+    // We detect taps by checking that the finger barely moved; swipes fall
+    // through to the browser's native scroll handling.
+    let _touchStartX = 0, _touchStartY = 0;
+    div.addEventListener('touchstart', e => {
+      const t = e.touches[0];
+      _touchStartX = t ? t.clientX : 0;
+      _touchStartY = t ? t.clientY : 0;
+    }, { passive: true });
+    div.addEventListener('touchend', e => {
+      const t = e.changedTouches[0];
+      const dx = t ? Math.abs(t.clientX - _touchStartX) : 99;
+      const dy = t ? Math.abs(t.clientY - _touchStartY) : 99;
+      if (dx < 10 && dy < 10) { e.preventDefault(); acAccept(s); }
+    }, { passive: false });
     acDropdown.appendChild(div);
   });
   showAcDropdown();
@@ -435,13 +486,15 @@ function acAccept(s) {
     if (Number.isFinite(replaceStart) && Number.isFinite(replaceEnd)) {
       const next = currentValue.slice(0, replaceStart) + insertValue + currentValue.slice(replaceEnd);
       const caret = replaceStart + insertValue.length;
+      acHide();
       setComposerValue(next, caret, caret);
     } else {
+      acHide();
       setComposerValue(insertValue, insertValue.length, insertValue.length);
     }
   } else {
+    acHide();
     setComposerValue(s, s.length, s.length);
   }
-  acHide();
   if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
 }

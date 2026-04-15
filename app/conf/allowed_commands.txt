@@ -38,7 +38,14 @@ fping
 traceroute
 tcptraceroute
 # Only allow netcat to do scanning/port checking
-nc -zv
+  nc -zv                                                                                                                                                              
+  nc -vz                                                                                                                                                              
+  nc -zvn                                                                                                                                                             
+  nc -znv                                                                                                                                                           
+  nc -vzn                                                                                                                                                           
+  nc -vnz
+  nc -nzv
+  nc -nvz
 # Deny command execution flags — also caught when combined with other flags (e.g. -ve, -vc)
 !nc -e
 !nc -c

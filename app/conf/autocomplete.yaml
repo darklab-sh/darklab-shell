@@ -42,9 +42,14 @@
 #   argument stays discoverable before typing begins.
 # - `pipe_command: true` marks entries that are also suggested after `command |`.
 # - `pipe_insert_value` overrides the inserted text (e.g. `wc -l`).
+# - `examples` is a list of full command invocations shown while the user is
+#   still typing the command root (before any trailing space). Accepting one
+#   replaces the entire input with the example. Use these to surface common
+#   invocation patterns for users who are unfamiliar with a command.
+#   Shape: `- value: <full-command>` / `description: <what it does>`
 #
-# The smoke test corpus lives in scripts/smoke_test_commands.txt — edit that
-# file to add or remove commands from the container regression suite.
+# The container smoke test runs every example command defined here. Add or
+# remove examples to add or remove commands from the regression suite.
 
 context:
   grep:
@@ -136,6 +141,15 @@ context:
         description: Prefix each line with its occurrence count
 
   nmap:
+    examples:
+      - value: "nmap -h"
+        description: Show help and usage
+      - value: "nmap -sV -p 80,443 ip.darklab.sh"
+        description: Service version detection on web ports
+      - value: "nmap -A -T4 ip.darklab.sh"
+        description: Aggressive scan with OS and service detection
+      - value: "nmap -Pn --top-ports 100 ip.darklab.sh"
+        description: Top 100 ports, skip host discovery
     flags:
       - value: -h
         description: Show help and usage
@@ -194,6 +208,15 @@ context:
           description: Hostname, IP, or CIDR
 
   ffuf:
+    examples:
+      - value: "ffuf -h"
+        description: Show help and usage
+      - value: "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+        description: Directory brute force with common wordlist
+      - value: "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -mc 200,301,302"
+        description: Filter for successful and redirect responses
+      - value: "ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H \"Host: FUZZ.ip.darklab.sh\""
+        description: Virtual host brute force with Host header injection
     flags:
       - value: -h
         description: Show help and usage
@@ -228,6 +251,11 @@ context:
           description: Usually provided through -u
 
   openssl:
+    examples:
+      - value: "openssl s_client -connect ip.darklab.sh:443 -quiet"
+        description: Inspect TLS connection and certificate
+      - value: "openssl s_client -connect ip.darklab.sh:443 -showcerts"
+        description: Show full certificate chain
     subcommands:
       - value: s_client
         description: Connect and inspect a TLS endpoint
@@ -282,6 +310,15 @@ context:
           description: List all supported cipher suites verbosely
 
   curl:
+    examples:
+      - value: "curl -h"
+        description: Show help and usage
+      - value: "curl -I https://ip.darklab.sh"
+        description: HEAD request — show response headers only
+      - value: "curl -sv https://ip.darklab.sh"
+        description: Verbose — full request and response headers
+      - value: "curl -o /dev/null -w \"%{http_code}\" https://ip.darklab.sh"
+        description: Print just the HTTP status code
     flags:
       - value: -h
         description: Show help and usage
@@ -330,6 +367,15 @@ context:
           description: Start an HTTP or HTTPS URL
 
   dig:
+    examples:
+      - value: "dig -h"
+        description: Show help and usage
+      - value: "dig darklab.sh +short"
+        description: A record lookup, short output
+      - value: "dig MX darklab.sh +short"
+        description: Mail exchanger records
+      - value: "dig @8.8.8.8 darklab.sh"
+        description: Query using Google's public resolver
     flags:
       - value: -h
         description: Show help and usage
@@ -351,6 +397,15 @@ context:
           description: Domain name to query
 
   nuclei:
+    examples:
+      - value: "nuclei -h"
+        description: Show help and usage
+      - value: "nuclei -u https://ip.darklab.sh -t http/"
+        description: Run HTTP detection templates
+      - value: "nuclei -u https://ip.darklab.sh -severity high,critical"
+        description: Run only high and critical severity templates
+      - value: "nuclei -u https://ip.darklab.sh -t ssl/"
+        description: Run TLS/SSL detection templates
     flags:
       - value: -h
         description: Show help and usage
@@ -382,6 +437,13 @@ context:
           description: Usually provided through -u or -l
 
   ping:
+    examples:
+      - value: "ping -h"
+        description: Show help and usage
+      - value: "ping -c 4 darklab.sh"
+        description: Send 4 pings to a host
+      - value: "ping -i 0.5 -c 20 darklab.sh"
+        description: Fast probe — 20 pings at half-second intervals
     flags:
       - value: -h
         description: Show help and usage
@@ -412,6 +474,11 @@ context:
           description: Hostname or IP address to probe
 
   nc:
+    examples:
+      - value: "nc -zv ip.darklab.sh 80"
+        description: Check if port 80 is open
+      - value: "nc -zv ip.darklab.sh 443 80"
+        description: Check multiple ports at once
     flags:
       - value: -z
         description: Zero-I/O mode for port scanning
@@ -430,6 +497,13 @@ context:
           description: Hostname or IP followed by one or more ports
 
   nslookup:
+    examples:
+      - value: "nslookup -type=A darklab.sh"
+        description: IPv4 address lookup
+      - value: "nslookup -type=MX darklab.sh"
+        description: Mail exchanger lookup
+      - value: "nslookup -type=TXT darklab.sh"
+        description: TXT record lookup
     flags:
       - value: -type=A
         description: IPv4 address lookup
@@ -451,6 +525,13 @@ context:
           description: Domain name to query
 
   host:
+    examples:
+      - value: "host -t A darklab.sh"
+        description: IPv4 address lookup
+      - value: "host -t MX darklab.sh"
+        description: Mail exchanger lookup
+      - value: "host -t NS darklab.sh"
+        description: Name server lookup
     flags:
       - value: -t
         description: Select DNS record type
@@ -473,6 +554,13 @@ context:
           description: Domain name to query
 
   traceroute:
+    examples:
+      - value: "traceroute --help"
+        description: Show help and usage
+      - value: "traceroute -n ip.darklab.sh"
+        description: Trace route without hostname resolution
+      - value: "traceroute -m 30 ip.darklab.sh"
+        description: Trace with a 30-hop maximum
     flags:
       - value: --help
         description: Show help and usage
@@ -513,6 +601,15 @@ context:
           description: Hostname or IP to trace
 
   mtr:
+    examples:
+      - value: "mtr -h"
+        description: Show help and usage
+      - value: "mtr -n ip.darklab.sh"
+        description: Trace without hostname resolution
+      - value: "mtr -c 20 ip.darklab.sh"
+        description: Stop after 20 probes
+      - value: "mtr -n -c 20 ip.darklab.sh"
+        description: 20 probes, no DNS resolution
     flags:
       - value: -h
         description: Show help and usage
@@ -535,6 +632,13 @@ context:
           description: Hostname or IP to trace
 
   wget:
+    examples:
+      - value: "wget -h"
+        description: Show help and usage
+      - value: "wget --spider https://ip.darklab.sh"
+        description: Check URL without downloading
+      - value: "wget -q -O /dev/null --server-response https://ip.darklab.sh"
+        description: Show server response headers, discard body
     flags:
       - value: -h
         description: Show help and usage
@@ -571,6 +675,15 @@ context:
           description: Start an HTTP or HTTPS URL
 
   testssl:
+    examples:
+      - value: "testssl --help"
+        description: Show help and usage
+      - value: "testssl --fast https://ip.darklab.sh"
+        description: Quick, lightweight TLS scan
+      - value: "testssl --severity HIGH https://ip.darklab.sh"
+        description: Report only high-severity findings
+      - value: "testssl --heartbleed https://ip.darklab.sh"
+        description: Check for the Heartbleed vulnerability
     flags:
       - value: --help
         description: Show help and usage
@@ -603,6 +716,15 @@ context:
           description: HTTPS target URL
 
   dnsrecon:
+    examples:
+      - value: "dnsrecon -h"
+        description: Show help and usage
+      - value: "dnsrecon -d darklab.sh -t std"
+        description: Standard DNS record enumeration
+      - value: "dnsrecon -d darklab.sh -t axfr"
+        description: Attempt zone transfer
+      - value: "dnsrecon -d darklab.sh -t brt"
+        description: Brute-force subdomain enumeration
     flags:
       - value: -h
         description: Show help and usage
@@ -641,6 +763,15 @@ context:
           description: Usually provided through -d
 
   dnsenum:
+    examples:
+      - value: "dnsenum -h"
+        description: Show help and usage
+      - value: "dnsenum --noreverse darklab.sh"
+        description: Enumerate without reverse lookups
+      - value: "dnsenum --enum darklab.sh"
+        description: Full enumeration set
+      - value: "dnsenum --dnsserver 8.8.8.8 darklab.sh"
+        description: Enumerate using Google's public resolver
     flags:
       - value: -h
         description: Show help and usage
@@ -664,6 +795,15 @@ context:
           description: Domain name to enumerate
 
   dnsx:
+    examples:
+      - value: "dnsx -h"
+        description: Show help and usage
+      - value: "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+        description: Brute-force subdomains with a wordlist
+      - value: "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp"
+        description: Brute-force subdomains and show DNS responses
+      - value: "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp"
+        description: Filter for A records and show responses
     flags:
       - value: -h
         description: Show help and usage
@@ -694,6 +834,15 @@ context:
           description: Usually provided through -d
 
   fierce:
+    examples:
+      - value: "fierce -h"
+        description: Show help and usage
+      - value: "fierce --domain darklab.sh"
+        description: Enumerate subdomains for a domain
+      - value: "fierce --domain darklab.sh --dns-servers 8.8.8.8"
+        description: Enumerate using a specific resolver
+      - value: "fierce --domain darklab.sh --traverse 5"
+        description: Set traversal depth to 5
     flags:
       - value: -h
         description: Show help and usage
@@ -716,6 +865,13 @@ context:
           description: Example resolver address
 
   subfinder:
+    examples:
+      - value: "subfinder -h"
+        description: Show help and usage
+      - value: "subfinder -d darklab.sh"
+        description: Discover subdomains for a domain
+      - value: "subfinder -d darklab.sh -silent"
+        description: Subdomain discovery with minimal output
     flags:
       - value: -h
         description: Show help and usage
@@ -735,6 +891,15 @@ context:
           description: Target domain to enumerate
 
   pd-httpx:
+    examples:
+      - value: "pd-httpx -h"
+        description: Show help and usage
+      - value: "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect"
+        description: Full recon — title, status code, and tech fingerprint
+      - value: "pd-httpx -u https://ip.darklab.sh -status-code"
+        description: Check HTTP status code
+      - value: "pd-httpx -u https://ip.darklab.sh -follow-redirects"
+        description: Follow and report redirects
     flags:
       - value: -h
         description: Show help and usage
@@ -756,6 +921,13 @@ context:
           description: Start an HTTP or HTTPS URL
 
   nikto:
+    examples:
+      - value: "nikto -h ip.darklab.sh -p 443 -ssl"
+        description: Scan HTTPS target on port 443
+      - value: "nikto -h ip.darklab.sh -Tuning 1"
+        description: Scan for interesting files only
+      - value: "nikto -h ip.darklab.sh -maxtime 120"
+        description: Time-limited scan of two minutes
     flags:
       - value: -h
         description: Target host or URL
@@ -788,6 +960,15 @@ context:
           description: Injection checks
 
   wpscan:
+    examples:
+      - value: "wpscan -h"
+        description: Show help and usage
+      - value: "wpscan --url https://ip.darklab.sh --enumerate vp"
+        description: Enumerate vulnerable plugins
+      - value: "wpscan --url https://ip.darklab.sh --enumerate u"
+        description: Enumerate WordPress users
+      - value: "wpscan --url https://ip.darklab.sh --detection-mode aggressive"
+        description: Aggressive detection mode
     flags:
       - value: -h
         description: Show help and usage
@@ -823,6 +1004,13 @@ context:
           description: Aggressive detection mode
 
   gobuster:
+    examples:
+      - value: "gobuster -h"
+        description: Show help and usage
+      - value: "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+        description: Directory brute force with common wordlist
+      - value: "gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+        description: Virtual host brute force
     flags:
       - value: -h
         description: Show help and usage
@@ -856,6 +1044,15 @@ context:
           description: Common extension list
 
   fping:
+    examples:
+      - value: "fping -h"
+        description: Show help and usage
+      - value: "fping -c 4 darklab.sh"
+        description: Send 4 probes with a summary
+      - value: "fping -s darklab.sh"
+        description: Probe with summary stats only
+      - value: "fping -e darklab.sh"
+        description: Show elapsed time per reply
     flags:
       - value: -h
         description: Show help and usage
@@ -879,6 +1076,13 @@ context:
           description: Hostname or IP to probe
 
   sslscan:
+    examples:
+      - value: "sslscan -h"
+        description: Show help and usage
+      - value: "sslscan ip.darklab.sh"
+        description: Full TLS scan of a host
+      - value: "sslscan --no-failed ip.darklab.sh"
+        description: Scan but suppress failed cipher output
     flags:
       - value: -h
         description: Show help and usage
@@ -905,6 +1109,13 @@ context:
           description: Hostname or host:port to scan
 
   sslyze:
+    examples:
+      - value: "sslyze --help"
+        description: Show help and usage
+      - value: "sslyze --certinfo ip.darklab.sh"
+        description: Validate the certificate chain
+      - value: "sslyze --heartbleed ip.darklab.sh"
+        description: Test for the Heartbleed vulnerability
     flags:
       - value: --help
         description: Show help and usage
@@ -932,6 +1143,11 @@ context:
           description: Hostname or host:port to scan
 
   wafw00f:
+    examples:
+      - value: "wafw00f --help"
+        description: Show help and usage
+      - value: "wafw00f https://darklab.sh"
+        description: Check darklab.sh for a WAF
     flags:
       - value: --help
         description: Show help and usage
@@ -954,6 +1170,13 @@ context:
           description: Target URL to fingerprint
 
   naabu:
+    examples:
+      - value: "naabu -help"
+        description: Show help and usage
+      - value: "naabu -host ip.darklab.sh -p 80,443"
+        description: Scan web ports on a host
+      - value: "naabu -host ip.darklab.sh -silent"
+        description: Scan with minimal output
     flags:
       - value: -help
         description: Show help and usage
@@ -995,6 +1218,11 @@ context:
           description: Usually provided through -host
 
   katana:
+    examples:
+      - value: "katana -help"
+        description: Show help and usage
+      - value: "katana -u https://ip.darklab.sh -d 1 -silent"
+        description: Shallow crawl with minimal output
     flags:
       - value: -help
         description: Show help and usage
@@ -1039,6 +1267,11 @@ context:
           description: Usually provided through -u
 
   masscan:
+    examples:
+      - value: "masscan --help"
+        description: Show help and usage
+      - value: "masscan -p 80,443 8.8.8.8"
+        description: Fast scan of web ports
     flags:
       - value: --help
         description: Show help and usage
@@ -1072,6 +1305,11 @@ context:
           description: IP address or CIDR range
 
   rustscan:
+    examples:
+      - value: "rustscan --help"
+        description: Show help and usage
+      - value: "rustscan -a ip.darklab.sh -p 80,443"
+        description: Scan specific ports on a host
     flags:
       - value: --help
         description: Show help and usage

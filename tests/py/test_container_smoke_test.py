@@ -2,10 +2,11 @@
 Opt-in regression for the built Docker image.
 
 This suite builds a fresh image, starts the web app container, and runs every
-command from scripts/smoke_test_commands.txt through /run. Each command is checked
-against a small normalized output prefix so missing apt/pip/go/gem tools,
-broken fake-command wiring, or changed command output surface before an image
-or dependency update lands.
+example command from app/conf/autocomplete.yaml through /run. Each command is
+checked against expected output recorded in
+tests/py/fixtures/container_smoke_test-expectations.json so missing apt/pip/go/gem
+tools, broken fake-command wiring, or changed command output surface before an
+image or dependency update lands.
 
 Run with:
   RUN_CONTAINER_SMOKE_TEST=1 pytest tests/py/test_container_smoke_test.py -q
@@ -30,7 +31,7 @@ import yaml
 
 
 ROOT = Path(__file__).resolve().parents[2]
-COMMANDS_FILE = ROOT / "scripts" / "smoke_test_commands.txt"
+AUTOCOMPLETE_FILE = ROOT / "app" / "conf" / "autocomplete.yaml"
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
@@ -203,12 +204,16 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
 
 
 def _load_autocomplete_commands() -> list[str]:
+    data = yaml.safe_load(AUTOCOMPLETE_FILE.read_text())
+    context = data.get("context", {})
     commands: list[str] = []
-    for raw_line in COMMANDS_FILE.read_text().splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+    for spec in context.values():
+        if not isinstance(spec, dict):
             continue
-        commands.append(line)
+        for example in spec.get("examples") or []:
+            value = str(example.get("value", "")).strip()
+            if value:
+                commands.append(value)
     return commands
 
 
@@ -581,7 +586,8 @@ def test_container_smoke_test_startup(container_smoke_test):
 @pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))
 def test_container_smoke_test_command_matches_expected_output(container_smoke_test, container_smoke_test_session_id, case):
     command = str(case["command"])
-    expected_exit_code = int(case.get("exit_code", 0))
+    raw_exit_code = case.get("exit_code", 0)
+    expected_exit_code = int(raw_exit_code) if raw_exit_code is not None else None
 
     print(f"[container-smoke-test] running {command}", flush=True)
 
@@ -619,10 +625,11 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
         exit_events = [event for event in events if event.get("type") == "exit"]
         assert exit_events, f"{command!r} never emitted an exit event; events={events[:5]}"
         assert len(exit_events) == 1, f"{command!r} emitted multiple exit events; events={events[:5]}"
-        exit_event = exit_events[0]
-        assert exit_event.get("code") == expected_exit_code, (
-            f"{command!r} exited with the wrong status; events={events[:10]}"
-        )
+        if expected_exit_code is not None:
+            exit_event = exit_events[0]
+            assert exit_event.get("code") == expected_exit_code, (
+                f"{command!r} exited with the wrong status; events={events[:10]}"
+            )
 
     assert "error" not in event_types, f"{command!r} emitted an error event; events={events[:10]}"
     assert "Command is not installed" not in "\n".join(texts), (

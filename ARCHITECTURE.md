@@ -21,6 +21,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 - [Theme System](#theme-system)
 - [Test Suite](#test-suite)
 - [Production Deployment Notes](#production-deployment-notes)
+- [Related Docs](#related-docs)
 
 ---
 
@@ -28,7 +29,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 
 darklab shell is a web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, and real-time SSE streaming.
 
-At a mid to high level, it works like this:
+At a high level, it works like this:
 
 - A browser-based terminal UI loads a Flask-rendered shell page, then hydrates itself from focused read routes such as `/config`, `/themes`, `/faq`, `/autocomplete`, and `/welcome*`.
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
@@ -36,6 +37,8 @@ At a mid to high level, it works like this:
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
 - The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser cookies hold persistent user preferences such as timestamps, line numbers, welcome-intro mode, and the default share-snapshot redaction choice. Browser session storage holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
+
+---
 
 ## Logical Runtime Layers
 
@@ -87,6 +90,8 @@ This diagram is intentionally framework- and runtime-oriented rather than app-mo
 
 The goal is for this section to stay stable even when app-specific modules, blueprints, or frontend files are refactored. The more detailed sections below cover those app-level components directly.
 
+---
+
 ## Runtime Topology
 
 ```mermaid
@@ -115,6 +120,8 @@ This is the transport/boundary view of the app. It focuses on the stable communi
 - Redis is only used for shared worker coordination, not as a general application datastore
 - SQLite and artifact files are the durable history/share boundary
 - command execution remains out-of-process, which keeps the Flask worker lifecycle separate from tool execution
+
+---
 
 ## Primary Request Flows
 
@@ -231,7 +238,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 - domain scripts own tab/output/search/history/welcome/runner logic
 - `config.js` and `app.js` handle bootstrap concerns, while `controller.js` is the composition root and last loader
 
-The important recent architectural change is that prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
+Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
 The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, and snapshot redaction defaults all sit in the frontend layer rather than in `config.yaml`.
 
@@ -347,7 +354,7 @@ The storage model is intentionally split:
 - artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
 - deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
 
-Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Cross-User Signalling And Multi-Worker Kill above).
+Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Cross-User Signalling And Multi-Worker Kill below).
 
 ---
 
@@ -522,7 +529,7 @@ Fast output bursts are rendered in small batches instead of forcing a full DOM u
 
 ### Output Prefixes: Line Numbers And Timestamps
 
-Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes and a synchronized `data-prefix` string, while `syncOutputPrefixes()` recomputes shared prefix width whenever rows are added or the prefix mode changes. That keeps prompt rows, output rows, and exit rows aligned without rerendering the transcript body.
+Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes and a synchronized `data-prefix` string, while `syncOutputPrefixes()` recomputes shared prefix width whenever rows are added or the prefix mode changes. That keeps prompt rows, output rows, and exit rows aligned without re-rendering the transcript body.
 
 Welcome rows are excluded from normal prefix numbering, and `tab.runStart` is captured after the submitted prompt line is appended so elapsed timing applies only to run output.
 
@@ -586,10 +593,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 845
-- `vitest`: 360
-- `playwright`: 150
-- total: 1,355
+- `pytest`: 732
+- `vitest`: 369
+- `playwright`: 153
+- total: 1,254
 
 ### Testing Architecture
 
@@ -648,7 +655,7 @@ Application log format still remains an application-level choice, so operators m
 
 - [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
 - [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) — local setup, test workflow, linting, and merge request guidance
+- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
 - [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
 - [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
 - [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

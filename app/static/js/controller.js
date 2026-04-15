@@ -487,8 +487,12 @@ document.addEventListener('keydown', e => {
       return;
     }
   }
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
     if (e.key !== 'Escape') return;
+    closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
+    if (isHistoryPanelOpen()) hideHistoryPanel();
+    e.preventDefault();
+    return;
   }
   if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
     const isCtrlC = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C');
@@ -916,7 +920,8 @@ cmdInput.addEventListener('keydown', e => {
     e.preventDefault();
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
     else if (acFiltered.length > 0) {
-      if (typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+      const _allExamples = acFiltered.every(item => item && item.isExample);
+      if (!_allExamples && typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
       if (acIndex < 0 || !isAcDropdownOpen()) {
         acIndex = 0;
       } else if (e.shiftKey) {

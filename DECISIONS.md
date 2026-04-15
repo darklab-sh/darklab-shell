@@ -2,23 +2,23 @@
 
 This document records the key architectural decisions, tradeoffs, bugs, and implementation lessons that shaped the current design of darklab shell.
 
-Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures. If you are about to change something and want to know what has historically caused problems, skip to [Known Gotchas And Lessons Learned](#known-gotchas-and-lessons-learned).
+Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures. If you are about to change something and want to know what has historically caused problems, skip to [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
 
 ---
 
 ## Table of Contents
 
-- [Runtime And Coordination Decisions](#runtime-and-coordination-decisions)
+- [Runtime and Coordination Decisions](#runtime-and-coordination-decisions)
   - [Real-time Output: SSE over WebSockets](#real-time-output-sse-over-websockets)
   - [Multi-worker Process Killing via Redis](#multi-worker-process-killing-via-redis)
   - [Rate Limiting via Redis](#rate-limiting-via-redis)
-- [Security And Isolation Decisions](#security-and-isolation-decisions)
+- [Security and Isolation Decisions](#security-and-isolation-decisions)
   - [Cross-User Process Killing](#cross-user-process-killing)
   - [Two-User Security Model](#two-user-security-model)
   - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
   - [Loopback Address Blocking](#loopback-address-blocking)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
-- [Deployment And Packaging Decisions](#deployment-and-packaging-decisions)
+- [Deployment and Packaging Decisions](#deployment-and-packaging-decisions)
   - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
   - [nmap Capabilities](#nmap-capabilities)
   - [Go Binary Installation](#go-binary-installation)
@@ -28,16 +28,17 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
 - [Frontend Decisions](#frontend-decisions)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
   - [Dedicated Mobile Shell](#dedicated-mobile-shell)
-- [Known Gotchas And Lessons Learned](#known-gotchas-and-lessons-learned)
-  - [Runtime Streaming And Process Lifecycle](#runtime-streaming-and-process-lifecycle)
-  - [Container And Filesystem Behavior](#container-and-filesystem-behavior)
-  - [Frontend And Rendering Gotchas](#frontend-and-rendering-gotchas)
-  - [Long-Running And Local-Dev Edge Cases](#long-running-and-local-dev-edge-cases)
+- [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned)
+  - [Runtime Streaming and Process Lifecycle](#runtime-streaming-and-process-lifecycle)
+  - [Container and Filesystem Behavior](#container-and-filesystem-behavior)
+  - [Demo Recording Pipeline](#demo-recording-pipeline)
+  - [Frontend and Rendering Gotchas](#frontend-and-rendering-gotchas)
+  - [Long-Running and Local-Dev Edge Cases](#long-running-and-local-dev-edge-cases)
 - [Related Docs](#related-docs)
 
 ---
 
-## Runtime And Coordination Decisions
+## Runtime and Coordination Decisions
 
 ### Real-time Output: SSE over WebSockets
 
@@ -72,7 +73,7 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 
 ---
 
-## Security And Isolation Decisions
+## Security and Isolation Decisions
 
 ### Cross-User Process Killing
 
@@ -95,7 +96,7 @@ This is what motivated the Redis addition in the first place. Once Redis was a d
 
 **Filesystem path references to `/data` and `/tmp` are blocked at validation time using a regex with a negative lookbehind.**
 
-The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because `/data` is preceded by `m`.
+The regex is `(?<![\w:/])/data\b` (and `/tmp`). The negative lookbehind `(?<![\w:/])` prevents false positives on URLs — `https://darklab.sh/data/` won't match because the `/data` segment is immediately preceded by `m` (the last character of `darklab.sh`), which satisfies `\w` in the lookbehind.
 
 Blocking happens at two layers: client-side (immediate feedback) and server-side (authoritative). Internal rewrites (e.g. `nuclei -ud /tmp/nuclei-templates`) are injected by `rewrite_command()` which runs *after* `is_command_allowed()`, so they bypass the check.
 
@@ -125,7 +126,7 @@ Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries
 
 ---
 
-## Deployment And Packaging Decisions
+## Deployment and Packaging Decisions
 
 ### Startup Sequence (entrypoint.sh)
 
@@ -221,9 +222,9 @@ This keeps the mobile surface structured without needing a separate frontend bun
 
 ---
 
-## Known Gotchas And Lessons Learned
+## Known Gotchas and Lessons Learned
 
-### Runtime Streaming And Process Lifecycle
+### Runtime Streaming and Process Lifecycle
 
 **Gunicorn generator laziness.** Any setup that must happen before a kill request can arrive (Popen, pid_register) must be outside the generator function passed to `Response()`. The generator only executes when Flask starts iterating it to stream bytes.
 
@@ -231,7 +232,7 @@ This keeps the mobile surface structured without needing a separate frontend bun
 
 **Scanner subprocess chains can orphan their leaf process.** `SIGTERM` sent to the process group kills all four processes (`sudo`, `env`, `sh`, `tool`) simultaneously. If the intermediate parents die first, the leaf tool briefly has no parent and is adopted by PID 1. With `init: true`, PID 1 is tini, not Gunicorn, so the adoption is benign.
 
-### Container And Filesystem Behavior
+### Container and Filesystem Behavior
 
 **Docker volume mount ownership.** Bind-mounting `./data:/data` resets the directory's ownership to the host user who created it. The `entrypoint.sh` `chown -R appuser:appuser /data` corrects this on every start. The `-R` is important — `history.db` itself may also be root-owned if it was created by a previous run as root.
 
@@ -243,7 +244,15 @@ This keeps the mobile surface structured without needing a separate frontend bun
 
 **`env` doesn't use `--` as a terminator.** `sudo -u scanner env HOME=/tmp -- sh -c "..."` fails because `env` treats `--` as a literal command name. The correct form is `sudo -u scanner env HOME=/tmp sh -c "..."`.
 
-### Frontend And Rendering Gotchas
+### Demo Recording Pipeline
+
+**Playwright's built-in video recorder ignores `deviceScaleFactor`.** The recorder always captures frames at CSS pixel dimensions (e.g. 1280×960) regardless of how `deviceScaleFactor` is configured in `playwright.config.js`. For a desktop demo at 1280×960 with `deviceScaleFactor: 2`, you want 2560×1920 frames that look sharp on Retina displays. `page.screenshot()` *does* respect the factor and returns images at full physical resolution. The demo specs run a concurrent background loop that calls `page.screenshot()` at ~10 fps, writes the frames to `test-results/demo-frames/`, and the wrapper script stitches them with ffmpeg (HEVC via VideoToolbox on macOS, VP9 via libvpx on Linux). The built-in `video: { mode: 'on' }` path was tried first and rejected for this reason.
+
+**Chromium's mobile keyboard simulation overlay cannot be covered.** In Playwright's headless Chromium mobile emulation, focusing any input element (`input.focus()`, `locator.click()`, or `page.keyboard.type()`) triggers a gray keyboard-simulation overlay that is painted above all page content regardless of z-index. This overlay is not a DOM element and cannot be hidden with CSS, `pointer-events: none`, or JS. The overlay also shrinks the visual viewport, making the composer area shift up and the transcript area shrink — producing a demo that looks nothing like the real mobile app on a phone. The mobile demo spec avoids this entirely by typing through the native `HTMLInputElement.prototype.value` setter + `InputEvent` dispatch, never calling `.focus()` on the input. This keeps the visual viewport stable, the fake keyboard image visible at the bottom of the frame, and the transcript filling the full screen while commands run.
+
+**CSS `overflow-y: visible !important` is silently ignored when `overflow-x` is non-visible.** The CSS spec's mutual-override rule converts `overflow-y: visible` to `overflow-y: auto` at computed-value time whenever `overflow-x` is set to any non-`visible` value (e.g. `scroll` or `auto`). This conversion happens *after* the cascade, so `!important` on the `overflow-y` specified value has no effect — the computed value is still `auto`. The element becomes a scroll container in the Y axis, which clips any child with a negative margin-bottom overhang. Encountered when fixing tab-pill top clipping in the Playwright demo recording (`.tabs-bar` has `overflow-x: scroll`, causing it to clip the tab's `margin-bottom: -1px` overhang). Fix: use the `overflow` shorthand to set both axes simultaneously — `overflow: visible !important` — so the mutual-override rule has no non-visible axis to trigger on.
+
+### Frontend and Rendering Gotchas
 
 **ansi_up and permalink colors.** ansi_up converts ANSI escape codes to HTML spans, consuming the original codes. If you try to re-render from `element.innerText`, all color information is lost. The `rawLines` array stores the original text before ansi_up processes it, enabling the permalink page to run ansi_up fresh and reproduce the exact same colors.
 
@@ -253,7 +262,7 @@ This keeps the mobile surface structured without needing a separate frontend bun
 
 **Multi-tab stall detection requires per-tab state.** The SSE stall detector fires if no data arrives within 45 seconds. The original implementation used a single module-level `_stalledTimeout` variable. With multiple tabs running commands simultaneously, starting a command in Tab B would cancel Tab A's timeout, leaving Tab A's stalled connection undetected indefinitely. Fixed by replacing the single variable with a `Map` keyed by `tabId` (`_stalledTimeouts = new Map()`). All four call sites (`_resetStalledTimeout`, `_clearStalledTimeout`, and their consumers in the SSE loop and kill handler) must pass `tabId`.
 
-### Long-Running And Local-Dev Edge Cases
+### Long-Running and Local-Dev Edge Cases
 
 **Command timeout must fire during continuous output.** The original timeout check was inside the `select()` idle branch — it only ran when no output had arrived for `HEARTBEAT_INTERVAL` seconds. A command producing a constant stream of output (e.g. a flood scan before deny rules were added) would never hit the idle branch and therefore never time out. Fix: moved the timeout check to the top of the `while True:` loop so it runs on every iteration regardless of output activity. The start time is parsed once outside the loop (`datetime.fromisoformat(run_started)`) to avoid repeated parsing overhead.
 
@@ -266,6 +275,6 @@ This keeps the mobile surface structured without needing a separate frontend bun
 - [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
 - [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
 - [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
-- [CONTRIBUTORS.md](CONTRIBUTORS.md) — local setup, test workflow, linting, and merge request guidance
+- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
 - [THEME.md](THEME.md) — theme registry, selector metadata, and override behavior
 - [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

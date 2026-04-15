@@ -1,19 +1,22 @@
 #!/usr/bin/env node
 
 import { chromium } from '@playwright/test'
-import { mkdir, readFile, writeFile } from 'node:fs/promises'
+import { execFileSync } from 'node:child_process'
+import { readFileSync } from 'node:fs'
+import { mkdir, writeFile } from 'node:fs/promises'
 import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..', '..')
-const SMOKE_TEST_COMMANDS_FILE = path.join(ROOT, 'scripts', 'smoke_test_commands.txt')
+const AUTOCOMPLETE_FILE = path.join(ROOT, 'app', 'conf', 'autocomplete.yaml')
 const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab-shell-container-smoke-test-corpus')
 
 function parseArgs(argv) {
   const args = {
     baseUrl: process.env.AUTOCOMPLETE_BASE_URL || 'http://localhost:5001',
     outDir: process.env.AUTOCOMPLETE_OUT_DIR || DEFAULT_OUT_DIR,
+    commandsFile: '',
     headed: false,
     clearBetween: true,
     resumeFromCommand: '',
@@ -34,6 +37,10 @@ function parseArgs(argv) {
     }
     if (arg === '--out-dir' && argv[i + 1]) {
       args.outDir = argv[++i]
+      continue
+    }
+    if (arg === '--commands-file' && argv[i + 1]) {
+      args.commandsFile = argv[++i]
       continue
     }
     if (arg === '--pause-ms' && argv[i + 1]) {
@@ -79,9 +86,13 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') {
       console.log(`Usage: node scripts/node/capture_output_for_smoke_test.mjs [options]
 
+By default, commands are read from app/conf/autocomplete.yaml (context.<root>.examples[].value).
+Use --commands-file to run a specific subset instead.
+
 Options:
   --base-url <url>            App URL to connect to (default: ${args.baseUrl})
   --out-dir <dir>             Directory for captured txt files (default: ${args.outDir})
+  --commands-file <path>      Plain-text file of commands to run (one per line, # comments ignored)
   --pause-ms <ms>             Pause between commands to avoid rate limits (default: ${args.pauseMs})
   --settle-ms <ms>            Time to wait after a command finishes before saving (default: ${args.settleMs})
   --stable-ms <ms>            Time the output line count must remain unchanged before saving (default: ${args.stableMs})
@@ -90,7 +101,7 @@ Options:
   --toast-timeout-ms <ms>     Time to wait for the no-output toast (default: ${args.toastTimeoutMs})
   --headed                    Launch a visible browser window
   --no-clear-between          Leave output in the tab between commands
-  --start-from-command <cmd>   Skip commands before the first exact match
+  --start-from-command <cmd>  Skip commands before the first exact match (searches within --commands-file if both are provided)
   --keep-browser-open         Leave the browser open after capture finishes
 `)
       process.exit(0)
@@ -109,17 +120,22 @@ function slugify(command) {
     .slice(0, 96) || 'command'
 }
 
-async function loadCommands() {
-  const content = await readFile(SMOKE_TEST_COMMANDS_FILE, 'utf8')
-  const commands = []
-  for (const rawLine of content.split(/\r?\n/)) {
-    const line = rawLine.trim()
-    if (!line || line.startsWith('#')) {
-      continue
-    }
-    commands.push(line)
+function loadCommands(args) {
+  if (args.commandsFile) {
+    return readFileSync(args.commandsFile, 'utf8')
+      .split(/\r?\n/)
+      .map(line => line.trim())
+      .filter(line => line && !line.startsWith('#'))
   }
-  return commands
+  const script = [
+    'import yaml, json, sys',
+    "d = yaml.safe_load(open(sys.argv[1]))",
+    "ctx = d.get('context', {})",
+    "cmds = [ex['value'] for spec in ctx.values() if isinstance(spec, dict) for ex in (spec.get('examples') or []) if str(ex.get('value', '')).strip()]",
+    "print(json.dumps(cmds))",
+  ].join('\n')
+  const output = execFileSync('python3', ['-c', script, AUTOCOMPLETE_FILE], { encoding: 'utf8' }).trim()
+  return JSON.parse(output)
 }
 
 function selectCommandTimeoutMs(command, defaultTimeoutMs) {
@@ -163,64 +179,6 @@ function selectCommandSettleMs(command, defaultSettleMs) {
   return defaultSettleMs
 }
 
-function selectCommandEarlyStop(command) {
-  const trimmed = command.trim()
-  const root = trimmed.split(/\s+/, 1)[0].toLowerCase()
-
-  switch (root) {
-    case 'nmap':
-      return {
-        markerTimeoutMs: 30_000,
-        postMarkerGraceMs: 1_500,
-        patterns: [
-          /Nmap scan report for /,
-          /Starting Nmap /,
-        ],
-      }
-    case 'masscan':
-      return {
-        markerTimeoutMs: 30_000,
-        postMarkerGraceMs: 1_500,
-        patterns: [
-          /Starting masscan\b/,
-          /Discovered open port /,
-        ],
-      }
-    case 'nikto':
-      return {
-        markerTimeoutMs: 30_000,
-        postMarkerGraceMs: 1_500,
-        patterns: [
-          /\+ Target Hostname:/,
-          /\+ Target IP:/,
-          /- Nikto v/,
-        ],
-      }
-    case 'testssl':
-      return {
-        markerTimeoutMs: 30_000,
-        postMarkerGraceMs: 1_500,
-        patterns: [
-          /Using OpenSSL /,
-          / Start \d{4}-\d{2}-\d{2} /,
-          /testssl version /,
-        ],
-      }
-    case 'nuclei':
-      return {
-        markerTimeoutMs: 30_000,
-        postMarkerGraceMs: 1_500,
-        patterns: [
-          /\[INF\] Templates loaded for current scan:/,
-          /\[INF\] Targets loaded for current scan:/,
-          /\[INF\] Scan completed in /,
-        ],
-      }
-    default:
-      return null
-  }
-}
-
 async function ensureHealthy(page, timeoutMs = 120_000) {
   const resp = await page.goto('/health', { waitUntil: 'domcontentloaded' })
   if (!resp || !resp.ok()) {
@@ -238,66 +196,6 @@ async function startCommand(page, command) {
 
 async function waitForCommandCompletion(page, timeoutMs) {
   await page.locator('.status-pill').filter({ hasNotText: 'RUNNING' }).waitFor({ timeout: timeoutMs })
-}
-
-async function waitForStatusText(page) {
-  return (await page.locator('.status-pill').textContent())?.trim() || ''
-}
-
-async function waitForOutputMarkerOrStop(page, patterns, timeoutMs) {
-  const lines = page.locator('.tab-panel.active .output .line')
-  const deadline = Date.now() + timeoutMs
-
-  while (Date.now() < deadline) {
-    const status = await waitForStatusText(page)
-    if (status && status !== 'RUNNING') {
-      return 'done'
-    }
-
-    const text = (await lines.allTextContents()).join('\n')
-    if (patterns.some(pattern => pattern.test(text))) {
-      return 'marker'
-    }
-
-    await page.waitForTimeout(250)
-  }
-
-  return 'timeout'
-}
-
-async function waitForRunId(page, timeoutMs) {
-  const deadline = Date.now() + timeoutMs
-  while (Date.now() < deadline) {
-    const runId = await page.evaluate(() => {
-      const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
-      return tab && typeof tab.runId === 'string' ? tab.runId : ''
-    })
-    if (runId) return runId
-    await page.waitForTimeout(100)
-  }
-  return ''
-}
-
-async function requestKill(page, runId) {
-  if (!runId) return false
-  const result = await page.evaluate(async (id) => {
-    try {
-      const resp = await fetch('/kill', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ run_id: id }),
-      })
-      return { status: resp.status, text: await resp.text() }
-    } catch (error) {
-      return { status: 0, text: String(error) }
-    }
-  }, runId)
-
-  if (result.status === 404) return false
-  if (result.status >= 400 || result.status === 0) {
-    throw new Error(`failed to kill ${runId}: ${result.text || result.status}`)
-  }
-  return true
 }
 
 async function waitForOutputToSettle(page, timeoutMs, stableMs) {
@@ -350,10 +248,11 @@ async function clearOutput(page) {
 
 async function main() {
   const args = parseArgs(process.argv.slice(2))
-  const commands = await loadCommands()
+  const commands = loadCommands(args)
 
   if (!commands.length) {
-    throw new Error(`No commands found in ${SMOKE_TEST_COMMANDS_FILE}`)
+    const source = args.commandsFile || AUTOCOMPLETE_FILE
+    throw new Error(`No commands found in ${source}`)
   }
 
   await mkdir(args.outDir, { recursive: true })
@@ -374,7 +273,7 @@ async function main() {
       : 0
 
     if (args.resumeFromCommand && startIndex === -1) {
-      throw new Error(`Could not find start command in smoke_test_commands.txt: ${args.resumeFromCommand}`)
+      throw new Error(`Could not find start command in autocomplete.yaml examples: ${args.resumeFromCommand}`)
     }
 
     for (let index = startIndex; index < commands.length; index += 1) {
@@ -385,44 +284,59 @@ async function main() {
       const destination = path.join(args.outDir, fileName)
       const timeoutMs = selectCommandTimeoutMs(command, args.commandTimeoutMs)
       const settleMs = selectCommandSettleMs(command, args.settleMs)
-      const earlyStop = selectCommandEarlyStop(command)
-      let markerMatched = false
-      let killRequested = false
 
-      await startCommand(page, command)
+      let captured = false
+      let errorMessage = ''
 
-      if (earlyStop) {
-        const outcome = await waitForOutputMarkerOrStop(page, earlyStop.patterns, earlyStop.markerTimeoutMs)
-        markerMatched = outcome === 'marker'
-        if (outcome !== 'done') {
-          if (markerMatched) {
-            await page.waitForTimeout(earlyStop.postMarkerGraceMs)
-          }
-          const runId = await waitForRunId(page, 5_000)
-          if (runId) {
-            killRequested = await requestKill(page, runId)
-          }
+      try {
+        await startCommand(page, command)
+        await waitForCommandCompletion(page, timeoutMs)
+        await waitForOutputToSettle(page, settleMs, args.stableMs)
+        const result = await saveCurrentOutput(page, command, destination, args)
+
+        manifest.push({
+          index: index + 1,
+          command,
+          file: fileName,
+          exported: result.exported,
+          timeoutMs,
+          settleMs,
+          note: result.note || '',
+        })
+        captured = true
+      } catch (err) {
+        errorMessage = err && err.message ? err.message.split('\n')[0] : String(err)
+        console.error(`[${prefix}] FAILED: ${command}\n  ${errorMessage}`)
+
+        // Attempt to save whatever output has rendered so far
+        let partialResult = { exported: false, note: '' }
+        try {
+          partialResult = await saveCurrentOutput(page, command, destination, args)
+        } catch (saveErr) {
+          // Nothing to save or save failed — proceed to recovery
+        }
+
+        manifest.push({
+          index: index + 1,
+          command,
+          file: fileName,
+          exported: partialResult.exported,
+          timeoutMs,
+          settleMs,
+          note: partialResult.note || '',
+          error: errorMessage,
+        })
+
+        // Recover page to a clean state before continuing
+        try {
+          await ensureHealthy(page)
+        } catch (recoveryErr) {
+          console.error(`[${prefix}] Page recovery failed, stopping: ${recoveryErr && recoveryErr.message ? recoveryErr.message.split('\n')[0] : String(recoveryErr)}`)
+          break
         }
       }
 
-      await waitForCommandCompletion(page, timeoutMs)
-      await waitForOutputToSettle(page, settleMs, args.stableMs)
-      const result = await saveCurrentOutput(page, command, destination, args)
-
-      manifest.push({
-        index: index + 1,
-        command,
-        file: fileName,
-        exported: result.exported,
-        timeoutMs,
-        settleMs,
-        earlyStop: !!earlyStop,
-        markerMatched,
-        killRequested,
-        note: result.note || '',
-      })
-
-      if (args.clearBetween && index < commands.length - 1) {
+      if (captured && args.clearBetween && index < commands.length - 1) {
         await clearOutput(page)
       }
 
@@ -437,7 +351,13 @@ async function main() {
       'utf8',
     )
 
-    console.log(`Captured ${manifest.length} commands into ${args.outDir}`)
+    const failed = manifest.filter(e => e.error).length
+    const succeeded = manifest.length - failed
+    if (failed > 0) {
+      console.log(`Captured ${succeeded}/${manifest.length} commands into ${args.outDir} (${failed} failed — see manifest.json)`)
+    } else {
+      console.log(`Captured ${manifest.length} commands into ${args.outDir}`)
+    }
   } finally {
     if (!args.keepBrowserOpen) {
       await context.close().catch(() => {})

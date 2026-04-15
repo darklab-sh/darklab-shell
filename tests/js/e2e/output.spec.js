@@ -171,10 +171,16 @@ test.describe('output follow helper', () => {
       updateOutputFollowButton(activeTabId)
     })
 
-    await expect.poll(async () => {
-      const [hidden, text] = await followBtn.evaluate(btn => [btn.hidden, btn.textContent])
-      return !hidden && text === 'jump to live'
-    }, { timeout: 5000 }).toBe(true)
+    await page.waitForFunction(() => {
+      const tab = getTab(activeTabId)
+      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+      return !!tab
+        && tab.st === 'running'
+        && !tab.followOutput
+        && !!btn
+        && !btn.hidden
+        && btn.textContent === 'jump to live'
+    }, { timeout: 5000 })
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to live')
 

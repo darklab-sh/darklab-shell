@@ -113,7 +113,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart) {
     prefixEl.className = 'prompt-prefix';
     prefixEl.textContent = prefix;
     content.appendChild(prefixEl);
-    if (text) content.appendChild(document.createTextNode(' ' + text));
+    if (text) content.appendChild(document.createTextNode(text));
     rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
   } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
     content.textContent = text;
@@ -192,7 +192,7 @@ function _appendRestoredOutputSpan(out, rawLine) {
     } else if (text.startsWith('$ ')) {
       bodyText = text.slice(2);
     }
-    if (bodyText) content.appendChild(document.createTextNode(' ' + bodyText));
+    if (bodyText) content.appendChild(document.createTextNode(bodyText));
   } else if (cls === 'notice' || cls === 'denied' || cls === 'exit-ok' || cls === 'exit-fail') {
     content.textContent = text;
   } else {
