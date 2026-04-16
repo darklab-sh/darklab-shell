@@ -170,12 +170,37 @@ The checks and their scope:
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
 | YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
 | Markdown | `markdownlint-cli2` | all tracked `.md` files | `npm run lint:md` |
+| Vendor JS | `build_vendor.mjs` + `git diff` | `app/static/js/vendor/` | `npm run vendor:check` |
 
-Run all JS/shell/Docker/YAML/Markdown linters at once: `npm run lint`
+Run all linters at once (Python + JS/shell/Docker/YAML/Markdown + vendor): `npm run lint`
 
 Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
+
+---
+
+## Vendor JS Workflow
+
+The two browser libraries used at runtime — `ansi_up` and `jspdf` — are tracked in `package.json` under `dependencies` and built into `app/static/js/vendor/` by `scripts/build_vendor.mjs`. The generated files are committed so the app works without a build step in local development and docker-compose.
+
+**Regenerate vendor files after a version bump:**
+
+```bash
+npm install             # update node_modules to match the new version
+npm run vendor:sync     # regenerate app/static/js/vendor/ from node_modules
+git add app/static/js/vendor/
+```
+
+**Verify vendor files are in sync (no uncommitted diff):**
+
+```bash
+npm run vendor:check    # runs vendor:sync then git diff --exit-code
+```
+
+`vendor:check` runs automatically as part of `npm run lint` and the pre-commit hook (when `node_modules` is present).
+
+**Why committed vendor files?** `ansi_up` v6 is ESM-only and cannot be loaded via a plain `<script>` tag. `scripts/build_vendor.mjs` wraps it in an IIFE that exposes `window.AnsiUp`. `jspdf` ships a UMD build that is copied as-is. Committing the generated output means local development and docker-compose runs never need an explicit build step, and the exact library version in use is always visible in git history.
 
 ---
 
