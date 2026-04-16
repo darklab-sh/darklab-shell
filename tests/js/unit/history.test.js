@@ -6,12 +6,12 @@ import { MemoryStorage, fromScript, fromDomScripts } from './helpers/extract.js'
 let _getStarred, _saveStarred, _toggleStar, store
 
 beforeEach(() => {
-  ;({ _getStarred, _saveStarred, _toggleStar, _storage: store } = fromScript(
-    'app/static/js/history.js',
-    '_getStarred',
-    '_saveStarred',
-    '_toggleStar',
-  ))
+  ;({
+    _getStarred,
+    _saveStarred,
+    _toggleStar,
+    _storage: store,
+  } = fromScript('app/static/js/history.js', '_getStarred', '_saveStarred', '_toggleStar'))
 })
 
 // ── _getStarred ───────────────────────────────────────────────────────────────
@@ -116,32 +116,39 @@ describe('command history hydration', () => {
     const cmdInput = document.getElementById('cmd')
     const historyPanel = document.getElementById('history-panel')
 
-    return fromDomScripts([
-      'app/static/js/history.js',
-    ], {
-      document,
-      localStorage: new MemoryStorage(),
-      APP_CONFIG: { recent_commands_limit: 3 },
-      histRow,
-      cmdInput,
-      historyPanel,
-      refreshHistoryPanel: vi.fn(),
-      useMobileTerminalViewportMode: () => false,
-      setComposerState: (next) => {
-        if (Object.prototype.hasOwnProperty.call(next, 'value')) cmdInput.value = String(next.value ?? '');
-        if (Object.prototype.hasOwnProperty.call(next, 'selectionStart') || Object.prototype.hasOwnProperty.call(next, 'selectionEnd')) {
-          const start = typeof next.selectionStart === 'number' ? next.selectionStart : cmdInput.value.length;
-          const end = typeof next.selectionEnd === 'number' ? next.selectionEnd : start;
-          cmdInput.setSelectionRange(start, end);
-        }
+    return fromDomScripts(
+      ['app/static/js/history.js'],
+      {
+        document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 3 },
+        histRow,
+        cmdInput,
+        historyPanel,
+        refreshHistoryPanel: vi.fn(),
+        useMobileTerminalViewportMode: () => false,
+        setComposerState: (next) => {
+          if (Object.prototype.hasOwnProperty.call(next, 'value'))
+            cmdInput.value = String(next.value ?? '')
+          if (
+            Object.prototype.hasOwnProperty.call(next, 'selectionStart') ||
+            Object.prototype.hasOwnProperty.call(next, 'selectionEnd')
+          ) {
+            const start =
+              typeof next.selectionStart === 'number' ? next.selectionStart : cmdInput.value.length
+            const end = typeof next.selectionEnd === 'number' ? next.selectionEnd : start
+            cmdInput.setSelectionRange(start, end)
+          }
+        },
       },
-    }, `{
+      `{
       hydrateCmdHistory,
       navigateCmdHistory,
       resetCmdHistoryNav,
       renderHistory,
       getCmdHistory: () => cmdHistory.slice(),
-    }`)
+    }`,
+    )
   }
 
   it('hydrates unique recent commands from server history and enables navigation', () => {
@@ -171,10 +178,7 @@ describe('command history hydration', () => {
     const { hydrateCmdHistory, navigateCmdHistory } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')
 
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'curl -I https://darklab.sh' },
-    ])
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'curl -I https://darklab.sh' }])
 
     cmdInput.value = 'pin'
     setComposerState({ value: 'pin', selectionStart: 3, selectionEnd: 3, activeInput: 'desktop' })
@@ -192,16 +196,18 @@ describe('command history hydration', () => {
     const { hydrateCmdHistory, navigateCmdHistory, resetCmdHistoryNav } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')
 
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'curl -I https://darklab.sh' },
-    ])
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'curl -I https://darklab.sh' }])
 
     expect(navigateCmdHistory(1)).toBe(true)
     expect(cmdInput.value).toBe('dig darklab.sh A')
 
     cmdInput.value = 'typed now'
-    setComposerState({ value: 'typed now', selectionStart: 9, selectionEnd: 9, activeInput: 'desktop' })
+    setComposerState({
+      value: 'typed now',
+      selectionStart: 9,
+      selectionEnd: 9,
+      activeInput: 'desktop',
+    })
     resetCmdHistoryNav()
 
     expect(navigateCmdHistory(-1)).toBe(false)
@@ -216,20 +222,22 @@ describe('command history hydration', () => {
       <div id="history-panel"></div>
     `
 
-    const helpers = fromDomScripts([
-      'app/static/js/history.js',
-    ], {
-      document,
-      localStorage: new MemoryStorage(),
-      APP_CONFIG: { recent_commands_limit: 8 },
-      histRow: document.getElementById('history-row'),
-      cmdInput: document.getElementById('cmd'),
-      historyPanel: document.getElementById('history-panel'),
-      refreshHistoryPanel: vi.fn(),
-      useMobileTerminalViewportMode: () => true,
-    }, `({
+    const helpers = fromDomScripts(
+      ['app/static/js/history.js'],
+      {
+        document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 8 },
+        histRow: document.getElementById('history-row'),
+        cmdInput: document.getElementById('cmd'),
+        historyPanel: document.getElementById('history-panel'),
+        refreshHistoryPanel: vi.fn(),
+        useMobileTerminalViewportMode: () => true,
+      },
+      `({
       hydrateCmdHistory,
-    })`)
+    })`,
+    )
 
     helpers.hydrateCmdHistory([
       { command: 'one' },
@@ -253,25 +261,29 @@ describe('command history hydration', () => {
       <div id="history-panel"></div>
     `
 
-    const helpers = fromDomScripts([
-      'app/static/js/history.js',
-    ], {
-      document,
-      localStorage: new MemoryStorage(),
-      APP_CONFIG: { recent_commands_limit: 8 },
-      histRow: document.getElementById('history-row'),
-      cmdInput: document.getElementById('cmd'),
-      historyPanel: document.getElementById('history-panel'),
-      refreshHistoryPanel: vi.fn(),
-      useMobileTerminalViewportMode: () => false,
-    }, `({
+    const helpers = fromDomScripts(
+      ['app/static/js/history.js'],
+      {
+        document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 8 },
+        histRow: document.getElementById('history-row'),
+        cmdInput: document.getElementById('cmd'),
+        historyPanel: document.getElementById('history-panel'),
+        refreshHistoryPanel: vi.fn(),
+        useMobileTerminalViewportMode: () => false,
+      },
+      `({
       hydrateCmdHistory,
-    })`)
+    })`,
+    )
 
     const originalRect = window.HTMLElement.prototype.getBoundingClientRect
     window.HTMLElement.prototype.getBoundingClientRect = function getBoundingClientRect() {
       if (!this.classList?.contains('hist-chip')) return { top: 0 }
-      const regularChipCount = document.querySelectorAll('.hist-chip:not(.hist-chip-overflow)').length
+      const regularChipCount = document.querySelectorAll(
+        '.hist-chip:not(.hist-chip-overflow)',
+      ).length
       if (this.classList.contains('hist-chip-overflow')) {
         return { top: regularChipCount > 2 ? 26 : 10 }
       }
@@ -287,7 +299,7 @@ describe('command history hydration', () => {
       ])
 
       const visibleChips = [...document.querySelectorAll('.hist-chip')]
-      expect(visibleChips.map(chip => chip.textContent)).toEqual(['☆one', '☆two', '+ more'])
+      expect(visibleChips.map((chip) => chip.textContent)).toEqual(['☆one', '☆two', '+ more'])
     } finally {
       window.HTMLElement.prototype.getBoundingClientRect = originalRect
     }
@@ -330,28 +342,37 @@ describe('history panel actions', () => {
       <input id="cmd" />
     `
 
-    const apiFetch = apiFetchImpl || vi.fn((url) => {
-      if (url === '/history') {
-        return Promise.resolve({
-          json: () => Promise.resolve({
-            roots: ['ping'],
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            ],
-          }),
-        })
-      }
-      if (url === '/history/run-1?json&preview=1') {
-        return Promise.resolve({
-          json: () => Promise.resolve({
-            command: 'ping darklab.sh',
-            output: ['ok'],
-            exit_code: 0,
-          }),
-        })
-      }
-      return Promise.resolve({ json: () => Promise.resolve({}) })
-    })
+    const apiFetch =
+      apiFetchImpl ||
+      vi.fn((url) => {
+        if (url === '/history') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                roots: ['ping'],
+                runs: [
+                  {
+                    id: 'run-1',
+                    command: 'ping darklab.sh',
+                    started: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }),
+          })
+        }
+        if (url === '/history/run-1?json&preview=1') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                command: 'ping darklab.sh',
+                output: ['ok'],
+                exit_code: 0,
+              }),
+          })
+        }
+        return Promise.resolve({ json: () => Promise.resolve({}) })
+      })
 
     const clipboard = clipboardImpl || { writeText: () => Promise.resolve() }
     const showToast = vi.fn()
@@ -360,7 +381,7 @@ describe('history panel actions', () => {
     const appendLine = vi.fn()
     const appendCommandEcho = vi.fn()
     const setTabStatus = vi.fn((id, st) => {
-      const tab = tabs.find(t => t.id === id)
+      const tab = tabs.find((t) => t.id === id)
       if (tab) tab.st = st
     })
     const hideTabKillBtn = vi.fn()
@@ -386,55 +407,55 @@ describe('history panel actions', () => {
     const windowOpen = vi.fn()
 
     return {
-      ...fromDomScripts([
-        'app/static/js/utils.js',
-        'app/static/js/history.js',
-      ], {
-        document,
-        localStorage: new MemoryStorage(),
-        APP_CONFIG: { recent_commands_limit: 8 },
-        apiFetch,
-        navigator: { clipboard },
-        location,
-        historyPanel,
-        historyList,
-        historyLoadOverlay,
-        historySearchInput,
-        historyMobileFiltersToggle,
-        historyAdvancedFilters,
-        historyRootInput,
-        historyRootDropdown,
-        historyExitFilter,
-        historyDateFilter,
-        historyStarredToggle,
-        historyClearFiltersBtn,
-        historyActiveFilters,
-        histRow: document.createElement('div'),
-        histDelOverlay,
-        histDelMsg,
-        histDelConfirmBtn,
-        cmdInput,
-        tabs,
-        activateTab,
-        createTab,
-        appendLine,
-        appendCommandEcho,
-        setTabStatus,
-        hideTabKillBtn,
-        showToast,
-        window: { open: windowOpen },
-        _getStarred,
-        _saveStarred,
-        refreshHistoryPanel: () => {},
-        renderHistory: () => {},
-        hideHistoryPanel: vi.fn(() => {
-          historyPanel.classList.remove('open')
-          if (typeof cmdInput.focus === 'function') cmdInput.focus()
-        }),
-        confirmHistAction: () => {},
-        executeHistAction: () => {},
-        useMobileTerminalViewportMode: () => mobileMode,
-      }, `{
+      ...fromDomScripts(
+        ['app/static/js/utils.js', 'app/static/js/history.js'],
+        {
+          document,
+          localStorage: new MemoryStorage(),
+          APP_CONFIG: { recent_commands_limit: 8 },
+          apiFetch,
+          navigator: { clipboard },
+          location,
+          historyPanel,
+          historyList,
+          historyLoadOverlay,
+          historySearchInput,
+          historyMobileFiltersToggle,
+          historyAdvancedFilters,
+          historyRootInput,
+          historyRootDropdown,
+          historyExitFilter,
+          historyDateFilter,
+          historyStarredToggle,
+          historyClearFiltersBtn,
+          historyActiveFilters,
+          histRow: document.createElement('div'),
+          histDelOverlay,
+          histDelMsg,
+          histDelConfirmBtn,
+          cmdInput,
+          tabs,
+          activateTab,
+          createTab,
+          appendLine,
+          appendCommandEcho,
+          setTabStatus,
+          hideTabKillBtn,
+          showToast,
+          window: { open: windowOpen },
+          _getStarred,
+          _saveStarred,
+          refreshHistoryPanel: () => {},
+          renderHistory: () => {},
+          hideHistoryPanel: vi.fn(() => {
+            historyPanel.classList.remove('open')
+            if (typeof cmdInput.focus === 'function') cmdInput.focus()
+          }),
+          confirmHistAction: () => {},
+          executeHistAction: () => {},
+          useMobileTerminalViewportMode: () => mobileMode,
+        },
+        `{
         refreshHistoryPanel,
         executeHistAction,
         confirmHistAction,
@@ -444,7 +465,8 @@ describe('history panel actions', () => {
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
-      }`),
+      }`,
+      ),
       apiFetch,
       clipboard,
       windowOpen,
@@ -467,24 +489,30 @@ describe('history panel actions', () => {
     cmdInput.focus = vi.fn()
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
     const entry = document.querySelector('#history-list .history-entry')
-    entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="copy"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clipboard.writeText).toHaveBeenCalledTimes(1)
     await Promise.resolve()
     await Promise.resolve()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.execCommand).toHaveBeenCalledWith('copy')
-    expect(document.getElementById('permalink-toast').textContent).toBe('Command copied to clipboard')
-    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(document.getElementById('permalink-toast').textContent).toBe(
+      'Command copied to clipboard',
+    )
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(cmdInput.focus).toHaveBeenCalled()
 
-    entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="permalink"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clipboard.writeText).toHaveBeenCalledTimes(2)
     await Promise.resolve()
     await Promise.resolve()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.execCommand).toHaveBeenCalledTimes(2)
     expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
@@ -497,22 +525,30 @@ describe('history panel actions', () => {
     historyPanel.classList.add('open')
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const entry = document.querySelector('#history-list .history-entry')
-    entry.querySelector('[data-action="star"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="star"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(true)
 
     historyPanel.classList.add('open')
-    entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="copy"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(false)
 
     historyPanel.classList.add('open')
-    entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="permalink"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(false)
 
     historyPanel.classList.add('open')
-    entry.querySelector('[data-action="delete"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="delete"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(false)
   })
 
@@ -522,24 +558,32 @@ describe('history panel actions', () => {
     historyPanel.classList.add('open')
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const entry = document.querySelector('#history-list .history-entry')
 
-    entry.querySelector('[data-action="star"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="star"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(true)
 
-    entry.querySelector('[data-action="copy"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="copy"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
     expect(historyPanel.classList.contains('open')).toBe(true)
 
-    entry.querySelector('[data-action="permalink"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="permalink"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
     expect(historyPanel.classList.contains('open')).toBe(true)
 
-    entry.querySelector('[data-action="delete"]').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    entry
+      .querySelector('[data-action="delete"]')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(false)
   })
 
@@ -547,7 +591,7 @@ describe('history panel actions', () => {
     const { refreshHistoryPanel } = loadHistoryPanel()
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
     expect(btn.textContent).toBe('permalink')
@@ -566,17 +610,25 @@ describe('history panel actions', () => {
     globalThis.Date = MockDate
     try {
       const { refreshHistoryPanel } = loadHistoryPanel({
-        apiFetchImpl: vi.fn(() => Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            ],
+        apiFetchImpl: vi.fn(() =>
+          Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                runs: [
+                  {
+                    id: 'run-1',
+                    command: 'ping darklab.sh',
+                    started: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }),
           }),
-        })),
+        ),
       })
 
       refreshHistoryPanel()
-      await new Promise(resolve => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
 
       expect(document.querySelector('.history-entry-date')).not.toBeNull()
     } finally {
@@ -597,17 +649,25 @@ describe('history panel actions', () => {
     globalThis.Date = MockDate
     try {
       const { refreshHistoryPanel } = loadHistoryPanel({
-        apiFetchImpl: vi.fn(() => Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-02T18:00:00Z', exit_code: 0 },
-            ],
+        apiFetchImpl: vi.fn(() =>
+          Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                runs: [
+                  {
+                    id: 'run-1',
+                    command: 'ping darklab.sh',
+                    started: '2026-01-02T18:00:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }),
           }),
-        })),
+        ),
       })
 
       refreshHistoryPanel()
-      await new Promise(resolve => setImmediate(resolve))
+      await new Promise((resolve) => setImmediate(resolve))
 
       expect(document.querySelector('.history-entry-date')).toBeNull()
     } finally {
@@ -616,113 +676,164 @@ describe('history panel actions', () => {
   })
 
   it('refreshHistoryPanel sends the active server-side filters to /history', async () => {
-    const { refreshHistoryPanel, apiFetch, _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel()
+    const { refreshHistoryPanel, apiFetch, _setHistoryFilter, _buildHistoryRequestUrl } =
+      loadHistoryPanel()
 
     _setHistoryFilter('q', 'dig')
     _setHistoryFilter('commandRoot', 'nmap')
     _setHistoryFilter('exitCode', 'nonzero')
     _setHistoryFilter('dateRange', '7d')
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(_buildHistoryRequestUrl()).toBe('/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d')
-    expect(apiFetch).toHaveBeenLastCalledWith('/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d')
+    expect(_buildHistoryRequestUrl()).toBe(
+      '/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
+    )
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
+    )
     expect(typeof refreshHistoryPanel).toBe('function')
   })
 
   it('populates command root suggestions from loaded history runs', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
-      apiFetchImpl: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({
-          roots: ['curl', 'dig', 'ping'],
-          runs: [
-            { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            { id: 'run-2', command: 'dig darklab.sh A', started: '2026-01-01T00:01:00Z', exit_code: 0 },
-            { id: 'run-3', command: 'ping -c 4 darklab.sh', started: '2026-01-01T00:02:00Z', exit_code: 0 },
-          ],
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['curl', 'dig', 'ping'],
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+                {
+                  id: 'run-2',
+                  command: 'dig darklab.sh A',
+                  started: '2026-01-01T00:01:00Z',
+                  exit_code: 0,
+                },
+                {
+                  id: 'run-3',
+                  command: 'ping -c 4 darklab.sh',
+                  started: '2026-01-01T00:02:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         }),
-      })),
+      ),
     })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
     const input = document.getElementById('history-root-input')
     input.value = 'd'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    const suggestions = [...document.querySelectorAll('#history-root-dropdown .ac-item')].map(el => el.textContent.trim())
+    const suggestions = [...document.querySelectorAll('#history-root-dropdown .ac-item')].map(
+      (el) => el.textContent.trim(),
+    )
     expect(suggestions).toEqual(['dig'])
   })
 
   it('keeps the root suggestion menu hidden until at least one character is typed', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
-      apiFetchImpl: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({
-          roots: ['curl', 'dig', 'ping'],
-          runs: [],
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['curl', 'dig', 'ping'],
+              runs: [],
+            }),
         }),
-      })),
+      ),
     })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const input = document.getElementById('history-root-input')
     input.dispatchEvent(new Event('focus'))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(
+      true,
+    )
   })
 
   it('hides the root suggestion menu when the only matching suggestion exactly matches the input', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
-      apiFetchImpl: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({
-          roots: ['dig'],
-          runs: [
-            { id: 'run-1', command: 'dig darklab.sh A', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-          ],
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['dig'],
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'dig darklab.sh A',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         }),
-      })),
+      ),
     })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const input = document.getElementById('history-root-input')
     input.value = 'dig'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(
+      true,
+    )
   })
 
   it('accepts a root suggestion with one mobile-style pointer interaction', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
-      apiFetchImpl: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({
-          roots: ['dig', 'ping'],
-          runs: [
-            { id: 'run-1', command: 'dig darklab.sh A', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-          ],
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: ['dig', 'ping'],
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'dig darklab.sh A',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         }),
-      })),
+      ),
     })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const input = document.getElementById('history-root-input')
     input.value = 'di'
     input.dispatchEvent(new Event('input', { bubbles: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('#history-root-dropdown .ac-item')
+    document
+      .querySelector('#history-root-dropdown .ac-item')
       .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(input.value).toBe('dig')
-    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('history-root-dropdown').classList.contains('u-hidden')).toBe(
+      true,
+    )
   })
 
   it('renders active filter chips for the current history filters', async () => {
@@ -733,9 +844,11 @@ describe('history panel actions', () => {
     _setHistoryFilter('exitCode', 'nonzero')
     _setHistoryFilter('dateRange', '7d')
     _setHistoryFilter('starredOnly', true)
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    const chips = [...document.querySelectorAll('#history-active-filters .history-active-filter-chip')].map(el => el.textContent)
+    const chips = [
+      ...document.querySelectorAll('#history-active-filters .history-active-filter-chip'),
+    ].map((el) => el.textContent)
     expect(chips).toEqual([
       expect.stringContaining('search: dig'),
       expect.stringContaining('root: nmap'),
@@ -743,7 +856,9 @@ describe('history panel actions', () => {
       expect.stringContaining('date: 7d'),
       expect.stringContaining('starred'),
     ])
-    expect(document.getElementById('history-active-filters').classList.contains('u-hidden')).toBe(false)
+    expect(document.getElementById('history-active-filters').classList.contains('u-hidden')).toBe(
+      false,
+    )
   })
 
   it('removes an individual filter when its active filter chip is cleared', async () => {
@@ -751,14 +866,16 @@ describe('history panel actions', () => {
 
     _setHistoryFilter('q', 'dig')
     _setHistoryFilter('commandRoot', 'nmap')
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    const removeBtn = [...document.querySelectorAll('#history-active-filters .history-active-filter-chip')]
-      .find(el => el.textContent.includes('root: nmap'))
+    const removeBtn = [
+      ...document.querySelectorAll('#history-active-filters .history-active-filter-chip'),
+    ]
+      .find((el) => el.textContent.includes('root: nmap'))
       ?.querySelector('.history-active-filter-remove')
 
     removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(_buildHistoryRequestUrl()).toBe('/history?q=dig')
     expect(document.getElementById('history-root-input').value).toBe('')
@@ -770,11 +887,12 @@ describe('history panel actions', () => {
     historyPanel.classList.add('open')
 
     _setHistoryFilter('q', 'dig')
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('#history-active-filters .history-active-filter-remove')
+    document
+      .querySelector('#history-active-filters .history-active-filter-remove')
       .dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(historyPanel.classList.contains('open')).toBe(true)
   })
@@ -817,7 +935,7 @@ describe('history panel actions', () => {
     _setHistoryFilter('q', 'dig')
     _setHistoryFilter('dateRange', '7d')
     _setHistoryFilter('starredOnly', true)
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(toggleBtn.textContent).toBe('filters (3)')
   })
@@ -827,12 +945,23 @@ describe('history panel actions', () => {
       apiFetchImpl: vi.fn((url) => {
         if (url === '/history') {
           return Promise.resolve({
-            json: () => Promise.resolve({
-              runs: [
-                { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-                { id: 'run-2', command: 'dig darklab.sh A', started: '2026-01-01T00:01:00Z', exit_code: 0 },
-              ],
-            }),
+            json: () =>
+              Promise.resolve({
+                runs: [
+                  {
+                    id: 'run-1',
+                    command: 'ping darklab.sh',
+                    started: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                  {
+                    id: 'run-2',
+                    command: 'dig darklab.sh A',
+                    started: '2026-01-01T00:01:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }),
           })
         }
         return Promise.resolve({ json: () => Promise.resolve({}) })
@@ -841,26 +970,40 @@ describe('history panel actions', () => {
 
     _saveStarred(new Set(['dig darklab.sh A']))
     document.getElementById('history-starred-toggle').checked = true
-    document.getElementById('history-starred-toggle').dispatchEvent(new Event('change', { bubbles: true }))
-    await new Promise(resolve => setImmediate(resolve))
+    document
+      .getElementById('history-starred-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    const entries = [...document.querySelectorAll('#history-list .history-entry-cmd')].map(el => el.textContent)
+    const entries = [...document.querySelectorAll('#history-list .history-entry-cmd')].map(
+      (el) => el.textContent,
+    )
     expect(entries).toEqual(['dig darklab.sh A'])
   })
 
   it('clearHistoryFilters resets the drawer controls and the request URL', async () => {
     const { _buildHistoryRequestUrl, clearHistoryFilters } = loadHistoryPanel()
     document.getElementById('history-search-input').value = 'curl'
-    document.getElementById('history-search-input').dispatchEvent(new Event('input', { bubbles: true }))
+    document
+      .getElementById('history-search-input')
+      .dispatchEvent(new Event('input', { bubbles: true }))
     document.getElementById('history-root-input').value = 'dig'
-    document.getElementById('history-root-input').dispatchEvent(new Event('input', { bubbles: true }))
+    document
+      .getElementById('history-root-input')
+      .dispatchEvent(new Event('input', { bubbles: true }))
     document.getElementById('history-exit-filter').value = '0'
-    document.getElementById('history-exit-filter').dispatchEvent(new Event('change', { bubbles: true }))
+    document
+      .getElementById('history-exit-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('history-date-filter').value = '24h'
-    document.getElementById('history-date-filter').dispatchEvent(new Event('change', { bubbles: true }))
+    document
+      .getElementById('history-date-filter')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('history-starred-toggle').checked = true
-    document.getElementById('history-starred-toggle').dispatchEvent(new Event('change', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 140))
+    document
+      .getElementById('history-starred-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 140))
 
     clearHistoryFilters()
 
@@ -874,30 +1017,44 @@ describe('history panel actions', () => {
 
   it('shows a filtered empty state when no runs match the active filters', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({
-      apiFetchImpl: vi.fn(() => Promise.resolve({
-        json: () => Promise.resolve({ runs: [] }),
-      })),
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () => Promise.resolve({ runs: [] }),
+        }),
+      ),
     })
 
     document.getElementById('history-search-input').value = 'nmap'
-    document.getElementById('history-search-input').dispatchEvent(new Event('input', { bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 140))
+    document
+      .getElementById('history-search-input')
+      .dispatchEvent(new Event('input', { bubbles: true }))
+    await new Promise((resolve) => setTimeout(resolve, 140))
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(document.querySelector('.history-empty-state-title')?.textContent).toBe('No matching runs.')
-    expect(document.querySelector('.history-empty-state-detail')?.textContent).toContain('Adjust or clear')
+    expect(document.querySelector('.history-empty-state-title')?.textContent).toBe(
+      'No matching runs.',
+    )
+    expect(document.querySelector('.history-empty-state-detail')?.textContent).toContain(
+      'Adjust or clear',
+    )
   })
 
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/history') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         })
       }
       if (url === '/history/run-1' && options.method === 'DELETE') {
@@ -905,16 +1062,18 @@ describe('history panel actions', () => {
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, executeHistAction, confirmHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, executeHistAction, confirmHistAction } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+    })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     confirmHistAction('delete', 'run-1', 'ping darklab.sh')
     executeHistAction('delete')
     await Promise.resolve()
     await Promise.resolve()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to delete run')
     expect(document.querySelectorAll('#history-list .history-entry')).toHaveLength(1)
@@ -924,11 +1083,17 @@ describe('history panel actions', () => {
     const apiFetch = vi.fn((url, options = {}) => {
       if (url === '/history' && (!options.method || options.method === 'GET')) {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         })
       }
       if (url === '/history/run-1' && options.method === 'DELETE') {
@@ -939,12 +1104,12 @@ describe('history panel actions', () => {
     const { refreshHistoryPanel, executeHistAction } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     executeHistAction('clear-nonfav')
     await Promise.resolve()
     await Promise.resolve()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to clear history')
     expect(document.querySelectorAll('#history-list .history-entry')).toHaveLength(1)
@@ -955,37 +1120,49 @@ describe('history panel actions', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/history') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         })
       }
       if (url === '/history/run-1?json&preview=1') {
         return new Promise((resolve) => {
-          resolveRun = () => resolve({
-            json: () => Promise.resolve({
-              command: 'ping darklab.sh',
-              output: ['ok'],
-              exit_code: 0,
-            }),
-          })
+          resolveRun = () =>
+            resolve({
+              json: () =>
+                Promise.resolve({
+                  command: 'ping darklab.sh',
+                  output: ['ok'],
+                  exit_code: 0,
+                }),
+            })
         })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, appendLine, hideTabKillBtn, setTabStatus } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, appendLine, hideTabKillBtn, setTabStatus } = loadHistoryPanel({
+      apiFetchImpl: apiFetch,
+    })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document
+      .querySelector('.history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(true)
 
     resolveRun()
-    await new Promise(resolve => setImmediate(resolve))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
   })
@@ -994,45 +1171,54 @@ describe('history panel actions', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/history') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              {
-                id: 'run-1',
-                command: 'ping darklab.sh',
-                started: '2026-01-01T00:00:00Z',
-                exit_code: 0,
-                full_output_available: true,
-              },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                  full_output_available: true,
+                },
+              ],
+            }),
         })
       }
       if (url === '/history/run-1?json') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            command: 'ping darklab.sh',
-            output: ['ok line 1', 'ok line 2'],
-            exit_code: 0,
-            full_output_available: true,
-          }),
+          json: () =>
+            Promise.resolve({
+              command: 'ping darklab.sh',
+              output: ['ok line 1', 'ok line 2'],
+              exit_code: 0,
+              full_output_available: true,
+            }),
         })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
-    const { refreshHistoryPanel, appendLine, appendCommandEcho, setTabStatus, hideTabKillBtn } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+    const { refreshHistoryPanel, appendLine, appendCommandEcho, setTabStatus, hideTabKillBtn } =
+      loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await new Promise(resolve => setImmediate(resolve))
-    await new Promise(resolve => setImmediate(resolve))
+    document
+      .querySelector('.history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
     expect(appendCommandEcho).toHaveBeenCalledWith('ping darklab.sh', 'tab-2')
     expect(appendLine).toHaveBeenCalledWith('ok line 1', '', 'tab-2')
-    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('preview truncated'), 'notice', 'tab-2')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      expect.stringContaining('preview truncated'),
+      'notice',
+      'tab-2',
+    )
     expect(setTabStatus).toHaveBeenCalledWith('tab-2', 'ok')
     expect(hideTabKillBtn).toHaveBeenCalledWith('tab-2')
   })
@@ -1041,11 +1227,17 @@ describe('history panel actions', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/history') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            runs: [
-              { id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z', exit_code: 0 },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
         })
       }
       if (url === '/history/run-1?json&preview=1') {
@@ -1056,17 +1248,18 @@ describe('history panel actions', () => {
     const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     refreshHistoryPanel()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    document.querySelector('.history-entry').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document
+      .querySelector('.history-entry')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(false)
     expect(document.getElementById('permalink-toast').textContent).toBe('Failed to load run')
   })
-
 })
 
 // ── Ctrl+R reverse-history search ─────────────────────────────────────────────
@@ -1085,27 +1278,28 @@ describe('Ctrl+R reverse-history search', () => {
     const histSearchDropdown = document.getElementById('hist-search-dropdown')
     const submitComposerCommand = submitMock ?? vi.fn()
 
-    return fromDomScripts([
-      'app/static/js/history.js',
-    ], {
-      document,
-      localStorage: new MemoryStorage(),
-      APP_CONFIG: { recent_commands_limit: 20 },
-      histRow,
-      cmdInput,
-      historyPanel,
-      histSearchDropdown,
-      shellPromptWrap: document.createElement('div'),
-      acHide: vi.fn(),
-      refreshHistoryPanel: vi.fn(),
-      useMobileTerminalViewportMode: () => false,
-      setComposerValue: (val, start = null, end = null, opts = {}) => {
-        cmdInput.value = String(val ?? '')
-        if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
+    return fromDomScripts(
+      ['app/static/js/history.js'],
+      {
+        document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 20 },
+        histRow,
+        cmdInput,
+        historyPanel,
+        histSearchDropdown,
+        shellPromptWrap: document.createElement('div'),
+        acHide: vi.fn(),
+        refreshHistoryPanel: vi.fn(),
+        useMobileTerminalViewportMode: () => false,
+        setComposerValue: (val, start = null, end = null, opts = {}) => {
+          cmdInput.value = String(val ?? '')
+          if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
+        },
+        getComposerValue: () => cmdInput.value,
+        submitComposerCommand,
       },
-      getComposerValue: () => cmdInput.value,
-      submitComposerCommand,
-    }, `{
+      `{
       hydrateCmdHistory,
       enterHistSearch,
       exitHistSearch,
@@ -1114,7 +1308,8 @@ describe('Ctrl+R reverse-history search', () => {
       isHistSearchMode,
       resetCmdHistoryNav,
       _submitComposerCommand: submitComposerCommand,
-    }`)
+    }`,
+    )
   }
 
   it('enterHistSearch activates search mode and shows the dropdown', () => {
@@ -1160,11 +1355,14 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('exitHistSearch(true) accepts the currently selected match', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, exitHistSearch, isHistSearchMode } = loadHistSearch()
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'nmap -sV darklab.sh' },
-    ])
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      exitHistSearch,
+      isHistSearchMode,
+    } = loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'nmap -sV darklab.sh' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
@@ -1173,11 +1371,14 @@ describe('Ctrl+R reverse-history search', () => {
 
     expect(isHistSearchMode()).toBe(false)
     expect(cmdInput.value).toBe('nmap -sV darklab.sh')
-    expect(document.getElementById('hist-search-dropdown').classList.contains('u-hidden')).toBe(true)
+    expect(document.getElementById('hist-search-dropdown').classList.contains('u-hidden')).toBe(
+      true,
+    )
   })
 
   it('exitHistSearch(false) cancels and restores the pre-draft', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, exitHistSearch } = loadHistSearch()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, exitHistSearch } =
+      loadHistSearch()
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
     cmdInput.value = 'my draft'
@@ -1190,13 +1391,19 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('handleHistSearchKey Escape cancels search and returns true', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchKey, isHistSearchMode } = loadHistSearch()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchKey, isHistSearchMode } =
+      loadHistSearch()
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
     cmdInput.value = 'pre'
 
     enterHistSearch()
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Escape', ctrlKey: false, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'Escape',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
@@ -1206,32 +1413,56 @@ describe('Ctrl+R reverse-history search', () => {
 
   it('handleHistSearchKey Enter accepts the match, exits search, and runs the command', () => {
     const submitComposerCommand = vi.fn()
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+    } = loadHistSearch({ submitComposerCommand })
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', ctrlKey: false, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'Enter',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
     expect(isHistSearchMode()).toBe(false)
     expect(cmdInput.value).toBe('dig darklab.sh A')
-    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh A', { dismissKeyboard: true })
+    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh A', {
+      dismissKeyboard: true,
+    })
   })
 
   it('handleHistSearchKey Enter with no matches keeps typed query and runs it', () => {
     const submitComposerCommand = vi.fn()
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+    } = loadHistSearch({ submitComposerCommand })
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'xyz'
     handleHistSearchInput('xyz')
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', ctrlKey: false, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'Enter',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     handleHistSearchKey(e)
 
     expect(isHistSearchMode()).toBe(false)
@@ -1241,14 +1472,25 @@ describe('Ctrl+R reverse-history search', () => {
 
   it('handleHistSearchKey Tab accepts the match without running the command', () => {
     const submitComposerCommand = vi.fn()
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+    } = loadHistSearch({ submitComposerCommand })
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Tab', ctrlKey: false, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'Tab',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
@@ -1258,7 +1500,8 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('handleHistSearchKey ArrowDown navigates to the next match and fills the input', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } =
+      loadHistSearch()
     hydrateCmdHistory([
       { command: 'dig darklab.sh A' },
       { command: 'dig darklab.sh MX' },
@@ -1272,7 +1515,12 @@ describe('Ctrl+R reverse-history search', () => {
     // index is now 0, input still shows 'dig'
     expect(cmdInput.value).toBe('dig')
 
-    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    const down = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowDown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(down)
 
     expect(handled).toBe(true)
@@ -1281,22 +1529,30 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('handleHistSearchKey ArrowUp navigates to the previous match', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'dig darklab.sh MX' },
-    ])
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } =
+      loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
 
-    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    const down = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowDown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     handleHistSearchKey(down)
     expect(cmdInput.value).toBe('dig darklab.sh MX')
 
-    const up = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowUp', ctrlKey: false, metaKey: false, altKey: false })
+    const up = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowUp',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(up)
 
     expect(handled).toBe(true)
@@ -1304,7 +1560,8 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('handleHistSearchKey Ctrl+R cycles to the next match', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } =
+      loadHistSearch()
     hydrateCmdHistory([
       { command: 'dig darklab.sh A' },
       { command: 'dig darklab.sh MX' },
@@ -1319,7 +1576,12 @@ describe('Ctrl+R reverse-history search', () => {
     // Input stays as the typed query until Ctrl+R or Enter accepts a match
     expect(cmdInput.value).toBe('dig')
 
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'r', ctrlKey: true, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'r',
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+    })
     handleHistSearchKey(e)
 
     expect(cmdInput.value).toBe('dig darklab.sh MX')
@@ -1330,12 +1592,23 @@ describe('Ctrl+R reverse-history search', () => {
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
 
     enterHistSearch()
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'a', ctrlKey: false, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'a',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     expect(handleHistSearchKey(e)).toBe(false)
   })
 
   it('handleHistSearchKey Ctrl+C exits search keeping the typed query in input (not restoring pre-draft)', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch()
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+    } = loadHistSearch()
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
     cmdInput.value = 'pre-draft'
@@ -1345,7 +1618,12 @@ describe('Ctrl+R reverse-history search', () => {
     cmdInput.value = 'di'
     handleHistSearchInput('di')
 
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'c', ctrlKey: true, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'c',
+      ctrlKey: true,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
@@ -1355,18 +1633,21 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('handleHistSearchKey ArrowDown wraps from the last match back to the first', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'dig darklab.sh MX' },
-    ])
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } =
+      loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
 
-    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    const down = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowDown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     handleHistSearchKey(down)
     expect(cmdInput.value).toBe('dig darklab.sh MX')
 
@@ -1376,18 +1657,21 @@ describe('Ctrl+R reverse-history search', () => {
   })
 
   it('handleHistSearchKey ArrowUp wraps from the first match back to the last', () => {
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } = loadHistSearch()
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'dig darklab.sh MX' },
-    ])
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey } =
+      loadHistSearch()
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
     // index starts at 0 (first match); ArrowUp wraps to the last match
-    const up = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowUp', ctrlKey: false, metaKey: false, altKey: false })
+    const up = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowUp',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(up)
 
     expect(handled).toBe(true)
@@ -1396,7 +1680,13 @@ describe('Ctrl+R reverse-history search', () => {
 
   it('handleHistSearchKey Tab with no matches exits keeping the typed query in input', () => {
     const submitComposerCommand = vi.fn()
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+    } = loadHistSearch({ submitComposerCommand })
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
     const cmdInput = document.getElementById('cmd')
     cmdInput.value = 'xyz-pre'
@@ -1405,7 +1695,12 @@ describe('Ctrl+R reverse-history search', () => {
     cmdInput.value = 'xyz'
     handleHistSearchInput('xyz') // no matches
 
-    const e = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Tab', ctrlKey: false, metaKey: false, altKey: false })
+    const e = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'Tab',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     const handled = handleHistSearchKey(e)
 
     expect(handled).toBe(true)
@@ -1417,30 +1712,46 @@ describe('Ctrl+R reverse-history search', () => {
 
   it('handleHistSearchKey Enter after ArrowDown runs the navigated-to match', () => {
     const submitComposerCommand = vi.fn()
-    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput, handleHistSearchKey, isHistSearchMode } = loadHistSearch({ submitComposerCommand })
-    hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'dig darklab.sh MX' },
-    ])
+    const {
+      hydrateCmdHistory,
+      enterHistSearch,
+      handleHistSearchInput,
+      handleHistSearchKey,
+      isHistSearchMode,
+    } = loadHistSearch({ submitComposerCommand })
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }, { command: 'dig darklab.sh MX' }])
     const cmdInput = document.getElementById('cmd')
 
     enterHistSearch()
     cmdInput.value = 'dig'
     handleHistSearchInput('dig')
 
-    const down = Object.assign(new Event('keydown', { cancelable: true }), { key: 'ArrowDown', ctrlKey: false, metaKey: false, altKey: false })
+    const down = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'ArrowDown',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     handleHistSearchKey(down) // moves to index 1 → 'dig darklab.sh MX'
 
-    const enter = Object.assign(new Event('keydown', { cancelable: true }), { key: 'Enter', ctrlKey: false, metaKey: false, altKey: false })
+    const enter = Object.assign(new Event('keydown', { cancelable: true }), {
+      key: 'Enter',
+      ctrlKey: false,
+      metaKey: false,
+      altKey: false,
+    })
     handleHistSearchKey(enter)
 
     expect(isHistSearchMode()).toBe(false)
     expect(cmdInput.value).toBe('dig darklab.sh MX')
-    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh MX', { dismissKeyboard: true })
+    expect(submitComposerCommand).toHaveBeenCalledWith('dig darklab.sh MX', {
+      dismissKeyboard: true,
+    })
   })
 
   it('resetCmdHistoryNav exits hist search mode if active', () => {
-    const { hydrateCmdHistory, enterHistSearch, resetCmdHistoryNav, isHistSearchMode } = loadHistSearch()
+    const { hydrateCmdHistory, enterHistSearch, resetCmdHistoryNav, isHistSearchMode } =
+      loadHistSearch()
     hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
 
     enterHistSearch()

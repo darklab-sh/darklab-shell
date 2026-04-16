@@ -1,0 +1,16 @@
+ignored:
+  # Consecutive RUN layers are intentional for readability and build caching.
+  - DL3059
+  # apt list cleanup, --no-install-recommends: known omissions in this image.
+  - DL3009
+  - DL3015
+  # Unpinned apt packages: intentional — tool image pulls latest on rebuild.
+  - DL3008
+  # Unpinned pip for upgrade commands (pip, setuptools, wheel) — pinning N/A.
+  - DL3013
+  - DL3042
+  # Tool image intentionally ships both wget and curl.
+  - DL4001
+  # wget progress bar and chmod glob: low-risk in this Dockerfile context.
+  - DL3047
+  - SC2035

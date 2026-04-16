@@ -8,19 +8,25 @@ test.describe('autocomplete', () => {
     await ensurePromptReady(page)
   })
 
-  test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({ page }) => {
+  test('Tab expands to the shared prefix and Enter accepts a reselected suggestion', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     // Start with a partial flag so contextual suggestions are visible
     await setComposerValueForTest(page, 'nmap -')
 
     const dropdown = page.locator('#ac-dropdown')
-    await expect.poll(async () => ({
-      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
-      text: (await dropdown.textContent()) || '',
-    })).toEqual(expect.objectContaining({
-      hidden: false,
-      text: expect.stringContaining('-sT'),
-    }))
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('-sT'),
+        }),
+      )
     await expect(dropdown).not.toContainText('man nmap')
 
     await page.keyboard.press('ArrowDown')
@@ -39,18 +45,24 @@ test.describe('autocomplete', () => {
     await expect(dropdown).toBeHidden()
   })
 
-  test('clicking outside the prompt hides autocomplete without changing the input', async ({ page }) => {
+  test('clicking outside the prompt hides autocomplete without changing the input', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     await setComposerValueForTest(page, 'whoi')
 
     const dropdown = page.locator('#ac-dropdown')
-    await expect.poll(async () => ({
-      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
-      text: (await dropdown.textContent()) || '',
-    })).toEqual(expect.objectContaining({
-      hidden: false,
-      text: expect.stringContaining('whois'),
-    }))
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('whois'),
+        }),
+      )
 
     await page.mouse.click(8, 8)
 
@@ -58,18 +70,24 @@ test.describe('autocomplete', () => {
     await expect(input).toHaveValue('whoi')
   })
 
-  test('context-aware autocomplete replaces only the active token for command flags', async ({ page }) => {
+  test('context-aware autocomplete replaces only the active token for command flags', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     const dropdown = page.locator('#ac-dropdown')
 
     await setComposerValueForTest(page, 'nmap -')
-    await expect.poll(async () => ({
-      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
-      text: (await dropdown.textContent()) || '',
-    })).toEqual(expect.objectContaining({
-      hidden: false,
-      text: expect.stringContaining('-sV'),
-    }))
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('-sV'),
+        }),
+      )
     await expect(dropdown).toContainText('Service/version detection')
     await expect(dropdown).not.toContainText('man nmap')
 
@@ -82,36 +100,48 @@ test.describe('autocomplete', () => {
     await expect(dropdown).toBeHidden()
   })
 
-  test('context-aware autocomplete shows positional hints alongside flags after a known command root', async ({ page }) => {
+  test('context-aware autocomplete shows positional hints alongside flags after a known command root', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     const dropdown = page.locator('#ac-dropdown')
 
     await input.pressSequentially('nmap ')
-    await expect.poll(async () => ({
-      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
-      text: (await dropdown.textContent()) || '',
-    })).toEqual(expect.objectContaining({
-      hidden: false,
-      text: expect.stringContaining('<target>'),
-    }))
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('<target>'),
+        }),
+      )
     await expect(dropdown).toContainText('-sV')
     await expect(dropdown).toContainText('-sT')
     await expect(dropdown).toContainText('<target>')
     await expect(dropdown).toContainText('Hostname, IP, or CIDR')
   })
 
-  test('built-in pipe support suggests the supported pipe commands after a pipe', async ({ page }) => {
+  test('built-in pipe support suggests the supported pipe commands after a pipe', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     const dropdown = page.locator('#ac-dropdown')
 
     await setComposerValueForTest(page, 'help | ')
-    await expect.poll(async () => ({
-      hidden: await dropdown.evaluate(node => node.classList.contains('u-hidden')),
-      text: (await dropdown.textContent()) || '',
-    })).toEqual(expect.objectContaining({
-      hidden: false,
-      text: expect.stringContaining('wc -l'),
-    }))
+    await expect
+      .poll(async () => ({
+        hidden: await dropdown.evaluate((node) => node.classList.contains('u-hidden')),
+        text: (await dropdown.textContent()) || '',
+      }))
+      .toEqual(
+        expect.objectContaining({
+          hidden: false,
+          text: expect.stringContaining('wc -l'),
+        }),
+      )
     await expect(dropdown).toContainText('grep')
     await expect(dropdown).toContainText('head')
     await expect(dropdown).toContainText('tail')

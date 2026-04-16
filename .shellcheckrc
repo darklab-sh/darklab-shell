@@ -1,0 +1,3 @@
+# SC1007: false positive for the `CDPATH= cd` idiom (temporary env-var prefix,
+# not a malformed assignment).
+disable=SC1007

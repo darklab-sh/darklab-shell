@@ -7,8 +7,13 @@ test.describe('welcome context', () => {
     await setupWelcomePage(page)
   })
 
-  test('running a command in another tab does not tear down the original welcome tab', async ({ page }) => {
-    await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.', { timeout: 15_000 })
+  test('running a command in another tab does not tear down the original welcome tab', async ({
+    page,
+  }) => {
+    await expect(page.locator('.line.welcome-hint')).toContainText(
+      'Use the history panel to reopen saved runs.',
+      { timeout: 15_000 },
+    )
 
     const originalTab = page.locator('.tab').first()
     await page.locator('#new-tab-btn').click()
@@ -19,11 +24,16 @@ test.describe('welcome context', () => {
 
     await originalTab.click()
     await expect(page.locator('.tab-panel.active .welcome-banner')).toHaveCount(1)
-    await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
+    await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText(
+      'Use the history panel to reopen saved runs.',
+    )
   })
 
   test('clearing a non-welcome tab does not remove the original welcome UI', async ({ page }) => {
-    await expect(page.locator('.line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.', { timeout: 15_000 })
+    await expect(page.locator('.line.welcome-hint')).toContainText(
+      'Use the history panel to reopen saved runs.',
+      { timeout: 15_000 },
+    )
 
     const originalTab = page.locator('.tab').first()
     await page.locator('#new-tab-btn').click()
@@ -31,7 +41,9 @@ test.describe('welcome context', () => {
 
     await originalTab.click()
     await expect(page.locator('.tab-panel.active .welcome-banner')).toHaveCount(1)
-    await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText('Use the history panel to reopen saved runs.')
+    await expect(page.locator('.tab-panel.active .line.welcome-hint')).toContainText(
+      'Use the history panel to reopen saved runs.',
+    )
   })
 
   test.describe('mobile view', () => {
@@ -49,7 +61,9 @@ test.describe('welcome context', () => {
       await expect(page.locator('.welcome-status-loaded')).toHaveCount(5, { timeout: 15_000 })
       await expect(page.locator('.welcome-command')).toHaveCount(0)
       await expect(page.locator('.welcome-section-header')).toContainText('Helpful hints')
-      await expect(page.locator('.line.welcome-hint')).toContainText(/Tap the prompt|Use the mobile menu|helper row|Rotate the device|Long runs/)
+      await expect(page.locator('.line.welcome-hint')).toContainText(
+        /Tap the prompt|Use the mobile menu|helper row|Rotate the device|Long runs/,
+      )
       await expect(page.locator('#mobile-run-btn')).toBeVisible()
     })
   })

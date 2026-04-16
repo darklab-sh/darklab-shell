@@ -1,34 +1,16 @@
 import { fromScript } from './helpers/extract.js'
 import { fromDomScripts } from './helpers/extract.js'
 
-const { _formatElapsed } = fromScript(
-  'app/static/js/runner.js',
-  '_formatElapsed',
-)
-const { _isSyntheticGrepCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticGrepCommand',
-)
-const { _isSyntheticHeadCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticHeadCommand',
-)
-const { _isSyntheticTailCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticTailCommand',
-)
+const { _formatElapsed } = fromScript('app/static/js/runner.js', '_formatElapsed')
+const { _isSyntheticGrepCommand } = fromScript('app/static/js/runner.js', '_isSyntheticGrepCommand')
+const { _isSyntheticHeadCommand } = fromScript('app/static/js/runner.js', '_isSyntheticHeadCommand')
+const { _isSyntheticTailCommand } = fromScript('app/static/js/runner.js', '_isSyntheticTailCommand')
 const { _isSyntheticWcLineCountCommand } = fromScript(
   'app/static/js/runner.js',
   '_isSyntheticWcLineCountCommand',
 )
-const { _isSyntheticSortCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticSortCommand',
-)
-const { _isSyntheticUniqCommand } = fromScript(
-  'app/static/js/runner.js',
-  '_isSyntheticUniqCommand',
-)
+const { _isSyntheticSortCommand } = fromScript('app/static/js/runner.js', '_isSyntheticSortCommand')
+const { _isSyntheticUniqCommand } = fromScript('app/static/js/runner.js', '_isSyntheticUniqCommand')
 
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
@@ -165,7 +147,7 @@ function loadRunnerFns({
   maybeMountDeferredPrompt = vi.fn(),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1')),
 } = {}) {
-  const normalizedTabs = tabs.map(tab => ({
+  const normalizedTabs = tabs.map((tab) => ({
     rawLines: [],
     previewTruncated: false,
     fullOutputAvailable: false,
@@ -213,14 +195,14 @@ function loadRunnerFns({
 
   const setTabLabel = vi.fn()
   const setTabStatus = vi.fn((id, nextStatus) => {
-    const tab = normalizedTabs.find(t => t.id === id)
+    const tab = normalizedTabs.find((t) => t.id === id)
     if (tab) tab.st = nextStatus
     const dot = document.querySelector(`.tab[data-id="${id}"] .tab-status`)
     if (dot) dot.className = `tab-status ${nextStatus}`
   })
   const clearTab = clearTabOverride || vi.fn()
   const activateTab = vi.fn((id) => {
-    const tab = normalizedTabs.find(t => t.id === id)
+    const tab = normalizedTabs.find((t) => t.id === id)
     if (tab) {
       activeTabId = id
       status.className = 'status-pill running'
@@ -230,58 +212,61 @@ function loadRunnerFns({
   const cancelWelcome = vi.fn()
   const showToast = showToastOverride || vi.fn()
 
-  const fns = fromDomScripts([
-    'app/static/js/runner.js',
-  ], {
-    document,
-    Map,
-    tabs: normalizedTabs,
-    activeTabId,
-    cmdInput,
-    runBtn,
-    status,
-    runTimer,
-    historyPanel,
-    tabsBar,
-    tabPanels,
-    mobileCmdInput: document.getElementById('mobile-cmd'),
-    mobileRunBtn: document.getElementById('mobile-run-btn'),
-    syncRunButtonDisabled: undefined,
-    APP_CONFIG: appConfig,
-    _welcomeActive: welcomeActive,
-    _welcomeDone: false,
-    searchBar: document.createElement('div'),
-    addToHistory,
-    setTabLabel,
-    setTabStatus,
-    activateTab,
-    appendLine,
-    appendCommandEcho,
-    apiFetch,
-    createTab,
-    clearTab,
-    cancelWelcome,
-    welcomeOwnsTab,
-    requestWelcomeSettle: () => {},
-    refreshHistoryPanel: () => {},
-    showToast,
-    dismissMobileKeyboardAfterSubmit,
-    _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
-    restoreHistoryRunIntoTab,
-    getComposerValue: getComposerValueOverride || (() => cmdValue),
-    ...(getVisibleComposerInputOverride ? { getVisibleComposerInput: getVisibleComposerInputOverride } : {}),
-    describeFetchError: (err, context = 'server') => {
-      const message = err && err.message ? err.message : 'unknown network error'
-      if (message === 'Failed to fetch' || message === 'network down') {
-        return `Unable to reach the ${context}. Check that it is running and try again.`
-      }
-      return `Request to the ${context} failed: ${message}`
+  const fns = fromDomScripts(
+    ['app/static/js/runner.js'],
+    {
+      document,
+      Map,
+      tabs: normalizedTabs,
+      activeTabId,
+      cmdInput,
+      runBtn,
+      status,
+      runTimer,
+      historyPanel,
+      tabsBar,
+      tabPanels,
+      mobileCmdInput: document.getElementById('mobile-cmd'),
+      mobileRunBtn: document.getElementById('mobile-run-btn'),
+      syncRunButtonDisabled: undefined,
+      APP_CONFIG: appConfig,
+      _welcomeActive: welcomeActive,
+      _welcomeDone: false,
+      searchBar: document.createElement('div'),
+      addToHistory,
+      setTabLabel,
+      setTabStatus,
+      activateTab,
+      appendLine,
+      appendCommandEcho,
+      apiFetch,
+      createTab,
+      clearTab,
+      cancelWelcome,
+      welcomeOwnsTab,
+      requestWelcomeSettle: () => {},
+      refreshHistoryPanel: () => {},
+      showToast,
+      dismissMobileKeyboardAfterSubmit,
+      _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
+      restoreHistoryRunIntoTab,
+      getComposerValue: getComposerValueOverride || (() => cmdValue),
+      ...(getVisibleComposerInputOverride
+        ? { getVisibleComposerInput: getVisibleComposerInputOverride }
+        : {}),
+      describeFetchError: (err, context = 'server') => {
+        const message = err && err.message ? err.message : 'unknown network error'
+        if (message === 'Failed to fetch' || message === 'network down') {
+          return `Unable to reach the ${context}. Check that it is running and try again.`
+        }
+        return `Request to the ${context} failed: ${message}`
+      },
+      logClientError: () => {},
+      clearTimeout,
+      setTimeout,
+      Event,
     },
-    logClientError: () => {},
-    clearTimeout,
-    setTimeout,
-    Event,
-  }, `{
+    `{
     setStatus,
     doKill,
     submitCommand,
@@ -293,7 +278,9 @@ function loadRunnerFns({
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
     _getPendingKillTabId: () => pendingKillTabId,
-  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
+  }`,
+    'setTabs(tabs); setActiveTabId(activeTabId);',
+  )
 
   return {
     ...fns,
@@ -332,10 +319,13 @@ describe('runner helpers', () => {
 
     doKill('tab-1')
 
-    expect(apiFetch).toHaveBeenCalledWith('/kill', expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/kill',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
     expect(tabs[0].runId).toBeNull()
     expect(tabs[0].killed).toBe(true)
     expect(document.querySelector('.tab-status').className).toBe('tab-status killed')
@@ -354,7 +344,9 @@ describe('runner helpers', () => {
     vi.useFakeTimers()
     vi.setSystemTime(new Date(now))
     const { restoreActiveRunsAfterReload, tabs, status } = loadRunnerFns({
-      tabs: [{ id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false }],
+      tabs: [
+        { id: 'tab-1', st: 'idle', runId: null, rawLines: [], pendingKill: false, killed: false },
+      ],
       appendLine,
       createTab,
     })
@@ -376,18 +368,20 @@ describe('runner helpers', () => {
     const appendLine = vi.fn()
     const createTab = vi.fn(() => 'tab-2')
     const { restoreActiveRunsAfterReload, tabs } = loadRunnerFns({
-      tabs: [{
-        id: 'tab-1',
-        st: 'idle',
-        runId: null,
-        rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo' }],
-        draftInput: 'dig darklab.sh',
-        command: 'dig darklab.sh',
-        historyRunId: 'run-old',
-        renamed: true,
-        pendingKill: false,
-        killed: false,
-      }],
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'idle',
+          runId: null,
+          rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo' }],
+          draftInput: 'dig darklab.sh',
+          command: 'dig darklab.sh',
+          historyRunId: 'run-old',
+          renamed: true,
+          pendingKill: false,
+          killed: false,
+        },
+      ],
       appendLine,
       createTab,
     })
@@ -415,16 +409,18 @@ describe('runner helpers', () => {
     })
     const restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1'))
     const { pollActiveRunsAfterReload, tabs } = loadRunnerFns({
-      tabs: [{
-        id: 'tab-1',
-        st: 'running',
-        runId: 'run-123',
-        historyRunId: 'run-123',
-        reconnectedRun: true,
-        rawLines: [],
-        pendingKill: false,
-        killed: false,
-      }],
+      tabs: [
+        {
+          id: 'tab-1',
+          st: 'running',
+          runId: 'run-123',
+          historyRunId: 'run-123',
+          reconnectedRun: true,
+          rawLines: [],
+          pendingKill: false,
+          killed: false,
+        },
+      ],
       apiFetch,
       restoreHistoryRunIntoTab,
     })
@@ -435,7 +431,7 @@ describe('runner helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/history/run-123?json&preview=1')
     expect(restoreHistoryRunIntoTab).toHaveBeenCalledWith(
       expect.objectContaining({ id: 'run-123' }),
-      { targetTabId: 'tab-1', hidePanelOnSuccess: false }
+      { targetTabId: 'tab-1', hidePanelOnSuccess: false },
     )
     expect(tabs[0].reconnectedRun).toBe(false)
   })
@@ -467,13 +463,27 @@ describe('runner helpers', () => {
     runCommand()
 
     expect(apiFetch).not.toHaveBeenCalled()
-    expect(appendLine).toHaveBeenNthCalledWith(1, 'ping google.com | cat /etc/passwd', 'prompt-echo', undefined)
-    expect(appendLine).toHaveBeenNthCalledWith(2, '[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(appendLine).toHaveBeenNthCalledWith(
+      1,
+      'ping google.com | cat /etc/passwd',
+      'prompt-echo',
+      undefined,
+    )
+    expect(appendLine).toHaveBeenNthCalledWith(
+      2,
+      '[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.',
+      'denied',
+    )
     expect(status.className).toBe('status-pill fail')
   })
 
   it('runCommand allows phase-1 synthetic grep through to the API', () => {
-    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) } }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) },
+      }),
+    )
     const appendLine = vi.fn()
     const { runCommand, status } = loadRunnerFns({
       cmdValue: 'ping darklab.sh | grep ttl',
@@ -485,12 +495,20 @@ describe('runner helpers', () => {
     runCommand()
 
     expect(apiFetch).toHaveBeenCalled()
-    expect(appendLine).not.toHaveBeenCalledWith('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      '[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.',
+      'denied',
+    )
     expect(status.className).not.toBe('status-pill fail')
   })
 
   it('runCommand allows other synthetic post-filters through to the API', () => {
-    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) } }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) },
+      }),
+    )
     const appendLine = vi.fn()
     const { runCommand, status } = loadRunnerFns({
       cmdValue: 'ping darklab.sh | tail -n 5',
@@ -502,12 +520,20 @@ describe('runner helpers', () => {
     runCommand()
 
     expect(apiFetch).toHaveBeenCalled()
-    expect(appendLine).not.toHaveBeenCalledWith('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      '[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.',
+      'denied',
+    )
     expect(status.className).not.toBe('status-pill fail')
   })
 
   it('runCommand allows exact special built-in commands with shell punctuation through to the API', () => {
-    const apiFetch = vi.fn(() => Promise.resolve({ ok: true, body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) } }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: { getReader: () => ({ read: vi.fn(() => Promise.resolve({ done: true })) }) },
+      }),
+    )
     const appendLine = vi.fn()
     const { runCommand, status } = loadRunnerFns({
       cmdValue: ':(){ :|:& };:',
@@ -519,7 +545,10 @@ describe('runner helpers', () => {
     runCommand()
 
     expect(apiFetch).toHaveBeenCalled()
-    expect(appendLine).not.toHaveBeenCalledWith('[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.', 'denied')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      '[denied] Shell operators (&&, |, ;, >, etc.) are not permitted.',
+      'denied',
+    )
     expect(status.className).not.toBe('status-pill fail')
   })
 
@@ -571,7 +600,11 @@ describe('runner helpers', () => {
 
     expect(apiFetch).not.toHaveBeenCalled()
     expect(appendLine).toHaveBeenNthCalledWith(1, 'curl /tmp/file', 'prompt-echo', undefined)
-    expect(appendLine).toHaveBeenNthCalledWith(2, '[denied] Access to /data and /tmp is not permitted.', 'denied')
+    expect(appendLine).toHaveBeenNthCalledWith(
+      2,
+      '[denied] Access to /data and /tmp is not permitted.',
+      'denied',
+    )
     expect(status.className).toBe('status-pill fail')
   })
 
@@ -589,22 +622,31 @@ describe('runner helpers', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    }))
-    expect(appendLine).toHaveBeenLastCalledWith('[connection error] Unable to reach the server. Check that it is running and try again.', 'exit-fail', 'tab-1')
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/run',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    expect(appendLine).toHaveBeenLastCalledWith(
+      '[connection error] Unable to reach the server. Check that it is running and try again.',
+      'exit-fail',
+      'tab-1',
+    )
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
   })
 
   it('runCommand handles a 500 response as a friendly server error', async () => {
-    const apiFetch = vi.fn(() => Promise.resolve({
-      ok: false,
-      status: 500,
-      headers: { get: () => 'application/json' },
-      json: () => Promise.resolve({ error: 'backend unavailable' }),
-    }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: false,
+        status: 500,
+        headers: { get: () => 'application/json' },
+        json: () => Promise.resolve({ error: 'backend unavailable' }),
+      }),
+    )
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
       cmdValue: 'echo hello',
@@ -618,16 +660,22 @@ describe('runner helpers', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(appendLine).toHaveBeenLastCalledWith('[server error] The server could not start the command. backend unavailable', 'exit-fail', 'tab-1')
+    expect(appendLine).toHaveBeenLastCalledWith(
+      '[server error] The server could not start the command. backend unavailable',
+      'exit-fail',
+      'tab-1',
+    )
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
   })
 
   it('runCommand handles a 403 response as a denied command', async () => {
-    const apiFetch = vi.fn(() => Promise.resolve({
-      status: 403,
-      json: () => Promise.resolve({ error: 'not allowed' }),
-    }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        status: 403,
+        json: () => Promise.resolve({ error: 'not allowed' }),
+      }),
+    )
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
       cmdValue: 'echo hello',
@@ -646,10 +694,12 @@ describe('runner helpers', () => {
   })
 
   it('runCommand handles a 429 response as rate limited', async () => {
-    const apiFetch = vi.fn(() => Promise.resolve({
-      status: 429,
-      json: () => Promise.resolve({}),
-    }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        status: 429,
+        json: () => Promise.resolve({}),
+      }),
+    )
     const appendLine = vi.fn()
     const { runCommand, status, runBtn } = loadRunnerFns({
       cmdValue: 'echo hello',
@@ -662,7 +712,11 @@ describe('runner helpers', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(appendLine).toHaveBeenLastCalledWith('[rate limited] Too many requests. Please wait a moment.', 'denied', 'tab-1')
+    expect(appendLine).toHaveBeenLastCalledWith(
+      '[rate limited] Too many requests. Please wait a moment.',
+      'denied',
+      'tab-1',
+    )
     expect(status.className).toBe('status-pill fail')
     expect(runBtn.disabled).toBe(false)
   })
@@ -701,36 +755,42 @@ describe('runner helpers', () => {
     expect(welcomeOwnsTab).toHaveBeenCalledWith('tab-1')
     expect(cancelWelcome).toHaveBeenCalledWith('tab-1')
     expect(clearTab).toHaveBeenCalledWith('tab-1')
-    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-    }))
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/run',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
   })
 
   it('runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line', async () => {
     const appendLine = vi.fn()
     const clearTab = vi.fn()
-    const apiFetch = vi.fn(() => Promise.resolve({
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => {
-          let done = false
-          return {
-            read: () => {
-              if (done) return Promise.resolve({ done: true, value: undefined })
-              done = true
-              const payload = [
-                'data: {"type":"started","run_id":"run-clear"}',
-                'data: {"type":"clear"}',
-                'data: {"type":"exit","code":0,"elapsed":0.1}',
-              ].join('\n\n') + '\n\n'
-              return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-            },
-          }
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => {
+            let done = false
+            return {
+              read: () => {
+                if (done) return Promise.resolve({ done: true, value: undefined })
+                done = true
+                const payload =
+                  [
+                    'data: {"type":"started","run_id":"run-clear"}',
+                    'data: {"type":"clear"}',
+                    'data: {"type":"exit","code":0,"elapsed":0.1}',
+                  ].join('\n\n') + '\n\n'
+                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+              },
+            }
+          },
         },
-      },
-    }))
+      }),
+    )
     const loaded = loadRunnerFns({
       cmdValue: 'clear',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
@@ -745,33 +805,40 @@ describe('runner helpers', () => {
     await Promise.resolve()
 
     expect(clearTab).toHaveBeenCalledWith('tab-1')
-    expect(appendLine).not.toHaveBeenCalledWith(expect.stringContaining('[process exited with code 0'), 'exit-ok', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith(
+      expect.stringContaining('[process exited with code 0'),
+      'exit-ok',
+      'tab-1',
+    )
     expect(loaded.status.className).toBe('status-pill ok')
   })
 
   it('runCommand appends a count-aware preview truncation notice on exit', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() => Promise.resolve({
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => {
-          let done = false
-          return {
-            read: () => {
-              if (done) return Promise.resolve({ done: true, value: undefined })
-              done = true
-              const payload = [
-                'data: {"type":"started","run_id":"run-man"}',
-                'data: {"type":"output","text":"line 1"}',
-                'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
-              ].join('\n\n') + '\n\n'
-              return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-            },
-          }
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => {
+            let done = false
+            return {
+              read: () => {
+                if (done) return Promise.resolve({ done: true, value: undefined })
+                done = true
+                const payload =
+                  [
+                    'data: {"type":"started","run_id":"run-man"}',
+                    'data: {"type":"output","text":"line 1"}',
+                    'data: {"type":"exit","code":0,"elapsed":0.1,"preview_truncated":true,"output_line_count":5104,"full_output_available":true}',
+                  ].join('\n\n') + '\n\n'
+                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+              },
+            }
+          },
         },
-      },
-    }))
+      }),
+    )
     const loaded = loadRunnerFns({
       cmdValue: 'man curl',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
@@ -786,7 +853,7 @@ describe('runner helpers', () => {
     await Promise.resolve()
 
     expect(appendLine).toHaveBeenCalledWith(
-      '[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. To view the full output, use either permalink button now; after another command, use this command\'s history permalink]',
+      "[preview truncated — only the last 5000 lines are shown here, but the full output had 5104 lines. To view the full output, use either permalink button now; after another command, use this command's history permalink]",
       'notice',
       'tab-1',
     )
@@ -795,28 +862,31 @@ describe('runner helpers', () => {
 
   it('runCommand preserves output classes from streamed events', async () => {
     const appendLine = vi.fn()
-    const apiFetch = vi.fn(() => Promise.resolve({
-      ok: true,
-      status: 200,
-      body: {
-        getReader: () => {
-          let done = false
-          return {
-            read: () => {
-              if (done) return Promise.resolve({ done: true, value: undefined })
-              done = true
-              const payload = [
-                'data: {"type":"started","run_id":"run-faq"}',
-                'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
-                'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
-                'data: {"type":"exit","code":0,"elapsed":0.1}',
-              ].join('\n\n') + '\n\n'
-              return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
-            },
-          }
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => {
+            let done = false
+            return {
+              read: () => {
+                if (done) return Promise.resolve({ done: true, value: undefined })
+                done = true
+                const payload =
+                  [
+                    'data: {"type":"started","run_id":"run-faq"}',
+                    'data: {"type":"output","text":"Q  Example question\\n","cls":"fake-faq-q"}',
+                    'data: {"type":"output","text":"A  Example answer\\n","cls":"fake-faq-a"}',
+                    'data: {"type":"exit","code":0,"elapsed":0.1}',
+                  ].join('\n\n') + '\n\n'
+                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+              },
+            }
+          },
         },
-      },
-    }))
+      }),
+    )
     const loaded = loadRunnerFns({
       cmdValue: 'faq',
       tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
@@ -846,8 +916,14 @@ describe('runner helpers', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(showToast).toHaveBeenCalledWith('Failed to send kill request; command may still be running')
-    expect(appendLine).toHaveBeenCalledWith('[kill request failed] Unable to reach the server. Check that it is running and try again.', 'notice', 'tab-1')
+    expect(showToast).toHaveBeenCalledWith(
+      'Failed to send kill request; command may still be running',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      '[kill request failed] Unable to reach the server. Check that it is running and try again.',
+      'notice',
+      'tab-1',
+    )
   })
 })
 
@@ -931,11 +1007,14 @@ describe('submitCommand return contract', () => {
 
     submitVisibleComposerCommand({ dismissKeyboard: true, focusAfterSubmit: false })
 
-    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: 'curl darklab.sh' }),
-    }))
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/run',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'curl darklab.sh' }),
+      }),
+    )
   })
 
   it('submitVisibleComposerCommand can submit an explicit raw command', () => {
@@ -945,13 +1024,20 @@ describe('submitCommand return contract', () => {
       getComposerValue: () => 'ignored',
     })
 
-    submitVisibleComposerCommand({ rawCmd: 'curl explicit.sh', dismissKeyboard: true, focusAfterSubmit: false })
+    submitVisibleComposerCommand({
+      rawCmd: 'curl explicit.sh',
+      dismissKeyboard: true,
+      focusAfterSubmit: false,
+    })
 
-    expect(apiFetch).toHaveBeenCalledWith('/run', expect.objectContaining({
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ command: 'curl explicit.sh' }),
-    }))
+    expect(apiFetch).toHaveBeenCalledWith(
+      '/run',
+      expect.objectContaining({
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ command: 'curl explicit.sh' }),
+      }),
+    )
   })
 
   it('interruptPromptLine refocuses the visible mobile composer when present', () => {

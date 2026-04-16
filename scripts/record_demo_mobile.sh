@@ -21,7 +21,7 @@
 #
 # Convert to GIF manually (scale down to 393px wide for embedding):
 #   ffmpeg -i docs/darklab_shell_mobile_demo.mp4 \
-#     -vf "fps=12,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
+#     -vf "fps=15,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
 #     docs/darklab_shell_mobile_demo.gif
 #
 # Trim the video before converting if needed:
@@ -85,14 +85,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   # instead of minutes. libvpx-vp9 software encoding does not effectively
   # parallelize on Apple Silicon and would take 30+ minutes at this resolution.
   OUT="$ROOT_DIR/docs/darklab_shell_mobile_demo.mp4"
-  ffmpeg -y -framerate 10 \
+  ffmpeg -y -framerate 15 \
     -i "$FRAMES_DIR/frame_%06d.png" \
     -c:v hevc_videotoolbox -q:v 60 \
     -tag:v hvc1 \
     "$OUT"
 else
   OUT="$ROOT_DIR/docs/darklab_shell_mobile_demo.webm"
-  ffmpeg -y -framerate 10 \
+  ffmpeg -y -framerate 15 \
     -i "$FRAMES_DIR/frame_%06d.png" \
     -c:v libvpx-vp9 -b:v 0 -crf 28 \
     -cpu-used 4 -row-mt 1 -threads 0 \
@@ -107,7 +107,7 @@ echo "Video saved to docs/${OUTNAME}"
 echo ""
 echo "Convert to GIF (scale down to 393px wide for embedding):"
 echo "  ffmpeg -i docs/${OUTNAME} \\"
-echo "    -vf \"fps=12,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \\"
+echo "    -vf \"fps=15,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \\"
 echo "    docs/darklab_shell_mobile_demo.gif"
 echo ""
 echo "Trim before converting if needed:"

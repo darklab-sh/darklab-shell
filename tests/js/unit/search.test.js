@@ -3,22 +3,23 @@ import { fromDomScripts } from './helpers/extract.js'
 const originalScrollIntoView = Element.prototype.scrollIntoView
 
 function loadSearchFns() {
-  return fromDomScripts([
-    'app/static/js/utils.js',
-    'app/static/js/search.js',
-  ], {
-    document,
-    activeTabId: 'tab-1',
-    getOutput: () => document.getElementById('out'),
-    searchInput: document.getElementById('searchInput'),
-    searchCount: document.getElementById('searchCount'),
-  }, `{
+  return fromDomScripts(
+    ['app/static/js/utils.js', 'app/static/js/search.js'],
+    {
+      document,
+      activeTabId: 'tab-1',
+      getOutput: () => document.getElementById('out'),
+      searchInput: document.getElementById('searchInput'),
+      searchCount: document.getElementById('searchCount'),
+    },
+    `{
     runSearch,
     navigateSearch,
     clearHighlights,
     clearSearch,
     _setRegexMode: (value) => { searchRegexMode = value; },
-  }`)
+  }`,
+  )
 }
 
 describe('search helpers', () => {
@@ -97,18 +98,19 @@ describe('search helpers', () => {
   })
 
   it('runSearch is a no-op when the active tab has no output', () => {
-    const { runSearch } = fromDomScripts([
-      'app/static/js/utils.js',
-      'app/static/js/search.js',
-    ], {
-      document,
-      activeTabId: 'tab-1',
-      getOutput: () => null,
-      searchInput: document.getElementById('searchInput'),
-      searchCount: document.getElementById('searchCount'),
-    }, `{
+    const { runSearch } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/search.js'],
+      {
+        document,
+        activeTabId: 'tab-1',
+        getOutput: () => null,
+        searchInput: document.getElementById('searchInput'),
+        searchCount: document.getElementById('searchCount'),
+      },
+      `{
       runSearch,
-    }`)
+    }`,
+    )
 
     document.getElementById('searchInput').value = 'hello'
     runSearch()
@@ -126,18 +128,19 @@ describe('search helpers', () => {
   })
 
   it('clearHighlights is safe when no output has been rendered', () => {
-    const { clearHighlights } = fromDomScripts([
-      'app/static/js/utils.js',
-      'app/static/js/search.js',
-    ], {
-      document,
-      activeTabId: 'tab-1',
-      getOutput: () => null,
-      searchInput: document.getElementById('searchInput'),
-      searchCount: document.getElementById('searchCount'),
-    }, `{
+    const { clearHighlights } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/search.js'],
+      {
+        document,
+        activeTabId: 'tab-1',
+        getOutput: () => null,
+        searchInput: document.getElementById('searchInput'),
+        searchCount: document.getElementById('searchCount'),
+      },
+      `{
       clearHighlights,
-    }`)
+    }`,
+    )
 
     expect(() => clearHighlights()).not.toThrow()
   })
@@ -145,7 +148,8 @@ describe('search helpers', () => {
   it('highlights mixed-content lines without flattening helper markup', () => {
     const { runSearch, clearHighlights } = loadSearchFns()
     document.getElementById('searchInput').value = 'curl localhost'
-    document.getElementById('out').innerHTML = '<span class="line"><span class="line-prefix">$</span>curl <span class="line-host">localhost</span></span>'
+    document.getElementById('out').innerHTML =
+      '<span class="line"><span class="line-prefix">$</span>curl <span class="line-host">localhost</span></span>'
 
     runSearch()
 

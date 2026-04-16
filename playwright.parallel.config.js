@@ -3,11 +3,17 @@ import { readdirSync } from 'fs'
 import { resolve } from 'path'
 import { __dirname, buildIsolatedWebServer, testDir } from './playwright.shared.js'
 
-const projectCount = Math.max(1, Number.parseInt(process.env.PLAYWRIGHT_PROJECT_COUNT || '5', 10) || 5)
-const basePort = Math.max(1, Number.parseInt(process.env.PLAYWRIGHT_BASE_PORT || '5001', 10) || 5001)
+const projectCount = Math.max(
+  1,
+  Number.parseInt(process.env.PLAYWRIGHT_PROJECT_COUNT || '5', 10) || 5,
+)
+const basePort = Math.max(
+  1,
+  Number.parseInt(process.env.PLAYWRIGHT_BASE_PORT || '5001', 10) || 5001,
+)
 
 const allSpecFiles = readdirSync(resolve(__dirname, 'tests/js/e2e'))
-  .filter(name => name.endsWith('.spec.js'))
+  .filter((name) => name.endsWith('.spec.js'))
   .sort()
 
 // Wall-clock weights from local runs so projects are balanced by elapsed time,
@@ -18,7 +24,6 @@ const specWeights = {
   'welcome-interactions.spec.js': 24,
   'welcome-context.spec.js': 17,
   'mobile.spec.js': 21,
-  'readme-screenshot.spec.js': 19,
   'share.spec.js': 11,
   'history.spec.js': 10,
   'timestamps.spec.js': 10,
@@ -40,7 +45,7 @@ const specWeights = {
 }
 
 const weightedSpecs = [...allSpecFiles]
-  .map(name => ({ name, weight: specWeights[name] || 5 }))
+  .map((name) => ({ name, weight: specWeights[name] || 5 }))
   .sort((a, b) => {
     if (b.weight !== a.weight) return b.weight - a.weight
     return a.name.localeCompare(b.name)
@@ -61,9 +66,7 @@ for (const spec of weightedSpecs) {
   buckets[0].totalWeight += spec.weight
 }
 
-const specGroups = buckets
-  .sort((a, b) => a.index - b.index)
-  .map(bucket => bucket.specs.sort())
+const specGroups = buckets.sort((a, b) => a.index - b.index).map((bucket) => bucket.specs.sort())
 
 const projects = specGroups
   .map((specs, index) => {
@@ -85,10 +88,9 @@ export default defineConfig({
   fullyParallel: false,
   workers: projects.length,
   retries: process.env.CI ? 1 : 0,
-  reporter: [
-    ['list'],
-    ['html', { open: 'never' }],
-  ],
+  reporter: [['list'], ['html', { open: 'never' }]],
   projects,
-  webServer: projects.map((project, index) => buildIsolatedWebServer(basePort + index, `w${index + 1}`)),
+  webServer: projects.map((project, index) =>
+    buildIsolatedWebServer(basePort + index, `w${index + 1}`),
+  ),
 })

@@ -19,7 +19,7 @@ test.describe('rate limiting', () => {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: payload,
-        }).then(r => r.status),
+        }).then((r) => r.status),
       )
       return Promise.all(requests)
     })

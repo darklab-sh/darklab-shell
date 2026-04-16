@@ -69,6 +69,7 @@ if [ -n "$PYTEST_ARGS" ]; then
     OLD_IFS=$IFS
     IFS='
 '
+    # shellcheck disable=SC2086  # word-splitting on $PYTEST_ARGS is intentional
     set -- $PYTEST_ARGS
     IFS=$OLD_IFS
 else

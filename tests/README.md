@@ -20,8 +20,8 @@ Current totals:
 
 - `pytest`: 732
 - `vitest`: 369
-- `playwright`: 153
-- total: 1,254
+- `playwright`: 151
+- total: 1,252
 
 This document is organized in two parts:
 
@@ -185,7 +185,7 @@ GitLab renders repo-hosted videos from markdown image tags — `![alt](path.mp4)
 
 **Why `page.screenshot()` instead of Playwright's built-in video recorder:**
 
-Playwright's built-in `video: { mode: 'on' }` recorder ignores `deviceScaleFactor` and always captures at CSS pixel dimensions. `page.screenshot()` respects the factor and returns images at full physical resolution (e.g. 2560×1920 for a 1280×960 viewport at `deviceScaleFactor: 2`). The specs run a concurrent background loop that calls `page.screenshot()` at ~10 fps, writes numbered PNG frames to `test-results/demo-frames/` (or `demo-mobile-frames/`), and the wrapper stitches them with ffmpeg.
+Playwright's built-in `video: { mode: 'on' }` recorder ignores `deviceScaleFactor` and always captures at CSS pixel dimensions. `page.screenshot()` respects the factor and returns images at full physical resolution (e.g. 2560×1920 for a 1280×960 viewport at `deviceScaleFactor: 2`). The specs run a concurrent background loop that calls `page.screenshot()` at ~15 fps, writes numbered PNG frames to `test-results/demo-frames/` (or `demo-mobile-frames/`), and the wrapper stitches them with ffmpeg at 15 fps.
 
 **Why the mobile spec injects a fake keyboard image instead of focusing the input:**
 
@@ -325,14 +325,12 @@ Common artifact locations:
 | Path | Produced by | Purpose |
 | --- | --- | --- |
 | `test-results/` | Playwright and other focused test helpers | Browser failure context, screenshots, error markdown, and related debugging output |
-| `docs/readme-app.png` | `readme-screenshot.spec.js` | Checked-in README hero image refreshed by the e2e suite |
 | `tests/py/fixtures/container_smoke_test-expectations.json` | smoke-test capture workflow | Stored expected command corpus output for the Container Smoke Test |
 | `test-results/container_smoke_test.xml` | container smoke test | JUnit-style result output when the smoke test is run directly or through its wrapper |
 
 Practical note:
 
 - if a Playwright test fails, inspect `test-results/` first
-- if the README screenshot changed unexpectedly, inspect `docs/readme-app.png`
 - if the smoke test output changed intentionally, recapture the baseline before treating the diff as expected
 
 ---
@@ -1514,12 +1512,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | --- | --- |
 | `firing more than 5 requests per second returns a 429` | Verifies that firing more than 5 requests per second returns a 429. |
 
-#### `readme-screenshot.spec.js`
-
-| Test | Description |
-| --- | --- |
-| `captures the current shell UI for the README hero image` | Verifies that captures the current shell UI for the README hero image. |
-
 #### `runner-stall.spec.js`
 
 | Test | Description |
@@ -1654,7 +1646,7 @@ These specs are not part of the normal test suite. They are excluded from both `
 
 #### `demo.spec.js`
 
-Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `docs/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution.
+Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `docs/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (2560×1920). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
 
 | Test | Description |
 | --- | --- |
@@ -1662,7 +1654,7 @@ Desktop demo recording spec. Drives a curated interaction sequence — ping tab,
 
 #### `demo.mobile.spec.js`
 
-Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1179×2556) for the 393×852 iPhone 14 Pro viewport.
+Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1179×2556) for the 393×852 iPhone 14 Pro viewport. Stitched at 15 fps.
 
 | Test | Description |
 | --- | --- |

@@ -1,29 +1,37 @@
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
 
-function loadSession({ storageData = {}, fetchImpl, randomUUID = () => 'generated-session-id' } = {}) {
+function loadSession({
+  storageData = {},
+  fetchImpl,
+  randomUUID = () => 'generated-session-id',
+} = {}) {
   const storage = new MemoryStorage()
   for (const [key, value] of Object.entries(storageData)) {
     storage.setItem(key, value)
   }
 
   const fetchCalls = []
-  const fetchFn = fetchImpl || ((url, options) => {
-    fetchCalls.push([url, options])
-    return Promise.resolve({ ok: true })
-  })
+  const fetchFn =
+    fetchImpl ||
+    ((url, options) => {
+      fetchCalls.push([url, options])
+      return Promise.resolve({ ok: true })
+    })
 
-  const fns = fromDomScripts([
-    'app/static/js/session.js',
-  ], {
-    localStorage: storage,
-    crypto: { randomUUID },
-    fetch: fetchFn,
-  }, `{
+  const fns = fromDomScripts(
+    ['app/static/js/session.js'],
+    {
+      localStorage: storage,
+      crypto: { randomUUID },
+      fetch: fetchFn,
+    },
+    `{
     apiFetch,
     describeFetchError,
     logClientError,
     _getSessionId: () => SESSION_ID,
-  }`)
+  }`,
+  )
 
   return { ...fns, storage, fetchCalls }
 }
@@ -90,7 +98,7 @@ describe('session.js', () => {
     const { describeFetchError } = loadSession()
 
     expect(describeFetchError(new Error('Failed to fetch'))).toBe(
-      'Unable to reach the server. Check that it is running and try again.'
+      'Unable to reach the server. Check that it is running and try again.',
     )
   })
 
@@ -98,7 +106,7 @@ describe('session.js', () => {
     const { describeFetchError } = loadSession()
 
     expect(describeFetchError(new Error('TLS handshake failed'))).toBe(
-      'Request to the server failed: TLS handshake failed'
+      'Request to the server failed: TLS handshake failed',
     )
   })
 })

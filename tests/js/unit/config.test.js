@@ -2,11 +2,7 @@ import { fromDomScript } from './helpers/extract.js'
 
 describe('frontend config defaults', () => {
   it('includes the welcome timing keys exposed by /config', () => {
-    const { APP_CONFIG } = fromDomScript(
-      'app/static/js/config.js',
-      {},
-      'APP_CONFIG',
-    )
+    const { APP_CONFIG } = fromDomScript('app/static/js/config.js', {}, 'APP_CONFIG')
 
     expect(APP_CONFIG).toMatchObject({
       app_name: expect.any(String),
@@ -27,14 +23,14 @@ describe('frontend config defaults', () => {
   })
 
   it('keeps the built-in share redaction baseline in bootstrap defaults', () => {
-    const { APP_CONFIG } = fromDomScript(
-      'app/static/js/config.js',
-      {},
-      'APP_CONFIG',
-    )
+    const { APP_CONFIG } = fromDomScript('app/static/js/config.js', {}, 'APP_CONFIG')
 
     expect(APP_CONFIG.share_redaction_enabled).toBe(true)
-    expect(APP_CONFIG.share_redaction_rules.some(rule => rule.label === 'bearer token')).toBe(true)
-    expect(APP_CONFIG.share_redaction_rules.some(rule => rule.label === 'email address')).toBe(true)
+    expect(APP_CONFIG.share_redaction_rules.some((rule) => rule.label === 'bearer token')).toBe(
+      true,
+    )
+    expect(APP_CONFIG.share_redaction_rules.some((rule) => rule.label === 'email address')).toBe(
+      true,
+    )
   })
 })

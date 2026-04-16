@@ -1,5 +1,12 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory, makeTestIp } from './helpers.js'
+import {
+  runCommand,
+  openHistory,
+  openHistoryWithEntries,
+  waitForHistoryRuns,
+  closeHistory,
+  makeTestIp,
+} from './helpers.js'
 
 // Use fake shell commands — they bypass the allowlist and complete instantly.
 const CMD_A = 'hostname'
@@ -15,7 +22,9 @@ test.describe('history drawer', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('loading a run from history opens output in a tab without repopulating command input', async ({ page }) => {
+  test('loading a run from history opens output in a tab without repopulating command input', async ({
+    page,
+  }) => {
     await runCommand(page, CMD_A)
 
     // Navigate away by opening a new tab (clears the input)
@@ -150,7 +159,9 @@ test.describe('history drawer', () => {
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
   })
 
-  test('loading a synthetic tail run from history restores the filtered transcript', async ({ page }) => {
+  test('loading a synthetic tail run from history restores the filtered transcript', async ({
+    page,
+  }) => {
     await runCommand(page, 'help | tail -n 3')
 
     await page.locator('#new-tab-btn').click()

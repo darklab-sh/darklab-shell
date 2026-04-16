@@ -2,15 +2,17 @@ import { test, expect } from '@playwright/test'
 
 test.describe('boot resilience', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('**/allowed-commands', route => route.abort('failed'))
-    await page.route('**/faq', route => route.abort('failed'))
-    await page.route('**/autocomplete', route => route.abort('failed'))
+    await page.route('**/allowed-commands', (route) => route.abort('failed'))
+    await page.route('**/faq', (route) => route.abort('failed'))
+    await page.route('**/autocomplete', (route) => route.abort('failed'))
 
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
 
-  test('the app still boots and core controls still work when startup fetches fail', async ({ page }) => {
+  test('the app still boots and core controls still work when startup fetches fail', async ({
+    page,
+  }) => {
     await expect(page.locator('header h1')).toHaveText(/darklab shell/)
 
     await page.locator('#theme-btn').click()
@@ -27,7 +29,7 @@ test.describe('boot resilience', () => {
 
   test('the shell does not request external font assets on load', async ({ page }) => {
     const externalFonts = []
-    page.on('request', request => {
+    page.on('request', (request) => {
       const url = request.url()
       if (url.includes('fonts.googleapis.com') || url.includes('fonts.gstatic.com')) {
         externalFonts.push(url)

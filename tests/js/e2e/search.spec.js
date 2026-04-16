@@ -63,7 +63,9 @@ test.describe('search and highlight', () => {
     await expect(page.locator('.tab-panel.active .output mark.search-hl')).toHaveCount(0)
   })
 
-  test('case-sensitive mode filters out lowercase matches for uppercase queries', async ({ page }) => {
+  test('case-sensitive mode filters out lowercase matches for uppercase queries', async ({
+    page,
+  }) => {
     await page.locator('#search-toggle-btn').click()
     await page.locator('#search-input').fill('STATUS')
     await expect(page.locator('#search-count')).toHaveText(/\d+ \/ \d+/)

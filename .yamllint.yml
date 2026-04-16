@@ -1,0 +1,7 @@
+extends: default
+rules:
+  # 80-char default is too tight for config files with long strings/URLs.
+  line-length:
+    max: 200
+  # `---` document-start marker is not used in this project's YAML files.
+  document-start: disable

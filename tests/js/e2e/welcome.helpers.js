@@ -5,7 +5,7 @@ export const TEST_IP = makeTestIp(68)
 
 export async function setupWelcomePage(page) {
   await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
-  await page.route('**/welcome', route => {
+  await page.route('**/welcome', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -23,7 +23,7 @@ export async function setupWelcomePage(page) {
       ]),
     })
   })
-  await page.route('**/welcome/ascii', route => {
+  await page.route('**/welcome/ascii', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'text/plain',
@@ -33,7 +33,7 @@ export async function setupWelcomePage(page) {
       ].join('\n'),
     })
   })
-  await page.route('**/welcome/ascii-mobile', route => {
+  await page.route('**/welcome/ascii-mobile', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'text/plain',
@@ -41,7 +41,7 @@ export async function setupWelcomePage(page) {
         '.----[ darklab shell :: mobile console ]----.',
         '|                                              |',
         '|   __  __   ___   ___   ___   ___   ___       |',
-        "|  |  \\/  | / _ \\ / _ \\ / _ \\ / _ \\ / _ \\      |",
+        '|  |  \\/  | / _ \\ / _ \\ / _ \\ / _ \\ / _ \\      |',
         '|  | |\\/| || (_) | (_) | (_) | (_) | (_) |     |',
         '|  |_|  |_| \\___/ \\___/ \\___/ \\___/ \\___/      |',
         '|                                              |',
@@ -49,7 +49,7 @@ export async function setupWelcomePage(page) {
       ].join('\n'),
     })
   })
-  await page.route('**/welcome/hints', route => {
+  await page.route('**/welcome/hints', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -58,7 +58,7 @@ export async function setupWelcomePage(page) {
       }),
     })
   })
-  await page.route('**/welcome/hints-mobile', route => {
+  await page.route('**/welcome/hints-mobile', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -67,7 +67,7 @@ export async function setupWelcomePage(page) {
       }),
     })
   })
-  await page.route('**/run', route => {
+  await page.route('**/run', (route) => {
     route.fulfill({
       status: 200,
       contentType: 'text/event-stream',
@@ -81,4 +81,3 @@ export async function setupWelcomePage(page) {
   await page.goto('/')
   await page.locator('#cmd').waitFor()
 }
-

@@ -1,7 +1,16 @@
 import { vi } from 'vitest'
 import { fromScript } from './helpers/extract.js'
 
-const { escapeHtml, escapeRegex, normalizeRedactionRules, applyRedactionRules, redactLineEntries, renderMotd, showToast, copyTextToClipboard } = fromScript(
+const {
+  escapeHtml,
+  escapeRegex,
+  normalizeRedactionRules,
+  applyRedactionRules,
+  redactLineEntries,
+  renderMotd,
+  showToast,
+  copyTextToClipboard,
+} = fromScript(
   'app/static/js/utils.js',
   'escapeHtml',
   'escapeRegex',
@@ -144,10 +153,9 @@ describe('normalizeRedactionRules', () => {
 
 describe('applyRedactionRules', () => {
   it('applies regex replacements in order', () => {
-    const out = applyRedactionRules(
-      'Authorization: Bearer abc123',
-      [{ pattern: 'Bearer\\s+\\S+', replacement: 'Bearer [redacted]' }],
-    )
+    const out = applyRedactionRules('Authorization: Bearer abc123', [
+      { pattern: 'Bearer\\s+\\S+', replacement: 'Bearer [redacted]' },
+    ])
 
     expect(out).toBe('Authorization: Bearer [redacted]')
   })
@@ -155,11 +163,10 @@ describe('applyRedactionRules', () => {
 
 describe('redactLineEntries', () => {
   it('redacts only the text field while preserving line metadata', () => {
-    const lines = redactLineEntries([
-      { text: 'token=abc123', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' },
-    ], [
-      { pattern: 'token=\\w+', replacement: 'token=[redacted]' },
-    ])
+    const lines = redactLineEntries(
+      [{ text: 'token=abc123', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' }],
+      [{ pattern: 'token=\\w+', replacement: 'token=[redacted]' }],
+    )
 
     expect(lines).toEqual([
       { text: 'token=[redacted]', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' },
@@ -209,6 +216,10 @@ describe('copyTextToClipboard', () => {
     expect(execCommand).toHaveBeenCalledWith('copy')
 
     if (originalClipboard === undefined) delete navigator.clipboard
-    else Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
+    else
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: originalClipboard,
+      })
   })
 })

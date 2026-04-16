@@ -26,6 +26,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
    - `pip3`
    - Node.js `22` (the repo pins this in [`.nvmrc`](.nvmrc))
    - `npm`
+   - `shellcheck`, `hadolint`, `yamllint` (via Homebrew on macOS: `brew install shellcheck hadolint yamllint`)
 
 2. Create and activate a local virtual environment from the repo root:
 
@@ -45,6 +46,12 @@ python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
 
 ```bash
 npm install
+```
+
+5. Activate the pre-commit hook:
+
+```bash
+git config core.hooksPath scripts/hooks
 ```
 
 Use the virtual environment for all local Python work:
@@ -68,6 +75,7 @@ Recommended extensions:
 - `Markdown Preview Mermaid Support`
 - `Flake8`
 - `Bandit`
+- `ESLint`
 
 Practical recommendations:
 
@@ -107,7 +115,7 @@ Commit messages should describe the intent of the change, not just what files we
 
 **Python** — `flake8` enforces style and syntax. Configuration lives in [`.flake8`](.flake8). The main rules are: max line length 120, with per-file ignores for test files and generated content. Run `flake8 app/ tests/py/` before every commit.
 
-**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing.
+**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`eslint.config.js`](eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern recurs across at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
@@ -123,7 +131,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **732 pytest + 369 Vitest + 153 Playwright = 1,254 tests**.
+Current totals: **732 pytest + 369 Vitest + 151 Playwright = 1,252 tests**.
 
 Playwright notes:
 
@@ -141,18 +149,30 @@ Relevant references:
 
 ## Linting and Security Scanning
 
+The pre-commit hook at [`scripts/hooks/pre-commit`](scripts/hooks/pre-commit) runs all checks automatically on `git commit` once activated (see [Local Setup](#local-setup)). To run the full suite manually:
+
 ```bash
-# Style and syntax
-flake8 app/ tests/py/
-
-# Security scan
-bandit -r app/ -ll -q
-
-# Dependency vulnerability audit
-pip-audit -r app/requirements.txt -r requirements-dev.txt
+bash scripts/hooks/pre-commit
 ```
 
-These checks run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml). The test stage fans out into dedicated `pytest`, `Vitest`, and `Playwright` jobs.
+The checks and their scope:
+
+| Check | Tool | Scope |
+|---|---|---|
+| Python style | `flake8` | `app/`, `tests/py/` |
+| Python security | `bandit` | `app/` |
+| Python tests | `pytest` | `tests/py/` |
+| Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` |
+| JS unit tests | `vitest` | `tests/js/unit/` |
+| JS style | `eslint` | all tracked `.js` files |
+| JS dep CVEs | `npm audit` | `package.json` (high/critical only) |
+| Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang |
+| Dockerfile | `hadolint` | `Dockerfile` |
+| YAML | `yamllint` | all tracked `.yml`/`.yaml` files |
+
+Tool configurations: [`.flake8`](.flake8), [`eslint.config.js`](eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`.hadolint.yaml`](.hadolint.yaml), [`.yamllint.yml`](.yamllint.yml).
+
+These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
 ---
 
@@ -173,10 +193,9 @@ The script accepts `--python-only`, `--node-only`, `--docker-only`, `--go-only`,
 Before submitting a merge request, at minimum:
 
 ```bash
-python3 -m pytest tests/py/ -v
-npm run test:unit
-npm run test:e2e
-git diff --check
+bash scripts/hooks/pre-commit   # all lint, security, and unit checks
+npm run test:e2e                # full Playwright browser suite
+git diff --check                # no trailing whitespace
 ```
 
 For smaller changes, run the narrowest relevant subset locally and state exactly what you ran in the merge request.
@@ -237,8 +256,7 @@ GitLab will use the checked-in default template, but this is the expected shape:
 - Why it changed
 
 ## Validation
-- `python3 -m pytest tests/py/ -v`
-- `npm run test:unit`
+- `bash scripts/hooks/pre-commit`
 - `npm run test:e2e`
 
 ## Risks

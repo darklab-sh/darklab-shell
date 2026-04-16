@@ -459,6 +459,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── pyrightconfig.json          # Pyright/Pylance config — adds app/ to the module search path so
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
+├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
+├── .hadolint.yaml              # hadolint config — ignores intentional Dockerfile patterns
+├── .yamllint.yml               # yamllint config — relaxed line length, no document-start requirement
+├── eslint.config.js            # ESLint config — indentation, quotes, and semicolon rules for JS config/test files
 ├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
 ├── .nvmrc                      # Node version pin (22) for Vitest / Playwright
 ├── package.json                # JS dev dependencies and test scripts
@@ -468,6 +472,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── playwright.shared.js        # Shared Playwright server-builder helpers used by both configs
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
 ├── scripts/
+│   ├── hooks/
+│   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
 │   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
 │   ├── container_smoke_test.sh # Builds the container, runs all commands in scripts/smoke_test_commands.txt, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
@@ -478,7 +484,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
 │       └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
 ├── docs/
-│   └── readme-app.png          # Current README hero screenshot; regenerate with npm run capture:readme-screenshot
 ├── tests/
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
@@ -518,7 +523,6 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │           ├── mobile.spec.js  # mobile composer/menu/layout regressions and touch flows
 │           ├── output.spec.js  # copy/clear/save/export behavior
 │           ├── rate-limit.spec.js # per-session /run rate limiting
-│           ├── readme-screenshot.spec.js # Refreshes the README hero screenshot during Playwright runs
 │           ├── search.spec.js  # search/highlight/navigation behavior
 │           ├── share.spec.js   # snapshot permalinks and clipboard behavior
 │           ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup

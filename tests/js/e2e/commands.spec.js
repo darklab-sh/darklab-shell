@@ -32,5 +32,4 @@ test.describe('command execution', () => {
     await expect(page.locator('.status-pill')).toHaveText('ERROR')
     await expect(page.locator('.tab-panel.active .output')).toContainText('[denied]')
   })
-
 })

@@ -2,7 +2,7 @@ import { test, expect } from '@playwright/test'
 import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 // Use allowed commands that complete quickly.
-const CMD   = 'hostname'
+const CMD = 'hostname'
 const CMD_B = 'date'
 const LONG_CMD = 'ping -c 1000 darklab.sh'
 const TEST_IP = makeTestIp(66)
@@ -113,47 +113,57 @@ test.describe('tab command recall', () => {
   test('running a command in one tab does not block another tab from running', async ({ page }) => {
     const secondCmd = 'status'
 
-    await page.addInitScript(([longCmd, secondCmd]) => {
-      const originalFetch = window.fetch.bind(window)
-      const encoder = new TextEncoder()
+    await page.addInitScript(
+      ([longCmd, secondCmd]) => {
+        const originalFetch = window.fetch.bind(window)
+        const encoder = new TextEncoder()
 
-      window.fetch = async (input, init) => {
-        const url = typeof input === 'string' ? input : input.url
-        const rawBody = typeof init?.body === 'string' ? init.body : ''
+        window.fetch = async (input, init) => {
+          const url = typeof input === 'string' ? input : input.url
+          const rawBody = typeof init?.body === 'string' ? init.body : ''
 
-        if (url.endsWith('/run') && init?.method === 'POST') {
-          const payload = JSON.parse(rawBody || '{}')
-          const command = payload.command || ''
+          if (url.endsWith('/run') && init?.method === 'POST') {
+            const payload = JSON.parse(rawBody || '{}')
+            const command = payload.command || ''
 
-          if (command === longCmd) {
-            const body = new ReadableStream({
-              start(controller) {
-                controller.enqueue(encoder.encode('data: {"type":"started","run_id":"tabs-long-run"}\n\n'))
-                controller.enqueue(encoder.encode('data: {"type":"output","text":"long run started\\n"}\n\n'))
-                // Leave the stream open so the originating tab stays in RUNNING.
-              },
-            })
-            return new Response(body, {
-              status: 200,
-              headers: { 'Content-Type': 'text/event-stream' },
-            })
+            if (command === longCmd) {
+              const body = new ReadableStream({
+                start(controller) {
+                  controller.enqueue(
+                    encoder.encode('data: {"type":"started","run_id":"tabs-long-run"}\n\n'),
+                  )
+                  controller.enqueue(
+                    encoder.encode('data: {"type":"output","text":"long run started\\n"}\n\n'),
+                  )
+                  // Leave the stream open so the originating tab stays in RUNNING.
+                },
+              })
+              return new Response(body, {
+                status: 200,
+                headers: { 'Content-Type': 'text/event-stream' },
+              })
+            }
+
+            if (command === secondCmd) {
+              return new Response(
+                [
+                  'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
+                  'data: {"type":"output","text":"second tab output\\n"}\n\n',
+                  'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+                ].join(''),
+                {
+                  status: 200,
+                  headers: { 'Content-Type': 'text/event-stream' },
+                },
+              )
+            }
           }
 
-          if (command === secondCmd) {
-            return new Response([
-              'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
-              'data: {"type":"output","text":"second tab output\\n"}\n\n',
-              'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-            ].join(''), {
-              status: 200,
-              headers: { 'Content-Type': 'text/event-stream' },
-            })
-          }
+          return originalFetch(input, init)
         }
-
-        return originalFetch(input, init)
-      }
-    }, [LONG_CMD, secondCmd])
+      },
+      [LONG_CMD, secondCmd],
+    )
 
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')
@@ -165,7 +175,9 @@ test.describe('tab command recall', () => {
     await page.locator('#cmd').fill(secondCmd)
     await page.keyboard.press('Enter')
 
-    await expect(page.locator('.tab-panel.active .output .line.exit-ok')).toBeVisible({ timeout: 15_000 })
+    await expect(page.locator('.tab-panel.active .output .line.exit-ok')).toBeVisible({
+      timeout: 15_000,
+    })
     await page.locator('.tab').first().click()
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
   })
@@ -176,7 +188,9 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('reload restores non-running tabs, transcript preview, and the active draft', async ({ page }) => {
+  test('reload restores non-running tabs, transcript preview, and the active draft', async ({
+    page,
+  }) => {
     const restoreCmd = 'hostname'
     await runCommand(page, restoreCmd)
     await expect(page.locator('.tab-panel.active .output')).toContainText(restoreCmd)
@@ -194,13 +208,19 @@ test.describe('tab command recall', () => {
 
     await page.locator('.tab').first().click()
     await expect(page.locator('.tab-panel.active .output')).toContainText(restoreCmd)
-    await expect.poll(async () => page.locator('.tab-panel.active .output .line').count()).toBeGreaterThan(1)
+    await expect
+      .poll(async () => page.locator('.tab-panel.active .output .line').count())
+      .toBeGreaterThan(1)
   })
 
-  test('reload restores a completed tab with a visible prompt and preserved prompt formatting', async ({ page }) => {
+  test('reload restores a completed tab with a visible prompt and preserved prompt formatting', async ({
+    page,
+  }) => {
     const restoreCmd = 'status'
     await runCommand(page, restoreCmd)
-    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toContainText(restoreCmd)
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toContainText(
+      restoreCmd,
+    )
 
     await page.reload()
     await page.locator('#cmd').waitFor()
@@ -217,12 +237,14 @@ test.describe('tab command recall', () => {
     await expect(page.locator('#cmd')).toHaveValue('hostname')
   })
 
-  test('reload restores idle tabs and drafts alongside an active-run reconnect tab', async ({ page }) => {
+  test('reload restores idle tabs and drafts alongside an active-run reconnect tab', async ({
+    page,
+  }) => {
     const idleCmd = 'status'
     const activeCmd = 'ping darklab.sh'
     let activeRunStarted = false
 
-    await page.route('**/run', async route => {
+    await page.route('**/run', async (route) => {
       const body = route.request().postData() || '{}'
       const payload = JSON.parse(body)
       if ((payload.command || '') !== activeCmd) {
@@ -240,20 +262,26 @@ test.describe('tab command recall', () => {
       })
     })
 
-    await page.route('**/history/active', async route => {
+    await page.route('**/history/active', async (route) => {
       if (!activeRunStarted) {
-        await route.fulfill({ status: 200, contentType: 'application/json', body: JSON.stringify({ runs: [] }) })
+        await route.fulfill({
+          status: 200,
+          contentType: 'application/json',
+          body: JSON.stringify({ runs: [] }),
+        })
         return
       }
       await route.fulfill({
         status: 200,
         contentType: 'application/json',
         body: JSON.stringify({
-          runs: [{
-            run_id: 'tabs-reconnect-run',
-            command: activeCmd,
-            started: '2026-04-13T00:00:00Z',
-          }],
+          runs: [
+            {
+              run_id: 'tabs-reconnect-run',
+              command: activeCmd,
+              started: '2026-04-13T00:00:00Z',
+            },
+          ],
         }),
       })
     })
@@ -277,7 +305,9 @@ test.describe('tab command recall', () => {
     await expect(page.locator('.tab')).toHaveCount(3)
     await expect(page.locator('.welcome-banner')).toHaveCount(0)
     await expect(page.locator('.status-pill')).toHaveText('RUNNING')
-    await expect(page.locator('.tab-panel.active .output')).toContainText('[reconnected to active run started at')
+    await expect(page.locator('.tab-panel.active .output')).toContainText(
+      '[reconnected to active run started at',
+    )
     await expect(page.locator('.tab-panel.active .output')).toContainText(activeCmd)
 
     await page.locator('.tab').nth(1).click()
@@ -293,16 +323,21 @@ test.describe('tab command recall', () => {
     // the hint feed starts). Checking _welcomeDone rather than a visible hint element
     // avoids a race where the welcome animation (5 sampled commands + inter-block
     // delays) can take close to 15 s, making a toBeVisible timeout unreliable.
-    await page.waitForFunction(() => {
-      return typeof _welcomeDone !== 'undefined' && _welcomeDone === true
-    }, { timeout: 30000 })
+    await page.waitForFunction(
+      () => {
+        return typeof _welcomeDone !== 'undefined' && _welcomeDone === true
+      },
+      { timeout: 30000 },
+    )
     const beforeCount = await page.locator('.tab-panel.active .output .line.prompt-echo').count()
 
     await ensurePromptReady(page)
 
     await page.locator('#cmd').press('Enter')
 
-    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(beforeCount + 1)
+    await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(
+      beforeCount + 1,
+    )
     await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })
@@ -347,9 +382,9 @@ test.describe('tab strip interactions', () => {
     const firstBox = await firstTab.boundingBox()
     if (!secondBox || !firstBox) throw new Error('Tab bounding boxes were not available')
 
-    await page.mouse.move(secondBox.x + (secondBox.width / 2), secondBox.y + (secondBox.height / 2))
+    await page.mouse.move(secondBox.x + secondBox.width / 2, secondBox.y + secondBox.height / 2)
     await page.mouse.down()
-    await page.mouse.move(firstBox.x + 8, firstBox.y + (firstBox.height / 2), { steps: 8 })
+    await page.mouse.move(firstBox.x + 8, firstBox.y + firstBox.height / 2, { steps: 8 })
     await page.mouse.up()
 
     await expect(page.locator('#cmd')).toBeFocused()
@@ -368,38 +403,62 @@ test.describe('tab strip interactions', () => {
     const thirdBox = await thirdTab.boundingBox()
     if (!firstBox || !thirdBox) throw new Error('Tab bounding boxes were not available')
 
-    await page.evaluate(({ downX, downY }) => {
-      const tab = document.querySelectorAll('.tab')[2]
-      const start = new Event('touchstart', { bubbles: true, cancelable: true })
-      Object.defineProperty(start, 'touches', { value: [{ identifier: 41, clientX: downX, clientY: downY }], configurable: true })
-      Object.defineProperty(start, 'changedTouches', { value: [{ identifier: 41, clientX: downX, clientY: downY }], configurable: true })
-      tab?.dispatchEvent(start)
-    }, {
-      downX: thirdBox.x + (thirdBox.width / 2),
-      downY: thirdBox.y + (thirdBox.height / 2),
-    })
+    await page.evaluate(
+      ({ downX, downY }) => {
+        const tab = document.querySelectorAll('.tab')[2]
+        const start = new Event('touchstart', { bubbles: true, cancelable: true })
+        Object.defineProperty(start, 'touches', {
+          value: [{ identifier: 41, clientX: downX, clientY: downY }],
+          configurable: true,
+        })
+        Object.defineProperty(start, 'changedTouches', {
+          value: [{ identifier: 41, clientX: downX, clientY: downY }],
+          configurable: true,
+        })
+        tab?.dispatchEvent(start)
+      },
+      {
+        downX: thirdBox.x + thirdBox.width / 2,
+        downY: thirdBox.y + thirdBox.height / 2,
+      },
+    )
 
     await page.waitForTimeout(220)
 
-    await page.evaluate(({ moveX, moveY }) => {
-      const move = new Event('touchmove', { bubbles: true, cancelable: true })
-      Object.defineProperty(move, 'touches', { value: [{ identifier: 41, clientX: moveX, clientY: moveY }], configurable: true })
-      Object.defineProperty(move, 'changedTouches', { value: [{ identifier: 41, clientX: moveX, clientY: moveY }], configurable: true })
-      document.dispatchEvent(move)
-    }, {
-      moveX: firstBox.x + 8,
-      moveY: firstBox.y + (firstBox.height / 2),
-    })
+    await page.evaluate(
+      ({ moveX, moveY }) => {
+        const move = new Event('touchmove', { bubbles: true, cancelable: true })
+        Object.defineProperty(move, 'touches', {
+          value: [{ identifier: 41, clientX: moveX, clientY: moveY }],
+          configurable: true,
+        })
+        Object.defineProperty(move, 'changedTouches', {
+          value: [{ identifier: 41, clientX: moveX, clientY: moveY }],
+          configurable: true,
+        })
+        document.dispatchEvent(move)
+      },
+      {
+        moveX: firstBox.x + 8,
+        moveY: firstBox.y + firstBox.height / 2,
+      },
+    )
 
-    await page.evaluate(({ upX, upY }) => {
-      const end = new Event('touchend', { bubbles: true, cancelable: true })
-      Object.defineProperty(end, 'touches', { value: [], configurable: true })
-      Object.defineProperty(end, 'changedTouches', { value: [{ identifier: 41, clientX: upX, clientY: upY }], configurable: true })
-      document.dispatchEvent(end)
-    }, {
-      upX: firstBox.x + 8,
-      upY: firstBox.y + (firstBox.height / 2),
-    })
+    await page.evaluate(
+      ({ upX, upY }) => {
+        const end = new Event('touchend', { bubbles: true, cancelable: true })
+        Object.defineProperty(end, 'touches', { value: [], configurable: true })
+        Object.defineProperty(end, 'changedTouches', {
+          value: [{ identifier: 41, clientX: upX, clientY: upY }],
+          configurable: true,
+        })
+        document.dispatchEvent(end)
+      },
+      {
+        upX: firstBox.x + 8,
+        upY: firstBox.y + firstBox.height / 2,
+      },
+    )
 
     await expect(page.locator('#tabs-bar')).not.toHaveClass(/tabs-bar-touch-sorting/)
     await expect(page.locator('.tab').first()).toContainText('tab 3')

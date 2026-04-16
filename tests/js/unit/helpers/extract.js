@@ -28,13 +28,27 @@ const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_helpers
 
 /** Minimal but complete in-memory Storage implementation. */
 export class MemoryStorage {
-  constructor() { this._data = Object.create(null) }
-  getItem(k) { return Object.prototype.hasOwnProperty.call(this._data, k) ? this._data[k] : null }
-  setItem(k, v) { this._data[k] = String(v) }
-  removeItem(k) { delete this._data[k] }
-  clear() { this._data = Object.create(null) }
-  get length() { return Object.keys(this._data).length }
-  key(n) { return Object.keys(this._data)[n] ?? null }
+  constructor() {
+    this._data = Object.create(null)
+  }
+  getItem(k) {
+    return Object.prototype.hasOwnProperty.call(this._data, k) ? this._data[k] : null
+  }
+  setItem(k, v) {
+    this._data[k] = String(v)
+  }
+  removeItem(k) {
+    delete this._data[k]
+  }
+  clear() {
+    this._data = Object.create(null)
+  }
+  get length() {
+    return Object.keys(this._data).length
+  }
+  key(n) {
+    return Object.keys(this._data)[n] ?? null
+  }
 }
 
 /**
@@ -49,10 +63,9 @@ export function fromScript(relPath, ...names) {
   const storage = new MemoryStorage()
   // Pass a minimal APP_CONFIG stub so references inside function bodies don't
   // throw a ReferenceError if those functions are ever called in the tests.
-  const fns = new Function('localStorage', 'APP_CONFIG', src + returnExpr)(
-    storage,
-    { recent_commands_limit: 20 },
-  )
+  const fns = new Function('localStorage', 'APP_CONFIG', src + returnExpr)(storage, {
+    recent_commands_limit: 20,
+  })
   return { ...fns, _storage: storage }
 }
 
@@ -61,7 +74,8 @@ export function fromScript(relPath, ...names) {
  * requested named bindings.
  */
 export function fromDomScript(relPath, globals, ...names) {
-  const src = STATE_SRC + '\n' + UI_HELPERS_SRC + '\n' + readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
+  const src =
+    STATE_SRC + '\n' + UI_HELPERS_SRC + '\n' + readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
   const globalNames = Object.keys(globals)
   const globalValues = Object.values(globals)
   const returnExpr = `\nreturn { ${names.join(', ')} };`
@@ -79,9 +93,14 @@ export function fromDomScript(relPath, globals, ...names) {
  *   seed shared state: e.g. `'setTabs(tabs); setActiveTabId(activeTabId);'`.
  */
 export function fromDomScripts(relPaths, globals, returnExpr, initCode = '') {
-  const src = STATE_SRC + '\n' + UI_HELPERS_SRC + '\n' + initCode + '\n' + relPaths
-    .map(relPath => readFileSync(resolve(REPO_ROOT, relPath), 'utf8'))
-    .join('\n')
+  const src =
+    STATE_SRC +
+    '\n' +
+    UI_HELPERS_SRC +
+    '\n' +
+    initCode +
+    '\n' +
+    relPaths.map((relPath) => readFileSync(resolve(REPO_ROOT, relPath), 'utf8')).join('\n')
   const globalNames = Object.keys(globals)
   const globalValues = Object.values(globals)
   return new Function(...globalNames, `${src}\nreturn ${returnExpr};`)(...globalValues)

@@ -144,22 +144,25 @@ test.describe('output follow helper', () => {
     })
   })
 
-  test('shows only when scrolled off tail and swaps from live to bottom state', async ({ page }) => {
+  test('shows only when scrolled off tail and swaps from live to bottom state', async ({
+    page,
+  }) => {
     const followBtn = page.locator('.tab-panel.active .output-follow-btn')
 
     await expect(followBtn).toBeHidden()
     await page.waitForFunction(() => {
       const out = getOutput(activeTabId)
       const tab = getTab(activeTabId)
-      const pending = typeof _pendingOutputBatches !== 'undefined'
-        ? _pendingOutputBatches.get(activeTabId)
-        : null
-      return !!out
-        && !!tab
-        && Array.isArray(tab.rawLines)
-        && tab.rawLines.length === 600
-        && (!pending || (!pending.scheduled && pending.items.length === 0))
-        && out.scrollHeight > out.clientHeight + 50
+      const pending =
+        typeof _pendingOutputBatches !== 'undefined' ? _pendingOutputBatches.get(activeTabId) : null
+      return (
+        !!out &&
+        !!tab &&
+        Array.isArray(tab.rawLines) &&
+        tab.rawLines.length === 600 &&
+        (!pending || (!pending.scheduled && pending.items.length === 0)) &&
+        out.scrollHeight > out.clientHeight + 50
+      )
     })
 
     await page.evaluate(() => {
@@ -171,16 +174,21 @@ test.describe('output follow helper', () => {
       updateOutputFollowButton(activeTabId)
     })
 
-    await page.waitForFunction(() => {
-      const tab = getTab(activeTabId)
-      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
-      return !!tab
-        && tab.st === 'running'
-        && !tab.followOutput
-        && !!btn
-        && !btn.hidden
-        && btn.textContent === 'jump to live'
-    }, { timeout: 5000 })
+    await page.waitForFunction(
+      () => {
+        const tab = getTab(activeTabId)
+        const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+        return (
+          !!tab &&
+          tab.st === 'running' &&
+          !tab.followOutput &&
+          !!btn &&
+          !btn.hidden &&
+          btn.textContent === 'jump to live'
+        )
+      },
+      { timeout: 5000 },
+    )
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to live')
 
@@ -203,11 +211,9 @@ test.describe('output follow helper', () => {
     await page.waitForFunction(() => {
       const tab = getTab(activeTabId)
       const btn = document.querySelector('.tab-panel.active .output-follow-btn')
-      return !!tab
-        && tab.st === 'idle'
-        && !!btn
-        && !btn.hidden
-        && btn.textContent === 'jump to bottom'
+      return (
+        !!tab && tab.st === 'idle' && !!btn && !btn.hidden && btn.textContent === 'jump to bottom'
+      )
     })
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to bottom')

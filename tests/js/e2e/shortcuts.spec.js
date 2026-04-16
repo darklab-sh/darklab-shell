@@ -25,7 +25,9 @@ test.describe('keyboard shortcuts', () => {
     await ensurePromptReady(page)
   })
 
-  test('macOS Option+T opens a new tab without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+T opens a new tab without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await expect(page.locator('.tab')).toHaveCount(1)
 
     await dispatchMacOptionKey(page, '#cmd', {
@@ -38,7 +40,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+W closes the active tab without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+W closes the active tab without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(2)
     await page.locator('.tab').nth(1).click()
@@ -53,7 +57,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await dispatchMacOptionKey(page, '#cmd', {
@@ -68,7 +74,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await dispatchMacOptionKey(page, '#cmd', {
@@ -106,7 +114,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+digit jumps directly to a tab without inserting a symbol', async ({ page }) => {
+  test('macOS Option+digit jumps directly to a tab without inserting a symbol', async ({
+    page,
+  }) => {
     await page.locator('#new-tab-btn').click()
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(3)
@@ -138,10 +148,12 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })
 
-  test('macOS Option+B and Option+F move by word without inserting symbols into the prompt', async ({ page }) => {
+  test('macOS Option+B and Option+F move by word without inserting symbols into the prompt', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     await input.fill('dig darklab.sh A')
-    await input.evaluate(el => el.setSelectionRange(el.value.length, el.value.length))
+    await input.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length))
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: '∫',
@@ -149,7 +161,7 @@ test.describe('keyboard shortcuts', () => {
       altKey: true,
     })
 
-    let selection = await input.evaluate(el => ({
+    let selection = await input.evaluate((el) => ({
       value: el.value,
       start: el.selectionStart,
       end: el.selectionEnd,
@@ -164,7 +176,7 @@ test.describe('keyboard shortcuts', () => {
       altKey: true,
     })
 
-    selection = await input.evaluate(el => ({
+    selection = await input.evaluate((el) => ({
       value: el.value,
       start: el.selectionStart,
       end: el.selectionEnd,
@@ -174,21 +186,30 @@ test.describe('keyboard shortcuts', () => {
     expect(selection.end).toBe(16)
   })
 
-  test('desktop prompt cursor follows repeated caret moves while arrowing across the command', async ({ page }) => {
+  test('desktop prompt cursor follows repeated caret moves while arrowing across the command', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     await input.fill('curl darklab.sh')
     await input.focus()
 
     const promptCaret = page.locator('#shell-prompt-text .shell-caret-char')
 
-    for (const [pos, ch] of [[0, 'c'], [1, 'u'], [2, 'r'], [3, 'l']]) {
+    for (const [pos, ch] of [
+      [0, 'c'],
+      [1, 'u'],
+      [2, 'r'],
+      [3, 'l'],
+    ]) {
       await input.evaluate((el, nextPos) => el.setSelectionRange(nextPos, nextPos), pos)
       await page.evaluate(() => document.dispatchEvent(new Event('selectionchange')))
       await expect(promptCaret).toHaveText(ch)
     }
   })
 
-  test('history and submit shortcuts still work after transcript text is selected', async ({ page }) => {
+  test('history and submit shortcuts still work after transcript text is selected', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     const lineCountBefore = await page.locator('.tab-panel.active .output .line').count()
 
@@ -211,7 +232,7 @@ test.describe('keyboard shortcuts', () => {
     await page.waitForFunction(
       (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
       lineCountBefore,
-      { timeout: 15_000 }
+      { timeout: 15_000 },
     )
   })
 })
@@ -248,11 +269,13 @@ test.describe('Ctrl+R reverse-history search', () => {
     await page.waitForFunction(
       (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
       linesBefore,
-      { timeout: 15_000 }
+      { timeout: 15_000 },
     )
   })
 
-  test('Tab in hist-search accepts the match into the input without running the command', async ({ page }) => {
+  test('Tab in hist-search accepts the match into the input without running the command', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     // Ensure the run is committed server-side so the debounced fetch finds it
     await waitForHistoryRuns(page, 1)
@@ -270,7 +293,9 @@ test.describe('Ctrl+R reverse-history search', () => {
     expect(linesAfter).toBe(linesBefore)
   })
 
-  test('ArrowDown in hist-search navigates to the next match and fills the input', async ({ page }) => {
+  test('ArrowDown in hist-search navigates to the next match and fills the input', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     await runCommand(page, 'dig darklab.sh A')
     await page.locator('#cmd').press('Control+r')
@@ -285,7 +310,9 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#cmd')).toHaveValue('hostname')
   })
 
-  test('Escape in hist-search closes the dropdown and restores the pre-search draft', async ({ page }) => {
+  test('Escape in hist-search closes the dropdown and restores the pre-search draft', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     await page.locator('#cmd').fill('my draft')
     await page.locator('#cmd').press('Control+r')
@@ -295,7 +322,9 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#cmd')).toHaveValue('my draft')
   })
 
-  test('Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input', async ({ page }) => {
+  test('Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     await page.locator('#cmd').fill('my draft')
     await page.locator('#cmd').press('Control+r')

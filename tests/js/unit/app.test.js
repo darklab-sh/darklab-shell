@@ -191,43 +191,50 @@ async function loadAppFns({
     document.cookie = `${name}=${encodeURIComponent(value)}; path=/`
   }
 
-  const apiFetch = apiFetchOverride || vi.fn((url) => {
-    if (url === '/config') {
-      return Promise.resolve({
-        json: () => Promise.resolve({
-          app_name: 'darklab shell',
-          prompt_prefix: 'anon@darklab:~$',
-          version: '9.9',
-          project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
-          default_theme: 'darklab_obsidian.yaml',
-          share_redaction_enabled: true,
-          share_redaction_rules: [],
-          motd: '',
-          command_timeout_seconds: 0,
-          max_output_lines: 0,
-          permalink_retention_days: 0,
-        }),
-      })
-    }
-    if (url === '/allowed-commands') {
-      return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }) })
-    }
-    if (url === '/faq') {
-      return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
-    }
-    return Promise.resolve({ json: () => Promise.resolve({}) })
-  })
+  const apiFetch =
+    apiFetchOverride ||
+    vi.fn((url) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              default_theme: 'darklab_obsidian.yaml',
+              share_redaction_enabled: true,
+              share_redaction_rules: [],
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
 
   const runSearch = vi.fn()
   const clearSearch = vi.fn()
   const navigateSearch = vi.fn()
   const logClientError = vi.fn()
-  const getTab = vi.fn(id => tabsState.find(tab => tab && tab.id === id) || null)
-  const getActiveTab = vi.fn(() => tabsState.find(tab => tab && tab.id === activeTabState) || null)
-  const setTabs = vi.fn(nextTabs => {
+  const getTab = vi.fn((id) => tabsState.find((tab) => tab && tab.id === id) || null)
+  const getActiveTab = vi.fn(
+    () => tabsState.find((tab) => tab && tab.id === activeTabState) || null,
+  )
+  const setTabs = vi.fn((nextTabs) => {
     tabsState.splice(0, tabsState.length, ...nextTabs)
   })
-  const setActiveTabId = vi.fn(id => {
+  const setActiveTabId = vi.fn((id) => {
     activeTabState = id
   })
   const cmdInput = document.getElementById('cmd')
@@ -328,12 +335,12 @@ async function loadAppFns({
   const originalMaxTouchPoints = navigator.maxTouchPoints
   window.scrollTo = vi.fn()
   if (mobileViewport) {
-    const matchMediaMock = vi.fn(query => {
+    const matchMediaMock = vi.fn((query) => {
       const q = String(query || '')
       const maxWidth = /max-width:\s*900px/.test(q)
       const coarse = /pointer:\s*coarse/.test(q)
       return {
-        matches: mobileTouch ? (maxWidth || coarse) : maxWidth,
+        matches: mobileTouch ? maxWidth || coarse : maxWidth,
         addEventListener: vi.fn(),
         removeEventListener: vi.fn(),
       }
@@ -377,114 +384,113 @@ async function loadAppFns({
     }
   }
 
-  const fns = fromDomScripts([
-    'app/static/js/output.js',
-    'app/static/js/app.js',
-    'app/static/js/controller.js',
-  ], {
-    document,
-    localStorage: storage,
-    sessionStorage: sessionStore,
-    apiFetch,
-    APP_CONFIG: {},
-    AnsiUp: FakeAnsiUp,
-    ThemeRegistry: themeRegistry,
-    ...domBindings,
-    getOutput: getOutputOverride || (() => document.getElementById('history-list')),
-    renderMotd: (text) => text,
-    updateNewTabBtn: () => {},
-    createTab: createTabOverride,
-    runWelcome: () => {},
-    closeFaq: () => {},
-    openFaq: () => {},
-    cmdInput,
-    runBtn: document.getElementById('run-btn'),
-    shellInputRow: document.getElementById('shell-input-row'),
-    searchBar: document.getElementById('search-bar'),
-    searchInput: document.getElementById('search-input'),
-    searchCaseBtn: document.getElementById('search-case-btn'),
-    searchRegexBtn: document.getElementById('search-regex-btn'),
-    historyPanel: document.getElementById('history-panel'),
-    runSearch,
-    clearSearch,
-    refreshHistoryPanel: () => {},
-    navigateSearch,
-    searchCaseSensitive: false,
-    searchRegexMode: false,
-    confirmHistAction: vi.fn(),
-    executeHistAction: vi.fn(),
-    histDelOverlay: document.getElementById('hist-del-overlay'),
-    killOverlay: document.getElementById('kill-overlay'),
-    pendingHistAction: null,
-    pendingKillTabId,
-    acHide: acHideOverride,
-    acSuggestions: acSuggestionsOverride,
-    acContextRegistry: acContextRegistryOverride,
-    getAutocompleteMatches: getAutocompleteMatchesOverride,
-    acFiltered: acFilteredOverride,
-    acIndex: acIndexOverride,
-    acShow: acShowOverride,
-    acAccept: () => {},
-    acExpandSharedPrefix: acExpandSharedPrefixOverride,
-    resetCmdHistoryNav: () => {},
-    navigateCmdHistory: navigateCmdHistoryOverride,
-    setupTabScrollControls: () => {},
-    hydrateCmdHistory: () => {},
-    mountShellPrompt: () => {},
-    unmountShellPrompt: () => {},
-    logClientError,
-    tabs: tabsState,
-    activeTabId: activeTabState,
-    getTab,
-    getActiveTab,
-    setTabs,
-    setActiveTabId,
-    confirmKill: confirmKillOverride,
-    closeTab: closeTabOverride,
-    activateTab: activateTabOverride,
-    permalinkTab: permalinkTabOverride,
-    copyTab: copyTabOverride,
-    clearTab: clearTabOverride,
-    cancelWelcome: cancelWelcomeOverride,
-    enterHistSearch: enterHistSearchOverride,
-    interruptPromptLine: interruptPromptLineOverride,
-    _welcomeActive: welcomeActive,
-    welcomeOwnsTab: welcomeOwnsTabOverride,
-    shellPromptWrap: shellPromptWrapEl,
-    shellPromptText: document.getElementById('shell-prompt-text'),
-    shellPromptCaret: document.getElementById('shell-prompt-caret'),
-    terminalWrap: document.querySelector('.terminal-wrap'),
-    terminalBar: document.querySelector('.terminal-bar'),
-    histRow: document.getElementById('history-row'),
-    tabPanels: document.getElementById('tab-panels'),
-    mobileShell: document.getElementById('mobile-shell'),
-    mobileShellChrome: document.getElementById('mobile-shell-chrome'),
-    mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
-    mobileShellComposer: document.getElementById('mobile-shell-composer'),
-    mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
-    mobileComposerHost: document.getElementById('mobile-composer-host'),
-    mobileComposerRow: document.getElementById('mobile-composer-row'),
-    mobileEditBar: document.getElementById('mobile-edit-bar'),
-    mobileMenu: document.getElementById('mobile-menu'),
-    faqOverlay: document.getElementById('faq-overlay'),
-    optionsOverlay: document.getElementById('options-overlay'),
-    workflowsOverlay: document.getElementById('workflows-overlay'),
-    workflowsBtn: document.getElementById('workflows-btn'),
-    workflowsCloseBtn: document.querySelector('.workflows-close'),
-    permalinkToast: document.getElementById('permalink-toast'),
-    mobileComposerHostEl,
-    acDropdown,
-    requestWelcomeSettle: requestWelcomeSettleOverride,
-    runCommand: runCommandOverride,
-    submitComposerCommand: submitComposerCommandOverride,
-    submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
-    doKill: doKillOverride,
-    Event,
-    setTimeout: (fn) => {
-      fn()
-      return 0
+  const fns = fromDomScripts(
+    ['app/static/js/output.js', 'app/static/js/app.js', 'app/static/js/controller.js'],
+    {
+      document,
+      localStorage: storage,
+      sessionStorage: sessionStore,
+      apiFetch,
+      APP_CONFIG: {},
+      AnsiUp: FakeAnsiUp,
+      ThemeRegistry: themeRegistry,
+      ...domBindings,
+      getOutput: getOutputOverride || (() => document.getElementById('history-list')),
+      renderMotd: (text) => text,
+      updateNewTabBtn: () => {},
+      createTab: createTabOverride,
+      runWelcome: () => {},
+      closeFaq: () => {},
+      openFaq: () => {},
+      cmdInput,
+      runBtn: document.getElementById('run-btn'),
+      shellInputRow: document.getElementById('shell-input-row'),
+      searchBar: document.getElementById('search-bar'),
+      searchInput: document.getElementById('search-input'),
+      searchCaseBtn: document.getElementById('search-case-btn'),
+      searchRegexBtn: document.getElementById('search-regex-btn'),
+      historyPanel: document.getElementById('history-panel'),
+      runSearch,
+      clearSearch,
+      refreshHistoryPanel: () => {},
+      navigateSearch,
+      searchCaseSensitive: false,
+      searchRegexMode: false,
+      confirmHistAction: vi.fn(),
+      executeHistAction: vi.fn(),
+      histDelOverlay: document.getElementById('hist-del-overlay'),
+      killOverlay: document.getElementById('kill-overlay'),
+      pendingHistAction: null,
+      pendingKillTabId,
+      acHide: acHideOverride,
+      acSuggestions: acSuggestionsOverride,
+      acContextRegistry: acContextRegistryOverride,
+      getAutocompleteMatches: getAutocompleteMatchesOverride,
+      acFiltered: acFilteredOverride,
+      acIndex: acIndexOverride,
+      acShow: acShowOverride,
+      acAccept: () => {},
+      acExpandSharedPrefix: acExpandSharedPrefixOverride,
+      resetCmdHistoryNav: () => {},
+      navigateCmdHistory: navigateCmdHistoryOverride,
+      setupTabScrollControls: () => {},
+      hydrateCmdHistory: () => {},
+      mountShellPrompt: () => {},
+      unmountShellPrompt: () => {},
+      logClientError,
+      tabs: tabsState,
+      activeTabId: activeTabState,
+      getTab,
+      getActiveTab,
+      setTabs,
+      setActiveTabId,
+      confirmKill: confirmKillOverride,
+      closeTab: closeTabOverride,
+      activateTab: activateTabOverride,
+      permalinkTab: permalinkTabOverride,
+      copyTab: copyTabOverride,
+      clearTab: clearTabOverride,
+      cancelWelcome: cancelWelcomeOverride,
+      enterHistSearch: enterHistSearchOverride,
+      interruptPromptLine: interruptPromptLineOverride,
+      _welcomeActive: welcomeActive,
+      welcomeOwnsTab: welcomeOwnsTabOverride,
+      shellPromptWrap: shellPromptWrapEl,
+      shellPromptText: document.getElementById('shell-prompt-text'),
+      shellPromptCaret: document.getElementById('shell-prompt-caret'),
+      terminalWrap: document.querySelector('.terminal-wrap'),
+      terminalBar: document.querySelector('.terminal-bar'),
+      histRow: document.getElementById('history-row'),
+      tabPanels: document.getElementById('tab-panels'),
+      mobileShell: document.getElementById('mobile-shell'),
+      mobileShellChrome: document.getElementById('mobile-shell-chrome'),
+      mobileShellTranscript: document.getElementById('mobile-shell-transcript'),
+      mobileShellComposer: document.getElementById('mobile-shell-composer'),
+      mobileShellOverlays: document.getElementById('mobile-shell-overlays'),
+      mobileComposerHost: document.getElementById('mobile-composer-host'),
+      mobileComposerRow: document.getElementById('mobile-composer-row'),
+      mobileEditBar: document.getElementById('mobile-edit-bar'),
+      mobileMenu: document.getElementById('mobile-menu'),
+      faqOverlay: document.getElementById('faq-overlay'),
+      optionsOverlay: document.getElementById('options-overlay'),
+      workflowsOverlay: document.getElementById('workflows-overlay'),
+      workflowsBtn: document.getElementById('workflows-btn'),
+      workflowsCloseBtn: document.querySelector('.workflows-close'),
+      permalinkToast: document.getElementById('permalink-toast'),
+      mobileComposerHostEl,
+      acDropdown,
+      requestWelcomeSettle: requestWelcomeSettleOverride,
+      runCommand: runCommandOverride,
+      submitComposerCommand: submitComposerCommandOverride,
+      submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
+      doKill: doKillOverride,
+      Event,
+      setTimeout: (fn) => {
+        fn()
+        return 0
+      },
     },
-  }, `{
+    `{
     _setTsMode,
     _setLnMode,
     handleComposerInputChange,
@@ -527,7 +533,9 @@ async function loadAppFns({
     syncShellPrompt,
     _getAcIndex: () => acIndex,
     _getWelcomeBootPending: () => _welcomeBootPending,
-  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
+  }`,
+    'setTabs(tabs); setActiveTabId(activeTabId);',
+  )
 
   await Promise.resolve()
   await Promise.resolve()
@@ -573,20 +581,39 @@ async function loadAppFns({
     setActiveTabId,
     restoreViewport: () => {
       if (originalMatchMedia === undefined) delete window.matchMedia
-      else Object.defineProperty(window, 'matchMedia', { configurable: true, value: originalMatchMedia })
+      else
+        Object.defineProperty(window, 'matchMedia', {
+          configurable: true,
+          value: originalMatchMedia,
+        })
       if (originalVisualViewport === undefined) delete window.visualViewport
-      else Object.defineProperty(window, 'visualViewport', { configurable: true, value: originalVisualViewport })
+      else
+        Object.defineProperty(window, 'visualViewport', {
+          configurable: true,
+          value: originalVisualViewport,
+        })
       if (originalScrollTo === undefined) delete window.scrollTo
       else window.scrollTo = originalScrollTo
       if (originalMaxTouchPoints === undefined) delete window.navigator.maxTouchPoints
-      else Object.defineProperty(window.navigator, 'maxTouchPoints', { configurable: true, value: originalMaxTouchPoints })
+      else
+        Object.defineProperty(window.navigator, 'maxTouchPoints', {
+          configurable: true,
+          value: originalMaxTouchPoints,
+        })
     },
   }
 }
 
 describe('app helpers', () => {
   beforeEach(() => {
-    ;['pref_theme', 'pref_theme_name', 'pref_timestamps', 'pref_line_numbers', 'pref_welcome_intro', 'pref_share_redaction_default'].forEach(name => {
+    ;[
+      'pref_theme',
+      'pref_theme_name',
+      'pref_timestamps',
+      'pref_line_numbers',
+      'pref_welcome_intro',
+      'pref_share_redaction_default',
+    ].forEach((name) => {
       document.cookie = `${name}=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT`
     })
   })
@@ -611,7 +638,6 @@ describe('app helpers', () => {
         ],
       },
     })
-
   })
 
   it('applies saved timestamp and line number preferences from cookies at startup', async () => {
@@ -632,7 +658,9 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-clock')).toBe(false)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
-    expect(document.querySelector('#mobile-menu [data-action="ts"]').textContent).toBe('timestamps: elapsed')
+    expect(document.querySelector('#mobile-menu [data-action="ts"]').textContent).toBe(
+      'timestamps: elapsed',
+    )
   })
 
   it('_setLnMode updates body classes and button labels', async () => {
@@ -642,7 +670,9 @@ describe('app helpers', () => {
 
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
-    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe('line numbers: on')
+    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe(
+      'line numbers: on',
+    )
 
     _setLnMode('off')
 
@@ -708,7 +738,7 @@ describe('app helpers', () => {
     })
 
     document.getElementById('theme-btn').click()
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('#theme-select .theme-card-active')).toBe(document.activeElement)
   })
@@ -742,11 +772,11 @@ describe('app helpers', () => {
     const themeSelect = document.getElementById('theme-select')
     expect(themeSelect).not.toBeNull()
     const themeCards = Array.from(themeSelect.querySelectorAll('[data-theme-name]'))
-    expect(themeCards.map(card => card.dataset.themeName)).toEqual([
+    expect(themeCards.map((card) => card.dataset.themeName)).toEqual([
       'theme_light_blue',
       'theme_light_olive',
     ])
-    expect(themeCards.map(card => card.querySelector('.theme-card-label')?.textContent)).toEqual([
+    expect(themeCards.map((card) => card.querySelector('.theme-card-label')?.textContent)).toEqual([
       'Blue Paper',
       'Olive Parchment',
     ])
@@ -810,11 +840,17 @@ describe('app helpers', () => {
       },
     })
 
-    const groupTitles = Array.from(document.querySelectorAll('#theme-select .theme-picker-group-title')).map(node => node.textContent)
+    const groupTitles = Array.from(
+      document.querySelectorAll('#theme-select .theme-picker-group-title'),
+    ).map((node) => node.textContent)
     expect(groupTitles).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
-    const sectionGroups = Array.from(document.querySelectorAll('#theme-select .theme-picker-group')).map(node => node.dataset.themeGroup)
+    const sectionGroups = Array.from(
+      document.querySelectorAll('#theme-select .theme-picker-group'),
+    ).map((node) => node.dataset.themeGroup)
     expect(sectionGroups).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
-    expect(document.getElementById('theme-select')?.style.getPropertyValue('--theme-picker-columns')).toBe('2')
+    expect(
+      document.getElementById('theme-select')?.style.getPropertyValue('--theme-picker-columns'),
+    ).toBe('2')
     expect(document.querySelectorAll('#theme-select [data-theme-name]').length).toBe(4)
   })
 
@@ -846,7 +882,9 @@ describe('app helpers', () => {
     })
 
     expect(document.body.dataset.theme).toBe('theme_light_blue')
-    expect(document.querySelector('#theme-select .theme-card-active')?.dataset.themeName).toBe('theme_light_blue')
+    expect(document.querySelector('#theme-select .theme-card-active')?.dataset.themeName).toBe(
+      'theme_light_blue',
+    )
   })
 
   it('falls back to the baked-in dark palette when the configured default theme is missing', async () => {
@@ -871,20 +909,23 @@ describe('app helpers', () => {
       apiFetch: vi.fn((url) => {
         if (url === '/config') {
           return Promise.resolve({
-            json: () => Promise.resolve({
-              app_name: 'darklab shell',
-              prompt_prefix: 'anon@darklab:~$',
-              version: '9.9',
-              default_theme: 'theme_missing.yaml',
-              motd: '',
-              command_timeout_seconds: 0,
-              max_output_lines: 0,
-              permalink_retention_days: 0,
-            }),
+            json: () =>
+              Promise.resolve({
+                app_name: 'darklab shell',
+                prompt_prefix: 'anon@darklab:~$',
+                version: '9.9',
+                default_theme: 'theme_missing.yaml',
+                motd: '',
+                command_timeout_seconds: 0,
+                max_output_lines: 0,
+                permalink_retention_days: 0,
+              }),
           })
         }
         if (url === '/allowed-commands') {
-          return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }) })
+          return Promise.resolve({
+            json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
+          })
         }
         if (url === '/faq') {
           return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
@@ -1039,7 +1080,10 @@ describe('app helpers', () => {
     expect(apiFetch).toHaveBeenCalledWith('/allowed-commands')
     expect(apiFetch).toHaveBeenCalledWith('/autocomplete')
     expect(logClientError).toHaveBeenCalledWith('failed to load /config', expect.any(Error))
-    expect(logClientError).toHaveBeenCalledWith('failed to load /allowed-commands', expect.any(Error))
+    expect(logClientError).toHaveBeenCalledWith(
+      'failed to load /allowed-commands',
+      expect.any(Error),
+    )
     expect(logClientError).toHaveBeenCalledWith('failed to load /autocomplete', expect.any(Error))
     expect(storage.getItem('theme')).toBeNull()
   })
@@ -1178,7 +1222,9 @@ describe('app helpers', () => {
       return id
     })
     const activateTab = vi.fn((id) => {
-      tabs.forEach(tab => { tab.active = tab.id === id })
+      tabs.forEach((tab) => {
+        tab.active = tab.id === id
+      })
     })
     const {
       restoreTabSessionState,
@@ -1194,38 +1240,41 @@ describe('app helpers', () => {
       activeTabId: null,
     })
 
-    sessionStorage.setItem(_getTabSessionStateKey(), JSON.stringify({
-      version: 1,
-      activeIndex: 1,
-      tabs: [
-        {
-          label: 'tab 1',
-          command: 'dig darklab.sh',
-          renamed: false,
-          draftInput: 'dig darklab.sh',
-          st: 'idle',
-          exitCode: null,
-          historyRunId: '',
-          previewTruncated: false,
-          fullOutputAvailable: false,
-          fullOutputLoaded: false,
-          rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' }],
-        },
-        {
-          label: 'notes',
-          command: '',
-          renamed: true,
-          draftInput: 'ffuf -u https://target/FUZZ',
-          st: 'fail',
-          exitCode: 1,
-          historyRunId: 'run-2',
-          previewTruncated: false,
-          fullOutputAvailable: true,
-          fullOutputLoaded: true,
-          rawLines: [{ text: '[connection error]', cls: 'exit-fail', tsC: '', tsE: '' }],
-        },
-      ],
-    }))
+    sessionStorage.setItem(
+      _getTabSessionStateKey(),
+      JSON.stringify({
+        version: 1,
+        activeIndex: 1,
+        tabs: [
+          {
+            label: 'tab 1',
+            command: 'dig darklab.sh',
+            renamed: false,
+            draftInput: 'dig darklab.sh',
+            st: 'idle',
+            exitCode: null,
+            historyRunId: '',
+            previewTruncated: false,
+            fullOutputAvailable: false,
+            fullOutputLoaded: false,
+            rawLines: [{ text: '$ dig darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' }],
+          },
+          {
+            label: 'notes',
+            command: '',
+            renamed: true,
+            draftInput: 'ffuf -u https://target/FUZZ',
+            st: 'fail',
+            exitCode: 1,
+            historyRunId: 'run-2',
+            previewTruncated: false,
+            fullOutputAvailable: true,
+            fullOutputLoaded: true,
+            rawLines: [{ text: '[connection error]', cls: 'exit-fail', tsC: '', tsE: '' }],
+          },
+        ],
+      }),
+    )
 
     expect(restoreTabSessionState()).toBe(true)
     expect(_getWelcomeBootPending()).toBe(false)
@@ -1258,7 +1307,7 @@ describe('app helpers', () => {
         closing: false,
       })
       if (activeId) {
-        const prev = tabs.find(tab => tab.id === activeId)
+        const prev = tabs.find((tab) => tab.id === activeId)
         if (prev) prev.draftInput = ''
       }
       activeId = id
@@ -1266,52 +1315,53 @@ describe('app helpers', () => {
     })
     const activateTab = vi.fn((id) => {
       activeId = id
-      tabs.forEach(tab => { tab.active = tab.id === id })
+      tabs.forEach((tab) => {
+        tab.active = tab.id === id
+      })
     })
-    const {
-      restoreTabSessionState,
-      sessionStorage,
-      _getTabSessionStateKey,
-      getTab,
-    } = await loadAppFns({
-      tabs,
-      createTab,
-      activateTab,
-      activeTabId: null,
-    })
+    const { restoreTabSessionState, sessionStorage, _getTabSessionStateKey, getTab } =
+      await loadAppFns({
+        tabs,
+        createTab,
+        activateTab,
+        activeTabId: null,
+      })
 
-    sessionStorage.setItem(_getTabSessionStateKey(), JSON.stringify({
-      version: 1,
-      activeIndex: 1,
-      tabs: [
-        {
-          label: 'tab 1',
-          command: '',
-          renamed: false,
-          draftInput: 'dig darklab.sh',
-          st: 'idle',
-          exitCode: null,
-          historyRunId: '',
-          previewTruncated: false,
-          fullOutputAvailable: false,
-          fullOutputLoaded: false,
-          rawLines: [],
-        },
-        {
-          label: 'tab 2',
-          command: '',
-          renamed: false,
-          draftInput: 'hostname',
-          st: 'idle',
-          exitCode: null,
-          historyRunId: '',
-          previewTruncated: false,
-          fullOutputAvailable: false,
-          fullOutputLoaded: false,
-          rawLines: [],
-        },
-      ],
-    }))
+    sessionStorage.setItem(
+      _getTabSessionStateKey(),
+      JSON.stringify({
+        version: 1,
+        activeIndex: 1,
+        tabs: [
+          {
+            label: 'tab 1',
+            command: '',
+            renamed: false,
+            draftInput: 'dig darklab.sh',
+            st: 'idle',
+            exitCode: null,
+            historyRunId: '',
+            previewTruncated: false,
+            fullOutputAvailable: false,
+            fullOutputLoaded: false,
+            rawLines: [],
+          },
+          {
+            label: 'tab 2',
+            command: '',
+            renamed: false,
+            draftInput: 'hostname',
+            st: 'idle',
+            exitCode: null,
+            historyRunId: '',
+            previewTruncated: false,
+            fullOutputAvailable: false,
+            fullOutputLoaded: false,
+            rawLines: [],
+          },
+        ],
+      }),
+    )
 
     expect(restoreTabSessionState()).toBe(true)
     expect(getTab('tab-1')?.draftInput).toBe('dig darklab.sh')
@@ -1340,25 +1390,48 @@ describe('app helpers', () => {
       })
       return id
     })
-    const {
-      restoreTabSessionState,
-      sessionStorage,
-      _getTabSessionStateKey,
-      getTab,
-    } = await loadAppFns({
-      tabs,
-      createTab,
-      activeTabId: null,
-    })
+    const { restoreTabSessionState, sessionStorage, _getTabSessionStateKey, getTab } =
+      await loadAppFns({
+        tabs,
+        createTab,
+        activeTabId: null,
+      })
 
-    sessionStorage.setItem(_getTabSessionStateKey(), JSON.stringify({
-      version: 1,
-      activeIndex: 0,
-      tabs: [
-        { label: 'tab 1', command: '', renamed: false, draftInput: 'alpha', st: 'idle', exitCode: null, historyRunId: '', previewTruncated: false, fullOutputAvailable: false, fullOutputLoaded: false, rawLines: [] },
-        { label: 'tab 2', command: '', renamed: false, draftInput: 'beta', st: 'idle', exitCode: null, historyRunId: '', previewTruncated: false, fullOutputAvailable: false, fullOutputLoaded: false, rawLines: [] },
-      ],
-    }))
+    sessionStorage.setItem(
+      _getTabSessionStateKey(),
+      JSON.stringify({
+        version: 1,
+        activeIndex: 0,
+        tabs: [
+          {
+            label: 'tab 1',
+            command: '',
+            renamed: false,
+            draftInput: 'alpha',
+            st: 'idle',
+            exitCode: null,
+            historyRunId: '',
+            previewTruncated: false,
+            fullOutputAvailable: false,
+            fullOutputLoaded: false,
+            rawLines: [],
+          },
+          {
+            label: 'tab 2',
+            command: '',
+            renamed: false,
+            draftInput: 'beta',
+            st: 'idle',
+            exitCode: null,
+            historyRunId: '',
+            previewTruncated: false,
+            fullOutputAvailable: false,
+            fullOutputLoaded: false,
+            rawLines: [],
+          },
+        ],
+      }),
+    )
 
     expect(restoreTabSessionState()).toBe(true)
     expect(getTab('tab-1')?.draftInput).toBe('alpha')
@@ -1393,7 +1466,10 @@ describe('app helpers', () => {
     {
       key: 'Enter',
       keydown: { key: 'Enter' },
-      expectAction: (helpers) => expect(helpers.submitComposerCommand).toHaveBeenCalledWith('ping darklab.sh', { dismissKeyboard: true }),
+      expectAction: (helpers) =>
+        expect(helpers.submitComposerCommand).toHaveBeenCalledWith('ping darklab.sh', {
+          dismissKeyboard: true,
+        }),
     },
     {
       key: 'Ctrl+R',
@@ -1441,7 +1517,10 @@ describe('app helpers', () => {
       expect(focusSpy).toHaveBeenCalled()
       expectAction({ navigateCmdHistory, enterHistSearch, submitComposerCommand })
     } finally {
-      Object.defineProperty(window, 'getSelection', { configurable: true, value: originalGetSelection })
+      Object.defineProperty(window, 'getSelection', {
+        configurable: true,
+        value: originalGetSelection,
+      })
     }
   })
 
@@ -1513,11 +1592,13 @@ describe('app helpers', () => {
     mobileCmdInput.value = 'curl'
     mobileCmdInput.dispatchEvent(new Event('input'))
     window.dispatchEvent(new Event('resize'))
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 10))
 
     expect(document.body.classList.contains('mobile-terminal-mode')).toBe(true)
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
-    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe('268px')
+    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe(
+      '268px',
+    )
     expect(terminalWrap.hidden).toBe(true)
     expect(mobileShell.hidden).toBe(false)
     expect(runBtn.hidden).toBe(true)
@@ -1611,7 +1692,9 @@ describe('app helpers', () => {
     Object.defineProperty(output, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
-      set: value => { scrollTop = value },
+      set: (value) => {
+        scrollTop = value
+      },
     })
     Object.defineProperty(output, 'scrollHeight', {
       configurable: true,
@@ -1619,7 +1702,14 @@ describe('app helpers', () => {
     })
     const { restoreViewport } = await loadAppFns({
       mobileViewport: { height: 768, offsetTop: 0 },
-      tabs: [{ id: 'tab-1', followOutput: true, suppressOutputScrollTracking: false, _outputFollowToken: 0 }],
+      tabs: [
+        {
+          id: 'tab-1',
+          followOutput: true,
+          suppressOutputScrollTracking: false,
+          _outputFollowToken: 0,
+        },
+      ],
       getOutput: () => output,
     })
     try {
@@ -1655,7 +1745,9 @@ describe('app helpers', () => {
     syncMobileComposerKeyboardState(0, { active: true })
     syncMobileComposerKeyboardState(268, { active: true })
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(false)
-    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe('268px')
+    expect(document.documentElement.style.getPropertyValue('--mobile-keyboard-offset')).toBe(
+      '268px',
+    )
     mobileCmdInput.dispatchEvent(new Event('focus'))
     expect(document.body.classList.contains('mobile-keyboard-open')).toBe(true)
     expect(document.getElementById('mobile-edit-bar').hidden).toBe(false)
@@ -1788,7 +1880,12 @@ describe('app helpers', () => {
     document.body.classList.add('mobile-terminal-mode')
 
     mobileCmdInput.value = 'curl darklab.sh'
-    setComposerState({ value: 'curl darklab.sh', selectionStart: 15, selectionEnd: 15, activeInput: 'mobile' })
+    setComposerState({
+      value: 'curl darklab.sh',
+      selectionStart: 15,
+      selectionEnd: 15,
+      activeInput: 'mobile',
+    })
 
     expect(getComposerValue()).toBe('curl darklab.sh')
 
@@ -1899,10 +1996,12 @@ describe('app helpers', () => {
     wordmark.href = '#'
     document.body.appendChild(wordmark)
 
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(wordmark.textContent).toBe('darklab shell v9.9')
-    expect(wordmark.getAttribute('href')).toBe('https://gitlab.com/darklab.sh/darklab-shell#darklab-shell')
+    expect(wordmark.getAttribute('href')).toBe(
+      'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+    )
   })
 
   it('keeps the mobile run button visible after the keyboard closes', async () => {
@@ -1958,7 +2057,10 @@ describe('app helpers', () => {
     mobileCmdInput.dispatchEvent(new Event('input'))
     mobileRunBtn.click()
 
-    expect(submitVisibleComposerCommand).toHaveBeenCalledWith({ dismissKeyboard: true, focusAfterSubmit: false })
+    expect(submitVisibleComposerCommand).toHaveBeenCalledWith({
+      dismissKeyboard: true,
+      focusAfterSubmit: false,
+    })
     expect(runCommand).not.toHaveBeenCalled()
 
     restoreViewport()
@@ -1988,8 +2090,12 @@ describe('app helpers', () => {
 
   it('keeps the themed mobile composer surfaces free of hard-coded dark colors', () => {
     const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
-    const shellMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer\s*\{([\s\S]*?)\}/)
-    const composerMatch = css.match(/body\.mobile-terminal-mode #mobile-shell-composer #mobile-composer\s*\{([\s\S]*?)\}/)
+    const shellMatch = css.match(
+      /body\.mobile-terminal-mode #mobile-shell-composer\s*\{([\s\S]*?)\}/,
+    )
+    const composerMatch = css.match(
+      /body\.mobile-terminal-mode #mobile-shell-composer #mobile-composer\s*\{([\s\S]*?)\}/,
+    )
 
     expect(shellMatch).not.toBeNull()
     expect(shellMatch[1]).toMatch(/background:\s*var\(--theme-mobile-composer-host-bg\)/)
@@ -2079,27 +2185,31 @@ describe('app helpers', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/autocomplete') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            suggestions: ['curl http://localhost:5001/health', 'man curl', 'cat /etc/hosts'],
-          }),
+          json: () =>
+            Promise.resolve({
+              suggestions: ['curl http://localhost:5001/health', 'man curl', 'cat /etc/hosts'],
+            }),
         })
       }
-    if (url === '/config') {
-      return Promise.resolve({
-        json: () => Promise.resolve({
-          app_name: 'darklab shell',
-          prompt_prefix: 'anon@darklab:~$',
-          version: '9.9',
-          default_theme: 'darklab_obsidian.yaml',
-          motd: '',
-          command_timeout_seconds: 0,
-            max_output_lines: 0,
-            permalink_retention_days: 0,
-          }),
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              default_theme: 'darklab_obsidian.yaml',
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
         })
       }
       if (url === '/allowed-commands' || url === '/faq') {
-        return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [], items: [] }) })
+        return Promise.resolve({
+          json: () => Promise.resolve({ restricted: false, commands: [], groups: [], items: [] }),
+        })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
@@ -2152,7 +2262,7 @@ describe('app helpers', () => {
 
     expect(acShow).toHaveBeenCalled()
     const [items] = acShow.mock.calls.at(-1)
-    expect(items.map(item => item.value)).toEqual(['-sV', '-Pn'])
+    expect(items.map((item) => item.value)).toEqual(['-sV', '-Pn'])
   })
 
   it('suppresses duplicate contextual flags that were already used in the command', async () => {
@@ -2169,7 +2279,7 @@ describe('app helpers', () => {
     cmdInput.dispatchEvent(new Event('input'))
 
     const [items] = acShow.mock.calls.at(-1)
-    expect(items.map(item => item.value)).toEqual(['-sV'])
+    expect(items.map((item) => item.value)).toEqual(['-sV'])
   })
 
   it('renders cursor and selection state from composer state', async () => {
@@ -2219,7 +2329,12 @@ describe('app helpers', () => {
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(12, 12)
-    setComposerState({ value: 'dig darklab.sh A', selectionStart: 12, selectionEnd: 12, activeInput: 'desktop' })
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: 12,
+      selectionEnd: 12,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'u', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('sh A')
@@ -2243,7 +2358,12 @@ describe('app helpers', () => {
 
     cmdInput.value = 'dig darklab.sh A'
     cmdInput.setSelectionRange(4, 4)
-    setComposerState({ value: 'dig darklab.sh A', selectionStart: 4, selectionEnd: 4, activeInput: 'desktop' })
+    setComposerState({
+      value: 'dig darklab.sh A',
+      selectionStart: 4,
+      selectionEnd: 4,
+      activeInput: 'desktop',
+    })
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'k', ctrlKey: true, bubbles: true }))
 
     expect(cmdInput.value).toBe('dig ')
@@ -2303,20 +2423,24 @@ describe('app helpers', () => {
       selectionEnd: cmdInput.value.length,
       activeInput: 'desktop',
     })
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: '∫',
-      code: 'KeyB',
-      altKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '∫',
+        code: 'KeyB',
+        altKey: true,
+        bubbles: true,
+      }),
+    )
     expect(cmdInput.selectionStart).toBe(15)
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'ƒ',
-      code: 'KeyF',
-      altKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'ƒ',
+        code: 'KeyF',
+        altKey: true,
+        bubbles: true,
+      }),
+    )
     expect(cmdInput.selectionStart).toBe(16)
   })
 
@@ -2325,7 +2449,9 @@ describe('app helpers', () => {
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const press = (selector) => {
-      document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+      document
+        .querySelector(selector)
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }
 
     document.body.classList.add('mobile-terminal-mode')
@@ -2374,12 +2500,15 @@ describe('app helpers', () => {
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const press = (selector) => {
-      document.querySelector(selector).dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
+      document
+        .querySelector(selector)
+        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
     }
 
     document.body.classList.add('mobile-terminal-mode')
     const mobileCmdInput = document.getElementById('mobile-cmd')
-    const longValue = 'curl https://example.com/healthcheck/with/a/very/long/path?token=abcdef1234567890'
+    const longValue =
+      'curl https://example.com/healthcheck/with/a/very/long/path?token=abcdef1234567890'
     mobileCmdInput.value = longValue
     mobileCmdInput.setSelectionRange(0, 0)
     mobileCmdInput.scrollLeft = 0
@@ -2448,12 +2577,14 @@ describe('app helpers', () => {
     })
     createTab.mockClear()
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: '†',
-      code: 'KeyT',
-      altKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '†',
+        code: 'KeyT',
+        altKey: true,
+        bubbles: true,
+      }),
+    )
 
     expect(createTab).toHaveBeenCalledWith('tab 2')
   })
@@ -2477,12 +2608,14 @@ describe('app helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: '∑',
-      code: 'KeyW',
-      altKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '∑',
+        code: 'KeyW',
+        altKey: true,
+        bubbles: true,
+      }),
+    )
 
     expect(closeTab).toHaveBeenCalledWith('tab-1')
   })
@@ -2499,11 +2632,15 @@ describe('app helpers', () => {
       ],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }),
+    )
     expect(activateTab).toHaveBeenCalledWith('tab-3')
 
     activateTab.mockClear()
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowLeft', altKey: true, bubbles: true }),
+    )
     expect(activateTab).toHaveBeenCalledWith('tab-1')
   })
 
@@ -2534,12 +2671,14 @@ describe('app helpers', () => {
       ],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: '£',
-      code: 'Digit3',
-      altKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: '£',
+        code: 'Digit3',
+        altKey: true,
+        bubbles: true,
+      }),
+    )
 
     expect(activateTab).toHaveBeenCalledWith('tab-3')
   })
@@ -2563,12 +2702,14 @@ describe('app helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'π',
-      code: 'KeyP',
-      altKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'π',
+        code: 'KeyP',
+        altKey: true,
+        bubbles: true,
+      }),
+    )
 
     expect(permalinkTab).toHaveBeenCalledWith('tab-1')
   })
@@ -2580,12 +2721,14 @@ describe('app helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'C',
-      altKey: true,
-      shiftKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'C',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
 
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
@@ -2597,13 +2740,15 @@ describe('app helpers', () => {
       tabs: [{ id: 'tab-1', st: 'idle' }],
     })
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'Ç',
-      code: 'KeyC',
-      altKey: true,
-      shiftKey: true,
-      bubbles: true,
-    }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'Ç',
+        code: 'KeyC',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
 
     expect(copyTab).toHaveBeenCalledWith('tab-1')
   })
@@ -2639,8 +2784,12 @@ describe('app helpers', () => {
     activateTab.mockClear()
     const searchInput = document.getElementById('search-input')
 
-    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
-    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }))
+    searchInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }),
+    )
+    searchInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'ArrowRight', altKey: true, bubbles: true }),
+    )
 
     expect(createTab).not.toHaveBeenCalled()
     expect(activateTab).not.toHaveBeenCalled()
@@ -2661,14 +2810,20 @@ describe('app helpers', () => {
     })
     const searchInput = document.getElementById('search-input')
 
-    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }))
-    searchInput.dispatchEvent(new KeyboardEvent('keydown', {
-      key: 'C',
-      altKey: true,
-      shiftKey: true,
-      bubbles: true,
-    }))
-    searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }))
+    searchInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'p', altKey: true, bubbles: true }),
+    )
+    searchInput.dispatchEvent(
+      new KeyboardEvent('keydown', {
+        key: 'C',
+        altKey: true,
+        shiftKey: true,
+        bubbles: true,
+      }),
+    )
+    searchInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true }),
+    )
 
     expect(permalinkTab).not.toHaveBeenCalled()
     expect(copyTab).not.toHaveBeenCalled()
@@ -2748,7 +2903,9 @@ describe('app helpers', () => {
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true }))
     expect(_getAcIndex()).toBe(1)
 
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true }),
+    )
     expect(_getAcIndex()).toBe(0)
   })
 
@@ -2759,15 +2916,21 @@ describe('app helpers', () => {
     })
 
     // Alt+Tab (the app tab-cycle shortcut) must not trigger autocomplete
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', altKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', altKey: true, bubbles: true }),
+    )
     expect(_getAcIndex()).toBe(-1)
 
     // Ctrl+Tab must not trigger autocomplete
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', ctrlKey: true, bubbles: true }),
+    )
     expect(_getAcIndex()).toBe(-1)
 
     // Meta+Tab must not trigger autocomplete
-    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', metaKey: true, bubbles: true }))
+    cmdInput.dispatchEvent(
+      new KeyboardEvent('keydown', { key: 'Tab', metaKey: true, bubbles: true }),
+    )
     expect(_getAcIndex()).toBe(-1)
 
     // Plain Tab (no modifier) still triggers autocomplete selection
@@ -2828,7 +2991,13 @@ describe('app helpers', () => {
 
   it('does not refocus the mobile composer when closing the kill confirmation modal', async () => {
     const doKill = vi.fn()
-    const { getVisibleComposerInput, showKillOverlay, isKillOverlayOpen, confirmPendingKill, closeKillOverlay } = await loadAppFns({
+    const {
+      getVisibleComposerInput,
+      showKillOverlay,
+      isKillOverlayOpen,
+      confirmPendingKill,
+      closeKillOverlay,
+    } = await loadAppFns({
       doKill,
       pendingKillTabId: 'tab-1',
       mobileViewport: { height: 500, offsetTop: 0 },
@@ -2917,7 +3086,7 @@ describe('app helpers', () => {
 
     searchBar.style.display = 'flex'
     searchInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 10))
+    await new Promise((resolve) => setTimeout(resolve, 10))
     expect(searchBar.style.display).toBe('none')
     expect(clearSearch).toHaveBeenCalled()
 
@@ -2989,7 +3158,7 @@ describe('app helpers', () => {
     expect(themeOverlay.classList.contains('open')).toBe(true)
 
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
-    await new Promise(resolve => setTimeout(resolve, 0))
+    await new Promise((resolve) => setTimeout(resolve, 0))
     expect(themeOverlay.classList.contains('open')).toBe(false)
   })
 
@@ -3058,17 +3227,30 @@ describe('app helpers', () => {
     })
 
     document.getElementById('theme-btn').click()
-    document.getElementById('theme-select').querySelector('[data-theme-name="theme_light_olive"]').click()
-    document.getElementById('theme-overlay').dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    document
+      .getElementById('theme-select')
+      .querySelector('[data-theme-name="theme_light_olive"]')
+      .click()
+    document
+      .getElementById('theme-overlay')
+      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     document.getElementById('options-btn').click()
     document.getElementById('options-ts-select').value = 'elapsed'
-    document.getElementById('options-ts-select').dispatchEvent(new Event('change', { bubbles: true }))
+    document
+      .getElementById('options-ts-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-ln-toggle').checked = true
-    document.getElementById('options-ln-toggle').dispatchEvent(new Event('change', { bubbles: true }))
+    document
+      .getElementById('options-ln-toggle')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-welcome-select').value = 'disable_animation'
-    document.getElementById('options-welcome-select').dispatchEvent(new Event('change', { bubbles: true }))
+    document
+      .getElementById('options-welcome-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
     document.getElementById('options-share-redaction-select').value = 'redacted'
-    document.getElementById('options-share-redaction-select').dispatchEvent(new Event('change', { bubbles: true }))
+    document
+      .getElementById('options-share-redaction-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -3085,47 +3267,54 @@ describe('app helpers', () => {
 
   it('renders backend-driven FAQ items with HTML answers and dynamic sections', async () => {
     const apiFetch = vi.fn((url) => {
-    if (url === '/config') {
-      return Promise.resolve({
-        json: () => Promise.resolve({
-          app_name: 'darklab shell',
-          prompt_prefix: 'anon@darklab:~$',
-          version: '9.9',
-          default_theme: 'darklab_obsidian.yaml',
-          motd: '',
-          command_timeout_seconds: 120,
-            max_output_lines: 5000,
-            permalink_retention_days: 365,
-          }),
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              default_theme: 'darklab_obsidian.yaml',
+              motd: '',
+              command_timeout_seconds: 120,
+              max_output_lines: 5000,
+              permalink_retention_days: 365,
+            }),
         })
       }
       if (url === '/allowed-commands') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            restricted: true,
-            commands: ['ping', 'curl'],
-            groups: [{ name: 'Network', commands: ['ping', 'curl'] }],
-          }),
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: ['ping', 'curl'],
+              groups: [{ name: 'Network', commands: ['ping', 'curl'] }],
+            }),
         })
       }
       if (url === '/faq') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            items: [
-              { question: 'What is this?', answer: 'plain', answer_html: 'Rich <strong>HTML</strong>' },
-              { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
-              { question: 'Limits?', answer: 'limits', ui_kind: 'limits' },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              items: [
+                {
+                  question: 'What is this?',
+                  answer: 'plain',
+                  answer_html: 'Rich <strong>HTML</strong>',
+                },
+                { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
+                { question: 'Limits?', answer: 'limits', ui_kind: 'limits' },
+              ],
+            }),
         })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
     await loadAppFns({ apiFetch })
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    const questions = [...document.querySelectorAll('.faq-q')].map(el => el.textContent)
+    const questions = [...document.querySelectorAll('.faq-q')].map((el) => el.textContent)
     expect(questions).toContain('What is this?')
     expect(document.querySelector('.faq-a strong')?.textContent).toBe('HTML')
     expect(document.getElementById('faq-allowed-text')?.textContent).toContain('Click any command')
@@ -3137,41 +3326,42 @@ describe('app helpers', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
-        json: () => Promise.resolve({
-          app_name: 'darklab shell',
-          prompt_prefix: 'anon@darklab:~$',
-          version: '9.9',
-            default_theme: 'darklab_obsidian.yaml',
-            motd: '',
-            command_timeout_seconds: 120,
-            max_output_lines: 5000,
-            permalink_retention_days: 365,
-          }),
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              default_theme: 'darklab_obsidian.yaml',
+              motd: '',
+              command_timeout_seconds: 120,
+              max_output_lines: 5000,
+              permalink_retention_days: 365,
+            }),
         })
       }
       if (url === '/allowed-commands') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            restricted: true,
-            commands: ['curl'],
-            groups: [{ name: 'Network', commands: ['curl'] }],
-          }),
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: ['curl'],
+              groups: [{ name: 'Network', commands: ['curl'] }],
+            }),
         })
       }
       if (url === '/faq') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            items: [
-              { question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              items: [{ question: 'Allowed?', answer: 'allowlist', ui_kind: 'allowed_commands' }],
+            }),
         })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
     await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     const mobileCmdInput = document.getElementById('mobile-cmd')
     const faqBtn = document.getElementById('faq-btn')
@@ -3190,47 +3380,53 @@ describe('app helpers', () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/config') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            app_name: 'darklab shell',
-            prompt_prefix: 'anon@darklab:~$',
-            version: '9.9',
-            default_theme: 'darklab_obsidian.yaml',
-            motd: '',
-            command_timeout_seconds: 120,
-            max_output_lines: 5000,
-            permalink_retention_days: 365,
-          }),
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              default_theme: 'darklab_obsidian.yaml',
+              motd: '',
+              command_timeout_seconds: 120,
+              max_output_lines: 5000,
+              permalink_retention_days: 365,
+            }),
         })
       }
       if (url === '/allowed-commands') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            restricted: true,
-            commands: ['curl'],
-            groups: [{ name: 'Network', commands: ['curl'] }],
-          }),
+          json: () =>
+            Promise.resolve({
+              restricted: true,
+              commands: ['curl'],
+              groups: [{ name: 'Network', commands: ['curl'] }],
+            }),
         })
       }
       if (url === '/faq') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            items: [
-              {
-                question: 'Styled custom FAQ?',
-                answer: 'Use [[cmd:ping -c 1 127.0.0.1|ping chip]] and **bold**.',
-                answer_html: 'Use <span class="allowed-chip faq-chip" data-faq-command="ping -c 1 127.0.0.1" role="button" tabindex="0">ping chip</span> and <strong>bold</strong>.',
-              },
-            ],
-          }),
+          json: () =>
+            Promise.resolve({
+              items: [
+                {
+                  question: 'Styled custom FAQ?',
+                  answer: 'Use [[cmd:ping -c 1 127.0.0.1|ping chip]] and **bold**.',
+                  answer_html:
+                    'Use <span class="allowed-chip faq-chip" data-faq-command="ping -c 1 127.0.0.1" role="button" tabindex="0">ping chip</span> and <strong>bold</strong>.',
+                },
+              ],
+            }),
         })
       }
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
     await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    const chip = document.querySelector('.faq-item .faq-chip[data-faq-command="ping -c 1 127.0.0.1"]')
+    const chip = document.querySelector(
+      '.faq-item .faq-chip[data-faq-command="ping -c 1 127.0.0.1"]',
+    )
     expect(chip).not.toBeNull()
 
     chip.click()

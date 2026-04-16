@@ -21,7 +21,7 @@ test.describe('permalink / share', () => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: {
-          writeText: text => {
+          writeText: (text) => {
             window.__clipboardText = text
             return Promise.resolve()
           },
@@ -64,9 +64,9 @@ test.describe('permalink / share', () => {
     const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
-    await page.context().addCookies([
-      { name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' },
-    ])
+    await page
+      .context()
+      .addCookies([{ name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' }])
     await page.goto(data.url)
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
@@ -96,7 +96,9 @@ test.describe('permalink / share', () => {
     await expect(page.locator('#permalink-toast')).toContainText('No output')
   })
 
-  test('permalink button falls back to execCommand when clipboard writeText rejects', async ({ page }) => {
+  test('permalink button falls back to execCommand when clipboard writeText rejects', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await page.evaluate(() => {
@@ -119,7 +121,9 @@ test.describe('permalink / share', () => {
     await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
-  test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({ page }) => {
+  test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
@@ -136,7 +140,9 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toContainText('"exit_code":0')
   })
 
-  test('fresh run permalink supports line-number and timestamp display toggles', async ({ page }) => {
+  test('fresh run permalink supports line-number and timestamp display toggles', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
@@ -160,7 +166,9 @@ test.describe('permalink / share', () => {
       .toContainEqual(expect.stringContaining('+'))
   })
 
-  test('snapshot permalink supports line-number and timestamp display toggles', async ({ page }) => {
+  test('snapshot permalink supports line-number and timestamp display toggles', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     const shareResp = await createShareSnapshot(page)
@@ -203,7 +211,9 @@ test.describe('permalink / share', () => {
       .toContainEqual(expect.stringContaining('+'))
   })
 
-  test('permalink exports use timestamped filenames for txt and html downloads', async ({ page }) => {
+  test('permalink exports use timestamped filenames for txt and html downloads', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     const shareResp = await createShareSnapshot(page)
@@ -215,16 +225,22 @@ test.describe('permalink / share', () => {
       page.waitForEvent('download'),
       page.locator('button:has-text("save .txt")').click(),
     ])
-    expect(txtDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
+    expect(txtDownload.suggestedFilename()).toMatch(
+      /^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/,
+    )
 
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
       page.locator('button:has-text("save .html")').click(),
     ])
-    expect(htmlDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
+    expect(htmlDownload.suggestedFilename()).toMatch(
+      /^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/,
+    )
   })
 
-  test('permalink exports include prompt echo and current prefix display state', async ({ page }) => {
+  test('permalink exports include prompt echo and current prefix display state', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     const shareResp = await createShareSnapshot(page)

@@ -8,13 +8,12 @@
     "test:unit:watch": "vitest",
     "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config playwright.parallel.config.js",
     "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config playwright.parallel.config.js --ui",
-    "capture:container-smoke-test": "node scripts/node/capture_output_for_smoke_test.mjs",
-    "capture:readme-screenshot": "playwright test tests/js/e2e/readme-screenshot.spec.js",
-    "capture:readme-screenshot-mobile": "playwright test tests/js/e2e/readme-screenshot-mobile.spec.js"
+    "capture:container-smoke-test": "node scripts/node/capture_output_for_smoke_test.mjs"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",
     "@vitest/coverage-v8": "^4.1.4",
+    "eslint": "^10.2.0",
     "jsdom": "^29.0.2",
     "vitest": "^4.1.4"
   }

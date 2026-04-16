@@ -15,9 +15,9 @@ test.describe('kill running command', () => {
 
       const finishLongRun = () => {
         if (!longRunController) return
-        longRunController.enqueue(encoder.encode(
-          'data: {"type":"exit","code":143,"elapsed":0.0}\n\n',
-        ))
+        longRunController.enqueue(
+          encoder.encode('data: {"type":"exit","code":143,"elapsed":0.0}\n\n'),
+        )
         longRunController.close()
         longRunController = null
       }
@@ -26,16 +26,20 @@ test.describe('kill running command', () => {
         const url = typeof input === 'string' ? input : input.url
         const rawBody = typeof init?.body === 'string' ? init.body : ''
 
-        if (url.endsWith('/run') && init?.method === 'POST' && rawBody.includes('ping -c 1000 127.0.0.1')) {
+        if (
+          url.endsWith('/run') &&
+          init?.method === 'POST' &&
+          rawBody.includes('ping -c 1000 127.0.0.1')
+        ) {
           const body = new ReadableStream({
             start(controller) {
               longRunController = controller
-              controller.enqueue(encoder.encode(
-                'data: {"type":"started","run_id":"kill-spec-long-run"}\n\n',
-              ))
-              controller.enqueue(encoder.encode(
-                'data: {"type":"output","text":"long run started\\n"}\n\n',
-              ))
+              controller.enqueue(
+                encoder.encode('data: {"type":"started","run_id":"kill-spec-long-run"}\n\n'),
+              )
+              controller.enqueue(
+                encoder.encode('data: {"type":"output","text":"long run started\\n"}\n\n'),
+              )
               // Leave the stream open so the command stays in RUNNING state.
             },
           })
@@ -46,7 +50,11 @@ test.describe('kill running command', () => {
           })
         }
 
-        if (url.endsWith('/kill') && init?.method === 'POST' && rawBody.includes('kill-spec-long-run')) {
+        if (
+          url.endsWith('/kill') &&
+          init?.method === 'POST' &&
+          rawBody.includes('kill-spec-long-run')
+        ) {
           finishLongRun()
           return new Response('{}', {
             status: 200,
@@ -158,7 +166,9 @@ test.describe('kill running command', () => {
     await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
   })
 
-  test('Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation', async ({ page }) => {
+  test('Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation', async ({
+    page,
+  }) => {
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
 
     await page.locator('#cmd').press('Control+c')

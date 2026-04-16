@@ -14,11 +14,21 @@ test.describe('theme selector', () => {
 
   test('selecting a theme applies it from the selector', async ({ page }) => {
     await page.locator('#theme-btn').click()
-    const optionLabels = await page.locator('#theme-select .theme-card-label').evaluateAll(labels => labels.map(label => label.textContent))
+    const optionLabels = await page
+      .locator('#theme-select .theme-card-label')
+      .evaluateAll((labels) => labels.map((label) => label.textContent))
     expect(optionLabels).toContain('Darklab Obsidian')
     expect(optionLabels).toContain('Charcoal Steel')
-    const groupLabels = await page.locator('#theme-select .theme-picker-group-title').evaluateAll(labels => labels.map(label => label.textContent))
-    expect(groupLabels).toEqual(['Dark Neon', 'Dark Neutral', 'Warm Light', 'Cool Light', 'Neutral Light'])
+    const groupLabels = await page
+      .locator('#theme-select .theme-picker-group-title')
+      .evaluateAll((labels) => labels.map((label) => label.textContent))
+    expect(groupLabels).toEqual([
+      'Dark Neon',
+      'Dark Neutral',
+      'Warm Light',
+      'Cool Light',
+      'Neutral Light',
+    ])
     await page.locator('#theme-select [data-theme-name="charcoal_steel"]').click()
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'charcoal_steel')
 
@@ -26,7 +36,9 @@ test.describe('theme selector', () => {
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'cobalt_obsidian')
   })
 
-  test('falls back to the configured default theme when localStorage references a missing theme', async ({ page }) => {
+  test('falls back to the configured default theme when localStorage references a missing theme', async ({
+    page,
+  }) => {
     await page.evaluate(() => {
       localStorage.setItem('theme', 'theme_missing.yaml')
     })
@@ -40,7 +52,7 @@ test.describe('theme selector', () => {
 
 test.describe('FAQ modal', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('**/allowed-commands', route => {
+    await page.route('**/allowed-commands', (route) => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -87,8 +99,13 @@ test.describe('FAQ modal', () => {
     await page.locator('#faq-btn').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
-    await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
-    await expect(page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first()).toBeVisible()
+    await expect(page.locator('.faq-q')).toContainText([
+      'What is this?',
+      'What commands are allowed?',
+    ])
+    await expect(
+      page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first(),
+    ).toBeVisible()
 
     // The allowed-commands section is inside a collapsed accordion — expand it first
     await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
@@ -102,7 +119,9 @@ test.describe('options modal', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('persists theme, timestamps, and line number preferences across reload', async ({ page }) => {
+  test('persists theme, timestamps, and line number preferences across reload', async ({
+    page,
+  }) => {
     await page.locator('#theme-btn').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await page.locator('#theme-select [data-theme-name="blue_paper"]').click()

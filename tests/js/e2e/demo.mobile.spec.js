@@ -48,12 +48,18 @@ async function typeSlowly(page, text, { delay = TYPE_DELAY_MS } = {}) {
       const input = document.getElementById('mobile-cmd')
       if (!input) return
       const nativeSetter = Object.getOwnPropertyDescriptor(
-        window.HTMLInputElement.prototype, 'value',
+        window.HTMLInputElement.prototype,
+        'value',
       ).set
       nativeSetter.call(input, (input.value || '') + c)
-      input.dispatchEvent(new InputEvent('input', {
-        bubbles: true, cancelable: true, data: c, inputType: 'insertText',
-      }))
+      input.dispatchEvent(
+        new InputEvent('input', {
+          bubbles: true,
+          cancelable: true,
+          data: c,
+          inputType: 'insertText',
+        }),
+      )
     }, char)
     await page.waitForTimeout(delay)
   }
@@ -65,7 +71,7 @@ async function typeSlowly(page, text, { delay = TYPE_DELAY_MS } = {}) {
 async function waitForFinished(page, cmd, { timeoutMs = 30_000 } = {}) {
   await page.locator('#mobile-run-btn').click()
   await page.waitForFunction(
-    expectedCmd => {
+    (expectedCmd) => {
       const tab = typeof getActiveTab === 'function' ? getActiveTab() : null
       return !!tab && tab.command === expectedCmd && tab.st !== 'running'
     },
@@ -98,12 +104,62 @@ async function unmountKeyboard(page) {
 }
 
 /**
- * Switch to a named theme by clicking its card inside the already-open theme
- * overlay, then pause briefly so the color change is visible in the recording.
+ * Dispatch a click on the target theme card.
+ *
+ * dispatchEvent('click') fires the card's click handler without Playwright's
+ * auto-scroll-into-view so the scroll position set by smoothScroll is
+ * preserved. Callers must scroll the card into full view beforehand via
+ * centeredScrollTop().
  */
-async function switchTheme(page, themeName, { pauseMs = 2_000 } = {}) {
-  await page.locator(`[data-theme-name="${themeName}"]`).click()
-  await page.waitForTimeout(pauseMs)
+async function switchTheme(page, themeName) {
+  await page.evaluate((name) => {
+    if (typeof applyThemeSelection === 'function') applyThemeSelection(name)
+  }, themeName)
+}
+
+/**
+ * Return the scrollTop that centres the named theme card inside .theme-body.
+ *
+ * Uses getBoundingClientRect() so the result is correct regardless of the
+ * container's current scroll position. Call after the overlay is open and
+ * rendered; the layout must be stable before calling.
+ */
+async function centeredScrollTop(page, themeName) {
+  return page.locator(`[data-theme-name="${themeName}"]`).evaluate((card) => {
+    const container = card.closest('.theme-body')
+    if (!container) return 0
+    const cRect = container.getBoundingClientRect()
+    const kRect = card.getBoundingClientRect()
+    const cardTopInContent = kRect.top - cRect.top + container.scrollTop
+    return Math.max(0, Math.round(cardTopInContent - cRect.height / 2 + kRect.height / 2))
+  })
+}
+
+/**
+ * Smoothly animate a scroll container to a target scrollTop position.
+ *
+ * One Playwright round-trip per step (~67 ms) so each step produces one
+ * captured frame at 15 fps. Sine ease-in-out is used instead of cubic because
+ * its peak derivative is π/2 ≈ 1.57 vs cubic's 3, cutting the maximum
+ * per-frame pixel jump by ~48% and giving a more uniform, fluid feel.
+ */
+async function smoothScroll(page, selector, targetScrollTop, { durationMs = 1_500 } = {}) {
+  const startScrollTop = await page.locator(selector).evaluate((el) => el.scrollTop)
+  const delta = targetScrollTop - startScrollTop
+  if (!delta) return
+  const steps = Math.max(1, Math.round(durationMs / 67))
+  for (let i = 1; i <= steps; i++) {
+    const p = i / steps
+    // Sine ease-in-out — shallower peak velocity than cubic, looks more uniform
+    const ease = (1 - Math.cos(Math.PI * p)) / 2
+    await page.locator(selector).evaluate(
+      (el, pos) => {
+        el.scrollTop = pos
+      },
+      Math.round(startScrollTop + delta * ease),
+    )
+    await page.waitForTimeout(67)
+  }
 }
 
 /**
@@ -125,7 +181,8 @@ async function mountKeyboard(page) {
     el.id = '__fake-kb'
     // z-index 100: visible above normal content but below modal overlays
     // (history panel, theme picker) so they render correctly over the keyboard.
-    el.style.cssText = 'position:fixed;bottom:0;left:0;width:100%;height:272px;z-index:100;pointer-events:none'
+    el.style.cssText =
+      'position:fixed;bottom:0;left:0;width:100%;height:272px;z-index:100;pointer-events:none'
     const img = document.createElement('img')
     img.src = src
     img.style.cssText = 'width:100%;height:100%;display:block;object-fit:fill'
@@ -135,7 +192,10 @@ async function mountKeyboard(page) {
 }
 
 test('demo-mobile', async ({ page }) => {
-  test.skip(!process.env.RUN_DEMO, 'set RUN_DEMO=1 to record the demo (use scripts/record_demo_mobile.sh)')
+  test.skip(
+    !process.env.RUN_DEMO,
+    'set RUN_DEMO=1 to record the demo (use scripts/record_demo_mobile.sh)',
+  )
   test.setTimeout(300_000)
 
   // ── Frame capture setup ───────────────────────────────────────────────────
@@ -150,26 +210,17 @@ test('demo-mobile', async ({ page }) => {
   // giving the capture loop time to execute. page.screenshot() is safe to call
   // during most Playwright operations; errors are caught and the frame skipped.
   const FRAMES_DIR = resolve(__dir, '../../../test-results/demo-mobile-frames')
-  try { rmSync(FRAMES_DIR, { recursive: true }) } catch { /* first run */ }
+  try {
+    rmSync(FRAMES_DIR, { recursive: true })
+  } catch {
+    /* first run */
+  }
   mkdirSync(FRAMES_DIR, { recursive: true })
 
-  const capture = { done: false, idx: 0 }
-  const TARGET_FPS = 10
-  const captureLoop = (async () => {
-    while (!capture.done) {
-      const t0 = Date.now()
-      try {
-        const buf = await page.screenshot({ type: 'png' })
-        writeFileSync(
-          join(FRAMES_DIR, `frame_${String(capture.idx++).padStart(6, '0')}.png`),
-          buf,
-        )
-      } catch { /* page mid-navigation or closing — skip frame */ }
-      const elapsed = Date.now() - t0
-      const remaining = Math.max(1, Math.round(1000 / TARGET_FPS) - elapsed)
-      await page.waitForTimeout(remaining)
-    }
-  })()
+  // capture.loop is assigned after page.goto() so the loop never fires against
+  // the blank pre-navigation page, which would produce a white first frame.
+  // capture.paused is set by freezeFrame() while it's stamping duplicate frames.
+  const capture = { done: false, paused: false, idx: 0, loop: null }
 
   // ── Boot ──────────────────────────────────────────────────────────────────
   await page.goto('/', { waitUntil: 'domcontentloaded' })
@@ -183,7 +234,9 @@ test('demo-mobile', async ({ page }) => {
   // (which fires even in non-mobile mode on hasTouch devices). Patching
   // getMobileKeyboardOffset to 0 prevents the visualViewport listener from
   // spuriously triggering keyboard-open state.
-  await page.evaluate(() => { window.getMobileKeyboardOffset = () => 0 })
+  await page.evaluate(() => {
+    window.getMobileKeyboardOffset = () => 0
+  })
 
   // Mock the history API so the drawer shows a realistic full list regardless
   // of how many commands were run during this recording session. Without this
@@ -193,7 +246,9 @@ test('demo-mobile', async ({ page }) => {
     if (route.request().method() !== 'GET') return route.continue()
     const now = Date.now()
     const mk = (id, cmd, exitCode, ageMs) => ({
-      id, command: cmd, exit_code: exitCode,
+      id,
+      command: cmd,
+      exit_code: exitCode,
       started: new Date(now - ageMs).toISOString(),
       full_output_available: false,
     })
@@ -202,35 +257,96 @@ test('demo-mobile', async ({ page }) => {
       contentType: 'application/json',
       body: JSON.stringify({
         runs: [
-          mk(1,  'nslookup -type=A darklab.sh',              0,   2 * 60_000),
-          mk(2,  'ping -i 0.5 -c 50 darklab.sh',             0,   5 * 60_000),
-          mk(3,  'curl -s https://api.ipify.org',             0,   1 * 3_600_000),
-          mk(4,  'dig @8.8.8.8 darklab.sh A',                0,   2 * 3_600_000),
-          mk(5,  'host -t A darklab.sh',                     0,   3 * 3_600_000),
-          mk(6,  'openssl s_client -connect darklab.sh:443', 0,   4 * 3_600_000),
-          mk(7,  'whois darklab.sh',                         0,   5 * 3_600_000),
-          mk(8,  'traceroute darklab.sh',                    0,   6 * 3_600_000),
-          mk(9,  'nmap -p 80,443 darklab.sh',                0,  12 * 3_600_000),
-          mk(10, 'curl -I https://darklab.sh',               0,  18 * 3_600_000),
-          mk(11, 'mtr --report darklab.sh',                  0,  24 * 3_600_000),
-          mk(12, 'dig +short darklab.sh MX',                 0,  30 * 3_600_000),
-          mk(13, 'curl -sv https://darklab.sh 2>&1',         0,  36 * 3_600_000),
-          mk(14, 'nmap -sV -p 22,80,443 darklab.sh',         0,  42 * 3_600_000),
-          mk(15, 'dig darklab.sh NS',                        0,  48 * 3_600_000),
-          mk(16, 'ping -c 10 darklab.sh',                    0,  54 * 3_600_000),
+          mk(1, 'nslookup -type=A darklab.sh', 0, 2 * 60_000),
+          mk(2, 'ping -i 0.5 -c 50 darklab.sh', 0, 5 * 60_000),
+          mk(3, 'curl -s https://api.ipify.org', 0, 1 * 3_600_000),
+          mk(4, 'dig @8.8.8.8 darklab.sh A', 0, 2 * 3_600_000),
+          mk(5, 'host -t A darklab.sh', 0, 3 * 3_600_000),
+          mk(6, 'openssl s_client -connect darklab.sh:443', 0, 4 * 3_600_000),
+          mk(7, 'whois darklab.sh', 0, 5 * 3_600_000),
+          mk(8, 'traceroute darklab.sh', 0, 6 * 3_600_000),
+          mk(9, 'nmap -p 80,443 darklab.sh', 0, 12 * 3_600_000),
+          mk(10, 'curl -I https://darklab.sh', 0, 18 * 3_600_000),
+          mk(11, 'mtr --report darklab.sh', 0, 24 * 3_600_000),
+          mk(12, 'dig +short darklab.sh MX', 0, 30 * 3_600_000),
+          mk(13, 'curl -sv https://darklab.sh 2>&1', 0, 36 * 3_600_000),
+          mk(14, 'nmap -sV -p 22,80,443 darklab.sh', 0, 42 * 3_600_000),
+          mk(15, 'dig darklab.sh NS', 0, 48 * 3_600_000),
+          mk(16, 'ping -c 10 darklab.sh', 0, 54 * 3_600_000),
           mk(17, 'openssl s_client -connect darklab.sh:443 -showcerts', 0, 60 * 3_600_000),
-          mk(18, 'host -t MX darklab.sh',                    0,  66 * 3_600_000),
+          mk(18, 'host -t MX darklab.sh', 0, 66 * 3_600_000),
           mk(19, 'curl -o /dev/null -w "%{http_code}" https://darklab.sh', 0, 72 * 3_600_000),
-          mk(20, 'nslookup -type=MX darklab.sh',             0,  78 * 3_600_000),
-          mk(21, 'traceroute -n darklab.sh',                 1,  84 * 3_600_000),
-          mk(22, 'whois 104.21.0.1',                         0,  90 * 3_600_000),
+          mk(20, 'nslookup -type=MX darklab.sh', 0, 78 * 3_600_000),
+          mk(21, 'traceroute -n darklab.sh', 1, 84 * 3_600_000),
+          mk(22, 'whois 104.21.0.1', 0, 90 * 3_600_000),
         ],
-        roots: ['curl', 'dig', 'host', 'mtr', 'nmap', 'nslookup', 'openssl', 'ping', 'traceroute', 'whois'],
+        roots: [
+          'curl',
+          'dig',
+          'host',
+          'mtr',
+          'nmap',
+          'nslookup',
+          'openssl',
+          'ping',
+          'traceroute',
+          'whois',
+        ],
       }),
     })
   })
 
   await expect(page.locator('#mobile-composer')).toBeVisible()
+
+  // Start the capture loop only after the UI is visible so the first captured
+  // frame shows real content rather than the blank pre-navigation page.
+  const TARGET_FPS = 15
+  capture.loop = (async () => {
+    while (!capture.done) {
+      if (capture.paused) {
+        await page.waitForTimeout(16)
+        continue
+      }
+      const t0 = Date.now()
+      try {
+        const buf = await page.screenshot({ type: 'png' })
+        writeFileSync(join(FRAMES_DIR, `frame_${String(capture.idx++).padStart(6, '0')}.png`), buf)
+      } catch {
+        /* page mid-navigation or closing — skip frame */
+      }
+      const elapsed = Date.now() - t0
+      const remaining = Math.max(1, Math.round(1000 / TARGET_FPS) - elapsed)
+      await page.waitForTimeout(remaining)
+    }
+  })()
+
+  /**
+   * Freeze the current frame for exactly durationMs of video time.
+   *
+   * page.screenshot() takes ~300 ms on this machine, so a bare
+   * waitForTimeout(2_000) only produces ~6 frames — 400 ms of video at 15 fps.
+   * freezeFrame() takes ONE screenshot then stamps it N times (= durationMs /
+   * frame_interval) so the video shows exactly the intended pause length. The
+   * background capture loop is paused while stamping to avoid duplicate index
+   * collisions.
+   */
+  const freezeFrame = async (durationMs) => {
+    capture.paused = true
+    try {
+      const buf = await page.screenshot({ type: 'png' })
+      // Re-create the frames dir defensively — the capture loop swallows ENOENT
+      // silently (incrementing capture.idx without writing), so the directory
+      // could be missing by the time freezeFrame runs if something removed it.
+      mkdirSync(FRAMES_DIR, { recursive: true })
+      const frameInterval = Math.round(1000 / TARGET_FPS)
+      const frameCount = Math.max(1, Math.round(durationMs / frameInterval))
+      for (let i = 0; i < frameCount; i++) {
+        writeFileSync(join(FRAMES_DIR, `frame_${String(capture.idx++).padStart(6, '0')}.png`), buf)
+      }
+    } finally {
+      capture.paused = false
+    }
+  }
 
   // Ensure we start on Darklab Obsidian regardless of any persisted preference.
   await page.evaluate(() => {
@@ -281,66 +397,83 @@ test('demo-mobile', async ({ page }) => {
 
   await page.locator('#mobile-menu [data-action="history"]').click()
   await expect(page.locator('#history-panel')).toHaveClass(/open/)
-  await page.locator('#history-list .history-entry').first().waitFor({ state: 'visible', timeout: 10_000 })
+  await page
+    .locator('#history-list .history-entry')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10_000 })
   // Pause so the viewer can read the top of the list before scrolling.
   await page.waitForTimeout(2_000)
-  // Scroll down incrementally — .history-panel-body is the overflow-y:auto
-  // container; #history-list is an unstyled inner div with no overflow set.
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop += 85 })
-  await page.waitForTimeout(650)
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop += 85 })
-  await page.waitForTimeout(650)
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop += 85 })
-  await page.waitForTimeout(650)
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop += 85 })
-  await page.waitForTimeout(650)
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop += 85 })
-  await page.waitForTimeout(1_000)
-  // Scroll back up.
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop -= 140 })
+  // Smooth scroll down then back up at a natural reading pace.
+  await smoothScroll(page, '.history-panel-body', 425, { durationMs: 1_100 })
   await page.waitForTimeout(600)
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop -= 140 })
-  await page.waitForTimeout(600)
-  await page.locator('.history-panel-body').evaluate(el => { el.scrollTop -= 140 })
-  await page.waitForTimeout(900)
+  await smoothScroll(page, '.history-panel-body', 0, { durationMs: 800 })
+  await page.waitForTimeout(500)
 
   await page.locator('#history-close').click()
   await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   await page.waitForTimeout(800)
 
   // ── Theme switching ───────────────────────────────────────────────────────
-  // First theme: open picker → switch → close → admire the new look → switch tabs
+  // Each cycle resets scrollTop on open so stale position never carries over.
+  // Browsing uses three segments — quick peek, longer look, slight overshoot-
+  // and-back — so the motion reads as a person scanning rather than a script.
   await page.locator('#hamburger-btn').click()
   await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
   await page.waitForTimeout(500)
 
   await page.locator('#mobile-menu [data-action="theme"]').click()
   await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-  await page.waitForTimeout(2_000)
-
-  await switchTheme(page, 'charcoal_violet', { pauseMs: 7_000 })
+  await page.locator('.theme-body').evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await page.waitForTimeout(600)
+  // Compute actual card positions now that the grid is rendered.
+  const charcoalTop = await centeredScrollTop(page, 'charcoal_violet')
+  await smoothScroll(page, '.theme-body', 210, { durationMs: 700 }) // quick peek
+  await page.waitForTimeout(600)
+  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 120, 570), { durationMs: 1_000 }) // past the card
+  await page.waitForTimeout(650)
+  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 500 }) // settle on card
+  await page.waitForTimeout(1_300) // hover — deciding
+  await switchTheme(page, 'charcoal_violet')
+  await page
+    .locator('[data-theme-name="charcoal_violet"].theme-card-active')
+    .waitFor({ state: 'attached', timeout: 5_000 })
+  await freezeFrame(1_500) // see the selected card
 
   await page.locator('.theme-close').click()
   await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
-  // Linger on the main UI so the new theme is visible, then flip tabs briefly.
-  await page.waitForTimeout(2_000)
+  await page.waitForTimeout(1_800)
   await page.locator('.tab').nth(1).click()
   await page.waitForTimeout(800)
   await page.locator('.tab').first().click()
-  await page.waitForTimeout(1_200)
+  await page.waitForTimeout(1_000)
 
-  // Second theme: same pattern
+  // Second session: browse the grid and return to the original theme without
+  // picking an intermediate one. Browse down to explore, then scroll back up
+  // toward the top where darklab_obsidian lives.
   await page.locator('#hamburger-btn').click()
   await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
   await page.waitForTimeout(500)
 
   await page.locator('#mobile-menu [data-action="theme"]').click()
   await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-  await page.waitForTimeout(2_000)
-
-  await switchTheme(page, 'ember_obsidian', { pauseMs: 7_000 })
-  // Return to the original theme so the recording ends on the best-looking frame.
-  await switchTheme(page, 'darklab_obsidian', { pauseMs: 4_000 })
+  await page.locator('.theme-body').evaluate((el) => {
+    el.scrollTop = 0
+  })
+  await page.waitForTimeout(600)
+  const darklabTop = await centeredScrollTop(page, 'darklab_obsidian')
+  await smoothScroll(page, '.theme-body', 260, { durationMs: 800 }) // scrolling down
+  await page.waitForTimeout(600)
+  await smoothScroll(page, '.theme-body', Math.max(darklabTop + 150, 500), { durationMs: 1_050 }) // going deeper
+  await page.waitForTimeout(650)
+  await smoothScroll(page, '.theme-body', darklabTop, { durationMs: 1_100 }) // back to darklab
+  await page.waitForTimeout(1_300) // hover — deciding
+  await switchTheme(page, 'darklab_obsidian')
+  await page
+    .locator('[data-theme-name="darklab_obsidian"].theme-card-active')
+    .waitFor({ state: 'attached', timeout: 5_000 })
+  await freezeFrame(1_500) // see the selected card
 
   await page.locator('.theme-close').click()
   await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
@@ -348,5 +481,5 @@ test('demo-mobile', async ({ page }) => {
 
   // Stop the background capture loop and wait for it to flush the last frame.
   capture.done = true
-  await captureLoop
+  await capture.loop
 })

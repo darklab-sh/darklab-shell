@@ -11,22 +11,25 @@ function loadOutputFns({ appConfig = {} } = {}) {
     }
   }
 
-  return fromDomScripts([
-    'app/static/js/output.js',
-  ], {
-    document,
-    AnsiUp: FakeAnsiUp,
-    activeTabId: 'tab-1',
-    tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
-    APP_CONFIG: { max_output_lines: 2, ...appConfig },
-    getOutput: () => document.getElementById('out'),
-    shellPromptWrap: document.getElementById('shell-prompt-wrap'),
-  }, `{
+  return fromDomScripts(
+    ['app/static/js/output.js'],
+    {
+      document,
+      AnsiUp: FakeAnsiUp,
+      activeTabId: 'tab-1',
+      tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
+      APP_CONFIG: { max_output_lines: 2, ...appConfig },
+      getOutput: () => document.getElementById('out'),
+      shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+    },
+    `{
     appendLine,
     _setTsMode,
     _setLnMode,
     _getTabs: () => tabs,
-  }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
+  }`,
+    'setTabs(tabs); setActiveTabId(activeTabId);',
+  )
 }
 
 describe('appendLine', () => {
@@ -64,19 +67,21 @@ describe('appendLine', () => {
   })
 
   it('falls back to plain-text rendering when AnsiUp is unavailable', () => {
-    const { appendLine } = fromDomScripts([
-      'app/static/js/utils.js',
-      'app/static/js/output.js',
-    ], {
-      document,
-      activeTabId: 'tab-1',
-      tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
-      APP_CONFIG: { max_output_lines: 2 },
-      getOutput: () => document.getElementById('out'),
-      shellPromptWrap: document.getElementById('shell-prompt-wrap'),
-    }, `{
+    const { appendLine } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/output.js'],
+      {
+        document,
+        activeTabId: 'tab-1',
+        tabs: [{ id: 'tab-1', rawLines: [], runStart: 1000 }],
+        APP_CONFIG: { max_output_lines: 2 },
+        getOutput: () => document.getElementById('out'),
+        shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+      },
+      `{
       appendLine,
-    }`, 'setTabs(tabs); setActiveTabId(activeTabId);')
+    }`,
+      'setTabs(tabs); setActiveTabId(activeTabId);',
+    )
 
     appendLine('plain <b>text</b>', '', 'tab-1')
 
@@ -135,7 +140,9 @@ describe('appendLine', () => {
     _setLnMode('on')
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
-    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe('line numbers: on')
+    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe(
+      'line numbers: on',
+    )
 
     _setLnMode('off')
     expect(document.body.classList.contains('ln-on')).toBe(false)
@@ -195,7 +202,7 @@ describe('appendLine', () => {
 
     expect(document.querySelectorAll('.line')).toHaveLength(60)
 
-    await new Promise(resolve => setTimeout(resolve, 25))
+    await new Promise((resolve) => setTimeout(resolve, 25))
 
     const lines = document.querySelectorAll('.line')
     expect(lines).toHaveLength(65)
