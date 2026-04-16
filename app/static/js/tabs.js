@@ -1016,59 +1016,9 @@ async function exportTabHtml(id) {
 }
 
 // ── PDF export ──
-// Uses jsPDF to generate a themed PDF that downloads directly like txt/html.
-// ANSI escape sequences in output lines are resolved via ansi_up into colored
-// text spans; theme colours are sampled from the live document CSS variables.
-
-function _parseCssColor(cssColor) {
-  // Normalise any CSS color string to [r, g, b] by painting it onto a canvas.
-  const canvas = document.createElement('canvas');
-  canvas.width = canvas.height = 1;
-  const ctx = canvas.getContext('2d');
-  ctx.fillStyle = '#888'; // sentinel — lets us detect parse failures
-  ctx.fillStyle = cssColor;
-  ctx.fillRect(0, 0, 1, 1);
-  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
-  return [r, g, b];
-}
-
-function _pdfThemeColors() {
-  const cs = getComputedStyle(document.documentElement);
-  const v = (name) => cs.getPropertyValue(name).trim();
-  return {
-    bg:      _parseCssColor(v('--bg')),
-    surface: _parseCssColor(v('--surface')),
-    border:  _parseCssColor(v('--border')),
-    text:    _parseCssColor(v('--text')),
-    muted:   _parseCssColor(v('--muted')),
-    green:   _parseCssColor(v('--green')),
-    red:     _parseCssColor(v('--red')),
-    amber:   _parseCssColor(v('--amber')),
-    blue:    _parseCssColor(v('--blue')),
-  };
-}
-
-// Renders a single raw-text line (which may contain ANSI escapes) as a
-// sequence of coloured jsPDF text segments. Returns the new x position.
-function _pdfRenderAnsiLine(doc, rawText, startX, y, defaultColor) {
-  const html = ansi_up.ansi_to_html(rawText);
-  const div = document.createElement('div');
-  div.innerHTML = html;
-  let x = startX;
-  for (const node of div.childNodes) {
-    const segment = node.textContent;
-    if (!segment) continue;
-    if (node.nodeType === Node.ELEMENT_NODE && node.style.color) {
-      const [r, g, b] = _parseCssColor(node.style.color);
-      doc.setTextColor(r, g, b);
-    } else {
-      doc.setTextColor(...defaultColor);
-    }
-    doc.text(segment, x, y);
-    x += doc.getTextWidth(segment);
-  }
-  return x;
-}
+// Delegates to ExportPdfUtils (export_pdf.js) which is the single source of
+// truth shared with permalink.html. This function handles only tab-specific
+// guards and data collection.
 
 function exportTabPdf(id) {
   const t = getTab(id);
@@ -1084,163 +1034,23 @@ function exportTabPdf(id) {
   }
   try {
     const { jsPDF } = window.jspdf;
-    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
-    const colors = _pdfThemeColors();
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-
-    // Layout constants — 8.5pt ≈ 13px/96dpi (matches HTML body font); leading = 8.5 * 1.65
-    const margin = 36;
-    const fontSize = 8.5;
-    const leading = 14;
-    const maxLineW = pageW - margin * 2;
-
-    // Header layout — baselines measured from page top
-    // Baseline-to-baseline gaps match HTML flex-column proportions (~20pt title→meta, ~14pt meta→badge)
-    const hPad = 18;
-    const hAppNamePt = 13;
-    const hMetaPt = 8;
-    const hBadgePt = 7.5;
-    const hAppNameY = hPad + hAppNamePt;                   // 31
-    const hMetaY    = hAppNameY + 20;                      // 51
-    const hBadgeY   = hMetaY + 14;                        // 65
-    const headerH   = Math.ceil(hBadgeY) + 14;             // 79
-
-    // Content pages use surface (lighter); header bar uses bg (darker) — matches HTML export
-    const fillBg = () => {
-      doc.setFillColor(...colors.surface);
-      doc.rect(0, 0, pageW, pageH, 'F');
-    };
-
-    fillBg();
-
-    // Header background — darker than content, like the terminal bar
-    doc.setFillColor(...colors.bg);
-    doc.rect(0, 0, pageW, headerH, 'F');
-
-    // App name — normal weight + char spacing to simulate CSS letter-spacing
     const appName = APP_CONFIG.app_name || 'darklab shell';
-    doc.setFont('courier', 'normal');
-    doc.setFontSize(hAppNamePt);
-    doc.setTextColor(...colors.green);
-    doc.setCharSpace(2);
-    doc.text(appName, margin, hAppNameY);
-    doc.setCharSpace(0);
-
-    // Meta line: preserve original casing (unlike HTML which uses CSS text-transform)
     const exportedAt = new Date().toLocaleString();
-    doc.setFontSize(hMetaPt);
-    doc.setTextColor(...colors.muted);
-    doc.text(`${t.label}  ·  ${exportedAt}`, margin, hMetaY);
-
-    // Badge row
-    doc.setFontSize(hBadgePt);
-    let badgeX = margin;
-    const badgePadX = 5;
-    const badgePadY = 2;
-
-    const renderBadge = (label, color, bordered) => {
-      const tw = doc.getTextWidth(label);
-      if (bordered) {
-        // Draw border box like the HTML meta-badge.
-        // Use cap height (0.72 em) not full em so padding is even above and below the glyphs.
-        const capH  = hBadgePt * 0.72;
-        const descH = hBadgePt * 0.20;
-        doc.setDrawColor(...color);
-        doc.setLineWidth(0.5);
-        doc.rect(badgeX, hBadgeY - capH - badgePadY, tw + badgePadX * 2, capH + descH + badgePadY * 2, 'S');
-        doc.setFont('courier', 'bold');
-        doc.setTextColor(...color);
-        doc.text(label, badgeX + badgePadX, hBadgeY);
-        doc.setFont('courier', 'normal');
-        badgeX += tw + badgePadX * 2 + 8;
-      } else {
-        doc.setTextColor(...color);
-        doc.text(label, badgeX, hBadgeY);
-        badgeX += tw + 10;
-      }
+    const runMeta = {
+      exitCode: t.exitCode,
+      duration: null,
+      lines: `${t.rawLines.length} lines`,
+      version: APP_CONFIG.version || null,
     };
-
-    if (t.exitCode !== null && t.exitCode !== undefined) {
-      renderBadge(`exit ${t.exitCode}`, t.exitCode === 0 ? colors.green : colors.red, true);
-    }
-    renderBadge(`${t.rawLines.length} lines`, colors.muted, false);
-    if (APP_CONFIG.version) renderBadge(`v${APP_CONFIG.version}`, colors.muted, false);
-
-    // Separator line between header and content
-    doc.setDrawColor(...colors.border);
-    doc.setLineWidth(0.5);
-    doc.line(0, headerH, pageW, headerH);
-
-    // Content
-    doc.setFont('courier', 'normal');
-    doc.setFontSize(fontSize);
-
-    // Fixed-width prefix gutter — respects current tsMode/lnMode toggles
-    const pdfPrefixes = t.rawLines.map((line, i) => _exportPrefix(line, i));
-    const longestPdfPrefix = pdfPrefixes.reduce((a, b) => a.length >= b.length ? a : b, '');
-    const prefixColW = longestPdfPrefix ? doc.getTextWidth(longestPdfPrefix) + 10 : 0;
-
-    let y = headerH + leading;
-
-    const newPage = () => {
-      doc.addPage();
-      fillBg();
-      y = margin + leading;
-    };
-
-    const checkPage = () => { if (y + leading > pageH - margin) newPage(); };
-
-    for (let _li = 0; _li < t.rawLines.length; _li++) {
-      const { text, cls } = t.rawLines[_li];
-      checkPage();
-      let x = margin;
-
-      // Prefix gutter — fixed column width so content aligns
-      if (prefixColW) {
-        const prefix = pdfPrefixes[_li];
-        if (prefix) {
-          doc.setTextColor(...colors.muted);
-          doc.text(prefix, x, y);
-        }
-        x += prefixColW;
-      }
-
-      const stripped = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
-      const contentW = maxLineW - (x - margin);
-
-      if (cls === 'exit-ok') {
-        doc.setTextColor(...colors.green);
-        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
-      } else if (cls === 'exit-fail') {
-        doc.setTextColor(...colors.red);
-        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
-      } else if (cls === 'denied') {
-        doc.setTextColor(...colors.amber);
-        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
-      } else if (cls === 'notice') {
-        doc.setTextColor(...colors.blue);
-        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
-      } else if (cls === 'prompt-echo') {
-        const firstSpace = text.indexOf(' ');
-        const pfx = firstSpace === -1 ? text : text.slice(0, firstSpace);
-        const rest = firstSpace === -1 ? '' : text.slice(firstSpace);
-        doc.setFont('courier', 'bold');
-        doc.setTextColor(...colors.blue);
-        doc.text(pfx, x, y);
-        x += doc.getTextWidth(pfx);
-        doc.setFont('courier', 'normal');
-        if (rest) {
-          doc.setTextColor(...colors.text);
-          doc.text(rest, x, y);
-        }
-      } else {
-        _pdfRenderAnsiLine(doc, text, x, y, colors.text);
-      }
-
-      y += leading;
-    }
-
+    const doc = ExportPdfUtils.buildTerminalExportPdf({
+      jsPDF,
+      appName,
+      metaLine: `${t.label}  ·  ${exportedAt}`,
+      runMeta,
+      rawLines: t.rawLines,
+      getPrefix: (line, i) => _exportPrefix(line, i),
+      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
+    });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
     doc.save(`${appName}-${ts}.pdf`);
   } catch {

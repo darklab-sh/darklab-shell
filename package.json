@@ -1,6 +1,6 @@
 {
   "name": "darklab-shell",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
     "test": "pytest; npm run test:unit; npm run test:e2e",
@@ -11,10 +11,10 @@
     "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "lint": "npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:md",
-    "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/",
-    "lint:shell": "shellcheck $(git ls-files '*.sh' | xargs grep -lE '^#!/.*(bash|sh)')",
+    "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/ app/static/js/**/*.js",
+    "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",
     "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
-    "lint:yaml": "yamllint -c config/yamllint.yml $(git ls-files '*.yml' '*.yaml')",
+    "lint:yaml": "yamllint -c config/yamllint.yml $(find . \\( -name '*.yml' -o -name '*.yaml' \\) -not -path './.git/*' -not -path './node_modules/*')",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "audit:js": "npm audit --audit-level=high"
   },

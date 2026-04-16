@@ -1632,7 +1632,7 @@ function _buildFaqLimitsContent(cfg) {
 }
 
 function renderFaqLimits(cfg) {
-  const limitsEl = document.getElementById('faq-limits-text') || faqLimitsText;
+  const limitsEl = document.getElementById('faq-limits-text');
   if (!limitsEl || !cfg) return;
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
@@ -1670,7 +1670,7 @@ function makeAllowedCommandChip(cmd) {
 }
 
 function renderAllowedCommandsFaq(data) {
-  const el = document.getElementById('faq-allowed-text') || faqAllowedText;
+  const el = document.getElementById('faq-allowed-text');
   if (!el || !data) return;
   if (!data.restricted) {
     el.textContent = 'No restrictions are configured — all commands are permitted.';

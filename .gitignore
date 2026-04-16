@@ -26,6 +26,9 @@ node_modules/
 playwright-report/
 test-results/
 
+# Environment overrides (copy .env.example → .env and edit locally)
+.env
+
 # OS
 .DS_Store
 Thumbs.db

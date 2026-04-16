@@ -25,8 +25,8 @@ function testScopedIp(testInfo, baseOffset = 0) {
 
 async function runCommandMobile(page, cmd) {
   await page.locator('#mobile-cmd').focus()
-  await page.locator('#mobile-cmd').pressSequentially(cmd)
   await simulateMobileKeyboard(page)
+  await setComposerValueForTest(page, cmd, { mobile: true })
   const runBtn = page.locator('#mobile-run-btn')
   await expect(runBtn).toBeEnabled({ timeout: 5_000 })
   await runBtn.click()

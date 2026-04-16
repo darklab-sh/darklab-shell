@@ -552,14 +552,6 @@ def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
     return None, None
 
 
-def parse_synthetic_grep(command: str) -> tuple[dict | None, str | None]:
-    """Backward-compatible grep-only wrapper around the synthetic post-filter parser."""
-    spec, error = parse_synthetic_postfilter(command)
-    if spec and spec.get("kind") == "grep":
-        return spec, error
-    return None, error if error and "grep" in error.lower() else None
-
-
 def load_allowed_commands():
     """Read allowed_commands.txt and return (allow_prefixes, deny_prefixes).
     allow_prefixes is None if the file doesn't exist or has no allow entries (= unrestricted).

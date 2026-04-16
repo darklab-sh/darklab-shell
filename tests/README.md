@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 732
-- `vitest`: 377
+- `vitest`: 383
 - `playwright`: 151
-- total: 1,260
+- total: 1,266
 
 This document is organized in two parts:
 
@@ -1393,6 +1393,17 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `runWelcome finalizes the typed command in place without leaving a transient live line` | Verifies that runWelcome finalizes the typed command in place without leaving a transient live line. |
 | `_sampleWelcomeBlocks prefers a featured basics command first and avoids duplicates` | _sampleWelcomeBlocks prefers a featured basics command first and avoids duplicates. |
 | `uses the mobile welcome path with the mobile banner and no sample commands` | Verifies that uses the mobile welcome path with the mobile banner and no sample commands. |
+
+#### `export_pdf.test.js`
+
+| Test | Description |
+| --- | --- |
+| `exposes ExportPdfUtils on window with the expected API` | Verifies the IIFE exposes `buildTerminalExportPdf`, `parseCssColor`, and `themeColors` on `window.ExportPdfUtils`. |
+| `returns a jsPDF doc instance` | Verifies `buildTerminalExportPdf` returns a jsPDF document object when given valid inputs. |
+| `returns a doc when rawLines is empty` | Verifies `buildTerminalExportPdf` handles an empty `rawLines` array without throwing. |
+| `renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing` | Verifies all supported line class variants render without errors using a canvas-capable document mock. |
+| `renders runMeta badges without throwing` | Verifies the exit code, duration, line count, and version badge row renders when `runMeta` is provided. |
+| `renders prefix gutter when getPrefix returns non-empty strings` | Verifies the line-number/timestamp prefix gutter renders correctly when `getPrefix` returns non-empty strings. |
 
 ### Playwright
 

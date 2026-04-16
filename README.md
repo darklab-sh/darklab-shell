@@ -298,7 +298,11 @@ The base `docker-compose.yml` is suitable for local use and testing. For a produ
 
 ### Environment Variables
 
-The repo includes a root [`.env`](.env) file with:
+The repo includes a [`.env.example`](.env.example) template. Copy it to `.env` and edit before starting Compose:
+
+```bash
+cp .env.example .env
+```
 
 ```env
 APP_PORT=8888
@@ -306,7 +310,7 @@ APP_PORT=8888
 # WEB_THREADS=4
 ```
 
-To run on a different port, edit [`.env`](.env) first, then start Compose again. That single value propagates through the Dockerfile `EXPOSE`, Gunicorn bind address, iptables rule, healthcheck, and published port.
+To run on a different port, edit `.env` first, then start Compose again. That single value propagates through the Dockerfile `EXPOSE`, Gunicorn bind address, iptables rule, healthcheck, and published port.
 
 The same file is also the operator-facing place to tune Gunicorn runtime sizing:
 
@@ -325,7 +329,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone shape used f
 
 1. Docker container log transport:
    - enables the Docker `gelf` log driver for both `shell` and `redis`
-   - reads `DOCKER_GELF_ADDRESS` from [`.env`](.env)
+   - reads `DOCKER_GELF_ADDRESS` from `.env`
 2. Reverse-proxy-aware environment:
    - sets `VIRTUAL_HOST`
    - sets `LETSENCRYPT_HOST`
@@ -338,7 +342,7 @@ The base [docker-compose.yml](docker-compose.yml) is the standalone shape used f
 5. Application log format:
    - still requires `log_format: gelf` in [app/conf/config.yaml](app/conf/config.yaml) or [app/conf/config.local.yaml](app/conf/config.local.yaml)
 6. Optional runtime sizing:
-   - `WEB_CONCURRENCY` and `WEB_THREADS` can be set in [`.env`](.env) so operators can tune Gunicorn without editing `entrypoint.sh`
+   - `WEB_CONCURRENCY` and `WEB_THREADS` can be set in `.env` so operators can tune Gunicorn without editing `entrypoint.sh`
 
 #### Network tuning for port scanners
 
@@ -448,7 +452,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 
 ```text
 .
-├── .env                        # Port and other environment defaults (edit here to change APP_PORT)
+├── .env.example                # Environment variable template (copy to .env and edit locally)
 ├── docker-compose.yml
 ├── Dockerfile
 ├── ARCHITECTURE.md            # Current system structure, diagrams, runtime layers, persistence, and deployment shape

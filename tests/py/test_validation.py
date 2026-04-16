@@ -12,7 +12,6 @@ from commands import (
     command_root,
     is_command_allowed,
     parse_synthetic_postfilter,
-    parse_synthetic_grep,
     rewrite_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -180,7 +179,7 @@ class TestAllowlist:
 
 class TestSyntheticGrepParsing:
     def test_parses_basic_synthetic_grep(self):
-        spec, err = parse_synthetic_grep("ping darklab.sh | grep ttl")
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep ttl")
         assert err is None
         assert spec is not None
         assert spec["base_command"] == "ping darklab.sh"
@@ -190,31 +189,31 @@ class TestSyntheticGrepParsing:
         assert spec["extended"] is False
 
     def test_parses_combined_flags(self):
-        spec, err = parse_synthetic_grep("ping darklab.sh | grep -iv ttl")
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -iv ttl")
         assert err is None
         assert spec is not None
         assert spec["ignore_case"] is True
         assert spec["invert_match"] is True
 
     def test_parses_extended_regex_pattern(self):
-        spec, err = parse_synthetic_grep("ping darklab.sh | grep -E 'ttl|time'")
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -E 'ttl|time'")
         assert err is None
         assert spec is not None
         assert spec["extended"] is True
         assert spec["pattern"] == "ttl|time"
 
     def test_rejects_missing_pattern(self):
-        spec, err = parse_synthetic_grep("ping darklab.sh | grep -i")
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -i")
         assert spec is None
         assert err == "Synthetic grep requires a pattern."
 
     def test_rejects_unsupported_flags(self):
-        spec, err = parse_synthetic_grep("ping darklab.sh | grep -n ttl")
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -n ttl")
         assert spec is None
         assert err == "Synthetic grep supports only -i, -v, and -E in phase 1."
 
     def test_rejects_extra_operands(self):
-        spec, err = parse_synthetic_grep("ping darklab.sh | grep ttl file.txt")
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep ttl file.txt")
         assert spec is None
         assert err == "Synthetic grep only supports a single pattern argument."
 

@@ -73,8 +73,22 @@ All notable changes to darklab shell are documented here.
 - **Unified `save ▾` dropdown** — the three output export formats (txt, html, pdf) are now grouped under a single `save ▾` dropdown button on the desktop tab action bar, the permalink page header, and the mobile menu. Previously the desktop bar had separate "Download" and "Export HTML" buttons; the permalink page had three separate buttons; the mobile save path was inconsistent.
 - **Native share-sheet for permalink URLs** — the `share snapshot` action now calls `navigator.share()` on browsers that support the Web Share API, providing a native OS share sheet on mobile devices. If the browser does not support the API or the user cancels the share, it falls back silently to copying the URL to the clipboard.
 
+- **Mobile e2e `runCommandMobile` race condition** — the helper fired `simulateMobileKeyboard` after `pressSequentially`, which triggered a `visualViewport` resize event with 120 ms async callbacks that could leave the composer empty and the run button disabled by the time the test tried to click it. Fixed by firing the keyboard simulation first and replacing `pressSequentially` with the atomic `setComposerValueForTest` helper so button state is evaluated only after the value is cleanly set.
+- **Dead DOM wiring in `dom.js`** — `faqLimitsText` and `faqAllowedText` were cached at module load time via `getElementById`, but those elements are created dynamically and do not exist at load time, so the constants were always `null`. The constants were removed and the two call sites updated to call `getElementById` directly at use time.
+- **CI lint scripts used `git ls-files` without git installed** — `yamllint` and `shellcheck` invocations in both `package.json` and `.gitlab-ci.yml` used `git ls-files` to enumerate files, but the CI runner images (`python:3.12-slim`, `node:22-slim`) do not have git installed. Replaced with `find` using explicit `.git/` and `node_modules/` exclusions. The `git` package was also removed from the `lint-js` CI job's apt install since it is no longer needed.
+
+### Changed
+
+- **PDF export extracted to `export_pdf.js`** — the PDF rendering logic (`parseCssColor`, `themeColors`, `renderAnsiLine`, `buildTerminalExportPdf`) previously duplicated across `tabs.js` (~180 lines) and `permalink.html` (~170 lines) has been extracted into a standalone `app/static/js/export_pdf.js` module following the same IIFE / `window.ExportPdfUtils` pattern as `export_html.js`. Both call sites now delegate to the shared module. Six Vitest unit tests cover the public API with a canvas mock that works around jsdom's lack of native canvas support.
+- **`.env` renamed to `.env.example`** — the committed environment file was renamed to `.env.example` (copy → edit locally) and `.env` added to `.gitignore`. The README quick-start and file tree were updated to reflect the new workflow.
+
+### Added
+
+- **`.dockerignore`** — a `.dockerignore` was added to exclude development directories (`.git/`, `.venv/`, `tests/`, `docs/`, `node_modules/`, etc.) from the Docker build context. The CI pipeline already referenced this file but it did not previously exist.
+
 ### Removed
 
+- **`parse_synthetic_grep()` compatibility shim** — the function was a thin wrapper around `parse_synthetic_postfilter` left over from an earlier rename. All six callers in `tests/py/test_validation.py` have been updated to call `parse_synthetic_postfilter` directly and the wrapper has been deleted.
 - **`readme-screenshot.spec.js` and `readme-screenshot-mobile.spec.js`** — the one-off screenshot capture specs used to produce static README hero images have been removed. The README now embeds the full demo `.mp4` videos produced by the demo recording pipeline instead.
 - **`scripts/smoke_test_commands.txt`** — the manually maintained command list has been deleted. The smoke test corpus is now sourced exclusively from `autocomplete.yaml` examples, making the file redundant.
 

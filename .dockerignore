@@ -1,0 +1,40 @@
+# Version control and IDE
+.git/
+.gitlab/
+.vscode/
+.claude/
+
+# Python dev artifacts
+.venv/
+.pytest_cache/
+__pycache__/
+*.pyc
+
+# Node / JS tooling
+node_modules/
+
+# Test output
+playwright-report/
+test-results/
+
+# Dev-only directories not used by the Dockerfile COPY instructions
+tests/
+docs/
+examples/
+assets/
+scripts/
+config/
+data/
+
+# Dev dependency manifests
+requirements-dev.txt
+package.json
+package-lock.json
+pyrightconfig.json
+
+# Documentation
+*.md
+
+# Compose and environment files
+docker-compose*.yml
+.env*

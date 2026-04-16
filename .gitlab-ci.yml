@@ -88,7 +88,7 @@ lint-py:
   script:
     - flake8 app/ tests/py/
     - bandit -r app/ -ll -q
-    - yamllint -c config/yamllint.yml $(git ls-files '*.yml' '*.yaml')
+    - yamllint -c config/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
 lint-js:
   stage: lint
@@ -99,7 +99,7 @@ lint-js:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - apt-get update -q && apt-get install -y -q git shellcheck
+    - apt-get update -q && apt-get install -y -q shellcheck
     - curl -sSL https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint && chmod +x /usr/local/bin/hadolint
     - npm ci
   cache:
