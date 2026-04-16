@@ -690,10 +690,11 @@
     },
     {
       "no_output": false,
-      "exit_code": 30,
+      "exit_code": null,
       "command": "dnsenum --dnsserver 8.8.8.8 darklab.sh",
       "expected_text": [
-        "dnsenum VERSION:"
+        "dnsenum VERSION:",
+        "AXFR record query failed"
       ]
     },
     {
