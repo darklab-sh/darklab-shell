@@ -432,6 +432,28 @@ mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transp
   opacity: 0;
   visibility: hidden;
 }
+#permalink-toast.toast-has-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast-action-btn {
+  background: none;
+  border: 1px solid currentColor;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.toast-action-btn:hover,
+.toast-action-btn:active {
+  opacity: 1;
+}
 #permalink-toast.toast-success,
 #copy-toast.toast-success {
   background: var(--surface);
@@ -504,6 +526,13 @@ body.permalink-page .permalink-title {
   letter-spacing: 4px;
   color: var(--green);
   text-shadow: 0 0 20px var(--green-glow);
+  /* Reset styles inherited from the generic `header h1` rule in base.css */
+  display: block;
+  border: none;
+  background: none;
+  padding: 0;
+  min-height: 0;
+  border-radius: 0;
 }
 body.permalink-page .permalink-meta,
 body.permalink-page .permalink-expiry {

@@ -10,17 +10,20 @@
     "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js",
     "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
-    "lint": "npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml",
+    "lint": "npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:md",
     "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/",
     "lint:shell": "shellcheck $(git ls-files '*.sh' | xargs grep -lE '^#!/.*(bash|sh)')",
     "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
-    "lint:yaml": "yamllint -c config/yamllint.yml $(git ls-files '*.yml' '*.yaml')"
+    "lint:yaml": "yamllint -c config/yamllint.yml $(git ls-files '*.yml' '*.yaml')",
+    "lint:md": "markdownlint-cli2 \"**/*.md\"",
+    "audit:js": "npm audit --audit-level=high"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",
     "@vitest/coverage-v8": "^4.1.4",
     "eslint": "^10.2.0",
     "jsdom": "^29.0.2",
+    "markdownlint-cli2": "^0.22.0",
     "vitest": "^4.1.4"
   }
 }

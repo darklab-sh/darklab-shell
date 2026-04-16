@@ -23,8 +23,14 @@
   <button class="term-action-btn" id="toggle-ts"{% if toggle_ts_disabled %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
   <a class="term-action-btn" href="{{ json_url }}">view json</a>
   <button class="term-action-btn" onclick="copyTxt()">copy</button>
-  <button class="term-action-btn" onclick="saveTxt()">save .txt</button>
-  <button class="term-action-btn" onclick="saveHtml()">save .html</button>
+  <div class="save-menu-wrap save-menu-down" id="perm-save-wrap">
+    <button class="term-action-btn" id="perm-save-btn">save</button>
+    <div class="save-menu">
+      <button onclick="saveTxt()">txt</button>
+      <button onclick="saveHtml()">html</button>
+      <button onclick="savePdf()">pdf</button>
+    </div>
+  </div>
   <a class="term-action-btn" href="/">← back to shell</a>
 {% endblock %}
 
@@ -134,6 +140,20 @@
 
   renderOutput();
 
+  // Save dropdown toggle — mirrors the terminal tab save-menu behaviour
+  (function () {
+    const wrap = document.getElementById('perm-save-wrap');
+    const btn  = document.getElementById('perm-save-btn');
+    if (!wrap || !btn) return;
+    btn.addEventListener('click', function (e) {
+      e.stopPropagation();
+      wrap.classList.toggle('open');
+    });
+    document.addEventListener('click', function () {
+      wrap.classList.remove('open');
+    });
+  })();
+
   function _showToast() {
     const t = document.getElementById('copy-toast');
     t.style.display = 'block';
@@ -206,47 +226,32 @@
   }
 
   function saveHtml() {
-    const plainClsSet = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
     const appName = {{ app_name_json | safe }};
     const label   = {{ label_json | safe }};
     const created = {{ created_json | safe }};
     const fontFacesCss = {{ font_faces_css | tojson }};
     const permalinkMeta = {{ meta_json | safe }};
 
-    const prefixWidth = Math.max(0, ...lines.map((entry, index) => formatPrefix(index + 1, entry).length));
-    const linesHtml = lines.map((entry, index) => {
-      const cls = entry.cls || '';
-      const prefix = formatPrefix(index + 1, entry);
-      const prefixSpan = prefix
-        ? '<span class="perm-prefix" style="min-width:' + prefixWidth + 'ch">' + escHtml(prefix) + '</span>'
-        : '';
-      const content = cls === 'prompt-echo'
-        ? renderPromptEcho(entry.text)
-        : plainClsSet.has(cls)
-          ? escHtml(entry.text)
-          : ansi_up.ansi_to_html(entry.text);
-      return '<span class="line' + (cls ? ' ' + cls : '') + '">' + prefixSpan
-        + '<span class="perm-content">' + content + '</span></span>';
-    }).join('\n');
+    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(lines, {
+      getPrefix: (entry, i) => formatPrefix(i + 1, entry),
+      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
+    });
 
-    let metaHtml = escHtml(created);
-    if (permalinkMeta) {
-      const parts = [];
-      if (permalinkMeta.exit_code !== null && permalinkMeta.exit_code !== undefined) {
-        const color = permalinkMeta.exit_code === 0 ? 'var(--green)' : 'var(--red)';
-        parts.push(`<span style="color:${color};font-weight:700">exit ${permalinkMeta.exit_code}</span>`);
-      }
-      if (permalinkMeta.duration) parts.push(escHtml(permalinkMeta.duration));
-      if (permalinkMeta.lines)    parts.push(escHtml(permalinkMeta.lines));
-      if (permalinkMeta.version)  parts.push('v' + escHtml(permalinkMeta.version));
-      if (parts.length) metaHtml = parts.join(' &nbsp;·&nbsp; ');
-    }
+    const runMeta = permalinkMeta ? {
+      exitCode: permalinkMeta.exit_code,
+      duration: permalinkMeta.duration || null,
+      lines:    permalinkMeta.lines    || null,
+      version:  permalinkMeta.version  || null,
+    } : null;
 
+    const createdFmt = (() => { try { return new Date(created).toLocaleString(); } catch(e) { return created; } })();
     const html = ExportHtmlUtils.buildTerminalExportHtml({
       appName,
       title: label,
-      metaHtml,
+      metaLine: label + '  ·  ' + createdFmt,
+      runMeta,
       linesHtml,
+      prefixWidth,
       fontFacesCss,
     });
 
@@ -255,6 +260,206 @@
     a.download = downloadName('html');
     a.click();
     URL.revokeObjectURL(a.href);
+  }
+
+  function savePdf() {
+    if (!window.jspdf) { alert('PDF library not loaded'); return; }
+    const { jsPDF } = window.jspdf;
+    const appName      = {{ app_name_json | safe }};
+    const label        = {{ label_json | safe }};
+    const created      = {{ created_json | safe }};
+    const permalinkMeta = {{ meta_json | safe }};
+
+    // Resolve theme colours via canvas for jsPDF
+    function parseCssColor(cssColor) {
+      const canvas = document.createElement('canvas');
+      canvas.width = canvas.height = 1;
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = cssColor;
+      ctx.fillRect(0, 0, 1, 1);
+      const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+      return [r, g, b];
+    }
+    const cs = getComputedStyle(document.documentElement);
+    const v = (n) => cs.getPropertyValue(n).trim();
+    const colors = {
+      bg:      parseCssColor(v('--bg')),
+      surface: parseCssColor(v('--surface')),
+      border:  parseCssColor(v('--border')),
+      text:    parseCssColor(v('--text')),
+      muted:   parseCssColor(v('--muted')),
+      green:   parseCssColor(v('--green')),
+      red:     parseCssColor(v('--red')),
+      amber:   parseCssColor(v('--amber')),
+      blue:    parseCssColor(v('--blue')),
+    };
+
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    // Layout constants — 8.5pt ≈ 13px/96dpi (matches HTML body font); leading = 8.5 * 1.65
+    const margin = 36;
+    const fontSize = 8.5;
+    const leading = 14;
+    const maxLineW = pageW - margin * 2;
+
+    // Header layout — baselines measured from page top
+    // Baseline-to-baseline gaps match HTML flex-column proportions (~20pt title→meta, ~14pt meta→badge)
+    const hPad = 18;
+    const hAppNamePt = 13;
+    const hMetaPt = 8;
+    const hBadgePt = 7.5;
+    const hAppNameY = hPad + hAppNamePt;               // 31
+    const hMetaY    = hAppNameY + 20;                  // 51
+    const hBadgeY   = hMetaY + 14;                    // 65
+    const headerH   = Math.ceil(hBadgeY) + 14;         // 79
+
+    // Content pages use surface (lighter); header bar uses bg (darker) — matches HTML export
+    const fillBg = () => {
+      doc.setFillColor(...colors.surface);
+      doc.rect(0, 0, pageW, pageH, 'F');
+    };
+
+    fillBg();
+
+    // Header background — darker than content, like the terminal bar
+    doc.setFillColor(...colors.bg);
+    doc.rect(0, 0, pageW, headerH, 'F');
+
+    // App name — normal weight + char spacing to simulate CSS letter-spacing
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(hAppNamePt);
+    doc.setTextColor(...colors.green);
+    doc.setCharSpace(2);
+    doc.text(appName, margin, hAppNameY);
+    doc.setCharSpace(0);
+
+    // Meta line: preserve original casing; format ISO timestamp to locale string
+    const createdFmt = (() => { try { return new Date(created).toLocaleString(); } catch(e) { return created; } })();
+    doc.setFontSize(hMetaPt);
+    doc.setTextColor(...colors.muted);
+    doc.text(label + '  ·  ' + createdFmt, margin, hMetaY);
+
+    // Badge row
+    doc.setFontSize(hBadgePt);
+    let badgeX = margin;
+    const badgePadX = 5;
+    const badgePadY = 2;
+
+    const renderBadge = (text, color, bordered) => {
+      const tw = doc.getTextWidth(text);
+      if (bordered) {
+        doc.setDrawColor(...color);
+        doc.setLineWidth(0.5);
+        const capH  = hBadgePt * 0.72;
+        const descH = hBadgePt * 0.20;
+        doc.rect(badgeX, hBadgeY - capH - badgePadY, tw + badgePadX * 2, capH + descH + badgePadY * 2, 'S');
+        doc.setFont('courier', 'bold');
+        doc.setTextColor(...color);
+        doc.text(text, badgeX + badgePadX, hBadgeY);
+        doc.setFont('courier', 'normal');
+        badgeX += tw + badgePadX * 2 + 8;
+      } else {
+        doc.setTextColor(...color);
+        doc.text(text, badgeX, hBadgeY);
+        badgeX += tw + 10;
+      }
+    };
+
+    if (permalinkMeta) {
+      if (permalinkMeta.exit_code !== null && permalinkMeta.exit_code !== undefined) {
+        renderBadge(`exit ${permalinkMeta.exit_code}`, permalinkMeta.exit_code === 0 ? colors.green : colors.red, true);
+      }
+      if (permalinkMeta.duration) renderBadge(String(permalinkMeta.duration).toUpperCase(), colors.muted, false);
+      if (permalinkMeta.lines)    renderBadge(String(permalinkMeta.lines).toUpperCase(), colors.muted, false);
+      if (permalinkMeta.version)  renderBadge(`v${permalinkMeta.version}`, colors.muted, false);
+    }
+
+    // Separator line between header and content
+    doc.setDrawColor(...colors.border);
+    doc.setLineWidth(0.5);
+    doc.line(0, headerH, pageW, headerH);
+
+    // Content
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(fontSize);
+
+    // Fixed-width prefix gutter from current view state (line numbers / timestamps)
+    const prefixes = lines.map((entry, i) => formatPrefix(i + 1, entry));
+    const longestPrefix = prefixes.reduce((a, b) => a.length >= b.length ? a : b, '');
+    const prefixColW = longestPrefix ? doc.getTextWidth(longestPrefix) + 10 : 0;
+
+    const ansiUp = new AnsiUp();
+    ansiUp.use_classes = false;
+
+    let y = headerH + leading;
+
+    const newPage = () => { doc.addPage(); fillBg(); y = margin + leading; };
+    const checkPage = () => { if (y + leading > pageH - margin) newPage(); };
+
+    for (let i = 0; i < lines.length; i++) {
+      const { text, cls } = lines[i];
+      checkPage();
+      let x = margin;
+
+      // Prefix gutter (timestamps / line numbers) — fixed column width
+      const prefix = prefixes[i];
+      if (prefixColW) {
+        if (prefix) {
+          doc.setTextColor(...colors.muted);
+          doc.text(prefix, x, y);
+        }
+        x += prefixColW;
+      }
+
+      const stripped = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+      const contentW = maxLineW - (x - margin);
+
+      if (cls === 'exit-ok') {
+        doc.setTextColor(...colors.green);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'exit-fail') {
+        doc.setTextColor(...colors.red);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'denied') {
+        doc.setTextColor(...colors.amber);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'notice') {
+        doc.setTextColor(...colors.blue);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'prompt-echo') {
+        const firstSpace = text.indexOf(' ');
+        const pfx = firstSpace === -1 ? text : text.slice(0, firstSpace);
+        const rest = firstSpace === -1 ? '' : text.slice(firstSpace);
+        doc.setFont('courier', 'bold');
+        doc.setTextColor(...colors.blue);
+        doc.text(pfx, x, y);
+        x += doc.getTextWidth(pfx);
+        doc.setFont('courier', 'normal');
+        if (rest) { doc.setTextColor(...colors.text); doc.text(rest, x, y); }
+      } else {
+        // Render ANSI via DOM span parsing
+        const html = ansiUp.ansi_to_html(text);
+        const div = document.createElement('div');
+        div.innerHTML = html;
+        for (const node of div.childNodes) {
+          const seg = node.textContent;
+          if (!seg) continue;
+          if (node.nodeType === Node.ELEMENT_NODE && node.style.color) {
+            const [r, g, b] = parseCssColor(node.style.color);
+            doc.setTextColor(r, g, b);
+          } else {
+            doc.setTextColor(...colors.text);
+          }
+          doc.text(seg, x, y);
+          x += doc.getTextWidth(seg);
+        }
+      }
+      y += leading;
+    }
+
+    doc.save(downloadName('pdf'));
   }
 </script>
 {% endblock %}

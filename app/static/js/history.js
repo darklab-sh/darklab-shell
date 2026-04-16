@@ -741,9 +741,7 @@ function refreshHistoryPanel() {
 
       entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
         const url = `${location.origin}/history/${run.id}`;
-        copyTextToClipboard(url)
-          .then(() => showToast('Link copied to clipboard'))
-          .catch(() => showToast('Failed to copy link', 'error'));
+        shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
         const btn = entry.querySelector('[data-action="permalink"]');
         if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
         if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();

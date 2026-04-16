@@ -30,29 +30,29 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
 
 2. Create and activate a local virtual environment from the repo root:
 
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-```
+   ```bash
+   python3 -m venv .venv
+   source .venv/bin/activate
+   ```
 
 3. Install Python dev dependencies:
 
-```bash
-python3 -m pip install --upgrade pip
-python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
-```
+   ```bash
+   python3 -m pip install --upgrade pip
+   python3 -m pip install -r app/requirements.txt -r requirements-dev.txt
+   ```
 
 4. Install Node dependencies:
 
-```bash
-npm install
-```
+   ```bash
+   npm install
+   ```
 
 5. Activate the pre-commit hook:
 
-```bash
-git config core.hooksPath scripts/hooks
-```
+   ```bash
+   git config core.hooksPath scripts/hooks
+   ```
 
 Use the virtual environment for all local Python work:
 
@@ -131,7 +131,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **732 pytest + 369 Vitest + 151 Playwright = 1,252 tests**.
+Current totals: **732 pytest + 377 Vitest + 151 Playwright = 1,260 tests**.
 
 Playwright notes:
 
@@ -165,14 +165,15 @@ The checks and their scope:
 | Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `tests/js/`, `config/`, `scripts/` | `npm run lint:js` |
-| JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm audit --audit-level=high` |
+| JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm run audit:js` |
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
 | YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
+| Markdown | `markdownlint-cli2` | all tracked `.md` files | `npm run lint:md` |
 
-Run all JS/shell/Docker/YAML linters at once: `npm run lint`
+Run all JS/shell/Docker/YAML/Markdown linters at once: `npm run lint`
 
-Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml).
+Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 

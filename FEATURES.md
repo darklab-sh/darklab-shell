@@ -331,7 +331,7 @@ Two toggle buttons sit between the input and the match counter:
 | Button | Default | Behavior |
 |--------|---------|-----------|
 | **Aa** | off | Case-sensitive matching — when off, search is case-insensitive |
-| **.**__*__ | off | Regular expression mode — when on, the search term is treated as a JavaScript regex; an invalid pattern shows `invalid regex` instead of throwing |
+| **.\*** | off | Regular expression mode — when on, the search term is treated as a JavaScript regex; an invalid pattern shows `invalid regex` instead of throwing |
 
 Both toggles re-run the search immediately when clicked.
 
@@ -339,11 +339,17 @@ Both toggles re-run the search immediately when clicked.
 
 ## Copy, Save, and Export
 
-Three actions are available from the tab action bar:
+Four actions are available from the tab action bar:
 
 - **Copy** — copies the full plain-text output to the clipboard
-- **Download** — saves a timestamped `.txt` file of the output
-- **Export HTML** — saves a themed HTML file with ANSI colors preserved, so the output renders correctly in a browser without the shell
+- **save ▾** — a dropdown with three export formats:
+  - **txt** — plain-text file with a timestamped filename
+  - **html** — themed HTML file with ANSI colors preserved, renders correctly in a browser without the shell; fonts and theme colors are inlined so the file is fully self-contained
+  - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output
+
+The same `save ▾` dropdown is available on the desktop tab action bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
+
+All local exports (txt, html, pdf) produce unredacted output — they show the true command output as it appeared in the terminal. Redaction is scoped exclusively to the permalink share flow.
 
 ---
 
@@ -407,7 +413,7 @@ Fields:
 
 There are two types of permalink:
 
-**Tab snapshot** (`/share/<id>`) — clicking **share snapshot** on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled HTML page with ANSI color rendering, a "save .txt" button, a "save .html" button (themed HTML with colors preserved), a "copy" button (full text to clipboard), a "view json" option, and a link back to the shell. It also honors the browser's saved line-number and timestamp preferences on load. This is the recommended way to share results.
+**Tab snapshot** (`/share/<id>`) — clicking **share snapshot** on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled HTML page with ANSI color rendering, a `save ▾` dropdown (txt, html, pdf), a **copy** button (full text to clipboard), a **view json** option, and a link back to the shell. It also honors the browser's saved line-number and timestamp preferences on load. On browsers that support the Web Share API, the share action invokes the native OS share sheet; otherwise it copies the URL to the clipboard. This is the recommended way to share results.
 
 **Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite. It also honors the browser's saved line-number and timestamp preferences on load.
 
@@ -447,7 +453,7 @@ The shell provides several categories of native commands that run without dispat
 
 **Utility commands**
 
-`help`, `history`, `last`, `limits`, `retention`, `status`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `ps`, `version`, and `whoami` are available in every session.
+`help`, `history`, `last`, `limits`, `retention`, `status`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session. `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a "no running processes" notice when idle.
 
 **Shell identity commands**
 
@@ -476,7 +482,8 @@ Allowed commands are controlled by `conf/allowed_commands.txt`. The file is re-r
 - Be as specific or broad as you like — `nmap -sT` permits only TCP connect scans, while `nmap` permits any nmap invocation
 
 **Example:**
-```
+
+```text
 ## Network Diagnostics
 ping
 curl
@@ -496,7 +503,7 @@ To **disable restrictions entirely**, delete `conf/allowed_commands.txt` or leav
 
 Lines starting with `!` are deny prefixes and take priority over allow prefixes. They let you block specific flags or subcommands on an otherwise-allowed tool:
 
-```
+```text
 nmap
 !nmap -sU
 !nmap --script
@@ -508,7 +515,7 @@ Tool names and subcommand prefixes are matched **case-insensitively**. Flag name
 
 **`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
 
-```
+```bash
 curl -o /dev/null -s -w "%{http_code}" https://example.com
 wget -q -O /dev/null --server-response https://example.com
 ```
@@ -519,7 +526,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 The full [SecLists](https://github.com/danielmiessler/SecLists) collection is installed at `/usr/share/wordlists/seclists/` and available to any tool that accepts a `-w` flag (gobuster, ffuf, dnsenum, fierce, etc.).
 
-```
+```text
 /usr/share/wordlists/seclists/
 ├── Discovery/
 │   ├── Web-Content/        — directory and file names (common.txt, big.txt, DirBuster-2007_*, raft-*, etc.)

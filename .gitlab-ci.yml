@@ -78,7 +78,7 @@ test-js-e2e:
       - test-results/
     expire_in: 1 week
 
-lint:
+lint-py:
   stage: lint
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
@@ -88,8 +88,31 @@ lint:
   script:
     - flake8 app/ tests/py/
     - bandit -r app/ -ll -q
+    - yamllint -c config/yamllint.yml $(git ls-files '*.yml' '*.yaml')
 
-audit:
+lint-js:
+  stage: lint
+  image: node:22-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git shellcheck
+    - curl -sSL https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint && chmod +x /usr/local/bin/hadolint
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run lint:js
+    - npm run lint:shell
+    - npm run lint:docker
+    - npm run lint:md
+
+audit-py:
   stage: audit
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
@@ -99,6 +122,23 @@ audit:
   script:
     - pip install -q pip-audit
     - pip-audit -r app/requirements.txt
+
+audit-js:
+  stage: audit
+  image: node:22-slim
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run audit:js
 
 dependency-version-check:
   stage: audit

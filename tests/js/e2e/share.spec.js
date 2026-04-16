@@ -72,9 +72,10 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
 
+    await page.locator('#perm-save-btn').click()
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .html")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
     const htmlStream = await htmlDownload.createReadStream()
     const htmlChunks = []
@@ -221,17 +222,19 @@ test.describe('permalink / share', () => {
 
     await page.goto(data.url)
 
+    await page.locator('#perm-save-btn').click()
     const [txtDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .txt")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("txt")').click(),
     ])
     expect(txtDownload.suggestedFilename()).toMatch(
       /^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/,
     )
 
+    await page.locator('#perm-save-btn').click()
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .html")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
     expect(htmlDownload.suggestedFilename()).toMatch(
       /^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/,
@@ -250,9 +253,10 @@ test.describe('permalink / share', () => {
     await page.locator('#toggle-ln').click()
     await page.locator('#toggle-ts').click()
 
+    await page.locator('#perm-save-btn').click()
     const [txtDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .txt")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("txt")').click(),
     ])
     const txtStream = await txtDownload.createReadStream()
     const txtChunks = []
@@ -263,9 +267,10 @@ test.describe('permalink / share', () => {
     expect(txt).toMatch(/1\s+anon@darklab:~\$ hostname/)
     expect(txt).toContain('+')
 
+    await page.locator('#perm-save-btn').click()
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .html")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
     const htmlStream = await htmlDownload.createReadStream()
     const htmlChunks = []

@@ -7,6 +7,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 ---
 
 ## Table of Contents
+
 - [System Overview](#system-overview)
 - [Logical Runtime Layers](#logical-runtime-layers)
 - [Runtime Topology](#runtime-topology)
@@ -170,7 +171,7 @@ That split is reflected directly in the blueprint structure.
 This route list belongs in the architecture document because it describes the application surface that contributors maintain, not the operator workflow.
 
 | Method | Endpoint | Description |
-|--------|----------|-------------|
+| -------- | ---------- | ------------- |
 | `GET` | `/` | Serves the Flask-rendered shell UI and theme bootstrap |
 | `GET` | `/favicon.ico` | Serves the site favicon |
 | `GET` | `/config` | Returns browser-facing runtime config as JSON |
@@ -253,6 +254,8 @@ External dependencies: local vendor routes backed by build-time font downloads a
 **JS module load order:** `session.js` → `state.js` → `utils.js` → `config.js` → `dom.js` → `ui_helpers.js` → `tabs.js` → `output.js` → `search.js` → `autocomplete.js` → `history.js` → `welcome.js` → `runner.js` → `app.js` → `controller.js`. `state.js` owns the shared store boundary, `ui_helpers.js` owns DOM-facing setters/getters and visibility helpers, `app.js` still provides reusable browser helpers, and `controller.js` owns the composition root and must load last so it can wire the DOM after all helpers are defined. `welcome.js` must precede `runner.js` because `runner.js` calls `cancelWelcome()` at the top of `runCommand()`.
 
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
+
+**Export rendering module (`export_html.js`).** All HTML export rendering is centralized in `window.ExportHtmlUtils`, which is loaded via a Flask route (`/static/js/export_html.js`) and exposes: `buildExportLinesHtml` (converts raw line objects to styled HTML spans, respecting `tsMode`/`lnMode` prefix state), `buildTerminalExportStyles` (produces the full inline CSS block with theme variables), `buildTerminalExportHtml` (assembles the complete standalone HTML document), and `fetchVendorFontFacesCss` (fetches and base64-encodes fonts for self-contained export files). All save surfaces — `exportTabHtml` in `tabs.js`, `saveHtml` in `permalink.html`, and the jsPDF-based PDF export — consume these shared helpers so visual changes propagate to all save formats from one place. PDF rendering (`exportTabPdf` / `savePdf`) shares the same line data and prefix logic but uses jsPDF directly for the rendering layer, as documented in [DECISIONS.md](DECISIONS.md).
 
 ---
 
@@ -384,7 +387,7 @@ The Docker logging driver and the application formatter are intentionally separa
 The current event inventory is:
 
 | Level | Event | Where | Key extra fields |
-|-------|-------|-------|-----------------|
+| ------- | ------- | ------- | ----------------- |
 | DEBUG | `REQUEST` | `before_request` | ip, method, path, qs |
 | DEBUG | `RESPONSE` | `after_request` | ip, method, path, status, size |
 | DEBUG | `KILL_MISS` | `kill_command` | ip, run_id |
@@ -393,32 +396,32 @@ The current event inventory is:
 | DEBUG | `HISTORY_DELETE_MISS` | `delete_run` | ip, run_id, session |
 | DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
 | DEBUG | `CMD_PIPE` | `run_command` | ip, session, cmd, pipe_to |
-| INFO  | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
-| INFO  | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
-| INFO  | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
-| INFO  | `RUN_END` | `generate()` | ip, run_id, session, exit_code, elapsed, cmd, cmd_type |
-| INFO  | `RUN_KILL` | `kill_command` | ip, run_id, pid, pgid |
-| INFO  | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
-| INFO  | `PAGE_LOAD` | `index` | ip, session, theme |
-| INFO  | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
-| INFO  | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted |
-| INFO  | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
-| INFO  | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
-| INFO  | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, command_root, exit_code_filter, date_range |
-| INFO  | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
-| INFO  | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
-| INFO  | `DIAG_VIEWED` | `diag()` | ip |
-| WARN  | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
-| WARN  | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
-| WARN  | `CMD_DENIED` | `run_command` | ip, session, cmd, reason |
-| WARN  | `CMD_MISSING` | `run_command` | ip, session, cmd |
-| WARN  | `CLIENT_ERROR` | `client_log` | ip, session, context, message |
-| WARN  | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
-| WARN  | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
-| WARN  | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
-| WARN  | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
-| WARN  | `KILL_FAILED` | `kill_command` | ip, run_id, pid, error |
-| WARN  | `HEALTH_DEGRADED` | `health()` | db, redis |
+| INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
+| INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
+| INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
+| INFO | `RUN_END` | `generate()` | ip, run_id, session, exit_code, elapsed, cmd, cmd_type |
+| INFO | `RUN_KILL` | `kill_command` | ip, run_id, pid, pgid |
+| INFO | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
+| INFO | `PAGE_LOAD` | `index` | ip, session, theme |
+| INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| INFO | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted |
+| INFO | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
+| INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
+| INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, command_root, exit_code_filter, date_range |
+| INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
+| INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
+| INFO | `DIAG_VIEWED` | `diag()` | ip |
+| WARN | `RUN_NOT_FOUND` | `get_run` | ip, run_id |
+| WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
+| WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason |
+| WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
+| WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, message |
+| WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
+| WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
+| WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
+| WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
+| WARN | `KILL_FAILED` | `kill_command` | ip, run_id, pid, error |
+| WARN | `HEALTH_DEGRADED` | `health()` | db, redis |
 | ERROR | `RUN_SPAWN_ERROR` | `run_command` | ip, session, cmd (+ traceback) |
 | ERROR | `RUN_STREAM_ERROR` | `generate()` | ip, run_id, session, cmd (+ traceback) |
 | ERROR | `RUN_SAVED_ERROR` | `generate()` | run_id, session, cmd (+ traceback) |
@@ -464,7 +467,7 @@ The container starts as root only long enough for `entrypoint.sh` to fix `/data`
 These happen in `rewrite_command()` silently (no user-visible notice unless specified):
 
 | Command | Rewrite | Reason |
-|---------|---------|--------|
+| --------- | --------- | -------- |
 | `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
 | `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
 | `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
@@ -560,6 +563,7 @@ Synthetic post-filters also sit on a distinct path before the normal shell-opera
 ### The KILLED Race Condition
 
 When a user clicks Kill:
+
 1. `doKill()` sets `tab.killed = true`, shows KILLED status
 2. Server receives SIGTERM, process exits with code -15
 3. SSE stream sends `exit` message with code -15
@@ -594,9 +598,9 @@ The test stack is intentionally split into three layers:
 Current totals:
 
 - `pytest`: 732
-- `vitest`: 369
-- `playwright`: 153
-- total: 1,254
+- `vitest`: 377
+- `playwright`: 151
+- total: 1,260
 
 ### Testing Architecture
 

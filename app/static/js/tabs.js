@@ -515,8 +515,27 @@ function _createTabPanel(id) {
   terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
   terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'share snapshot'));
   terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
-  terminalActions.appendChild(_createTabActionButton(id, 'save', 'save txt'));
-  terminalActions.appendChild(_createTabActionButton(id, 'html', 'save html'));
+  const saveWrap = document.createElement('div');
+  saveWrap.className = 'save-menu-wrap';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'term-action-btn';
+  saveBtn.dataset.action = 'save-menu';
+  saveBtn.dataset.tab = id;
+  saveBtn.textContent = 'save';
+  const saveMenu = document.createElement('div');
+  saveMenu.className = 'save-menu';
+  [['save-txt', 'txt'], ['save-html', 'html'], ['save-pdf', 'pdf']].forEach(([action, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.dataset.action = action;
+    item.dataset.tab = id;
+    item.textContent = label;
+    saveMenu.appendChild(item);
+  });
+  saveWrap.appendChild(saveBtn);
+  saveWrap.appendChild(saveMenu);
+  terminalActions.appendChild(saveWrap);
   terminalActions.appendChild(_createTabActionButton(id, 'clear', 'clear'));
   terminalBody.appendChild(terminalActions);
 
@@ -581,8 +600,11 @@ function createTab(label) {
     if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;
     if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
   });
+  document.addEventListener('click', () => {
+    document.querySelectorAll('.save-menu-wrap.open').forEach(w => w.classList.remove('open'));
+  });
   panel.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', e => {
       const action = btn.dataset.action;
       if (typeof useMobileTerminalViewportMode === 'function'
         && useMobileTerminalViewportMode()
@@ -592,9 +614,15 @@ function createTab(label) {
       if (action === 'kill')      confirmKill(id);
       if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
       if (action === 'copy')      copyTab(id);
-      if (action === 'save')      saveTab(id);
-      if (action === 'html')      exportTabHtml(id);
       if (action === 'permalink') permalinkTab(id);
+      if (action === 'save-menu') {
+        e.stopPropagation(); // prevent the document close-handler from immediately collapsing the menu
+        btn.closest('.save-menu-wrap').classList.toggle('open');
+        return;
+      }
+      if (action === 'save-txt')  saveTab(id);
+      if (action === 'save-html') exportTabHtml(id);
+      if (action === 'save-pdf')  exportTabPdf(id);
       if (typeof btn.blur === 'function') {
         setTimeout(() => {
           if (typeof btn.blur === 'function') btn.blur();
@@ -930,9 +958,19 @@ function saveTab(id) {
   if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
 }
 
+// Returns the gutter prefix for a raw line, respecting the current tsMode/lnMode
+// toggles so exports match what the user sees in the terminal.
+function _exportPrefix(line, zeroBasedIndex) {
+  const parts = [];
+  if (typeof lnMode !== 'undefined' && lnMode === 'on') parts.push(String(zeroBasedIndex + 1));
+  if (typeof tsMode !== 'undefined') {
+    if (tsMode === 'clock' && line.tsC) parts.push(line.tsC);
+    else if (tsMode === 'elapsed' && line.tsE) parts.push(line.tsE);
+  }
+  return parts.join(' ');
+}
+
 // ── HTML snapshot export ──
-// Generates a themed HTML file with terminal styling, ANSI colors rendered
-// as inline spans, and clock timestamps shown alongside each line.
 async function exportTabHtml(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) { showToast('No output to export'); if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true }); return; }
@@ -941,43 +979,272 @@ async function exportTabHtml(id) {
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
     return;
   }
-
   try {
     const appName = APP_CONFIG.app_name || 'darklab shell';
     const exportedAt = new Date().toLocaleString();
-    const lines = t.rawLines;
-
-    const linesHtml = lines.map(({ text, cls, tsC }) => {
-      const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
-      let content;
-      if (cls === 'prompt-echo') {
-        content = ExportHtmlUtils.renderExportPromptEcho(text);
-      } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
-        content = ExportHtmlUtils.escapeExportHtml(text);
-      } else {
-        content = ansi_up.ansi_to_html(text);
-      }
-      return `<span class="line${cls ? ' ' + cls : ''}">${tsSpan}${content}</span>`;
-    }).join('\n');
-
+    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(t.rawLines, {
+      getPrefix: (line, i) => _exportPrefix(line, i),
+      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
+    });
+    const runMeta = {
+      exitCode: t.exitCode,
+      duration: null,
+      lines: `${t.rawLines.length} lines`,
+      version: APP_CONFIG.version || null,
+    };
     const fontFacesCss = await ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => '');
     const html = ExportHtmlUtils.buildTerminalExportHtml({
       appName,
       title: t.label,
-      metaHtml: `exported ${ExportHtmlUtils.escapeExportHtml(exportedAt)}`,
+      metaLine: `${t.label}  ·  ${exportedAt}`,
+      runMeta,
       linesHtml,
+      prefixWidth,
       fontFacesCss,
     });
-
     const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');
-    const fileTs = ExportHtmlUtils.exportTimestamp();
     a.href = URL.createObjectURL(blob);
-    a.download = `${appName}-${fileTs}.html`;
+    a.download = `${appName}-${ExportHtmlUtils.exportTimestamp()}.html`;
     a.click();
     URL.revokeObjectURL(a.href);
   } catch {
     showToast('Failed to export html', 'error');
+  } finally {
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+  }
+}
+
+// ── PDF export ──
+// Uses jsPDF to generate a themed PDF that downloads directly like txt/html.
+// ANSI escape sequences in output lines are resolved via ansi_up into colored
+// text spans; theme colours are sampled from the live document CSS variables.
+
+function _parseCssColor(cssColor) {
+  // Normalise any CSS color string to [r, g, b] by painting it onto a canvas.
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = 1;
+  const ctx = canvas.getContext('2d');
+  ctx.fillStyle = '#888'; // sentinel — lets us detect parse failures
+  ctx.fillStyle = cssColor;
+  ctx.fillRect(0, 0, 1, 1);
+  const [r, g, b] = ctx.getImageData(0, 0, 1, 1).data;
+  return [r, g, b];
+}
+
+function _pdfThemeColors() {
+  const cs = getComputedStyle(document.documentElement);
+  const v = (name) => cs.getPropertyValue(name).trim();
+  return {
+    bg:      _parseCssColor(v('--bg')),
+    surface: _parseCssColor(v('--surface')),
+    border:  _parseCssColor(v('--border')),
+    text:    _parseCssColor(v('--text')),
+    muted:   _parseCssColor(v('--muted')),
+    green:   _parseCssColor(v('--green')),
+    red:     _parseCssColor(v('--red')),
+    amber:   _parseCssColor(v('--amber')),
+    blue:    _parseCssColor(v('--blue')),
+  };
+}
+
+// Renders a single raw-text line (which may contain ANSI escapes) as a
+// sequence of coloured jsPDF text segments. Returns the new x position.
+function _pdfRenderAnsiLine(doc, rawText, startX, y, defaultColor) {
+  const html = ansi_up.ansi_to_html(rawText);
+  const div = document.createElement('div');
+  div.innerHTML = html;
+  let x = startX;
+  for (const node of div.childNodes) {
+    const segment = node.textContent;
+    if (!segment) continue;
+    if (node.nodeType === Node.ELEMENT_NODE && node.style.color) {
+      const [r, g, b] = _parseCssColor(node.style.color);
+      doc.setTextColor(r, g, b);
+    } else {
+      doc.setTextColor(...defaultColor);
+    }
+    doc.text(segment, x, y);
+    x += doc.getTextWidth(segment);
+  }
+  return x;
+}
+
+function exportTabPdf(id) {
+  const t = getTab(id);
+  if (!t || !t.rawLines.length) {
+    showToast('No output to export');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+    return;
+  }
+  if (!window.jspdf) {
+    showToast('PDF library not loaded', 'error');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF({ unit: 'pt', format: 'a4' });
+    const colors = _pdfThemeColors();
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+
+    // Layout constants — 8.5pt ≈ 13px/96dpi (matches HTML body font); leading = 8.5 * 1.65
+    const margin = 36;
+    const fontSize = 8.5;
+    const leading = 14;
+    const maxLineW = pageW - margin * 2;
+
+    // Header layout — baselines measured from page top
+    // Baseline-to-baseline gaps match HTML flex-column proportions (~20pt title→meta, ~14pt meta→badge)
+    const hPad = 18;
+    const hAppNamePt = 13;
+    const hMetaPt = 8;
+    const hBadgePt = 7.5;
+    const hAppNameY = hPad + hAppNamePt;                   // 31
+    const hMetaY    = hAppNameY + 20;                      // 51
+    const hBadgeY   = hMetaY + 14;                        // 65
+    const headerH   = Math.ceil(hBadgeY) + 14;             // 79
+
+    // Content pages use surface (lighter); header bar uses bg (darker) — matches HTML export
+    const fillBg = () => {
+      doc.setFillColor(...colors.surface);
+      doc.rect(0, 0, pageW, pageH, 'F');
+    };
+
+    fillBg();
+
+    // Header background — darker than content, like the terminal bar
+    doc.setFillColor(...colors.bg);
+    doc.rect(0, 0, pageW, headerH, 'F');
+
+    // App name — normal weight + char spacing to simulate CSS letter-spacing
+    const appName = APP_CONFIG.app_name || 'darklab shell';
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(hAppNamePt);
+    doc.setTextColor(...colors.green);
+    doc.setCharSpace(2);
+    doc.text(appName, margin, hAppNameY);
+    doc.setCharSpace(0);
+
+    // Meta line: preserve original casing (unlike HTML which uses CSS text-transform)
+    const exportedAt = new Date().toLocaleString();
+    doc.setFontSize(hMetaPt);
+    doc.setTextColor(...colors.muted);
+    doc.text(`${t.label}  ·  ${exportedAt}`, margin, hMetaY);
+
+    // Badge row
+    doc.setFontSize(hBadgePt);
+    let badgeX = margin;
+    const badgePadX = 5;
+    const badgePadY = 2;
+
+    const renderBadge = (label, color, bordered) => {
+      const tw = doc.getTextWidth(label);
+      if (bordered) {
+        // Draw border box like the HTML meta-badge.
+        // Use cap height (0.72 em) not full em so padding is even above and below the glyphs.
+        const capH  = hBadgePt * 0.72;
+        const descH = hBadgePt * 0.20;
+        doc.setDrawColor(...color);
+        doc.setLineWidth(0.5);
+        doc.rect(badgeX, hBadgeY - capH - badgePadY, tw + badgePadX * 2, capH + descH + badgePadY * 2, 'S');
+        doc.setFont('courier', 'bold');
+        doc.setTextColor(...color);
+        doc.text(label, badgeX + badgePadX, hBadgeY);
+        doc.setFont('courier', 'normal');
+        badgeX += tw + badgePadX * 2 + 8;
+      } else {
+        doc.setTextColor(...color);
+        doc.text(label, badgeX, hBadgeY);
+        badgeX += tw + 10;
+      }
+    };
+
+    if (t.exitCode !== null && t.exitCode !== undefined) {
+      renderBadge(`exit ${t.exitCode}`, t.exitCode === 0 ? colors.green : colors.red, true);
+    }
+    renderBadge(`${t.rawLines.length} lines`, colors.muted, false);
+    if (APP_CONFIG.version) renderBadge(`v${APP_CONFIG.version}`, colors.muted, false);
+
+    // Separator line between header and content
+    doc.setDrawColor(...colors.border);
+    doc.setLineWidth(0.5);
+    doc.line(0, headerH, pageW, headerH);
+
+    // Content
+    doc.setFont('courier', 'normal');
+    doc.setFontSize(fontSize);
+
+    // Fixed-width prefix gutter — respects current tsMode/lnMode toggles
+    const pdfPrefixes = t.rawLines.map((line, i) => _exportPrefix(line, i));
+    const longestPdfPrefix = pdfPrefixes.reduce((a, b) => a.length >= b.length ? a : b, '');
+    const prefixColW = longestPdfPrefix ? doc.getTextWidth(longestPdfPrefix) + 10 : 0;
+
+    let y = headerH + leading;
+
+    const newPage = () => {
+      doc.addPage();
+      fillBg();
+      y = margin + leading;
+    };
+
+    const checkPage = () => { if (y + leading > pageH - margin) newPage(); };
+
+    for (let _li = 0; _li < t.rawLines.length; _li++) {
+      const { text, cls } = t.rawLines[_li];
+      checkPage();
+      let x = margin;
+
+      // Prefix gutter — fixed column width so content aligns
+      if (prefixColW) {
+        const prefix = pdfPrefixes[_li];
+        if (prefix) {
+          doc.setTextColor(...colors.muted);
+          doc.text(prefix, x, y);
+        }
+        x += prefixColW;
+      }
+
+      const stripped = text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '');
+      const contentW = maxLineW - (x - margin);
+
+      if (cls === 'exit-ok') {
+        doc.setTextColor(...colors.green);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'exit-fail') {
+        doc.setTextColor(...colors.red);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'denied') {
+        doc.setTextColor(...colors.amber);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'notice') {
+        doc.setTextColor(...colors.blue);
+        doc.text(doc.splitTextToSize(stripped, contentW), x, y);
+      } else if (cls === 'prompt-echo') {
+        const firstSpace = text.indexOf(' ');
+        const pfx = firstSpace === -1 ? text : text.slice(0, firstSpace);
+        const rest = firstSpace === -1 ? '' : text.slice(firstSpace);
+        doc.setFont('courier', 'bold');
+        doc.setTextColor(...colors.blue);
+        doc.text(pfx, x, y);
+        x += doc.getTextWidth(pfx);
+        doc.setFont('courier', 'normal');
+        if (rest) {
+          doc.setTextColor(...colors.text);
+          doc.text(rest, x, y);
+        }
+      } else {
+        _pdfRenderAnsiLine(doc, text, x, y, colors.text);
+      }
+
+      y += leading;
+    }
+
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    doc.save(`${appName}-${ts}.pdf`);
+  } catch {
+    showToast('Failed to export pdf', 'error');
   } finally {
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
   }
@@ -1107,9 +1374,7 @@ async function permalinkTab(id) {
     body: JSON.stringify({ label: t.label, content: shareContent, apply_redaction: applyRedaction })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
-    copyTextToClipboard(url)
-      .then(() => showToast('Link copied to clipboard'))
-      .catch(() => showToast('Failed to copy link', 'error'));
+    shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
   }).catch(() => showToast('Failed to create permalink', 'error'))
     .finally(() => {
       if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();

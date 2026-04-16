@@ -149,7 +149,6 @@ function _buildContextAutocomplete(ctx) {
     );
   }
 
-  const currentLower = ctx.currentToken.toLowerCase();
   const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');
   const expectsValue = Array.isArray(spec.expects_value) ? spec.expects_value : [];
   const argHints = spec.arg_hints || {};
@@ -368,7 +367,7 @@ function _scrollAutocompleteActiveItem() {
 function acShow(items) {
   acDropdown.innerHTML = '';
   if (!items.length) { hideAcDropdown(); return; }
-  const showAbove = _positionAutocomplete(items.length);
+  _positionAutocomplete(items.length);
   if (acIndex >= items.length) acIndex = items.length - 1;
   const currentValue = (typeof getComposerValue === 'function')
     ? getComposerValue()

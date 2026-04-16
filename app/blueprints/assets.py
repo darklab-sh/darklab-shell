@@ -34,6 +34,8 @@ def _fmt_elapsed(seconds):
 
 _ANSI_UP_PATH = Path("/usr/local/share/shell-assets/js/vendor/ansi_up.js")
 _ANSI_UP_FALLBACK = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
+_JSPDF_PATH = Path("/usr/local/share/shell-assets/js/vendor/jspdf.umd.min.js")
+_JSPDF_FALLBACK = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
 _FONT_DIR = Path("/usr/local/share/shell-assets/fonts")
 _FONT_FALLBACK_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
 _VENDOR_FONT_FILES = frozenset({
@@ -66,6 +68,14 @@ def vendor_ansi_up_js():
     if _ANSI_UP_PATH.exists():
         return send_file(_ANSI_UP_PATH, mimetype="application/javascript")
     return send_file(_ANSI_UP_FALLBACK, mimetype="application/javascript")
+
+
+@assets_bp.route("/vendor/jspdf.umd.min.js")
+def vendor_jspdf_js():
+    """Serve jsPDF from the build-time vendor path, with a repo fallback."""
+    if _JSPDF_PATH.exists():
+        return send_file(_JSPDF_PATH, mimetype="application/javascript")
+    return send_file(_JSPDF_FALLBACK, mimetype="application/javascript")
 
 
 @assets_bp.route("/vendor/fonts/<path:filename>")

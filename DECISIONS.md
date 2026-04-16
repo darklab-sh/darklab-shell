@@ -27,6 +27,10 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
   - [Structured Logging](#structured-logging)
 - [Frontend Decisions](#frontend-decisions)
   - [Shared Frontend State Layer](#shared-frontend-state-layer)
+  - [Export Rendering Centralization (ExportHtmlUtils)](#export-rendering-centralization-exporthtmlutils)
+  - [Client-Side PDF Export (jsPDF)](#client-side-pdf-export-jspdf)
+  - [Save Menu UX (save ▾ dropdown)](#save-menu-ux-save--dropdown)
+  - [Native Share-Sheet for Permalink URLs](#native-share-sheet-for-permalink-urls)
   - [Dedicated Mobile Shell](#dedicated-mobile-shell)
 - [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned)
   - [Runtime Streaming and Process Lifecycle](#runtime-streaming-and-process-lifecycle)
@@ -145,7 +149,7 @@ Container starts as root → `entrypoint.sh` runs → fixes `/data` ownership (D
 
 nmap requires `CAP_NET_RAW` and `CAP_NET_ADMIN` for OS fingerprinting and SYN scans:
 
-```
+```bash
 setcap cap_net_raw,cap_net_admin+eip /usr/bin/nmap
 ```
 
@@ -203,6 +207,36 @@ The concrete event inventory and the operator-facing description of the `text` a
 The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
 
 That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, then prepend `ui_helpers.js` before DOM-bound modules so the extracted scripts see the same helper globals as production without rewriting the production call sites.
+
+### Export Rendering Centralization (ExportHtmlUtils)
+
+**Problem:** Save/export had rendering logic in multiple places. `exportTabHtml` in `tabs.js`, `saveHtml` in `permalink.html`, and the PDF surfaces in both files each built their own line rendering, CSS, and document structure. Every visual fix required edits in two or more places. The PDF surfaces were especially fragile because they were structurally identical but unlinked.
+
+**Solution:** `export_html.js` was introduced as the single source of truth for HTML export rendering, exposing `window.ExportHtmlUtils`. All HTML save paths — desktop tab, permalink, and (via shared prefix logic) PDF — consume these helpers. The PDF rendering layer still calls jsPDF directly for the output, but reads the same `rawLines` and calls the same `_exportPrefix()` helper so prefix state and line ordering are consistent.
+
+**Current drift risk:** The PDF rendering functions (`exportTabPdf` in `tabs.js` and `savePdf` in `permalink.html`) remain structurally duplicated. Every visual change to the PDF layout requires parallel edits to both files. A future `ExportPdfUtils` module would resolve this, but was deferred — see the Technical Debt entry in `TODO.md`. For now, the HTML and PDF surfaces share data preparation but not rendering.
+
+### Client-Side PDF Export (jsPDF)
+
+**Why jsPDF over server-side rendering:** The shell has no server-side PDF capability (no headless browser, no LaTeX, no wkhtmltopdf). Adding a server-side PDF renderer would require a new dependency, server CPU, and a separate request lifecycle. jsPDF generates PDFs entirely in the browser from the already-rendered ANSI data, matching the "no server round-trip" model of the existing HTML export.
+
+**Font limitations:** jsPDF bundles Courier (a monospaced font) rather than JetBrains Mono. Replicating exact CSS kerning, weight 300, and `letter-spacing` values is not feasible in jsPDF's text model. The PDF export aims for visual parity — matching spacing, proportions, and theme colors — rather than pixel-identical output.
+
+**Color resolution:** jsPDF needs RGB arrays, not CSS custom property values. `_parseCssColor()` creates a 1×1 canvas, sets the CSS color string as `fillStyle`, reads back the computed `fillStyle`, and parses the `rgb(...)` result. This handles any CSS color format including `color-mix()` expressions from the theme system.
+
+**Character spacing units:** jsPDF's `setCharSpace(n)` adds `n` points between each character. CSS `letter-spacing: 4px` at 96dpi ≈ 3pt. Using `setCharSpace(2)` with `hAppNamePt: 13` produces visually comparable spacing to the HTML export's `font-size: 20px; letter-spacing: 4px; font-weight: 300` heading.
+
+### Save Menu UX (save ▾ dropdown)
+
+**Why one dropdown instead of separate buttons:** Three export formats (txt, html, pdf) in the tab action bar would consume too much horizontal space, especially at narrow tab widths. The `save ▾` dropdown groups them under a single button matching the model already used by other action menus in the shell.
+
+**Consistency across surfaces:** The same dropdown pattern was applied to the permalink page header and the mobile menu so the export interaction is predictable regardless of which surface the user is on.
+
+### Native Share-Sheet for Permalink URLs
+
+**Problem:** "Copy permalink URL" works on desktop but is awkward on mobile — users have to paste from clipboard into a share target manually.
+
+**Solution:** `navigator.share()` (Web Share API) invokes the native OS share sheet when the browser supports it. On unsupported browsers (most desktop browsers at time of writing) the flow falls back to `navigator.clipboard.writeText()` without UI intervention. `AbortError` from the user cancelling the share dialog is caught and suppressed silently — it is not an error.
 
 ### Dedicated Mobile Shell
 
@@ -271,7 +305,7 @@ This keeps the mobile surface structured without needing a separate frontend bun
 
 **ESLint was chosen over Prettier for JS linting.** Prettier's `--check` mode only identifies which files differ from its expected output — it does not show which line or rule is violated. ESLint shows the exact file, line, column, and rule name on every violation, which is far more actionable in a pre-commit hook. ESLint is configured in `config/eslint.config.js` with three rules scoped to config and test files (`tests/js/`, `playwright*.js`): 2-space `indent`, `singleQuote`, and `semi: never`. The browser-side app JS (`app/static/js/`) is excluded because it follows a different convention (semicolons) and rewriting it would be a large unrelated diff.
 
-**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers all ten checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint).
+**Git hooks live in `scripts/hooks/` instead of `.githooks/` or `.git/hooks/`.** `.git/hooks/` is not version-controlled and requires every developer to manually copy or symlink files after cloning. `.githooks/` is trackable but is a non-standard directory name that requires explicit opt-in. `scripts/hooks/` is tracked like any other script, follows the project's existing `scripts/` convention, and is activated with one command: `git config core.hooksPath scripts/hooks`. The previous Python-only hook at `.githooks/pre-commit` has been superseded; the consolidated hook at `scripts/hooks/pre-commit` covers all eleven checks (flake8, bandit, pytest, pip-audit, vitest, eslint, npm audit, shellcheck, hadolint, yamllint, markdownlint).
 
 ### Long-Running and Local-Dev Edge Cases
 

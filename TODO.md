@@ -36,16 +36,18 @@ Allow users to generate a personal session token so their run history, snapshots
 _Backend_
 - `GET /session/token/generate` — generate a new `tok_…` token, persist it in a `tokens` table `(token TEXT PRIMARY KEY, created TEXT)`, return it. Does not migrate anything.
 - `POST /session/migrate` — migrate all runs and snapshots from `from_session_id` to `to_session_id` in a single transaction:
+
   ```sql
   UPDATE runs      SET session_id = :to WHERE session_id = :from;
   UPDATE snapshots SET session_id = :to WHERE session_id = :from;
   ```
+
   Security constraint: `from_session_id` must equal the requester's current `X-Session-ID` header. Reject any request where they don't match to prevent cross-user history theft.
 - Add `tokens` table to `database.py` schema (single column, no FK constraints needed — the session ID space is shared).
 
 _Frontend — terminal commands_
 - `token` — show token status: active token (masked, e.g. `tok_a1b2••••`) or "none (anonymous session)".
-- `token generate` — call `/session/token/generate`, save the returned token to `localStorage` as `token_id`, update `SESSION_ID` in `session.js` to use it going forward. If the current session has any runs, prompt: *"You have N runs in this session. Migrate history to your new token? [yes/no]"* — if yes, call `/session/migrate`.
+- `token generate` — call `/session/token/generate`, save the returned token to `localStorage` as `token_id`, update `SESSION_ID` in `session.js` to use it going forward. If the current session has any runs, prompt: _"You have N runs in this session. Migrate history to your new token? [yes/no]"_ — if yes, call `/session/migrate`.
 - `token set <value>` — enter an existing token (e.g. from another device). Save to `localStorage`. If the current browser session has runs, offer the same migration prompt. If the current session is empty, silently switch.
 - `token clear` — remove `token_id` from `localStorage`, revert to the auto-generated UUID. Does not delete any data.
 - `token rotate` — generate a new token, migrate history from the current token to it, update `localStorage`. Old token's data is left in the DB under the old ID (effectively orphaned unless the user has another copy).
@@ -80,15 +82,28 @@ Starred commands are currently `localStorage`-only (`starred` key, array of comm
 
 ## Technical Debt
 
-- **Smoke test fixture out of sync — needs re-capture against live container**
-  - `tests/py/fixtures/container_smoke_test-expectations.json` has two categories of stale entries:
-    1. **DNS command renames** — fixture still has the old `ip.darklab.sh` forms for `dig`, `nslookup`, `host`, `dnsrecon`, `subfinder`, `dnsx`, `dnsenum`, and `fierce`. These were updated to `darklab.sh` in `scripts/smoke_test_commands.txt` but the fixture was not re-captured.
-    2. **Missing entries** — 25 commands in `scripts/smoke_test_commands.txt` have no fixture entry at all: `autocomplete`, `ip a`, `jobs`, `route`, `df -h`, `free -h`, `uname`, the four `ping … | <pipe>` variants, `curl -I … | grep server`, `openssl ciphers -v`, `openssl s_client`, `sslscan` (3), `sslyze` (2), `naabu` (2), `wafw00f`, `katana`, `masscan`, and `rustscan`.
-  - Also: 4 stale `amass enum` fixture entries whose commands were removed from the corpus.
-  - Fix: disable rate limiting locally, run `scripts/capture_container_smoke_test_outputs.sh` against a known-good container, review the diff, then re-enable rate limiting.
+### Export rendering fragmentation
 
-- **JS code review for clean-up opportunities**
-  - `autocomplete.js` has at least two unused variable assignments: `currentLower` (line 136) and the `showAbove` return value from `_positionAutocomplete` (line 352). Do a full-pass code review of the JS files to surface similar dead assignments, unreachable branches, and other clean-up opportunities.
+The save/export pipeline currently has rendering logic scattered across several places that must be kept in sync manually. The HTML export surface was partially consolidated into `ExportHtmlUtils` (`export_html.js`), but the PDF surface was not.
+
+**Affected surfaces**
+
+| Surface | HTML export | PDF export |
+|---|---|---|
+| Main UI (tab panel) | `exportTabHtml()` in `tabs.js` via `ExportHtmlUtils` | `exportTabPdf()` in `tabs.js` — standalone ~100-line function |
+| Permalink page | `saveHtml()` in `permalink.html` via `ExportHtmlUtils` | `savePdf()` in `permalink.html` — near-duplicate of the above |
+| Mobile | Inherits tab panel actions (same `terminal-actions` div moved to mobile transcript) — not separately verified | Same inheritance — not separately tested |
+
+**Known drift points**
+- `exportTabPdf()` and `savePdf()` are structurally identical but live in two files. Every visual tweak (font size, header layout, badge alignment, background colours) requires editing both.
+- `buildTerminalExportStyles()` in `export_html.js` inlines a separate CSS block for downloaded HTML files. Changes to the live permalink page styles (`components.css`) do not automatically propagate to downloaded HTML, and vice versa — they are maintained independently.
+- The permalink page's live header meta uses `text-transform: uppercase` via `components.css`; downloaded HTML uses `export_html.js` CSS. These can drift independently.
+- Mobile save/export has never been explicitly tested after export changes were made.
+
+**Recommended consolidation path**
+- Extract the shared PDF rendering logic into a `ExportPdfUtils` module (e.g. `export_pdf.js`, loaded via Flask route like `export_html.js`). Both `tabs.js` and `permalink.html` call through it, passing a descriptor object with lines, metadata, and a `getPrefix` callback — same pattern as `buildExportLinesHtml`.
+- Audit `buildTerminalExportStyles()` against the live `components.css` permalink styles and either unify them or document the intentional divergence so future changes don't silently drift.
+- Add a mobile smoke-test pass to the export workflow whenever export changes ship.
 
 ---
 

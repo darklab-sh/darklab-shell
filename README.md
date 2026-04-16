@@ -39,8 +39,8 @@ A full-stack, self-hosted web terminal for running network diagnostics and secur
 
 - **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, bash-like `Tab` completion with context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei, `Ctrl+R` reverse-history search, built-in pipe support for `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, and client-side stall detection with an inline notice when the connection silently dies
 - **Mobile shell** — dedicated mobile composer, keyboard helper row with character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, and output-follow behavior that keeps the latest lines visible when the keyboard opens
-- **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy/save/export actions, and a jump-to-live / jump-to-bottom helper when you scroll away from the tail
-- **History and sharing** — recent command chips, a persistent history drawer with search/filtering, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot permalinks, and full-output artifacts for longer runs
+- **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), and a jump-to-live / jump-to-bottom helper when you scroll away from the tail
+- **History and sharing** — recent command chips, a persistent history drawer with search/filtering, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
 - **Safer sharing and exports** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks and local exports, with optional operator regex rules appended on top. Permalink creation can now choose raw vs redacted sharing per snapshot, without changing the stored run history
 - **Themes and presentation** — named theme variants, theme-aware permalink/export rendering, mobile/desktop theme parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction
 - **Built-in commands** — native shell commands like `help`, `history`, `last`, `limits`, `status`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available
@@ -69,9 +69,9 @@ Steps:
 1. Make sure Docker and Docker Compose are installed and running.
 2. From the repo root, start the stack:
 
-```bash
-docker compose up --build
-```
+   ```bash
+   docker compose up --build
+   ```
 
 3. Open [http://localhost:8888](http://localhost:8888).
 
@@ -146,7 +146,7 @@ This is the high-level runtime shape of the app:
 - SQLite plus artifact files hold durable history/share state
 - real command execution happens in subprocesses rather than inside the web worker process
 
-For system design, contributor workflow, and detailed test references, use the specialized docs listed below.
+For system design, contributor workflow, and detailed test references, use the specialized docs in the [Documentation Map](#documentation-map).
 
 ---
 
@@ -185,8 +185,8 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `welcome_status_labels` | `["CONFIG","RUNNER","HISTORY","LIMITS","AUTOCOMPLETE"]` | Labels shown in the fake startup-status block during the welcome animation. Best with 4-6 short labels |
 | `welcome_hint_interval_ms` | `4200` | Delay between footer-hint rotations while the welcome tab remains idle (ms) |
 | `welcome_hint_rotations` | `0` | Maximum number of hint states shown while the welcome tab remains idle. `0` keeps rotating until interrupted; `1` keeps only the first hint visible |
-| `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG`. See [Logging](#logging) |
-| `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog). See [Logging](#logging) |
+| `log_level` | `INFO` | Log verbosity. Options: `ERROR`, `WARN`, `INFO`, `DEBUG` |
+| `log_format` | `text` | Log output format. Options: `text` (human-readable), `gelf` (GELF 1.1 JSON for Graylog) |
 
 ### Config file reload behavior
 
@@ -446,7 +446,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 
 Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTURE.md). The architecture and testing docs carry the deeper explanations.
 
-```
+```text
 .
 ├── .env                        # Port and other environment defaults (edit here to change APP_PORT)
 ├── docker-compose.yml

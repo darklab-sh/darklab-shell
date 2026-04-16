@@ -126,6 +126,7 @@ function loadTabsFns({
     copyTab,
     saveTab,
     exportTabHtml,
+    exportTabPdf,
     permalinkTab,
     _getTabs: () => getTabs(),
     _getActiveTabId: () => getActiveTabId(),
@@ -891,6 +892,7 @@ describe('tabs helpers', () => {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
       buildTerminalExportHtml: () => '<html><body>export</body></html>',
       exportTimestamp: () => '2026-01-01-00-00-00',
     }
@@ -1007,6 +1009,7 @@ describe('tabs helpers', () => {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
       buildTerminalExportHtml: ({ linesHtml }) => linesHtml,
       exportTimestamp: () => '2026-01-01-00-00-00',
     }
@@ -1030,6 +1033,53 @@ describe('tabs helpers', () => {
     expect(html).toContain('token=abc123')
     expect(html).not.toContain('token=[redacted]')
     delete window.ExportHtmlUtils
+  })
+
+  it('exportTabHtml shows a toast when the tab has no lines', async () => {
+    window.ExportHtmlUtils = {
+      fetchVendorFontFacesCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: '', prefixWidth: 0 }),
+      buildTerminalExportHtml: () => '',
+      exportTimestamp: () => '2026-01-01-00-00-00',
+    }
+    const { createTab, exportTabHtml } = loadTabsFns()
+    const id = createTab('tab 1')
+
+    await exportTabHtml(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
+    delete window.ExportHtmlUtils
+  })
+
+  it('exportTabHtml shows a toast when ExportHtmlUtils is not loaded', async () => {
+    delete window.ExportHtmlUtils
+    const { createTab, exportTabHtml, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'hello', cls: '', tsC: '', tsE: '' })
+
+    await exportTabHtml(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to export html')
+  })
+
+  it('exportTabPdf shows a toast when the tab has no lines', () => {
+    const { createTab, exportTabPdf } = loadTabsFns()
+    const id = createTab('tab 1')
+
+    exportTabPdf(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
+  })
+
+  it('exportTabPdf shows a toast when jsPDF is not loaded', () => {
+    delete window.jspdf
+    const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'hello', cls: '', tsC: '', tsE: '' })
+
+    exportTabPdf(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('PDF library not loaded')
   })
 
   it('permalinkTab applies configured redaction rules before creating a snapshot', async () => {

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit checks: flake8, bandit, pytest, pip-audit, eslint, npm audit,
-#                   shellcheck, hadolint, yamllint
+#                   shellcheck, hadolint, yamllint, markdownlint
 # Install once with: git config core.hooksPath scripts/hooks
 
 set -uo pipefail
@@ -49,7 +49,7 @@ run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
     $(git ls-files '*.js' | xargs -I{} sh -c '[ -f "{}" ] && echo "{}"')
 
 # npm audit — JS dependency CVEs (fail on high/critical only)
-run_check "npm audit" npm --prefix "$REPO_ROOT" audit --audit-level=high
+run_check "npm audit" npm --prefix "$REPO_ROOT" run audit:js
 
 # shellcheck — shell script static analysis (skips non-shell .sh files)
 shell_scripts=$(git ls-files '*.sh' | while read -r f; do
@@ -68,6 +68,9 @@ fi
 # yamllint — YAML syntax and style
 # shellcheck disable=SC2046  # word-splitting intentional to pass list of files
 run_check "yamllint" yamllint -c "$REPO_ROOT/config/yamllint.yml" $(git ls-files '*.yml' '*.yaml')
+
+# markdownlint-cli2 — Markdown style and consistency
+run_check "markdownlint" npm --prefix "$REPO_ROOT" run lint:md
 
 printf "\n\033[1m[pre-commit]\033[0m %d passed" "$PASS"
 if [ "$FAIL" -gt 0 ]; then

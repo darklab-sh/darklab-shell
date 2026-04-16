@@ -80,6 +80,7 @@ RUN pip install --no-cache-dir -r /tmp/requirements.txt
 # the docker-compose bind mount cannot shadow it.
 RUN mkdir -p /usr/local/share/shell-assets/js/vendor
 COPY app/static/js/vendor/ansi_up.js /usr/local/share/shell-assets/js/vendor/ansi_up.js
+COPY app/static/js/vendor/jspdf.umd.min.js /usr/local/share/shell-assets/js/vendor/jspdf.umd.min.js
 
 # Download the current upstream font binaries at build time so the image keeps
 # using locally hosted fonts without relying on Google Fonts requests at runtime.

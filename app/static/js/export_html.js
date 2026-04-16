@@ -1,4 +1,7 @@
 // ── Shared HTML export helpers ───────────────────────────────────────────────
+// Single source of truth for all export formatting (save html, save pdf,
+// permalink save html). All callers go through these helpers so the rendered
+// output is consistent across every save surface.
 (function () {
   // HTML export deliberately inlines the runtime theme variables so downloaded
   // files preserve the active palette without depending on the live app shell.
@@ -30,6 +33,7 @@
     '--terminal-font-size',
     '--terminal-line-height',
   ];
+  const PLAIN_CLASSES = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
 
   function escapeExportHtml(text) {
     return String(text ?? '')
@@ -90,7 +94,53 @@
     return 'light dark';
   }
 
-  function buildTerminalExportStyles(fontFacesCss = '') {
+  // ── Line rendering ────────────────────────────────────────────────────────
+  // Shared helper used by all save surfaces (html, pdf prep, permalink).
+  // rawLines: array of { text, cls, tsC?, ... }
+  // getPrefix: (line, index) => string — caller controls what goes in the gutter
+  // ansiToHtml: (text) => html string — caller supplies the ansi_up instance
+  // Returns { linesHtml, prefixWidth } where prefixWidth is in characters.
+  function buildExportLinesHtml(rawLines, { getPrefix = () => '', ansiToHtml }) {
+    const prefixes = rawLines.map((line, i) => getPrefix(line, i));
+    const prefixWidth = Math.max(0, ...prefixes.map(p => p.length));
+    const linesHtml = rawLines.map(({ text, cls }, i) => {
+      const prefix = prefixes[i];
+      const prefixSpan = prefix
+        ? `<span class="perm-prefix">${escapeExportHtml(prefix)}</span>`
+        : '';
+      let content;
+      if (cls === 'prompt-echo') {
+        content = renderExportPromptEcho(text);
+      } else if (PLAIN_CLASSES.has(cls)) {
+        content = escapeExportHtml(text);
+      } else {
+        content = ansiToHtml(text);
+      }
+      return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${content}</span></span>`;
+    }).join('');
+    return { linesHtml, prefixWidth };
+  }
+
+  // ── Run-meta badge row ────────────────────────────────────────────────────
+  // runMeta: { exitCode, duration, lines, version } — all fields optional/null
+  function _buildRunMetaHtml(runMeta) {
+    if (!runMeta) return '';
+    const parts = [];
+    const { exitCode, duration, lines, version } = runMeta;
+    if (exitCode !== null && exitCode !== undefined) {
+      const cls = exitCode === 0 ? 'meta-badge-ok' : 'meta-badge-fail';
+      parts.push(`<span class="meta-badge ${cls}">exit ${exitCode}</span>`);
+    }
+    if (duration) parts.push(`<span class="meta-item">${escapeExportHtml(String(duration))}</span>`);
+    if (lines)    parts.push(`<span class="meta-item">${escapeExportHtml(String(lines))}</span>`);
+    if (version)  parts.push(`<span class="meta-item">v${escapeExportHtml(String(version))}</span>`);
+    return parts.join('');
+  }
+
+  // ── Styles ────────────────────────────────────────────────────────────────
+  // Produces the full inline CSS for an export document, matching the
+  // permalink-page layout. prefixWidth sets the gutter column width in ch.
+  function buildTerminalExportStyles(fontFacesCss = '', prefixWidth = 0) {
     const themeVars = getThemeExportVars();
     const themeDecls = Object.entries(themeVars)
       .map(([name, value]) => `    ${name}: ${value};`)
@@ -98,55 +148,116 @@
     return `${fontFacesCss}
   :root {
 ${themeDecls}
+    --perm-prefix-width: ${prefixWidth}ch;
   }
-  *, *::before, *::after { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  html, body { height: 100%; margin: 0; }
   body {
-    background: var(--bg); color: var(--text);
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    padding: 28px 32px; margin: 0; line-height: 1.65;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px;
+    line-height: 1.65;
   }
-  .header {
-    margin-bottom: 20px;
-    padding: 16px 18px;
-    border: 1px solid var(--theme-terminal-bar-border, var(--border));
+  .export-header {
+    display: flex;
+    align-items: baseline;
+    gap: 14px;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--theme-terminal-bar-border, var(--border));
     background: var(--theme-terminal-bar-bg, var(--bg));
-    border-radius: 4px 4px 0 0;
+    flex-wrap: wrap;
   }
-  .app-name { color: var(--green); font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }
-  .meta { color: var(--muted); font-size: 11px; }
-  .output {
+  .export-header-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .export-title {
+    font-size: 20px;
+    font-weight: 300;
+    letter-spacing: 4px;
+    color: var(--green);
+    text-shadow: 0 0 20px var(--green-glow);
+  }
+  .export-meta {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+  }
+  .export-run-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 10px;
+    margin-top: 3px;
+  }
+  .meta-badge {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 1px;
+    padding: 1px 7px;
+    border-radius: 2px;
+    border: 1px solid;
+  }
+  .meta-badge-ok   { color: var(--green); border-color: var(--green-dim); }
+  .meta-badge-fail { color: var(--red);   border-color: var(--red); }
+  .meta-item {
+    font-size: 10px;
+    color: var(--muted);
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+  }
+  .export-output {
+    flex: 1;
+    padding: 16px 20px 20px;
     white-space: pre-wrap;
     word-break: break-all;
+    overflow-wrap: anywhere;
     background: var(--theme-panel-bg, var(--surface));
     border: 1px solid var(--theme-panel-border, var(--border));
-    border-top: none;
-    border-radius: 0 0 4px 4px;
-    padding: 16px 18px 18px;
-    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-panel-shadow, transparent) 74%, transparent);
   }
   .line { display: block; }
-  .line.exit-ok   { color: var(--green); font-weight: 700; margin-top: 8px; }
-  .line.exit-fail { color: var(--red); font-weight: 700; margin-top: 8px; }
+  .line.exit-ok   { color: var(--green); font-weight: 700; }
+  .line.exit-fail { color: var(--red);   font-weight: 700; }
   .line.denied    { color: var(--amber); font-weight: 700; }
-  .line.notice    { color: var(--blue); font-style: italic; }
-  .ts {
-    display: inline-block; min-width: 58px; text-align: right;
-    color: var(--muted); font-size: 10px; user-select: none;
-    padding-right: 8px; margin-right: 6px;
-    border-right: 1px solid var(--border);
+  .line.notice    { color: var(--blue);  font-style: italic; }
+  .perm-prefix {
+    display: inline-block;
+    min-width: var(--perm-prefix-width, 0ch);
+    margin-right: 14px;
+    color: var(--muted);
+    font-size: 10px;
+    user-select: none;
+    text-align: right;
     font-variant-numeric: tabular-nums;
   }
+  .perm-content { display: inline; }
   .prompt-prefix { color: var(--blue); font-weight: 700; margin-right: 8px; }`;
   }
 
+  // ── Document builder ──────────────────────────────────────────────────────
+  // appName   — displayed in the header (green, letter-spaced)
+  // title     — used in <title> tag
+  // metaLine  — subtitle shown below app name in muted/uppercase style
+  // runMeta   — optional { exitCode, duration, lines, version } for badge row
+  // linesHtml — pre-built via buildExportLinesHtml
+  // prefixWidth — gutter width in ch (for --perm-prefix-width)
+  // fontFacesCss — @font-face declarations (base64 fonts)
   function buildTerminalExportHtml({
     appName,
     title,
-    metaHtml = '',
+    metaLine = '',
+    runMeta = null,
     linesHtml = '',
+    prefixWidth = 0,
     fontFacesCss = '',
   }) {
     const colorScheme = getThemeExportColorScheme();
+    const runMetaHtml = _buildRunMetaHtml(runMeta);
+    const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -154,17 +265,20 @@ ${themeDecls}
 <meta name="color-scheme" content="${escapeExportHtml(colorScheme)}">
 <title>${escapeExportHtml(title)} — ${escapeExportHtml(appName)}</title>
 <style>
-${buildTerminalExportStyles(fontFacesCss)}
+${styles}
 </style>
 </head>
 <body>
-<div class="header">
-  <div class="app-name">${escapeExportHtml(appName)}</div>
-  ${metaHtml ? `<div class="meta">${metaHtml}</div>` : ''}
-</div>
-<div class="output">
+<header class="export-header">
+  <div class="export-header-copy">
+    <div class="export-title">${escapeExportHtml(appName)}</div>
+    ${metaLine ? `<div class="export-meta">${escapeExportHtml(metaLine)}</div>` : ''}
+    ${runMetaHtml ? `<div class="export-run-meta">${runMetaHtml}</div>` : ''}
+  </div>
+</header>
+<main class="export-output">
 ${linesHtml}
-</div>
+</main>
 </body>
 </html>`;
   }
@@ -199,6 +313,7 @@ ${linesHtml}
     exportTimestamp,
     escapeExportHtml,
     renderExportPromptEcho,
+    buildExportLinesHtml,
     buildTerminalExportHtml,
     buildTerminalExportStyles,
     fetchVendorFontFacesCss,

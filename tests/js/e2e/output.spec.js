@@ -68,9 +68,10 @@ test.describe('output actions', () => {
   // ── Save .txt ─────────────────────────────────────────────────────────────
 
   test('save-txt button triggers a .txt file download', async ({ page }) => {
+    await page.locator('[data-action="save-menu"]').click()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('[data-action="save"]').click(),
+      page.locator('[data-action="save-txt"]').click(),
     ])
 
     expect(download.suggestedFilename()).toMatch(/\.txt$/)
@@ -79,18 +80,20 @@ test.describe('output actions', () => {
   // ── Save .html ────────────────────────────────────────────────────────────
 
   test('save-html button triggers a .html file download', async ({ page }) => {
+    await page.locator('[data-action="save-menu"]').click()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('[data-action="html"]').click(),
+      page.locator('[data-action="save-html"]').click(),
     ])
 
     expect(download.suggestedFilename()).toMatch(/\.html$/)
   })
 
   test('downloaded html file contains the command text', async ({ page }) => {
+    await page.locator('[data-action="save-menu"]').click()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('[data-action="html"]').click(),
+      page.locator('[data-action="save-html"]').click(),
     ])
 
     const stream = await download.createReadStream()
@@ -126,7 +129,8 @@ test.describe('output actions with no exportable output', () => {
   })
 
   test('save-txt button shows a toast when there is no output to export', async ({ page }) => {
-    await page.locator('[data-action="save"]').click()
+    await page.locator('[data-action="save-menu"]').click()
+    await page.locator('[data-action="save-txt"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output to export')
   })

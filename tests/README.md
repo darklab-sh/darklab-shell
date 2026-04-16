@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 732
-- `vitest`: 369
+- `vitest`: 377
 - `playwright`: 151
-- total: 1,252
+- total: 1,260
 
 This document is organized in two parts:
 
@@ -1114,7 +1114,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
 | `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space. |
 | `returns value hints after a value-taking flag and trailing space` | Verifies that value hints appear after accepting or typing a value-taking flag such as `curl -o `. |
-| `suggests built-in pipe commands after a supported command pipe` | Verifies that typing `command | ` can switch autocomplete into the narrow built-in pipe stage. |
+| `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
 | `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
@@ -1404,7 +1404,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `clicking outside the prompt hides autocomplete without changing the input` | Verifies that clicking outside the prompt hides autocomplete without changing the input. |
 | `context-aware autocomplete replaces only the active token for command flags` | Verifies that context-aware autocomplete replaces only the active token for command flags. |
 | `context-aware autocomplete shows positional hints alongside flags after a known command root` | Verifies that contextual autocomplete can surface positional guidance like `<target>` alongside command-specific flags after a known root such as `nmap `. |
-| `built-in pipe support suggests the supported pipe commands after a pipe` | Verifies that typing `command | ` exposes the narrow built-in pipe commands in the normal autocomplete dropdown. |
+| `built-in pipe support suggests the supported pipe commands after a pipe` | Verifies that after a pipe character, the narrow built-in pipe commands appear in the autocomplete dropdown. |
 
 #### `boot-resilience.spec.js`
 

@@ -100,6 +100,8 @@ async function unmountKeyboard(page) {
     document.getElementById('__fake-kb')?.remove()
     const shell = document.getElementById('mobile-shell')
     if (shell) shell.style.paddingBottom = ''
+    window.getMobileKeyboardOffset = () => 0
+    document.body.classList.remove('mobile-keyboard-open')
   })
 }
 
@@ -188,6 +190,18 @@ async function mountKeyboard(page) {
     img.style.cssText = 'width:100%;height:100%;display:block;object-fit:fill'
     el.appendChild(img)
     document.body.appendChild(el)
+
+    // Activate mobile-keyboard-open so the keyboard helper bar (#mobile-edit-bar)
+    // becomes visible. getMobileKeyboardOffset is patched to 272 so layout code
+    // sees the correct offset. isMobileKeyboardOpen is patched to check for the
+    // fake keyboard element — syncMobileViewportState calls isMobileKeyboardOpen
+    // to decide whether to clear the class, and it normally returns false because
+    // typeSlowly never focuses the input. Tying it to the element's existence
+    // keeps mobile-keyboard-open set for exactly as long as the fake keyboard is
+    // mounted, without needing a separate teardown step.
+    window.getMobileKeyboardOffset = () => 272
+    window.isMobileKeyboardOpen = () => !!document.getElementById('__fake-kb')
+    document.body.classList.add('mobile-keyboard-open')
   }, KEYBOARD_SRC)
 }
 

@@ -10,6 +10,7 @@ const {
   renderMotd,
   showToast,
   copyTextToClipboard,
+  shareUrl,
 } = fromScript(
   'app/static/js/utils.js',
   'escapeHtml',
@@ -20,6 +21,7 @@ const {
   'renderMotd',
   'showToast',
   'copyTextToClipboard',
+  'shareUrl',
 )
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
@@ -194,6 +196,82 @@ describe('showToast', () => {
     const toast = document.getElementById('permalink-toast')
     expect(toast.classList.contains('toast-success')).toBe(true)
     expect(toast.classList.contains('toast-error')).toBe(false)
+  })
+})
+
+describe('shareUrl', () => {
+  const TEST_URL = 'https://example.com/share/abc123'
+
+  function setupToast() {
+    document.body.innerHTML = '<div id="permalink-toast"></div>'
+  }
+
+  it('copies to clipboard and shows a share button in the toast when navigator.share is available', async () => {
+    setupToast()
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'share', { configurable: true, value: vi.fn() })
+
+    await shareUrl(TEST_URL)
+
+    expect(writeText).toHaveBeenCalledWith(TEST_URL)
+    const toast = document.getElementById('permalink-toast')
+    expect(toast.textContent).toContain('Link copied to clipboard')
+    expect(toast.querySelector('.toast-action-btn')).not.toBeNull()
+    expect(toast.querySelector('.toast-action-btn').textContent).toBe('share ↗')
+
+    delete navigator.share
+  })
+
+  it('tapping the share button in the toast calls navigator.share with the url', async () => {
+    setupToast()
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const share = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+
+    await shareUrl(TEST_URL)
+
+    document.querySelector('.toast-action-btn').click()
+
+    expect(share).toHaveBeenCalledWith({ url: TEST_URL })
+
+    delete navigator.share
+  })
+
+  it('copies to clipboard and shows a plain toast when navigator.share is unavailable', async () => {
+    setupToast()
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const originalShare = navigator.share
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+
+    await shareUrl(TEST_URL)
+
+    expect(writeText).toHaveBeenCalledWith(TEST_URL)
+    const toast = document.getElementById('permalink-toast')
+    expect(toast.textContent).toBe('Link copied to clipboard')
+    expect(toast.querySelector('.toast-action-btn')).toBeNull()
+
+    Object.defineProperty(navigator, 'share', { configurable: true, value: originalShare })
+  })
+
+  it('falls back to window.prompt when clipboard is unavailable', async () => {
+    setupToast()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('not allowed')) },
+    })
+    document.execCommand = vi.fn(() => false)
+    const prompt = vi.fn()
+    window.prompt = prompt
+
+    await shareUrl(TEST_URL)
+
+    expect(prompt).toHaveBeenCalledWith('Copy the link:', TEST_URL)
+    expect(document.getElementById('permalink-toast').textContent).toBe('')
+
+    delete window.prompt
   })
 })
 

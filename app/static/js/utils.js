@@ -109,14 +109,59 @@ async function copyTextToClipboard(text) {
   return _copyTextFallback(value);
 }
 
-function showToast(msg, tone = 'success') {
+async function shareUrl(url) {
+  // navigator.share requires a user gesture and a secure context (HTTPS).
+  // Because shareUrl is always called from inside a fetch .then() callback
+  // (creating the snapshot), the transient activation has already expired by
+  // the time we get here — a direct navigator.share() call will always fail
+  // with NotAllowedError. Instead we always copy to clipboard first (reliable),
+  // then surface a share button in the toast so the user can open the native
+  // share sheet with a fresh gesture from that tap.
+  const canShare = typeof navigator !== 'undefined' && typeof navigator.share === 'function';
+  try {
+    await copyTextToClipboard(url);
+  } catch (_) {
+    // Clipboard unavailable — surface the URL in a native prompt as last resort.
+    if (typeof window !== 'undefined' && typeof window.prompt === 'function') {
+      window.prompt('Copy the link:', url);
+    }
+    return;
+  }
+  if (canShare) {
+    showToast('Link copied to clipboard', 'success', {
+      label: 'share ↗',
+      onClick: () => { navigator.share({ url }).catch(() => {}); },
+    });
+  } else {
+    showToast('Link copied to clipboard');
+  }
+}
+
+function showToast(msg, tone = 'success', action = null) {
   // Toasts are transient UI feedback only; avoid stacking timers by resetting
   // the hide timer whenever a new message reuses the same element.
   const toast = document.getElementById('permalink-toast');
   const isError = tone === 'error' || /^(failed|unable|error|\[.*error\])/i.test(String(msg || ''));
+  toast.classList.remove('toast-has-action');
   toast.textContent = msg;
+  if (action && action.label && typeof action.onClick === 'function') {
+    const btn = document.createElement('button');
+    btn.className = 'toast-action-btn';
+    btn.textContent = action.label;
+    btn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toast.classList.remove('show');
+      toast.classList.remove('toast-has-action');
+      action.onClick();
+    }, { once: true });
+    toast.classList.add('toast-has-action');
+    toast.appendChild(btn);
+  }
   toast.classList.toggle('toast-error', isError);
   toast.classList.toggle('toast-success', !isError);
   toast.classList.add('show');
-  setTimeout(() => toast.classList.remove('show'), 2500);
+  setTimeout(() => {
+    toast.classList.remove('show');
+    toast.classList.remove('toast-has-action');
+  }, action ? 5000 : 2500);
 }

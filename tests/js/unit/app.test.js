@@ -1,6 +1,10 @@
 import { readFileSync } from 'fs'
-import { resolve } from 'path'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
 import { MemoryStorage, fromDomScripts } from './helpers/extract.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = resolve(__dirname, '../../..')
 
 // This harness recreates the browser-global environment expected by the classic
 // script bundle so app.js can be tested without loading the full page.
@@ -2081,7 +2085,7 @@ describe('app helpers', () => {
   })
 
   it('keeps the mobile composer host free of keyboard-height spacing in the simplified shell', () => {
-    const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
+    const css = readFileSync(resolve(REPO_ROOT, 'app/static/css/mobile.css'), 'utf8')
     const match = css.match(/body\.mobile-terminal-mode #mobile-composer-host\s*\{([\s\S]*?)\}/)
 
     expect(match).not.toBeNull()
@@ -2089,7 +2093,7 @@ describe('app helpers', () => {
   })
 
   it('keeps the themed mobile composer surfaces free of hard-coded dark colors', () => {
-    const css = readFileSync(resolve(process.cwd(), 'app/static/css/mobile.css'), 'utf8')
+    const css = readFileSync(resolve(REPO_ROOT, 'app/static/css/mobile.css'), 'utf8')
     const shellMatch = css.match(
       /body\.mobile-terminal-mode #mobile-shell-composer\s*\{([\s\S]*?)\}/,
     )
