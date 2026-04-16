@@ -992,7 +992,10 @@ async function exportTabHtml(id) {
       lines: `${t.rawLines.length} lines`,
       version: APP_CONFIG.version || null,
     };
-    const fontFacesCss = await ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => '');
+    const [fontFacesCss, exportCss] = await Promise.all([
+      ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
+      ExportHtmlUtils.fetchTerminalExportCss().catch(() => ''),
+    ]);
     const html = ExportHtmlUtils.buildTerminalExportHtml({
       appName,
       title: t.label,
@@ -1001,6 +1004,7 @@ async function exportTabHtml(id) {
       linesHtml,
       prefixWidth,
       fontFacesCss,
+      exportCss,
     });
     const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');

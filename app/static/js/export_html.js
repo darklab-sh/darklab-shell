@@ -138,9 +138,10 @@
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
-  // Produces the full inline CSS for an export document, matching the
-  // permalink-page layout. prefixWidth sets the gutter column width in ch.
-  function buildTerminalExportStyles(fontFacesCss = '', prefixWidth = 0) {
+  // Produces the full inline CSS for an export document. exportCss is the
+  // content of terminal_export.css (fetched and passed by the caller).
+  // prefixWidth sets the --perm-prefix-width custom property.
+  function buildTerminalExportStyles(fontFacesCss = '', prefixWidth = 0, exportCss = '') {
     const themeVars = getThemeExportVars();
     const themeDecls = Object.entries(themeVars)
       .map(([name, value]) => `    ${name}: ${value};`)
@@ -158,84 +159,10 @@ ${themeDecls}
     background: var(--bg);
     color: var(--text);
     font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    line-height: 1.65;
+    font-size: var(--terminal-font-size, 14px);
+    line-height: var(--terminal-line-height, 1.65);
   }
-  .export-header {
-    display: flex;
-    align-items: baseline;
-    gap: 14px;
-    padding: 16px 20px;
-    border-bottom: 1px solid var(--theme-terminal-bar-border, var(--border));
-    background: var(--theme-terminal-bar-bg, var(--bg));
-    flex-wrap: wrap;
-  }
-  .export-header-copy {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-  }
-  .export-title {
-    font-size: 20px;
-    font-weight: 300;
-    letter-spacing: 4px;
-    color: var(--green);
-    text-shadow: 0 0 20px var(--green-glow);
-  }
-  .export-meta {
-    font-size: 10px;
-    color: var(--muted);
-    letter-spacing: 1.5px;
-  }
-  .export-run-meta {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 10px;
-    margin-top: 3px;
-  }
-  .meta-badge {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    padding: 1px 7px;
-    border-radius: 2px;
-    border: 1px solid;
-  }
-  .meta-badge-ok   { color: var(--green); border-color: var(--green-dim); }
-  .meta-badge-fail { color: var(--red);   border-color: var(--red); }
-  .meta-item {
-    font-size: 10px;
-    color: var(--muted);
-    letter-spacing: 1.5px;
-    text-transform: uppercase;
-  }
-  .export-output {
-    flex: 1;
-    padding: 16px 20px 20px;
-    white-space: pre-wrap;
-    word-break: break-all;
-    overflow-wrap: anywhere;
-    background: var(--theme-panel-bg, var(--surface));
-    border: 1px solid var(--theme-panel-border, var(--border));
-  }
-  .line { display: block; }
-  .line.exit-ok   { color: var(--green); font-weight: 700; }
-  .line.exit-fail { color: var(--red);   font-weight: 700; }
-  .line.denied    { color: var(--amber); font-weight: 700; }
-  .line.notice    { color: var(--blue);  font-style: italic; }
-  .perm-prefix {
-    display: inline-block;
-    min-width: var(--perm-prefix-width, 0ch);
-    margin-right: 14px;
-    color: var(--muted);
-    font-size: 10px;
-    user-select: none;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-  }
-  .perm-content { display: inline; }
-  .prompt-prefix { color: var(--blue); font-weight: 700; margin-right: 8px; }`;
+  ${exportCss}`;
   }
 
   // ── Document builder ──────────────────────────────────────────────────────
@@ -254,10 +181,11 @@ ${themeDecls}
     linesHtml = '',
     prefixWidth = 0,
     fontFacesCss = '',
+    exportCss = '',
   }) {
     const colorScheme = getThemeExportColorScheme();
     const runMetaHtml = _buildRunMetaHtml(runMeta);
-    const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth);
+    const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth, exportCss);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -281,6 +209,19 @@ ${linesHtml}
 </main>
 </body>
 </html>`;
+  }
+
+  let _cachedTerminalExportCss = null;
+
+  async function fetchTerminalExportCss() {
+    if (_cachedTerminalExportCss !== null) return _cachedTerminalExportCss;
+    try {
+      const res = await fetch('/static/css/terminal_export.css');
+      _cachedTerminalExportCss = res.ok ? await res.text() : '';
+    } catch (_) {
+      _cachedTerminalExportCss = '';
+    }
+    return _cachedTerminalExportCss;
   }
 
   async function fetchVendorFontFacesCss() {
@@ -317,5 +258,6 @@ ${linesHtml}
     buildTerminalExportHtml,
     buildTerminalExportStyles,
     fetchVendorFontFacesCss,
+    fetchTerminalExportCss,
   };
 })();

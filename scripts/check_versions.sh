@@ -186,16 +186,18 @@ def _load_json(path: pathlib.Path) -> dict:
         return {}
 
 
-def _node_dev_dependencies() -> dict[str, str]:
+def _node_dependencies() -> tuple[dict[str, str], dict[str, str]]:
     payload = _load_json(PACKAGE_JSON)
-    devdeps = payload.get("devDependencies") if isinstance(payload, dict) else {}
-    if not isinstance(devdeps, dict):
-        return {}
-    result: dict[str, str] = {}
-    for name, version in devdeps.items():
-        if isinstance(name, str) and isinstance(version, str):
-            result[name] = version
-    return result
+    if not isinstance(payload, dict):
+        return {}, {}
+
+    def _extract(key: str) -> dict[str, str]:
+        section = payload.get(key)
+        if not isinstance(section, dict):
+            return {}
+        return {k: v for k, v in section.items() if isinstance(k, str) and isinstance(v, str)}
+
+    return _extract("dependencies"), _extract("devDependencies")
 
 
 def _package_lock_resolved_version(name: str) -> str:
@@ -211,21 +213,26 @@ def _package_lock_resolved_version(name: str) -> str:
 
 
 def _print_node_dependencies() -> None:
-    devdeps = _node_dev_dependencies()
-    if not devdeps:
-        return
-    print("Node devDependencies:")
-    for name in sorted(devdeps):
-        spec = devdeps[name]
-        locked = _package_lock_resolved_version(name)
-        latest = _latest_npm_version(name)
-        if latest == "unknown":
-            status = "unknown"
-        elif locked != "unknown" and locked == latest:
-            status = "up-to-date"
-        else:
-            status = "behind" if latest != "unknown" else "unknown"
-        print(f"- {name:24} spec={spec:12} locked={locked:12} latest={latest:12} {status}")
+    deps, devdeps = _node_dependencies()
+
+    def _print_section(label: str, packages: dict[str, str]) -> None:
+        if not packages:
+            return
+        print(f"\nNode {label}:")
+        for name in sorted(packages):
+            spec = packages[name]
+            locked = _package_lock_resolved_version(name)
+            latest = _latest_npm_version(name)
+            if latest == "unknown":
+                status = "unknown"
+            elif locked != "unknown" and locked == latest:
+                status = "up-to-date"
+            else:
+                status = "behind" if latest != "unknown" else "unknown"
+            print(f"- {name:24} spec={spec:12} locked={locked:12} latest={latest:12} {status}")
+
+    _print_section("dependencies", deps)
+    _print_section("devDependencies", devdeps)
 
 
 def _parse_image_ref(ref: str) -> tuple[str, str | None] | None:
@@ -425,7 +432,7 @@ def _print_docker_image() -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--python-only", action="store_true", help="Only report Python requirements")
-    parser.add_argument("--node-only", action="store_true", help="Only report Node devDependencies")
+    parser.add_argument("--node-only", action="store_true", help="Only report Node dependencies and devDependencies")
     parser.add_argument("--docker-only", action="store_true", help="Only report the Docker base image")
     parser.add_argument("--go-only", action="store_true", help="Only report Go tool pins from Dockerfile")
     parser.add_argument("--pip-only", action="store_true", help="Only report pip tool pins from Dockerfile")
@@ -469,7 +476,7 @@ def main() -> int:
     print("\nNotes:")
     print("- `pip index versions <package>` requires network access, so unavailable lookups are reported as unknown.")
     print("- The Go check uses the public Go module proxy and only considers stable release tags.")
-    print("- The Node check reads package.json/package-lock.json devDependencies and compares them against the npm registry.")
+    print("- The Node check reads package.json/package-lock.json dependencies and devDependencies and compares them against the npm registry.")
     print("- The Docker check reads the current base image directly from Dockerfile and ignores prerelease tags like alpha and rc builds.")
     print("- Dockerfile pinned tool versions are checked against upstream: go→proxy.golang.org, pip→pypi.org, gem→rubygems.org, github→GitHub releases API.")
     print("- Version comparisons normalise leading 'v' so v2.4.1 and 2.4.1 are treated as equal.")

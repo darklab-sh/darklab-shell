@@ -892,6 +892,7 @@ describe('tabs helpers', () => {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
       buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
       buildTerminalExportHtml: () => '<html><body>export</body></html>',
       exportTimestamp: () => '2026-01-01-00-00-00',
@@ -964,12 +965,13 @@ describe('tabs helpers', () => {
       title: 'share export',
       metaHtml: '<span>meta</span>',
       linesHtml: '<span class="line">hello</span>',
+      exportCss: '.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }',
     })
 
     expect(html).toContain('<meta name="color-scheme" content="light">')
-    expect(html).toContain('background: var(--theme-terminal-bar-bg, var(--bg));')
-    expect(html).toContain('background: var(--theme-panel-bg, var(--surface));')
-    expect(html).toContain('border: 1px solid var(--theme-panel-border, var(--border));')
+    expect(html).toContain('--bg: #eef4fa;')
+    expect(html).toContain('--theme-panel-bg: #edf4fb;')
+    expect(html).toContain('.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }')
 
     delete window.ThemeRegistry
   })
@@ -1009,6 +1011,7 @@ describe('tabs helpers', () => {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
       buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
       buildTerminalExportHtml: ({ linesHtml }) => linesHtml,
       exportTimestamp: () => '2026-01-01-00-00-00',
@@ -1038,6 +1041,7 @@ describe('tabs helpers', () => {
   it('exportTabHtml shows a toast when the tab has no lines', async () => {
     window.ExportHtmlUtils = {
       fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
       buildExportLinesHtml: (lines) => ({ linesHtml: '', prefixWidth: 0 }),
       buildTerminalExportHtml: () => '',
       exportTimestamp: () => '2026-01-01-00-00-00',

@@ -109,7 +109,9 @@ def _normalize_permalink_lines(content_lines, label: str):
 
     if is_structured_snapshot:
         has_prompt_echo = any(
-            isinstance(entry, dict) and str(entry.get("cls", "")) == "prompt-echo"
+            isinstance(entry, dict)
+            and str(entry.get("cls", "")) == "prompt-echo"
+            and len(str(entry.get("text", "")).split(None, 1)) > 1
             for entry in content_items
         )
         if not has_prompt_echo:

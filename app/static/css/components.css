@@ -493,6 +493,10 @@ body #copy-toast.toast-error {
 }
 
 /* ── Permalink pages ── */
+/* Shared header/output/line chrome lives in terminal_export.css, which is
+ * linked after styles.css on all permalink/diag pages and inlined into HTML
+ * exports by buildTerminalExportStyles. Only permalink-specific overrides live
+ * here. */
 body.permalink-page {
   display: flex;
   flex-direction: column;
@@ -503,46 +507,6 @@ body.permalink-page {
 }
 body.permalink-page::before {
   display: none;
-}
-body.permalink-page .permalink-header {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--theme-terminal-bar-border);
-  background: var(--theme-terminal-bar-bg);
-  flex-wrap: wrap;
-}
-body.permalink-page .permalink-header-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-body.permalink-page .permalink-title {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 300;
-  letter-spacing: 4px;
-  color: var(--green);
-  text-shadow: 0 0 20px var(--green-glow);
-  /* Reset styles inherited from the generic `header h1` rule in base.css */
-  display: block;
-  border: none;
-  background: none;
-  padding: 0;
-  min-height: 0;
-  border-radius: 0;
-}
-body.permalink-page .permalink-meta,
-body.permalink-page .permalink-expiry {
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
-body.permalink-page .permalink-expiry {
-  color: var(--amber);
 }
 body.permalink-page .permalink-actions {
   margin-left: auto;
@@ -555,61 +519,14 @@ body.permalink-page .permalink-actions .term-action-btn:hover {
   border-color: var(--green-dim);
   color: var(--green);
 }
-body.permalink-page .permalink-output {
-  flex: 1;
-  padding: 16px 20px 20px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-y: auto;
-  overflow-wrap: anywhere;
-  min-height: 0;
-  background: var(--theme-panel-bg);
+body.permalink-page .permalink-expiry {
+  font-size: 10px;
+  color: var(--amber);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
 body.permalink-page .output:empty::before {
   content: none;
-}
-body.permalink-page .perm-prefix {
-  display: inline-block;
-  min-width: var(--perm-prefix-width, 0ch);
-  margin-right: 14px;
-  color: var(--muted);
-  font-size: 10px;
-  user-select: none;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-body.permalink-page .perm-content {
-  display: inline;
-}
-body.permalink-page .permalink-run-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-top: 3px;
-}
-body.permalink-page .meta-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  padding: 1px 7px;
-  border-radius: 2px;
-  border: 1px solid;
-}
-body.permalink-page .meta-badge-ok {
-  color: var(--green);
-  border-color: var(--green-dim);
-}
-body.permalink-page .meta-badge-fail {
-  color: var(--red);
-  border-color: var(--red);
-}
-body.permalink-page .meta-item {
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
 }
 body.permalink-page .permalink-error-heading {
   color: var(--amber);

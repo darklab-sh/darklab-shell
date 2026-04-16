@@ -1,9 +1,9 @@
 {% extends "permalink_base.html" %}
 
 {% block header_meta %}
-  <div class="permalink-meta">{{ label }} &nbsp;·&nbsp; {{ created_fmt }}</div>
+  <div class="export-meta">{{ label }} &nbsp;·&nbsp; {{ created_fmt }}</div>
   {% if meta %}
-  <div class="permalink-run-meta">
+  <div class="export-run-meta">
     {% if meta.exit_code is not none %}<span class="meta-badge {% if meta.exit_code == 0 %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">exit {{ meta.exit_code }}</span>{% endif %}
     {% if meta.duration %}<span class="meta-item">{{ meta.duration }}</span>{% endif %}
     {% if meta.lines %}<span class="meta-item">{{ meta.lines }}</span>{% endif %}
@@ -225,7 +225,7 @@
     return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
   }
 
-  function saveHtml() {
+  async function saveHtml() {
     const appName = {{ app_name_json | safe }};
     const label   = {{ label_json | safe }};
     const created = {{ created_json | safe }};
@@ -244,6 +244,7 @@
       version:  permalinkMeta.version  || null,
     } : null;
 
+    const exportCss = await ExportHtmlUtils.fetchTerminalExportCss().catch(() => '');
     const createdFmt = (() => { try { return new Date(created).toLocaleString(); } catch(e) { return created; } })();
     const html = ExportHtmlUtils.buildTerminalExportHtml({
       appName,
@@ -253,6 +254,7 @@
       linesHtml,
       prefixWidth,
       fontFacesCss,
+      exportCss,
     });
 
     const a = document.createElement('a');

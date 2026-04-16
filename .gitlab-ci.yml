@@ -111,6 +111,7 @@ lint-js:
     - npm run lint:shell
     - npm run lint:docker
     - npm run lint:md
+    - npm run vendor:check
 
 audit-py:
   stage: audit
