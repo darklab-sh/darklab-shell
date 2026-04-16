@@ -1009,35 +1009,15 @@ class TestRunStreaming:
         assert f"README: see the project README at {PROJECT_README}\\n" in body
         assert '"type": "exit"' in body
 
-    def test_fake_ps_lists_recent_session_commands(self):
+    def test_fake_ps_lists_active_session_processes(self):
         client = get_client()
-        with db_connect() as conn:
-            conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-1", "sess-ps", "ping darklab.sh", "2026-01-01T00:00:00+00:00", "2026-01-01T00:00:03+00:00", 0, "[]")
-            )
-            conn.execute(
-                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                ("run-2", "sess-ps", "dig darklab.sh A", "2026-01-01T00:00:05+00:00", "2026-01-01T00:00:06+00:00", 0, "[]")
-            )
-            conn.commit()
 
         resp = client.post("/run", json={"command": "ps aux"}, headers={"X-Session-ID": "sess-ps"})
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "PID TTY      EXIT START    END      CMD\\n" in body
-        assert " 9000 pts/0    -    -        -        ps aux\\n" in body
-        assert (
-            f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:05+00:00')} "
-            f"{self._local_clock_text('2026-01-01T00:00:06+00:00')} dig darklab.sh A\\n"
-        ) in body
-        assert (
-            f"pts/0    0    {self._local_clock_text('2026-01-01T00:00:00+00:00')} "
-            f"{self._local_clock_text('2026-01-01T00:00:03+00:00')} ping darklab.sh\\n"
-        ) in body
+        assert "PID TTY      STAT START    CMD\\n" in body
+        assert " 9000 pts/0    R    -        ps aux\\n" in body
         assert '"type": "exit"' in body
 
     def test_run_reports_missing_allowlisted_command_without_spawning(self):

@@ -787,21 +787,19 @@ def _run_fake_retention() -> list[dict[str, str]]:
 
 
 def _run_fake_ps(session_id: str, command: str) -> list[dict[str, str]]:
-    rows = _recent_runs(session_id)
+    active = active_runs_for_session(session_id)
     current = command.strip() or "ps"
     lines = [
         _output_line("Process view:", "fake-section"),
-        _output_line("  PID TTY      EXIT START    END      CMD", "fake-ps-header"),
-        _output_line(f"{9000:5d} pts/0    -    -        -        {current}", "fake-ps-row"),
+        _output_line("  PID TTY      STAT START    CMD", "fake-ps-header"),
+        _output_line(f"{9000:5d} pts/0    R    -        {current}", "fake-ps-row"),
     ]
-    for row in rows:
-        cmd = str(row["command"]).strip()
-        exit_code = row["exit_code"]
-        exit_label = "?" if exit_code is None else str(exit_code)
-        started_clock = _format_clock(row["started"])
-        finished_clock = _format_clock(row["finished"]) if row["finished"] else "-"
+    for job in active:
+        cmd = str(job.get("command", "")).strip()
+        pid = job.get("pid") or ""
+        started_clock = _format_clock(job["started"]) if job.get("started") else "-"
         lines.append(_output_line(
-            f"{'':5} pts/0    {exit_label:<4} {started_clock:<8} {finished_clock:<8} {cmd}",
+            f"{str(pid):>5} pts/0    S    {started_clock:<8} {cmd}",
             "fake-ps-row",
         ))
     return lines

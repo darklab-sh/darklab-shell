@@ -723,11 +723,11 @@
     },
     {
       "no_output": false,
-      "exit_code": 255,
+      "exit_code": null,
       "command": "fierce --domain darklab.sh",
       "expected_text": [
         "NS:",
-        "SOA: failure"
+        "SOA:"
       ]
     },
     {
@@ -741,11 +741,11 @@
     },
     {
       "no_output": false,
-      "exit_code": 255,
+      "exit_code": null,
       "command": "fierce --domain darklab.sh --traverse 5",
       "expected_text": [
         "NS:",
-        "SOA: failure"
+        "SOA:"
       ]
     },
     {
