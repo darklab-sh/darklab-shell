@@ -1,3 +1,7 @@
+default:
+  tags:
+    - self-hosted
+
 image: python:3.12-slim
 
 workflow:
