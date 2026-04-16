@@ -4,11 +4,16 @@
   "type": "module",
   "scripts": {
     "test": "pytest; npm run test:unit; npm run test:e2e",
-    "test:unit": "vitest run",
-    "test:unit:watch": "vitest",
-    "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config playwright.parallel.config.js",
-    "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config playwright.parallel.config.js --ui",
-    "capture:container-smoke-test": "node scripts/node/capture_output_for_smoke_test.mjs"
+    "test:unit": "vitest run --config config/vitest.config.js",
+    "test:unit:watch": "vitest --config config/vitest.config.js",
+    "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js",
+    "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
+    "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
+    "lint": "npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml",
+    "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/",
+    "lint:shell": "shellcheck $(git ls-files '*.sh' | xargs grep -lE '^#!/.*(bash|sh)')",
+    "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
+    "lint:yaml": "yamllint -c config/yamllint.yml $(git ls-files '*.yml' '*.yaml')"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",

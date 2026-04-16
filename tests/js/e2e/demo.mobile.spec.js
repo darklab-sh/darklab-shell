@@ -8,7 +8,7 @@
  *
  * Run via scripts/record_demo_mobile.sh rather than directly — the wrapper
  * handles health-checking the container, running this spec, and stitching the
- * captured frames into docs/demo-mobile.webm via ffmpeg.
+ * captured frames into assets/demo-mobile.webm via ffmpeg.
  *
  * This spec captures frames via page.screenshot() (which respects
  * deviceScaleFactor, giving 1179×2556 images) rather than Playwright's built-in

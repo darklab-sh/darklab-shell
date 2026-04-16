@@ -4,7 +4,7 @@
  * Drives a curated sequence of interactions against a running container for
  * use as a README demo video. Run via scripts/record_demo.sh rather than
  * directly — the wrapper handles health-checking the container, running this
- * spec, and stitching the captured frames into docs/demo.mp4 via ffmpeg.
+ * spec, and stitching the captured frames into assets/demo.mp4 via ffmpeg.
  *
  * This spec captures frames via page.screenshot() (which respects
  * deviceScaleFactor, giving 2560×1600 images) rather than Playwright's built-in

@@ -84,7 +84,7 @@ function parseArgs(argv) {
       continue
     }
     if (arg === '--help' || arg === '-h') {
-      console.log(`Usage: node scripts/node/capture_output_for_smoke_test.mjs [options]
+      console.log(`Usage: node scripts/capture_output_for_smoke_test.mjs [options]
 
 By default, commands are read from app/conf/autocomplete.yaml (context.<root>.examples[].value).
 Use --commands-file to run a specific subset instead.

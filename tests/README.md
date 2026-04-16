@@ -58,7 +58,7 @@ You need different local dependencies depending on which suite you want to run:
 | --- | --- | --- |
 | `pytest` | Python, repo virtualenv, Python dev dependencies | Normal backend coverage does not require Docker |
 | `Vitest` | Node.js, npm dependencies | Runs in jsdom; no Flask server required |
-| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `playwright.config.js` is the single-project editor/debug config and `playwright.parallel.config.js` is the isolated parallel CLI config |
+| `Playwright` | Node.js, npm dependencies, Playwright browsers | Uses a real browser; `config/playwright.config.js` is the single-project editor/debug config and `config/playwright.parallel.config.js` is the isolated parallel CLI config |
 | Container Smoke Test | Docker + Docker Compose | Opt-in verification path for image/tooling changes |
 
 Recommended local baseline:
@@ -111,8 +111,8 @@ npm run test:e2e -- tests/js/e2e/failure-paths.spec.js
 
 Playwright notes:
 
-- `npm run test:e2e` uses [playwright.parallel.config.js](../playwright.parallel.config.js), which currently fans out across 5 isolated Chromium projects
-- plain `npx playwright test` uses [playwright.config.js](../playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
+- `npm run test:e2e` uses [config/playwright.parallel.config.js](../config/playwright.parallel.config.js), which currently fans out across 5 isolated Chromium projects
+- plain `npx playwright test` uses [config/playwright.config.js](../config/playwright.config.js), the single-project config intended for VS Code Test Explorer and focused local debugging
 - each parallel project gets its own Flask server port plus isolated `APP_DATA_DIR` state, so SQLite history, run-output artifacts, and limiter/process state do not leak between workers
 
 ---
@@ -157,15 +157,15 @@ The sections below stay intentionally short. The exhaustive per-test appendix fo
 
 The browser layer now uses a split config model:
 
-- [playwright.config.js](../playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
-- [playwright.parallel.config.js](../playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
+- [config/playwright.config.js](../config/playwright.config.js) keeps a simple single-project run path for editor integration and focused debugging
+- [config/playwright.parallel.config.js](../config/playwright.parallel.config.js) is the normal CLI path and balances the suite across 5 isolated projects using measured per-file runtime weights
 
 ### Demo Recording
 
-`tests/js/e2e/demo.spec.js` and `tests/js/e2e/demo.mobile.spec.js` are standalone recording scripts for producing the README demo videos. They are **not part of the normal test suite** — they are excluded from `playwright.config.js` and `playwright.parallel.config.js` and can only be triggered through their dedicated configs:
+`tests/js/e2e/demo.spec.js` and `tests/js/e2e/demo.mobile.spec.js` are standalone recording scripts for producing the README demo videos. They are **not part of the normal test suite** — they are excluded from `config/playwright.config.js` and `config/playwright.parallel.config.js` and can only be triggered through their dedicated configs:
 
-- `playwright.demo.config.js` — desktop (1280×960, `deviceScaleFactor: 2`)
-- `playwright.demo.mobile.config.js` — mobile (393×852 iPhone 14 Pro profile)
+- `config/playwright.demo.config.js` — desktop (1280×960, `deviceScaleFactor: 2`)
+- `config/playwright.demo.mobile.config.js` — mobile (393×852 iPhone 14 Pro profile)
 
 Both specs are also guarded by `test.skip(!process.env.RUN_DEMO, ...)` so they cannot run accidentally in a normal `npx playwright test` invocation.
 
@@ -177,7 +177,7 @@ scripts/record_demo_mobile.sh                       # mobile
 scripts/record_demo.sh --base-url http://localhost:9000   # custom port
 ```
 
-The wrapper scripts health-check the container, set `RUN_DEMO=1`, run the spec, and stitch the captured frames into a video with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The output files are `docs/darklab_shell_demo.mp4` and `docs/darklab_shell_mobile_demo.mp4`.
+The wrapper scripts health-check the container, set `RUN_DEMO=1`, run the spec, and stitch the captured frames into a video with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The output files are `assets/darklab_shell_demo.mp4` and `assets/darklab_shell_mobile_demo.mp4`.
 
 **How the videos are embedded in README.md:**
 
@@ -1642,11 +1642,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 ### Demo Recording Specs
 
-These specs are not part of the normal test suite. They are excluded from both `playwright.config.js` and `playwright.parallel.config.js`, matched only by `playwright.demo.config.js` and `playwright.demo.mobile.config.js`, and guarded by `test.skip(!process.env.RUN_DEMO, ...)`. Run them via `scripts/record_demo.sh` or `scripts/record_demo_mobile.sh`. See the [Demo Recording](#demo-recording) section above for the full usage guide.
+These specs are not part of the normal test suite. They are excluded from both `config/playwright.config.js` and `config/playwright.parallel.config.js`, matched only by `config/playwright.demo.config.js` and `config/playwright.demo.mobile.config.js`, and guarded by `test.skip(!process.env.RUN_DEMO, ...)`. Run them via `scripts/record_demo.sh` or `scripts/record_demo_mobile.sh`. See the [Demo Recording](#demo-recording) section above for the full usage guide.
 
 #### `demo.spec.js`
 
-Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `docs/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (2560×1920). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
+Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (2560×1920). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
 
 | Test | Description |
 | --- | --- |

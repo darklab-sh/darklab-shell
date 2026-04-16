@@ -5,11 +5,11 @@
 # Run this against a known-good running container whenever the expected
 # output for one or more Container Smoke Test commands changes intentionally —
 # for example, after a tool upgrade that changes help text, a new command
-# added to scripts/smoke_test_commands.txt, or a rewrite rule that alters output.
+# added to app/conf/autocomplete.yaml, or a rewrite rule that alters output.
 #
 # It drives a live browser session against the running dev container
 # (default: http://localhost:8888) and records the visible output of every
-# command in scripts/smoke_test_commands.txt into
+# command from app/conf/autocomplete.yaml examples into
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #
 # Rate limiting: the capture script runs every Container Smoke Test command in sequence
@@ -40,14 +40,14 @@
 #   scripts/capture_container_smoke_test_outputs.sh --start-from-command "nmap -h"
 #   scripts/capture_container_smoke_test_outputs.sh --base-url http://localhost:9000
 #
-# The underlying Node script (scripts/node/capture_output_for_smoke_test.mjs) accepts
+# The underlying Node script (scripts/capture_output_for_smoke_test.mjs) accepts
 # additional flags; pass them through after --.
 
 set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 
-exec node "$ROOT_DIR/scripts/node/capture_output_for_smoke_test.mjs" \
+exec node "$ROOT_DIR/scripts/capture_output_for_smoke_test.mjs" \
     --base-url http://localhost:8888 \
     --headed \
     "$@"

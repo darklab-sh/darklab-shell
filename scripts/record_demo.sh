@@ -10,16 +10,16 @@
 #   scripts/record_demo.sh
 #   scripts/record_demo.sh --base-url http://localhost:9000
 #
-# On macOS the output is docs/demo.mp4 (Apple VideoToolbox HEVC, ~seconds).
-# On Linux the output is docs/demo.webm (VP9 software encode, slower).
+# On macOS the output is assets/demo.mp4 (Apple VideoToolbox HEVC, ~seconds).
+# On Linux the output is assets/demo.webm (VP9 software encode, slower).
 #
 # Convert to GIF manually (scale down to 1280px wide for embedding):
-#   ffmpeg -i docs/darklab_shell_demo.mp4 \
+#   ffmpeg -i assets/darklab_shell_demo.mp4 \
 #     -vf "fps=15,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
-#     docs/darklab_shell_demo.gif
+#     assets/darklab_shell_demo.gif
 #
 # Trim the video before converting if needed:
-#   ffmpeg -i docs/darklab_shell_demo.mp4 -ss 00:00:02 -to 00:01:30 -c copy docs/darklab_shell_demo-trimmed.mp4
+#   ffmpeg -i assets/darklab_shell_demo.mp4 -ss 00:00:02 -to 00:01:30 -c copy assets/darklab_shell_demo-trimmed.mp4
 
 set -eu
 
@@ -55,7 +55,7 @@ cd "$ROOT_DIR"
 rm -rf test-results/demo-frames/ test-results/demo-output/
 
 DEMO_BASE_URL="$BASE_URL" RUN_DEMO=1 npx playwright test \
-  --config playwright.demo.config.js
+  --config config/playwright.demo.config.js
 
 # ── Stitch frames into video ──────────────────────────────────────────────────
 # The spec writes PNG frames to test-results/demo-frames/ via
@@ -78,14 +78,14 @@ if [[ "$(uname -s)" == "Darwin" ]]; then
   # Apple Silicon: use VideoToolbox hardware HEVC encoder — encodes in seconds
   # instead of minutes. libvpx-vp9 software encoding does not effectively
   # parallelize on Apple Silicon and would take 30+ minutes at this resolution.
-  OUT="$ROOT_DIR/docs/darklab_shell_demo.mp4"
+  OUT="$ROOT_DIR/assets/darklab_shell_demo.mp4"
   ffmpeg -y -framerate 15 \
     -i "$FRAMES_DIR/frame_%06d.png" \
     -c:v hevc_videotoolbox -q:v 60 \
     -tag:v hvc1 \
     "$OUT"
 else
-  OUT="$ROOT_DIR/docs/darklab_shell_demo.webm"
+  OUT="$ROOT_DIR/assets/darklab_shell_demo.webm"
   ffmpeg -y -framerate 15 \
     -i "$FRAMES_DIR/frame_%06d.png" \
     -c:v libvpx-vp9 -b:v 0 -crf 28 \
@@ -94,15 +94,15 @@ else
 fi
 
 OUTNAME=$(basename "$OUT")
-echo "Done. Final video: docs/${OUTNAME}"
+echo "Done. Final video: assets/${OUTNAME}"
 
 echo ""
-echo "Video saved to docs/${OUTNAME}"
+echo "Video saved to assets/${OUTNAME}"
 echo ""
 echo "Convert to GIF (scale down to 1280px wide for embedding, preserves aspect ratio):"
-echo "  ffmpeg -i docs/${OUTNAME} \\"
+echo "  ffmpeg -i assets/${OUTNAME} \\"
 echo "    -vf \"fps=15,scale=1280:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \\"
-echo "    docs/darklab_shell_demo.gif"
+echo "    assets/darklab_shell_demo.gif"
 echo ""
 echo "Trim before converting if needed:"
-echo "  ffmpeg -i docs/${OUTNAME} -ss 00:00:02 -to 00:01:30 -c copy docs/darklab_shell_demo-trimmed.${OUTNAME##*.}"
+echo "  ffmpeg -i assets/${OUTNAME} -ss 00:00:02 -to 00:01:30 -c copy assets/darklab_shell_demo-trimmed.${OUTNAME##*.}"

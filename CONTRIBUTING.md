@@ -115,7 +115,7 @@ Commit messages should describe the intent of the change, not just what files we
 
 **Python** — `flake8` enforces style and syntax. Configuration lives in [`.flake8`](.flake8). The main rules are: max line length 120, with per-file ignores for test files and generated content. Run `flake8 app/ tests/py/` before every commit.
 
-**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`eslint.config.js`](eslint.config.js)).
+**JavaScript** — the frontend has no transpiler or bundler. Keep the classic-script pattern: no ES modules, no framework dependencies. New logic belongs in the appropriate focused module (`state.js`, `ui_helpers.js`, domain scripts, etc.), with `controller.js` remaining the composition root that loads last. Match the existing style of the file you are editing. ESLint enforces 2-space indentation, single quotes, and no semicolons for config and test files ([`config/eslint.config.js`](config/eslint.config.js)).
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern recurs across at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
@@ -157,20 +157,22 @@ bash scripts/hooks/pre-commit
 
 The checks and their scope:
 
-| Check | Tool | Scope |
-|---|---|---|
-| Python style | `flake8` | `app/`, `tests/py/` |
-| Python security | `bandit` | `app/` |
-| Python tests | `pytest` | `tests/py/` |
-| Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` |
-| JS unit tests | `vitest` | `tests/js/unit/` |
-| JS style | `eslint` | all tracked `.js` files |
-| JS dep CVEs | `npm audit` | `package.json` (high/critical only) |
-| Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang |
-| Dockerfile | `hadolint` | `Dockerfile` |
-| YAML | `yamllint` | all tracked `.yml`/`.yaml` files |
+| Check | Tool | Scope | Run manually |
+|---|---|---|---|
+| Python style | `flake8` | `app/`, `tests/py/` | `python -m flake8 app/ tests/py/` |
+| Python security | `bandit` | `app/` | `python -m bandit -r app/ -ll -q` |
+| Python tests | `pytest` | `tests/py/` | `npm run test:unit` |
+| Python dep CVEs | `pip-audit` | `app/requirements.txt`, `requirements-dev.txt` | `python -m pip_audit -r app/requirements.txt -r requirements-dev.txt` |
+| JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
+| JS style | `eslint` | `tests/js/`, `config/`, `scripts/` | `npm run lint:js` |
+| JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm audit --audit-level=high` |
+| Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
+| Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
+| YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
 
-Tool configurations: [`.flake8`](.flake8), [`eslint.config.js`](eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`.hadolint.yaml`](.hadolint.yaml), [`.yamllint.yml`](.yamllint.yml).
+Run all JS/shell/Docker/YAML linters at once: `npm run lint`
+
+Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
@@ -214,7 +216,7 @@ When choosing the test layer:
 - use `Vitest` for browser-module logic that can be covered in jsdom
 - use `Playwright` for real browser behavior such as focus, mobile layout, drag/drop, scrolling, and end-to-end flows
 
-After a Dockerfile or packaged-tool change, run the container smoke test before merging. It builds the container, runs every command in `scripts/smoke_test_commands.txt`, and compares output against the stored expectations:
+After a Dockerfile or packaged-tool change, run the container smoke test before merging. It builds the container, runs every command from `app/conf/autocomplete.yaml` examples, and compares output against the stored expectations:
 
 ```bash
 ./scripts/container_smoke_test.sh

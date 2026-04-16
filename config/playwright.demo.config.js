@@ -3,9 +3,9 @@ import { defineConfig } from '@playwright/test'
 const BASE_URL = process.env.DEMO_BASE_URL || 'http://localhost:8888'
 
 export default defineConfig({
-  testDir: './tests/js/e2e',
+  testDir: '../tests/js/e2e',
   testMatch: '**/demo.spec.js',
-  outputDir: 'test-results/demo-output',
+  outputDir: '../test-results/demo-output',
   fullyParallel: false,
   workers: 1,
   retries: 0,

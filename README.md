@@ -9,12 +9,12 @@ A full-stack, self-hosted web terminal for running network diagnostics and secur
 </tr><tr>
 <td valign="top">
 
-![Desktop demo](docs/darklab_shell_demo.mp4)
+![Desktop demo](assets/darklab_shell_demo.mp4)
 
 </td>
 <td valign="top" width="320">
 
-![Mobile demo](docs/darklab_shell_mobile_demo.mp4)
+![Mobile demo](assets/darklab_shell_mobile_demo.mp4)
 
 </td>
 </tr></table>
@@ -460,30 +460,34 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── .flake8                     # flake8 config — line length and per-file ignore rules for CI linting
 ├── .shellcheckrc               # shellcheck config — suppresses false positives (e.g. CDPATH= idiom)
-├── .hadolint.yaml              # hadolint config — ignores intentional Dockerfile patterns
-├── .yamllint.yml               # yamllint config — relaxed line length, no document-start requirement
-├── eslint.config.js            # ESLint config — indentation, quotes, and semicolon rules for JS config/test files
 ├── .gitlab-ci.yml              # GitLab CI pipeline — pytest, Vitest, Playwright, lint, audit, and Docker build
 ├── .nvmrc                      # Node version pin (22) for Vitest / Playwright
 ├── package.json                # JS dev dependencies and test scripts
-├── vitest.config.js            # Vitest unit test config (jsdom environment)
-├── playwright.config.js        # Playwright single-project config for VS Code and focused local debugging
-├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments
-├── playwright.shared.js        # Shared Playwright server-builder helpers used by both configs
+├── config/
+│   ├── eslint.config.js        # ESLint config — indentation, quotes, and semicolon rules for JS config/test files
+│   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
+│   ├── yamllint.yml            # yamllint config — relaxed line length, no document-start requirement
+│   ├── vitest.config.js        # Vitest unit test config (jsdom environment)
+│   ├── playwright.config.js    # Playwright single-project config for VS Code and focused local debugging
+│   ├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments
+│   ├── playwright.shared.js    # Shared Playwright server-builder helpers used by both configs
+│   ├── playwright.demo.config.js     # Playwright config for recording the desktop demo video
+│   └── playwright.demo.mobile.config.js # Playwright config for recording the mobile demo video
 ├── requirements-dev.txt        # Dev-only dependencies (pytest, flake8, bandit, pip-audit)
 ├── scripts/
 │   ├── hooks/
 │   │   └── pre-commit          # Git pre-commit hook — runs all lint, security, and unit checks (activate with: git config core.hooksPath scripts/hooks)
+│   ├── playwright/
+│   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
+│   │   └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
 │   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
-│   ├── container_smoke_test.sh # Builds the container, runs all commands in scripts/smoke_test_commands.txt, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
+│   ├── container_smoke_test.sh # Builds the container, runs all autocomplete.yaml example commands through /run, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
+│   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
-│   ├── node/
-│   │   └── capture_output_for_smoke-test.mjs # Browser-driven smoke-test corpus capture helper
-│   └── playwright/
-│       ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
-│       └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
-├── docs/
+│   ├── record_demo.sh          # Records the desktop demo video — health-checks container, runs Playwright, stitches frames with ffmpeg
+│   └── record_demo_mobile.sh   # Same as record_demo.sh but for the mobile shell UI
+├── assets/                        # README media assets (demo videos)
 ├── tests/
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)

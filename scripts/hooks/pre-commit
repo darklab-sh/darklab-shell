@@ -45,6 +45,7 @@ fi
 
 # ESLint — check all tracked JS files that exist on disk
 run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
+    --config "$REPO_ROOT/config/eslint.config.js" \
     $(git ls-files '*.js' | xargs -I{} sh -c '[ -f "{}" ] && echo "{}"')
 
 # npm audit — JS dependency CVEs (fail on high/critical only)
@@ -61,12 +62,12 @@ fi
 
 # hadolint — Dockerfile linting
 if [ -f "$REPO_ROOT/Dockerfile" ]; then
-    run_check "hadolint" hadolint "$REPO_ROOT/Dockerfile"
+    run_check "hadolint" hadolint --config "$REPO_ROOT/config/hadolint.yaml" "$REPO_ROOT/Dockerfile"
 fi
 
 # yamllint — YAML syntax and style
 # shellcheck disable=SC2046  # word-splitting intentional to pass list of files
-run_check "yamllint" yamllint $(git ls-files '*.yml' '*.yaml')
+run_check "yamllint" yamllint -c "$REPO_ROOT/config/yamllint.yml" $(git ls-files '*.yml' '*.yaml')
 
 printf "\n\033[1m[pre-commit]\033[0m %d passed" "$PASS"
 if [ "$FAIL" -gt 0 ]; then
