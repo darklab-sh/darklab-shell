@@ -1290,6 +1290,7 @@ describe('Ctrl+R reverse-history search', () => {
         histSearchDropdown,
         shellPromptWrap: document.createElement('div'),
         acHide: vi.fn(),
+        apiFetch: vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ runs: [] }) })),
         refreshHistoryPanel: vi.fn(),
         useMobileTerminalViewportMode: () => false,
         setComposerValue: (val, start = null, end = null, opts = {}) => {

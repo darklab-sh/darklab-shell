@@ -24,15 +24,16 @@ function testScopedIp(testInfo, baseOffset = 0) {
 }
 
 async function runCommandMobile(page, cmd) {
-  await openMobileKeyboard(page)
+  await page.locator('#mobile-cmd').focus()
   await page.locator('#mobile-cmd').pressSequentially(cmd)
-  await expect(page.locator('#mobile-run-btn')).toBeEnabled()
-  await page.locator('#mobile-run-btn').click()
+  await simulateMobileKeyboard(page)
+  const runBtn = page.locator('#mobile-run-btn')
+  await expect(runBtn).toBeEnabled({ timeout: 5_000 })
+  await runBtn.click()
   await page.locator('.status-pill').filter({ hasNotText: 'RUNNING' }).waitFor({ timeout: 15_000 })
 }
 
-async function openMobileKeyboard(page) {
-  await page.locator('#mobile-cmd').focus()
+async function simulateMobileKeyboard(page) {
   await page.evaluate(() => {
     const vv = window.visualViewport
     if (!vv) return
@@ -44,6 +45,11 @@ async function openMobileKeyboard(page) {
     } catch (_) {}
     window.dispatchEvent(new Event('resize'))
   })
+}
+
+async function openMobileKeyboard(page) {
+  await page.locator('#mobile-cmd').focus()
+  await simulateMobileKeyboard(page)
 }
 
 test.describe('mobile menu', () => {

@@ -4,6 +4,7 @@
   "type": "module",
   "scripts": {
     "test": "pytest; npm run test:unit; npm run test:e2e",
+    "test:pytest": "pytest",
     "test:unit": "vitest run --config config/vitest.config.js",
     "test:unit:watch": "vitest --config config/vitest.config.js",
     "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js",
