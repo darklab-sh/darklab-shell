@@ -149,7 +149,7 @@
   </div>
   <div class="history-panel-body">
     <div class="history-panel-filters">
-      <input id="history-search-input" type="text" placeholder="search commands" autocomplete="off" aria-label="Search run history">
+      <input id="history-search-input" type="text" placeholder="search commands and output" autocomplete="off" aria-label="Search command and output history">
       <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle" type="button" aria-expanded="false">filters</button>
       <div id="history-advanced-filters" class="history-advanced-filters">
         <div class="history-root-autocomplete">
@@ -354,6 +354,15 @@
             <option value="redacted">Default To Redacted</option>
             <option value="raw">Default To Raw</option>
           </select>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Run Notifications</div>
+        <div class="faq-a options-fieldset">
+          <label class="options-choice">
+            <input type="checkbox" id="options-notify-toggle">
+            <span>Notify when a run completes or is killed</span>
+          </label>
         </div>
       </div>
       <div class="faq-item">

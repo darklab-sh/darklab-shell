@@ -145,6 +145,8 @@ function loadRunnerFns({
   dismissMobileKeyboardAfterSubmit = () => {},
   maybeMountDeferredPrompt = vi.fn(),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1')),
+  getRunNotifyPreference: getRunNotifyPreferenceOverride = () => 'off',
+  Notification: NotificationOverride = undefined,
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
     rawLines: [],
@@ -264,10 +266,13 @@ function loadRunnerFns({
       clearTimeout,
       setTimeout,
       Event,
+      getRunNotifyPreference: getRunNotifyPreferenceOverride,
+      ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
     setStatus,
     doKill,
+    _maybeNotify,
     submitCommand,
     submitComposerCommand,
     submitVisibleComposerCommand,
@@ -1281,5 +1286,103 @@ describe('_sessionTokenSet verify failure behavior', () => {
 
     const verifyCalls = apiFetch.mock.calls.filter(([url]) => url === '/session/token/verify')
     expect(verifyCalls).toHaveLength(0)
+  })
+})
+
+// ── _maybeNotify ──────────────────────────────────────────────────────────────
+
+describe('_maybeNotify', () => {
+  function makeNotificationClass() {
+    const instances = []
+    class MockNotification {
+      constructor(title, options) {
+        this.title = title
+        this.body = options?.body
+        instances.push(this)
+      }
+
+      static get permission() {
+        return MockNotification._permission
+      }
+    }
+    MockNotification._permission = 'granted'
+    MockNotification.instances = instances
+    return MockNotification
+  }
+
+  it('does nothing when pref is off', () => {
+    const MockNotification = makeNotificationClass()
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'off',
+      Notification: MockNotification,
+    })
+    _maybeNotify('nmap -sV ip.darklab.sh', 0, '12.3s')
+    expect(MockNotification.instances).toHaveLength(0)
+  })
+
+  it('does nothing when Notification is not available', () => {
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'on',
+      // Notification intentionally omitted — simulates unsupported browser
+    })
+    // Should not throw
+    expect(() => _maybeNotify('ping darklab.sh', 0, '1.0s')).not.toThrow()
+  })
+
+  it('does nothing when permission is not granted', () => {
+    const MockNotification = makeNotificationClass()
+    MockNotification._permission = 'default'
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'on',
+      Notification: MockNotification,
+    })
+    _maybeNotify('nmap -sV ip.darklab.sh', 0, '12.3s')
+    expect(MockNotification.instances).toHaveLength(0)
+  })
+
+  it('fires with command root as title and exit code + elapsed in body for exit 0', () => {
+    const MockNotification = makeNotificationClass()
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'on',
+      Notification: MockNotification,
+    })
+    _maybeNotify('nmap -sV ip.darklab.sh', 0, '12.3s')
+    expect(MockNotification.instances).toHaveLength(1)
+    expect(MockNotification.instances[0].title).toBe('$ nmap')
+    expect(MockNotification.instances[0].body).toBe('exit 0 in 12.3s')
+  })
+
+  it('fires with non-zero exit code in body for failed run', () => {
+    const MockNotification = makeNotificationClass()
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'on',
+      Notification: MockNotification,
+    })
+    _maybeNotify('curl https://darklab.sh', 6, '3.0s')
+    expect(MockNotification.instances).toHaveLength(1)
+    expect(MockNotification.instances[0].body).toBe('exit 6 in 3.0s')
+  })
+
+  it('fires with killed status and elapsed in body when run is killed', () => {
+    const MockNotification = makeNotificationClass()
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'on',
+      Notification: MockNotification,
+    })
+    _maybeNotify('nmap -p- ip.darklab.sh', 'killed', '4.2s')
+    expect(MockNotification.instances).toHaveLength(1)
+    expect(MockNotification.instances[0].title).toBe('$ nmap')
+    expect(MockNotification.instances[0].body).toBe('killed after 4.2s')
+  })
+
+  it('shows only the command root in the title, not arguments', () => {
+    const MockNotification = makeNotificationClass()
+    const { _maybeNotify } = loadRunnerFns({
+      getRunNotifyPreference: () => 'on',
+      Notification: MockNotification,
+    })
+    // Arguments may contain bearer tokens, API keys, or sensitive targets.
+    _maybeNotify('curl -H "Authorization: Bearer secret" https://api.example.com', 0, '1.0s')
+    expect(MockNotification.instances[0].title).toBe('$ curl')
   })
 })

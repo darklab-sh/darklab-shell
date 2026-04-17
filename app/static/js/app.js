@@ -456,6 +456,27 @@ function getShareRedactionDefaultPreference() {
   return _shareRedactionDefaultModes.includes(value) ? value : 'unset';
 }
 
+function getRunNotifyPreference() {
+  return getPreference('pref_run_notify') === 'on' ? 'on' : 'off';
+}
+
+async function applyRunNotifyPreference(mode, persist = true) {
+  let nextMode = mode === 'on' ? 'on' : 'off';
+  if (nextMode === 'on') {
+    if (typeof Notification === 'undefined') {
+      nextMode = 'off';
+    } else if (Notification.permission === 'denied') {
+      nextMode = 'off';
+      showToast('Notifications are blocked in your browser settings.');
+    } else if (Notification.permission !== 'granted') {
+      const result = await Notification.requestPermission();
+      if (result !== 'granted') nextMode = 'off';
+    }
+  }
+  if (persist) setPreferenceCookie('pref_run_notify', nextMode);
+  syncOptionsControls();
+}
+
 function syncOptionsControls() {
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
@@ -463,6 +484,7 @@ function syncOptionsControls() {
   if (lnToggle) lnToggle.checked = typeof lnMode === 'string' && lnMode === 'on';
   if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
+  if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
 }
 
 function applyThemePreference(theme, persist = true) {
@@ -1555,6 +1577,14 @@ function applyThemeSelection(themeName, persist = true) {
 const _tsModes  = ['off', 'elapsed', 'clock'];
 const _tsLabels = { off: 'timestamps: off', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
 
+// Update the label text on a mobile menu action button.  Centralises the
+// pattern used by _setTsMode (app.js) and _setLnMode (output.js) so both
+// go through the same mobileMenu reference instead of re-querying the DOM.
+function _setMobileActionLabel(action, label) {
+  const el = mobileMenu ? mobileMenu.querySelector(`[data-action="${action}"]`) : null;
+  if (el) el.textContent = label;
+}
+
 function _setTsMode(mode) {
   // Timestamp mode is expressed via body classes so both active transcript
   // rendering and exported/permalink views can share the same styling model.
@@ -1564,8 +1594,7 @@ function _setTsMode(mode) {
   if (mode === 'clock')   document.body.classList.add('ts-clock');
   const label = _tsLabels[mode];
   if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
-  const mobileTs = mobileMenu ? mobileMenu.querySelector('[data-action="ts"]') : null;
-  if (mobileTs) mobileTs.textContent = label;
+  _setMobileActionLabel('ts', label);
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
 }

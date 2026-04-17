@@ -42,6 +42,7 @@ const optionsTsSelect = document.getElementById('options-ts-select');
 const optionsLnToggle = document.getElementById('options-ln-toggle');
 const optionsWelcomeSelect = document.getElementById('options-welcome-select');
 const optionsShareRedactionSelect = document.getElementById('options-share-redaction-select');
+const optionsNotifyToggle = document.getElementById('options-notify-toggle');
 const themeSelect = document.getElementById('theme-select');
 const tsBtn = document.getElementById('ts-btn');
 const lnBtn = document.getElementById('ln-btn');

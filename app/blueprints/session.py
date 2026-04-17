@@ -41,6 +41,65 @@ def session_token_generate():
     return jsonify({"session_token": session_token})
 
 
+@session_bp.route("/session/token/info")
+def session_token_info():
+    """Return the current session token and its creation date.
+
+    Returns ``{"token": "tok_...", "created": "YYYY-MM-DD HH:MM:SS"}`` when the
+    caller is using a named session token, or ``{"token": null, "created": null}``
+    for anonymous UUID sessions.  The ``created`` field may be ``null`` for tokens
+    that pre-date the ``created`` column (edge case in older deployments).
+    """
+    session_id = get_session_id()
+    if not session_id.startswith("tok_"):
+        return jsonify({"token": None, "created": None})
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT created FROM session_tokens WHERE token = ?", (session_id,)
+        ).fetchone()
+    # get_session_id() already rejects revoked tokens; this row-absent check
+    # guards the narrow TOCTOU window between that validation and this query.
+    if not row:
+        return jsonify({"token": None, "created": None})
+    return jsonify({"token": session_id, "created": row["created"]})
+
+
+@session_bp.route("/session/token/revoke", methods=["POST"])
+def session_token_revoke():
+    """Permanently delete a session token from the server.
+
+    Accepts ``{"token": "tok_..."}`` in the request body.  The token must carry a
+    ``tok_`` prefix and must exist in ``session_tokens``; any other value returns a
+    4xx error.  On success the token is deleted and can no longer be used as a
+    named session identity.  Associated run history, snapshots, and starred commands
+    remain in the database under the now-orphaned session ID; they are not deleted
+    and are not migrated.
+
+    Possession of the token value is the only authorization check — there is no
+    higher-level ownership model.  If the caller is revoking their own current
+    active token (``X-Session-ID == token``) the client is responsible for
+    switching to an anonymous session after this call succeeds.
+    """
+    data = request.get_json(silent=True) or {}
+    token = str(data.get("token") or "").strip()
+    if not token:
+        return jsonify({"error": "token is required"}), 400
+    if not token.startswith("tok_"):
+        return jsonify({"error": "only tok_ tokens can be revoked"}), 400
+    with db_connect() as conn:
+        result = conn.execute(
+            "DELETE FROM session_tokens WHERE token = ?", (token,)
+        )
+        conn.commit()
+    if result.rowcount == 0:
+        return jsonify({"error": "token not found"}), 404
+    log.info("SESSION_TOKEN_REVOKED", extra={
+        "ip": get_client_ip(),
+        "session": get_session_id(),
+    })
+    return jsonify({"ok": True})
+
+
 @session_bp.route("/session/token/verify", methods=["POST"])
 def session_token_verify():
     """Check whether a tok_ session token was issued by this server.

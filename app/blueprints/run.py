@@ -36,7 +36,7 @@ from fake_commands import (
 )
 from helpers import get_client_ip, get_session_id
 from process import active_run_register, active_run_remove, pid_pop, pid_register
-from run_output_store import RunOutputCapture
+from run_output_store import RunOutputCapture, load_full_output_entries
 
 log = logging.getLogger("shell")
 
@@ -60,18 +60,38 @@ def _run_output_capture(run_id):
     )
 
 
+def _extract_output_search_text(preview_lines):
+    return "\n".join(
+        str(line.get("text", "")) if isinstance(line, dict) else str(line)
+        for line in preview_lines
+        if line is not None
+    )
+
+
 def _save_completed_run(run_id, session_id, command, run_started, finished_iso, exit_code, capture):
     # Persist preview text and artifact metadata together so history/permalink
     # readers never observe half-written run state.
     capture.finalize()
     try:
+        preview_lines = list(capture.preview_lines)
+        # Index full output when available so early lines of long runs are searchable.
+        # Falls back to preview if the artifact can't be read.
+        if capture.full_output_available and capture.artifact_rel_path:
+            try:
+                full_entries = load_full_output_entries(capture.artifact_rel_path)
+                search_text = _extract_output_search_text(full_entries)
+            except Exception:
+                search_text = _extract_output_search_text(preview_lines)
+        else:
+            search_text = _extract_output_search_text(preview_lines)
         with db_connect() as conn:
             conn.execute(
                 "INSERT INTO runs "
                 "("
                 "id, session_id, command, started, finished, exit_code, output, output_preview, "
-                "preview_truncated, output_line_count, full_output_available, full_output_truncated"
-                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
+                "output_search_text"
+                ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
                 (
                     run_id,
                     session_id,
@@ -80,11 +100,12 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
                     finished_iso,
                     exit_code,
                     None,
-                    json.dumps(list(capture.preview_lines)),
+                    json.dumps(preview_lines),
                     int(capture.preview_truncated),
                     capture.output_line_count,
                     int(capture.full_output_available),
                     int(capture.full_output_truncated),
+                    search_text,
                 )
             )
             if capture.full_output_available and capture.artifact_rel_path:

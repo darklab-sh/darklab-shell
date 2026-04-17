@@ -24,6 +24,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
   - [nmap Capabilities](#nmap-capabilities)
   - [Go Binary Installation](#go-binary-installation)
   - [SQLite WAL Mode](#sqlite-wal-mode)
+  - [FTS5 Tokenizer: Trigram with Unicode61 Fallback](#fts5-tokenizer-trigram-with-unicode61-fallback)
 - [Observability Decisions](#observability-decisions)
   - [Structured Logging](#structured-logging)
 - [Frontend Decisions](#frontend-decisions)
@@ -124,7 +125,7 @@ The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It
 
 ### Session Token Security
 
-**Three non-obvious constraints in the session token design:**
+**Five non-obvious constraints in the session token design:**
 
 **1. `/session/migrate` requires `from_session_id == X-Session-ID`**
 
@@ -140,9 +141,15 @@ Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) onl
 
 The `storage` event fires in every same-origin tab that did NOT make the change. `session.js` registers a listener that calls `SESSION_ID = e.newValue || _sessionUuid` when `e.key === 'session_token'`. This means tabs that are already open pick up a token change immediately without a reload — they won't keep sending a stale `X-Session-ID` after another tab runs `session-token set/clear/rotate`. The listener intentionally does not call `updateSessionId()` (which reads back from `localStorage`) because `e.newValue` already carries the new value directly, and `localStorage` reads in another tab may not yet reflect the change on some browsers.
 
+Header sync alone is not sufficient, though. Passive tabs also need to refresh session-scoped UI such as recent-command chips, server-backed starred state, history results, and the options-panel token status. The current listener therefore also calls `reloadSessionHistory()` and `_updateOptionsSessionTokenStatus()` when those helpers are present, so visible UI follows the new session identity instead of lagging behind it.
+
 **4. Session-token subcommands are intercepted client-side; bare `session-token` is not**
 
-`generate`, `set`, `clear`, and `rotate` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present.
+`generate`, `set`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present.
+
+**5. Revocation is enforced at the API layer, not just client-side**
+
+`session-token revoke` deletes the token row from `session_tokens`. But that alone is not enough — any client still holding the token string could keep sending it as `X-Session-ID` and get data back, because the old data routes trusted any header value unconditionally. `get_session_id()` in `helpers.py` now looks up every `tok_`-prefixed header value against `session_tokens` on each request. A revoked or never-issued token returns `""` (anonymous), so the caller immediately loses access to session-scoped runs, snapshots, and stars — no client-side coopertion required. The DB lookup adds a single indexed read per request; the `session_tokens` table is small and hit-rate is high, so the overhead is negligible.
 
 ### Deny Flag Matching (anywhere in command)
 
@@ -195,6 +202,14 @@ All Go tools (`nuclei`, `subfinder`, `httpx`, `dnsx`, `gobuster`) are installed 
 SQLite is configured in WAL (Write-Ahead Logging) mode with `PRAGMA synchronous=NORMAL`. This allows concurrent reads during writes, which is important with 4 Gunicorn workers all reading/writing the same database simultaneously. The `db_connect()` function applies these pragmas on every connection.
 
 Startup bootstrap is still serialized explicitly. `database.py` calls `db_init()` at module import time, so all Gunicorn workers can reach schema creation, migration, and retention pruning concurrently during boot. `_db_init_lock()` takes an exclusive filesystem lock on `/data/history.db.init.lock` (or the `/tmp` fallback) so that import-time bootstrap work happens once at a time and workers do not fail with `sqlite3.OperationalError: database is locked`.
+
+### FTS5 Tokenizer: Trigram with Unicode61 Fallback
+
+The `runs_fts` virtual table uses the FTS5 **trigram** tokenizer when available (SQLite ≥ 3.38), falling back to **unicode61** (the FTS5 default, available on all SQLite versions).
+
+**Why trigram:** Security tool output contains port numbers (`443/tcp`), CVEs (`CVE-2024-1234`), IP addresses, hostnames, and flag strings that users typically search for by substring. Trigram tokenization breaks every string into overlapping 3-character sequences, enabling `MATCH "443"` to find `443/tcp open` without the user needing to know the exact token boundary. Unicode61 tokenizes on whitespace and punctuation, so `443` alone would not match `443/tcp` — the user would need to search `443/tcp` exactly.
+
+**Why the fallback matters:** The production Docker image is based on the latest Ubuntu and ships SQLite 3.38+, so trigram is always used in production. The fallback to unicode61 preserves FTS functionality for operators running darklab shell on platforms with older SQLite (some Alpine-based images, macOS system SQLite). In the fallback case, search remains functional for whole-word and prefix queries; only substring matching within tokens degrades. `_create_fts_schema()` in `database.py` detects the available tokenizer at init time and falls back gracefully; no config change is needed.
 
 ---
 
@@ -260,6 +275,14 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 **Problem:** "Copy permalink URL" works on desktop but is awkward on mobile — users have to paste from clipboard into a share target manually.
 
 **Solution:** `navigator.share()` (Web Share API) invokes the native OS share sheet when the browser supports it. On unsupported browsers (most desktop browsers at time of writing) the flow falls back to `navigator.clipboard.writeText()` without UI intervention. `AbortError` from the user cancelling the share dialog is caught and suppressed silently — it is not an error.
+
+### Run Notification Title Uses Command Root Only
+
+Desktop notifications on run completion (`_maybeNotify()` in `runner.js`) use only the command root — the first word — as the notification title (e.g. `$ curl`) rather than the full command string.
+
+**Why not the full command:** The full command can contain bearer tokens (`curl -H "Authorization: Bearer sk-..."`), API keys in query strings, auth headers, internal hostnames, or the literal token value from `session-token revoke <token>`. Browser notifications are visible in the OS notification center and can persist after the browser window is closed. Logging the full command in the notification title would expose secrets in a surface that users may not associate with sensitive data. The command root communicates which tool ran without leaking any arguments.
+
+**Why not suppress the title entirely:** A blank or generic title ("run complete") gives operators no context about which of several concurrent long-running scans just finished. The command root is a reasonable middle ground — enough signal to identify the tool, no risk of credential exposure.
 
 ### Dedicated Mobile Shell
 

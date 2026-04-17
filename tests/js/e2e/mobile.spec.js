@@ -52,6 +52,58 @@ async function openMobileKeyboard(page) {
   await simulateMobileKeyboard(page)
 }
 
+// Fixed IP within the diagnostics_allowed_cidrs range (10.0.0.0/8) so the
+// /diag endpoint serves the page rather than returning 404.  The peer IP
+// (127.0.0.1) is in trusted_proxy_cidrs by default, so X-Forwarded-For is
+// honoured and the resolved client IP becomes this value.
+const DIAG_TEST_IP = '10.0.0.1'
+
+test.describe('diagnostics page on mobile', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': DIAG_TEST_IP })
+  })
+
+  test('back button is visible at mobile viewport width', async ({ page }) => {
+    await page.setViewportSize(MOBILE)
+    await page.goto('/diag')
+    await expect(page.locator('.diag-back-btn')).toBeVisible()
+  })
+
+  test('back button navigates back to the shell', async ({ page }) => {
+    await page.setViewportSize(MOBILE)
+    await page.goto('/diag')
+    await page.locator('.diag-back-btn').click()
+    await expect(page.locator('header h1')).toBeVisible()
+    await expect(page.locator('#hamburger-btn')).toBeVisible()
+  })
+
+  // Verify parity at the shell's mobile-mode threshold (900px + touch).
+  // A touch device at 850px gets the mobile shell, so the diag back button
+  // must also appear. The breakpoint was previously 760px which missed this.
+  test('back button is visible at 850px touch viewport (shell threshold)', async ({ page }) => {
+    await page.setViewportSize({ width: 850, height: 900 })
+    await page.goto('/diag')
+    await expect(page.locator('.diag-back-btn')).toBeVisible()
+  })
+})
+
+test.describe('diagnostics page on desktop at threshold width', () => {
+  // Override the file-level hasTouch/isMobile so the CSS sees pointer:fine.
+  // A non-touch browser at 850px stays in the desktop shell, so the diag
+  // page must not show the mobile back button.
+  test.use({ hasTouch: false, isMobile: false })
+
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': DIAG_TEST_IP })
+  })
+
+  test('back button is hidden at 850px non-touch viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 850, height: 900 })
+    await page.goto('/diag')
+    await expect(page.locator('.diag-back-btn')).toBeHidden()
+  })
+})
+
 test.describe('mobile menu', () => {
   test.beforeEach(async ({ page }, testInfo) => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': testScopedIp(testInfo, 101) })

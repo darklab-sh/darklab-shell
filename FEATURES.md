@@ -392,7 +392,7 @@ When full-output persistence is enabled, the history drawer **permalink** action
 
 The **clear all** button at the top of the history drawer prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt.
 
-The history drawer also supports command-text search plus filters for command root, exit status, recent date range, and starred-only results. On mobile, the advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete suggestions instead of the browser's native picker, and the common row actions keep the drawer open so you can work through multiple history entries without repeated reopen churn.
+The history drawer also supports full-text search across both command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only results. Typing a term like a port number, CVE identifier, IP address, or any other string from a previous scan's output will surface matching runs. The search field placeholder reads "search commands and output" to reflect this. Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on the `command` and `output_search_text` columns. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so even early lines of long runs are reachable; otherwise it falls back to the capped preview window. On mobile, the advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete suggestions instead of the browser's native picker, and the common row actions keep the drawer open so you can work through multiple history entries without repeated reopen churn.
 
 If the page reloads while a command is still running, the shell restores a running placeholder tab for that session instead of dropping the command on the floor. Live output cannot be replayed after the SSE stream is gone, but the restored tab keeps the kill action available, shows the submitted command with the normal prompt styling, polls for completion, and swaps into the saved run output automatically when the run lands in history.
 
@@ -671,6 +671,7 @@ Click **≡ options** in the header (or the **☰** menu on mobile) to open the 
 | **Line Numbers** | on / off | Shows or hides sequential line numbers beside output and the live prompt. Equivalent to the tab toolbar toggle |
 | **Welcome Intro** | Animated / Disable Animation / Remove Completely | Controls whether the welcome animation plays on the first tab: full animated sequence, instant settle, or no welcome tab at all |
 | **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Sets the default redaction choice for snapshot sharing so the prompt is skipped once a preference is saved |
+| **Run Notifications** | on / off | When enabled, a browser desktop notification fires each time a run exits or is killed. The notification title shows only the command root (e.g. `$ curl`) to avoid exposing arguments or token values; the body shows exit code and elapsed time. Enabling triggers the native browser permission prompt if needed; if the browser has already blocked notifications, the toggle reverts and a toast is shown |
 
 All preferences are stored in browser cookies and persist across sessions on the same device.
 
@@ -707,19 +708,23 @@ By default the shell assigns each browser an anonymous UUID stored in `localStor
 
 Run `session-token` (no subcommand) to see the current status: active token in masked form or "anonymous session" if none is set.
 
-- **`session-token generate`** — requests a new `tok_<32 hex>` token from the server, stores it in `localStorage` under `session_token`, and makes it the active session identity immediately. If the current anonymous session has any run history you will be asked: _"you have N run(s) in your previous session. migrate history to your new session token? [yes/no]"_ — answering yes calls `/session/migrate`; answering no leaves the anonymous history in place and starts fresh.
+- **`session-token generate`** — requests a new `tok_<32 hex>` token from the server and offers to migrate the current session’s runs, snapshots, and starred commands. The token becomes active only after the optional migration step completes successfully; if you decline migration it activates immediately as a fresh named session, and if migration fails the old session stays active.
 
-- **`session-token set <token>`** — adopts an existing token, for example one generated on another device. The value is validated (must start with `tok_` or be a valid UUID) before being applied. If the current session has run history, the same migration prompt is offered.
+- **`session-token set <token>`** — adopts an existing token, for example one generated on another device. The value is validated before being applied: UUIDs are always allowed, while `tok_...` values must already exist on this server. If the current session has run history, the same migration prompt is offered; verification failures fail closed rather than silently switching to an empty session.
 
 - **`session-token clear`** — removes `session_token` from `localStorage` and reverts to the original anonymous UUID session. The token's run history remains in the server database and can be reclaimed with `session-token set` at any time.
 
 - **`session-token rotate`** — generates a new token and migrates all run history and snapshots from the old identity to the new one before switching. The switch is **atomic**: if the migration call fails, the rotation is aborted and the old token stays active. The old token is retired after a successful rotate.
 
-All subcommands (`generate`, `set`, `clear`, `rotate`) are intercepted client-side and never reach the server, so token values are not written to the command log.
+- **`session-token list`** — calls `GET /session/token/info` and displays the active token in masked form along with its creation date. Shows "anonymous session" if no token is set.
+
+- **`session-token revoke <token>`** — permanently deletes the given token from the server via `POST /session/token/revoke`. If the revoked token is the currently active one, the client also clears `localStorage` and falls back to the anonymous UUID session. Possession of the token string is the only authorization check, matching the existing session model. Revocation invalidates the token at the API layer immediately; the old runs, snapshots, and starred-command rows are not deleted, but the revoked token can no longer read or write them.
+
+All subcommands (`generate`, `set`, `clear`, `rotate`, `list`, `revoke`) are intercepted client-side and never reach the server, so token values are not written to the command log.
 
 **Options panel**
 
-The options panel (⚙) shows the active session token in masked form (e.g. `tok_abcd••••••••`) when one is set, or "No session token — anonymous session" otherwise. Four shortcut buttons cover the full lifecycle — their visibility is conditional on whether a token is currently active:
+The options panel (⚙) shows the active session token in masked form (e.g. `tok_abcd••••••••`) when one is set, or "No session token — anonymous session" otherwise. Four shortcut buttons cover the common inline token actions — their visibility is conditional on whether a token is currently active. `list` and `revoke` remain terminal-only commands:
 
 | Button | Shown when | Action |
 |---|---|---|
@@ -732,7 +737,7 @@ If a session has run history, a history migration confirmation modal is shown be
 
 **Cross-tab sync**
 
-When you change your session token in one tab, all other open tabs adopt the new identity automatically via the browser `storage` event — no reload required for subsequent API requests to carry the correct `X-Session-ID`.
+When you change your session token in one tab, all other open tabs adopt the new identity automatically via the browser `storage` event. Passive tabs also refresh recent-command chips, starred-command state, the history drawer, and the options-panel token display, so the visible UI stays aligned with the new `X-Session-ID` without a reload.
 
 **Token format and storage**
 

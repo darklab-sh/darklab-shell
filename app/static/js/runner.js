@@ -37,6 +37,22 @@ function setStatus(s) {
   status.textContent = labels[s] || s;
 }
 
+// ── Run notifications ──
+
+function _maybeNotify(command, codeOrStatus, elapsed) {
+  if (typeof getRunNotifyPreference !== 'function' || getRunNotifyPreference() !== 'on') return;
+  if (typeof Notification === 'undefined' || Notification.permission !== 'granted') return;
+  // Use only the command root (first word) so arguments — which may contain
+  // bearer tokens, API keys, auth headers, or sensitive targets — are never
+  // surfaced in OS notifications or on the lock screen.
+  const root = (command || '').split(/\s+/)[0] || '';
+  const title = root ? '$ ' + root : '$';
+  const body = codeOrStatus === 'killed'
+    ? (elapsed ? `killed after ${elapsed}` : 'killed')
+    : (elapsed ? `exit ${codeOrStatus} in ${elapsed}` : `exit ${codeOrStatus}`);
+  try { new Notification(title, { body }); } catch(e) {}
+}
+
 // ── Run timer ──
 
 // Format a duration in seconds as a compact human-readable string.
@@ -322,6 +338,7 @@ function doKill(tabId) {
   t.reconnectedRun = false;
   stopTimer();
   appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
+  _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
   setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
@@ -727,6 +744,77 @@ async function _sessionTokenRotate(tabId) {
   }
 }
 
+async function _sessionTokenList(tabId) {
+  try {
+    const resp = await apiFetch('/session/token/info');
+    if (!resp.ok) {
+      appendLine('[error] failed to load session token info', 'exit-fail', tabId);
+      setStatus('fail'); appendPromptNewline(tabId);
+      return;
+    }
+    const data = await resp.json();
+    const w = 14;
+    const kv = (k, v) => k.padEnd(w) + '  ' + v;
+    if (data.token) {
+      appendLine(kv('session token', maskSessionToken(data.token)), 'fake-kv', tabId);
+      appendLine(kv('status', 'active'), 'fake-kv', tabId);
+      if (data.created) appendLine(kv('created', data.created + ' UTC'), 'fake-kv', tabId);
+      appendLine(kv('storage', 'localStorage (session_token)'), 'fake-kv', tabId);
+    } else {
+      appendLine(kv('session', maskSessionToken(SESSION_ID)), 'fake-kv', tabId);
+      appendLine(kv('status', 'anonymous (no session token set)'), 'fake-kv', tabId);
+      appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'fake-kv', tabId);
+    }
+    setStatus('ok'); appendPromptNewline(tabId);
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError('session-token list', err);
+    setStatus('fail'); appendPromptNewline(tabId);
+  }
+}
+
+async function _sessionTokenRevoke(token, tabId) {
+  if (!token) {
+    appendLine('usage: session-token revoke <token>', '', tabId);
+    setStatus('fail'); appendPromptNewline(tabId);
+    return;
+  }
+  if (!token.startsWith('tok_')) {
+    appendLine('[error] only tok_ tokens can be revoked', 'exit-fail', tabId);
+    setStatus('fail'); appendPromptNewline(tabId);
+    return;
+  }
+  try {
+    const resp = await apiFetch('/session/token/revoke', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ token }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (!resp.ok) {
+      appendLine(`[error] ${data.error || resp.status}`, 'exit-fail', tabId);
+      setStatus('fail'); appendPromptNewline(tabId);
+      return;
+    }
+    const isCurrentToken = token === SESSION_ID;
+    appendLine(`session token revoked: ${maskSessionToken(token)}`, '', tabId);
+    if (isCurrentToken) {
+      localStorage.removeItem('session_token');
+      const uuid = localStorage.getItem('session_id') || SESSION_ID;
+      updateSessionId(uuid);
+      if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+      appendLine(`reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
+    } else {
+      appendLine('token removed from server — any device using it is now on an empty anonymous session', '', tabId);
+    }
+    setStatus('ok'); appendPromptNewline(tabId);
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError('session-token revoke', err);
+    setStatus('fail'); appendPromptNewline(tabId);
+  }
+}
+
 async function _handleSessionTokenCommand(cmd, tabId) {
   const parts = cmd.trim().split(/\s+/);
   const sub = (parts[1] || '').toLowerCase();
@@ -740,9 +828,14 @@ async function _handleSessionTokenCommand(cmd, tabId) {
     _sessionTokenClear(tabId);
   } else if (sub === 'rotate') {
     await _sessionTokenRotate(tabId);
+  } else if (sub === 'list') {
+    await _sessionTokenList(tabId);
+  } else if (sub === 'revoke') {
+    const value = parts.slice(2).join(' ').trim();
+    await _sessionTokenRevoke(value, tabId);
   } else {
     appendLine(`session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
-    appendLine('usage: session-token [generate | set <value> | clear | rotate]', '', tabId);
+    appendLine('usage: session-token [generate | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
     setStatus('fail');
     appendPromptNewline(tabId);
   }
@@ -991,6 +1084,7 @@ function submitCommand(rawCmd) {
                   setTabStatus(tabId, 'fail');
                 }
                 if (t) t.syntheticClear = false;
+                _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
                 _setRunButtonDisabled(false); hideTabKillBtn(tabId);
                 if (t && t.closing && typeof finalizeClosingTab === 'function') {
                   finalizeClosingTab(tabId);

@@ -1,0 +1,311 @@
+/* darklab shell CSS module: diag
+   Diagnostics page layout, header, tables, chips, and responsive overrides. */
+
+/* ── Diag page layout ──────────────────────────────────────────────────────── */
+body.diag-page {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  padding: 0;
+  gap: 0;
+  overflow: auto;
+}
+body.diag-page::before { display: none; }
+
+.diag-header {
+  justify-content: space-between;
+  align-items: center;
+  gap: 18px;
+}
+
+.diag-header-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.diag-header-title {
+  display: inline-flex;
+  align-items: center;
+  min-height: 34px;
+  width: fit-content;
+  margin: 0;
+  padding: 0 12px;
+  background: linear-gradient(180deg, color-mix(in srgb, var(--green) 2%, transparent), color-mix(in srgb, var(--green) 0.6%, transparent));
+  border: 1px solid color-mix(in srgb, var(--green-dim) 22%, var(--border));
+  border-radius: 4px;
+  color: var(--green);
+  font-family: var(--font-mono);
+  font-size: 22px;
+  font-weight: 500;
+  letter-spacing: 1.5px;
+  text-shadow: 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 1.5%, transparent);
+}
+
+.diag-header-meta {
+  padding-left: 12px;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 2.4px;
+  text-transform: uppercase;
+  opacity: 0.7;
+}
+
+.diag-back-btn {
+  display: none;
+  flex: 0 0 auto;
+}
+
+.diag-mobile-divider {
+  display: none;
+}
+
+.diag-main {
+  display: grid;
+  /* 4 equal columns for the top cards; Stats/Config/Tools break out full-width */
+  grid-template-columns: repeat(4, 1fr);
+  grid-template-areas:
+    "app   db    redis  assets"
+    "cfg   cfg   cfg    cfg"
+    "usage usage usage  usage"
+    "cmds  cmds  cmds   cmds"
+    "tools tools tools  tools";
+  gap: 16px;
+  padding: 24px 24px 40px;
+  max-width: 1200px;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+/* ── Section card ──────────────────────────────────────────────────────────── */
+.diag-section {
+  background: var(--theme-panel-bg);
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 4px;
+  overflow: hidden;
+  min-width: 0;
+}
+.diag-section.s-app    { grid-area: app; }
+.diag-section.s-db     { grid-area: db; }
+.diag-section.s-redis  { grid-area: redis; }
+.diag-section.s-assets { grid-area: assets; }
+.diag-section.s-config { grid-area: cfg; }
+.diag-section.s-usage  { grid-area: usage; }
+.diag-section.s-cmds   { grid-area: cmds; }
+.diag-section.s-tools  { grid-area: tools; }
+
+.diag-section-title {
+  font-size: 10px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 10px 14px 8px;
+  border-bottom: 1px solid var(--theme-terminal-bar-border);
+  background: var(--theme-terminal-bar-bg);
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+.diag-section-title-count {
+  color: var(--muted);
+  opacity: 0.6;
+  font-size: 9px;
+}
+
+/* ── Key-value tables ──────────────────────────────────────────────────────── */
+.diag-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.diag-table tr + tr td { border-top: 1px solid var(--theme-panel-border); }
+.diag-table td {
+  padding: 8px 14px;
+  vertical-align: middle;
+  line-height: 1.4;
+}
+.diag-table td:first-child {
+  color: var(--muted);
+  white-space: nowrap;
+  width: 1%;
+  padding-right: 20px;
+  font-size: 11px;
+  letter-spacing: 0.5px;
+}
+.diag-table td:last-child {
+  color: var(--text);
+  word-break: break-word;
+}
+
+/* Status values */
+.diag-ok   { color: var(--green); }
+.diag-warn { color: var(--amber); }
+.diag-fail { color: var(--red); }
+
+/* Dot indicator beside status text */
+.diag-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 6px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.diag-dot.ok   { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
+.diag-dot.warn { background: var(--amber); }
+.diag-dot.fail { background: var(--red); }
+
+/* ── Config: two-column internal layout ────────────────────────────────────── */
+.diag-config-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.diag-config-grid .diag-table:first-child {
+  border-right: 1px solid var(--theme-panel-border);
+}
+
+/* ── Tools chip grid ────────────────────────────────────────────────────────── */
+.diag-tools-block {
+  padding: 14px 14px 10px;
+}
+.diag-tools-block + .diag-tools-block {
+  border-top: 1px solid var(--theme-panel-border);
+  padding-top: 12px;
+}
+.diag-tools-sublabel {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+.diag-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.diag-chip {
+  font-size: 12px;
+  font-family: var(--font-mono);
+  padding: 3px 10px;
+  border-radius: 3px;
+  border: 1px solid;
+  letter-spacing: 0.2px;
+}
+.diag-chip.present {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+.diag-chip.missing {
+  color: var(--red);
+  border-color: color-mix(in srgb, var(--red) 40%, transparent);
+  background: color-mix(in srgb, var(--red) 5%, transparent);
+}
+.diag-empty {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: italic;
+  padding: 12px 14px;
+}
+
+/* ── Commands split: two labelled columns ───────────────────────────────────── */
+.diag-cmd-cols {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.diag-cmd-cols > * + * { border-left: 1px solid var(--theme-panel-border); }
+.diag-cmd-col-label {
+  font-size: 9px;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--muted);
+  padding: 8px 14px 6px;
+  border-bottom: 1px solid var(--theme-panel-border);
+}
+.diag-cmd-cell {
+  max-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--text) !important;
+  padding-right: 12px !important;
+}
+.diag-stat-val {
+  white-space: nowrap;
+  color: var(--muted) !important;
+  font-size: 12px !important;
+  width: 1% !important;
+  padding-left: 0 !important;
+}
+
+/* ── Responsive collapse ────────────────────────────────────────────────────── */
+
+/* Content layout — width-driven; applies to all device types. ─────────────── */
+@media (max-width: 760px) {
+  .diag-main {
+    grid-template-columns: 1fr 1fr;
+    grid-template-areas:
+      "app    db"
+      "redis  assets"
+      "cfg    cfg"
+      "usage  usage"
+      "cmds   cmds"
+      "tools  tools";
+  }
+  .diag-config-grid { grid-template-columns: 1fr; }
+  .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--theme-panel-border); }
+  .diag-cmd-cols { grid-template-columns: 1fr; }
+  .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--theme-panel-border); }
+}
+
+/* Mobile chrome — mirrors useMobileTerminalViewportMode() in app.js:
+   touch/coarse-pointer device at ≤900px. Shows the back button and adapts
+   the header for the touch context. Desktop browsers at the same width keep
+   the full header chrome and no back button, matching the shell's behaviour. */
+@media (max-width: 900px) and (pointer: coarse) {
+  body.diag-page .diag-header {
+    align-items: start;
+    gap: 12px;
+    border-bottom: none;
+    padding: 14px 20px 8px;
+  }
+  body.diag-page .diag-header-copy {
+    min-width: 0;
+    flex: 1 1 auto;
+  }
+  body.diag-page .diag-header-title {
+    font-size: 19px;
+    letter-spacing: 1.1px;
+  }
+  body.diag-page .diag-header-meta {
+    display: block;
+    padding: 0 0 0 2px;
+    margin: 0;
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 1.6px;
+    line-height: 1.15;
+    text-transform: uppercase;
+    opacity: 0.72;
+    white-space: normal;
+  }
+  body.diag-page .diag-back-btn {
+    display: inline-flex;
+    align-self: start;
+    flex: 0 0 auto;
+  }
+  body.diag-page .diag-mobile-divider {
+    display: none;
+  }
+  body.diag-page .diag-main {
+    border-top: 1px solid color-mix(in srgb, var(--theme-terminal-bar-border) 82%, var(--text) 18%);
+    margin-top: 10px;
+    padding-top: 12px;
+  }
+}

@@ -45,6 +45,8 @@ async function loadAppFns({
   getOutput: getOutputOverride = null,
   mobileViewport = null,
   mobileTouch = true,
+  Notification: NotificationOverride = undefined,
+  showToast: showToastOverride = vi.fn(),
 } = {}) {
   document.body.className = ''
   document.body.innerHTML = `
@@ -175,6 +177,7 @@ async function loadAppFns({
         <option value="redacted">redacted</option>
         <option value="raw">raw</option>
       </select>
+      <input id="options-notify-toggle" type="checkbox" />
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
       </div>
@@ -277,6 +280,7 @@ async function loadAppFns({
     optionsLnToggle: document.getElementById('options-ln-toggle'),
     optionsWelcomeSelect: document.getElementById('options-welcome-select'),
     optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
+    optionsNotifyToggle: document.getElementById('options-notify-toggle'),
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
@@ -497,6 +501,8 @@ async function loadAppFns({
       submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
       doKill: doKillOverride,
       Event,
+      showToast: showToastOverride,
+      ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
       setTimeout: (fn) => {
         fn()
         return 0
@@ -536,6 +542,9 @@ async function loadAppFns({
     getRememberedShareRedactionChoice,
     getWelcomeIntroPreference,
     getShareRedactionDefaultPreference,
+    getRunNotifyPreference,
+    applyRunNotifyPreference,
+    syncOptionsControls,
     resolveShareRedactionChoice,
     cancelShareRedactionChoice,
     isShareRedactionOverlayOpen,
@@ -3476,5 +3485,103 @@ describe('app helpers', () => {
 
     expect(document.getElementById('mobile-cmd').value).toBe('ping -c 1 127.0.0.1 ')
     expect(document.getElementById('faq-overlay').classList.contains('open')).toBe(false)
+  })
+})
+
+// ── Run notification preference ───────────────────────────────────────────────
+
+describe('getRunNotifyPreference', () => {
+  it('returns off when no cookie is set', async () => {
+    const { getRunNotifyPreference } = await loadAppFns({})
+    expect(getRunNotifyPreference()).toBe('off')
+  })
+
+  it('returns on when cookie is set to on', async () => {
+    const { getRunNotifyPreference } = await loadAppFns({
+      cookies: { pref_run_notify: 'on' },
+    })
+    expect(getRunNotifyPreference()).toBe('on')
+  })
+
+  it('returns off for any value other than on', async () => {
+    const { getRunNotifyPreference } = await loadAppFns({
+      cookies: { pref_run_notify: 'yes' },
+    })
+    expect(getRunNotifyPreference()).toBe('off')
+  })
+})
+
+describe('applyRunNotifyPreference', () => {
+  it('saves on and syncs toggle when permission is already granted', async () => {
+    class MockNotification {}
+    MockNotification.permission = 'granted'
+    const { applyRunNotifyPreference, getRunNotifyPreference } = await loadAppFns({
+      Notification: MockNotification,
+    })
+    await applyRunNotifyPreference('on')
+    expect(getRunNotifyPreference()).toBe('on')
+    expect(document.getElementById('options-notify-toggle').checked).toBe(true)
+  })
+
+  it('requests permission when it is default and saves on if granted', async () => {
+    class MockNotification {}
+    MockNotification.permission = 'default'
+    MockNotification.requestPermission = vi.fn().mockResolvedValue('granted')
+    const { applyRunNotifyPreference, getRunNotifyPreference } = await loadAppFns({
+      Notification: MockNotification,
+    })
+    await applyRunNotifyPreference('on')
+    expect(MockNotification.requestPermission).toHaveBeenCalledOnce()
+    expect(getRunNotifyPreference()).toBe('on')
+  })
+
+  it('falls back to off and unchecks toggle when permission request is denied', async () => {
+    class MockNotification {}
+    MockNotification.permission = 'default'
+    MockNotification.requestPermission = vi.fn().mockResolvedValue('denied')
+    const { applyRunNotifyPreference, getRunNotifyPreference } = await loadAppFns({
+      Notification: MockNotification,
+    })
+    await applyRunNotifyPreference('on')
+    expect(getRunNotifyPreference()).toBe('off')
+    expect(document.getElementById('options-notify-toggle').checked).toBe(false)
+  })
+
+  it('falls back to off and shows toast when permission is already denied by browser', async () => {
+    const showToast = vi.fn()
+    class MockNotification {}
+    MockNotification.permission = 'denied'
+    const { applyRunNotifyPreference, getRunNotifyPreference } = await loadAppFns({
+      Notification: MockNotification,
+      showToast,
+    })
+    await applyRunNotifyPreference('on')
+    expect(getRunNotifyPreference()).toBe('off')
+    expect(showToast).toHaveBeenCalledWith(expect.stringContaining('blocked'))
+  })
+
+  it('saves off and unchecks toggle when mode is off', async () => {
+    const { applyRunNotifyPreference, getRunNotifyPreference } = await loadAppFns({
+      cookies: { pref_run_notify: 'on' },
+    })
+    await applyRunNotifyPreference('off')
+    expect(getRunNotifyPreference()).toBe('off')
+    expect(document.getElementById('options-notify-toggle').checked).toBe(false)
+  })
+})
+
+describe('syncOptionsControls notify toggle', () => {
+  it('reflects off preference as unchecked toggle', async () => {
+    const { syncOptionsControls } = await loadAppFns({})
+    syncOptionsControls()
+    expect(document.getElementById('options-notify-toggle').checked).toBe(false)
+  })
+
+  it('reflects on preference as checked toggle', async () => {
+    const { syncOptionsControls } = await loadAppFns({
+      cookies: { pref_run_notify: 'on' },
+    })
+    syncOptionsControls()
+    expect(document.getElementById('options-notify-toggle').checked).toBe(true)
   })
 })

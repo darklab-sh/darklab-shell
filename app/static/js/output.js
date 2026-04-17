@@ -349,8 +349,7 @@ function _setLnMode(mode) {
     lnBtn.textContent = label;
     lnBtn.classList.toggle('active', mode === 'on');
   }
-  const mobileLn = document.querySelector('#mobile-menu [data-action="ln"]');
-  if (mobileLn) mobileLn.textContent = label;
+  if (typeof _setMobileActionLabel === 'function') _setMobileActionLabel('ln', label);
   syncOutputPrefixes();
   try {
     _refreshFollowingOutputsAfterLayout();

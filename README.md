@@ -40,9 +40,10 @@ darklab shell is a full-stack, self-hosted web terminal for running network diag
 - **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, bash-like `Tab` completion with context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei, `Ctrl+R` reverse-history search, built-in pipe support for `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, and client-side stall detection with an inline notice when the connection silently dies
 - **Mobile shell** — dedicated mobile composer, keyboard helper row with character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, and output-follow behavior that keeps the latest lines visible when the keyboard opens
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), and a jump-to-live / jump-to-bottom helper when you scroll away from the tail
-- **History and sharing** — recent command chips, a persistent history drawer with search/filtering, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
-- **Session tokens** — generate a persistent `tok_` session token to carry your run history and shell identity across browsers and devices; `session-token generate/set/clear/rotate` manage the full token lifecycle with optional history migration, atomic rotate with rollback on failure, and automatic cross-tab identity sync; all four operations are also available natively from the Options modal without entering commands
-- **Safer sharing and exports** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks and local exports, with optional operator regex rules appended on top. Permalink creation can now choose raw vs redacted sharing per snapshot, without changing the stored run history
+- **History and sharing** — recent command chips, a persistent history drawer with full-text search across command text and stored output text (SQLite FTS5), filtering by command root / exit code / date range / starred status, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
+- **Session tokens** — generate a persistent `tok_` session token to carry your run history and shell identity across browsers and devices; `session-token generate/set/clear/rotate/list/revoke` manage the full token lifecycle with optional history migration, atomic rotate with rollback on failure, automatic cross-tab identity sync with session-scoped UI refresh, and server-side revocation; the Options modal exposes the four common inline actions (`Generate`, `Set`, `Rotate`, `Clear`) without entering commands
+- **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
+- **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel; uses only the command root in the notification title to avoid exposing arguments or token values
 - **Themes and presentation** — named theme variants, theme-aware permalink/export rendering, mobile/desktop theme parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction
 - **Built-in commands** — native shell commands like `help`, `history`, `last`, `limits`, `status`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available
 - **Guided workflows** — built-in diagnostic sequences (DNS troubleshooting, TLS/HTTPS check, HTTP triage, quick reachability, email server check) that load individual steps directly into the active prompt; extendable with site-specific sequences via `conf/workflows.yaml`
@@ -161,8 +162,8 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `prompt_prefix` | `anon@darklab:~$` | Prompt text shown in the shell input and welcome samples. Can be customized independently of `app_name` |
 | `motd` | _(empty)_ | Optional operator message shown at the top of the welcome sequence as a centered “Message From The Operator” notice. Supports `**bold**`, `` `code` ``, `[link](url)`, and newlines. Leave empty to disable |
 | `default_theme` | `darklab_obsidian.yaml` | Default theme filename for new visitors. Must match a file in `app/conf/themes/`. Overridden by the user's saved preference |
-| `share_redaction_enabled` | `true` | Enables the built-in basic share/export redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom share/export redaction rules run |
-| `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in share/export redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This first version does not change the stored run history or the history drawer permalink path; it only affects snapshot sharing and local export paths |
+| `share_redaction_enabled` | `true` | Enables the built-in basic snapshot-share redaction baseline for bearer tokens, email addresses, IPv4 addresses, IPv6 addresses, and hostnames/dotted domains. When enabled, the `share snapshot` action asks whether to share the raw or redacted snapshot until the user sets a persistent default in the Options modal. If the prompt’s checkbox is enabled, the chosen raw/redacted mode is written back to that same persistent default. When disabled, no built-in or custom snapshot-share redaction rules run |
+| `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop header and mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
@@ -504,6 +505,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── test_request_kill_and_commands.py # /kill, request parsing, loader edges, and built-in command resolution
 │   │   ├── test_backend_modules.py # DB init/migration, loader/overlay helpers, config/theme/FAQ coverage
 │   │   ├── test_container_smoke_test.py # Opt-in Docker build/run smoke test (see scripts/container_smoke_test.sh)
+│   │   ├── test_output_search.py # SQLite FTS history-search coverage and fallback behavior
+│   │   ├── test_session_routes.py # session-token generation/verify/migrate/revoke/starred route coverage
 │   │   └── test_logging.py     # Structured logging: formatters, configure_logging, and event coverage
 │   └── js/
 │       ├── unit/               # Vitest unit tests for browser-module logic
@@ -558,13 +561,14 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── assets.py           # /vendor/*, /favicon.ico, /health, /diag (IP-gated operator diagnostics)
     │   ├── content.py          # /, /config, /themes, /faq, /autocomplete, /welcome*
     │   ├── run.py              # /run (rate-limited SSE), /kill; run-output capture helpers
-    │   └── history.py          # /history*, /share*; preview-output shaping helpers
+    │   ├── history.py          # /history*, /share*; preview/full-output shaping helpers
+    │   └── session.py          # /session/token/*, /session/migrate, /session/starred*
     ├── fake_commands.py        # Synthetic shell helpers handled through /run before spawn
     ├── config.py               # load_config(), CFG defaults, SCANNER_PREFIX detection, theme registry
     ├── logging_setup.py        # structured logging formatters and logger configuration
     ├── database.py             # SQLite connection, schema init, retention pruning
     ├── process.py              # Redis setup, pid_register/pid_pop, in-process fallback
-    ├── redaction.py            # Share/export redaction helpers and built-in rule application
+    ├── redaction.py            # Snapshot-share redaction helpers and built-in rule application
     ├── commands.py             # Command loading, validation (is_command_allowed), and rewrites
     ├── permalinks.py           # Flask context/render helpers for /history/<id> and /share/<id>
     ├── run_output_store.py     # Preview/full-output capture and artifact persistence helpers
@@ -595,8 +599,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
         │   ├── base.css        # Theme tokens, reset, base layout, header, input, and dropdown foundations
         │   ├── shell.css       # Terminal shell frame, panels, history row, utility buttons, and modals
         │   ├── components.css  # Tabs, search UI, permalink/history surfaces, toast, and menu components
+        │   ├── terminal_export.css # Shared export/permalink/diag header chrome
         │   ├── welcome.css     # Welcome animation, operator notice, and onboarding-specific UI
-        │   └── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
+        │   ├── mobile.css      # Mobile composer, mobile shell layout, sheets, and viewport overrides
+        │   └── diag.css        # Diagnostics-page-specific layout and responsive chrome
         ├── fonts/              # Vendored local font files used by the app's vendor routes and permalink/export fallbacks
         └── js/
             ├── session.js      # Session UUID + apiFetch wrapper (loads first)

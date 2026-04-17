@@ -1,6 +1,6 @@
 import { fromDomScripts } from './helpers/extract.js'
 
-function loadOutputFns({ appConfig = {} } = {}) {
+function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
   class FakeAnsiUp {
     constructor() {
       this.use_classes = false
@@ -21,6 +21,7 @@ function loadOutputFns({ appConfig = {} } = {}) {
       APP_CONFIG: { max_output_lines: 2, ...appConfig },
       getOutput: () => document.getElementById('out'),
       shellPromptWrap: document.getElementById('shell-prompt-wrap'),
+      ...extraGlobals,
     },
     `{
     appendLine,
@@ -135,7 +136,14 @@ describe('appendLine', () => {
       <div id="mobile-menu"><button data-action="ln"></button></div>
       <div id="out"></div>
     `
-    const { _setLnMode } = loadOutputFns()
+    const { _setLnMode } = loadOutputFns({
+      extraGlobals: {
+        _setMobileActionLabel: (action, label) => {
+          const el = document.querySelector(`#mobile-menu [data-action="${action}"]`)
+          if (el) el.textContent = label
+        },
+      },
+    })
 
     _setLnMode('on')
     expect(document.body.classList.contains('ln-on')).toBe(true)

@@ -527,3 +527,109 @@ class TestSessionStarred:
             headers={"X-Session-ID": session_a},
         )
         assert self._count_stars(session_b) == 1
+
+
+# ── /session/token/info ───────────────────────────────────────────────────────
+
+class TestSessionTokenInfo:
+    def test_returns_null_for_uuid_session(self):
+        client = get_client()
+        resp = client.get(
+            "/session/token/info",
+            headers={"X-Session-ID": "a1b2c3d4-0000-0000-0000-000000000001"},
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["token"] is None
+        assert data["created"] is None
+
+    def test_returns_token_for_tok_session(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        resp = client.get("/session/token/info", headers={"X-Session-ID": token})
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["token"] == token
+
+    def test_returns_created_date_for_tok_session(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": token}).data)
+        assert data["created"] is not None
+        assert len(data["created"]) > 0
+
+    def test_returns_null_for_tok_not_in_db(self):
+        """tok_ token that was never issued is treated as anonymous — both fields null."""
+        client = get_client()
+        phantom = "tok_" + "f" * 32
+        data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": phantom}).data)
+        assert data["token"] is None
+        assert data["created"] is None
+
+    def test_revoked_token_is_treated_as_anonymous(self):
+        """After revocation, using the old token returns anonymous (null) info."""
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        client.post("/session/token/revoke", json={"token": token})
+        data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": token}).data)
+        assert data["token"] is None
+        assert data["created"] is None
+
+
+# ── /session/token/revoke ─────────────────────────────────────────────────────
+
+class TestSessionTokenRevoke:
+    def test_returns_200_for_existing_token(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        resp = client.post("/session/token/revoke", json={"token": token})
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["ok"] is True
+
+    def test_deletes_token_from_db(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        client.post("/session/token/revoke", json={"token": token})
+        with sqlite3.connect(DB_PATH) as conn:
+            row = conn.execute(
+                "SELECT 1 FROM session_tokens WHERE token = ?", (token,)
+            ).fetchone()
+        assert row is None
+
+    def test_returns_404_for_unknown_token(self):
+        client = get_client()
+        fake = "tok_" + "b" * 32
+        resp = client.post("/session/token/revoke", json={"token": fake})
+        assert resp.status_code == 404
+
+    def test_rejects_uuid_format(self):
+        client = get_client()
+        resp = client.post(
+            "/session/token/revoke",
+            json={"token": "a1b2c3d4-0000-0000-0000-000000000002"},
+        )
+        assert resp.status_code == 400
+
+    def test_rejects_missing_token_field(self):
+        client = get_client()
+        resp = client.post("/session/token/revoke", json={})
+        assert resp.status_code == 400
+
+    def test_can_revoke_own_current_token(self):
+        """Revoking the caller's own active token is permitted."""
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        resp = client.post(
+            "/session/token/revoke",
+            json={"token": token},
+            headers={"X-Session-ID": token},
+        )
+        assert resp.status_code == 200
+
+    def test_second_revoke_returns_404(self):
+        """Once revoked, the same token cannot be revoked again."""
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        client.post("/session/token/revoke", json={"token": token})
+        resp = client.post("/session/token/revoke", json={"token": token})
+        assert resp.status_code == 404

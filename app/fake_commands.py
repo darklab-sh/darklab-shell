@@ -397,7 +397,7 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(cmd)
     subcommand = parts[1].lower() if len(parts) > 1 else ""
 
-    if subcommand in ("generate", "set", "clear", "rotate"):
+    if subcommand in ("generate", "set", "clear", "rotate", "list", "revoke"):
         # These subcommands are intercepted and executed client-side; they
         # should never reach the server.  Return a safe fallback message.
         return [_output_line("session-token: subcommands run client-side — reload the page and try again.")]
@@ -405,7 +405,7 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     if subcommand:
         return [
             _output_line(f"session-token: unknown subcommand '{subcommand}'"),
-            _output_line("Usage: session-token [generate | set <value> | clear | rotate]"),
+            _output_line("Usage: session-token [generate | set <value> | clear | rotate | list | revoke <token>]"),
         ]
 
     # Bare session-token — show status from the server-side session_id

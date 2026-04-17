@@ -1584,13 +1584,18 @@ context:
   session-token:
     expects_value:
       - set
+      - revoke
     arg_hints:
       "set":
         - value: "<token>"
           description: Paste a tok_... token or UUID from another device
+      "revoke":
+        - value: "<token>"
+          description: tok_ token to permanently invalidate on the server
       "generate": []
       "clear": []
       "rotate": []
+      "list": []
       "__positional__":
         - value: generate
           description: Generate a new session token and save it to this browser
@@ -1601,6 +1606,11 @@ context:
           description: Remove the session token and revert to an anonymous session
         - value: rotate
           description: Generate a new token and migrate all history to it
+        - value: list
+          description: Show the active session token and its creation date
+        - value: "revoke <token>"
+          insertValue: "revoke "
+          description: Permanently invalidate a tok_ token on this server
   shortcuts: {}
   status: {}
   tty: {}

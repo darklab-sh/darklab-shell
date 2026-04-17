@@ -114,8 +114,24 @@ def get_client_ip():
 
 
 def get_session_id():
-    """Extract the anonymous session ID from the X-Session-ID request header."""
-    return request.headers.get("X-Session-ID", "").strip()
+    """Extract and validate the session ID from the X-Session-ID request header.
+
+    For ``tok_`` prefixed tokens the token must be present in ``session_tokens``
+    to be considered valid.  A revoked or never-issued ``tok_`` value is treated
+    as an anonymous session (returns ``""``) so callers cannot access data under
+    an invalidated identity.  UUID-format anonymous session IDs are returned
+    as-is without a DB lookup.
+    """
+    session_id = request.headers.get("X-Session-ID", "").strip()
+    if not session_id.startswith("tok_"):
+        return session_id
+    # Local import avoids a circular dependency at module load time.
+    from database import db_connect  # noqa: PLC0415
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM session_tokens WHERE token = ?", (session_id,)
+        ).fetchone()
+    return session_id if row else ""
 
 
 # ── Font manifest ──────────────────────────────────────────────────────────────

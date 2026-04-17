@@ -21,49 +21,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
-### Persistent session tokens (cross-browser identity)
-
-Allow users to generate a personal session token so their run history, snapshots, and starred commands follow them across browsers and workstations — without a login screen.
-
-**Design rules**
-- No login screen. Tokens are the only identity mechanism.
-- Token = session ID. The server treats a `tok_…` string identically to a UUID — all existing session-scoped queries work unchanged.
-- Token is stored in `localStorage` and sent as `X-Session-ID`, same as the auto-generated UUID today.
-- Tokens are server-generated (cryptographically random, `tok_` prefix) to prevent guessing and to distinguish them from UUID sessions in logs and the DB.
-
-**Phase 1 — token management + history migration** ✅ _implemented in v1.5_
-
-_Backend_
-- ✅ `GET /session/token/generate` — generates a `tok_<32 hex>` token, persists it in the `session_tokens` table, returns it.
-- ✅ `POST /session/migrate` — migrates all runs and snapshots from `from_session_id` to `to_session_id`. Security constraint: `from_session_id` must match the `X-Session-ID` header.
-- ✅ `session_tokens` table added to `database.py` schema with automatic migration for existing databases.
-
-_Frontend — terminal commands_
-- ✅ `session-token` — shows session token status (masked active token or "anonymous session").
-- ✅ `session-token generate` — generates a token, saves to `localStorage`, prompts to migrate existing history if runs are present.
-- ✅ `session-token set <value>` — accepts an existing token, optionally migrates history from the current session.
-- ✅ `session-token clear` — removes session token from `localStorage`, reverts to auto-generated UUID.
-- ✅ `session-token rotate` — generates a new token, migrates history atomically before switching identity.
-
-_Frontend — options menu_
-- ✅ "Session token" row in options panel with masked token status and Set/Clear buttons.
-
-_session.js change_
-- ✅ `SESSION_ID` prefers `localStorage.session_token` over the UUID `session_id`; `updateSessionId()` switches identity at runtime; `maskSessionToken()` provides display-safe representation.
-
-**Phase 2 — server-side starred commands (cross-browser star sync)** ✅ _implemented in v1.5_
-
-- ✅ Add `starred_commands` table: `(session_id TEXT, command TEXT, PRIMARY KEY (session_id, command))`.
-- ✅ Add `GET /session/starred` — return starred command list for the current session.
-- ✅ Add `POST /session/starred` and `DELETE /session/starred` — toggle a star server-side.
-- ✅ Update `_getStarred()` and `_toggleStar()` in `history.js` to call these endpoints (async). Keep a local cache to avoid blocking the UI on every render.
-- ✅ On `token set` / `token generate`: seed from `localStorage` on first token activation; `token rotate` migrates stars along with runs and snapshots.
-- ✅ Seed from `localStorage` on first token activation for users who already have stars — read the existing `starred` array and POST each command to the new endpoint, then clear `localStorage` entry.
-
-**Notes**
-- "Token is a shared secret" — surface a short warning in the `token generate` output: tokens grant full session access to anyone who has them. Don't share.
-- `token rotate` is a safety valve, not a core workflow — keep it simple.
-
 ---
 
 ## Known Issues
@@ -71,17 +28,6 @@ _session.js change_
 ---
 
 ## Technical Debt
-
-### Mobile shell and standalone page chrome parity
-
-The recent header/export de-duplication work is already the right pattern for save flows: `ExportHtmlUtils` and `ExportPdfUtils` should remain the single source of truth for HTML/PDF output, including on mobile. The remaining duplication is around page chrome and responsive headers on mobile-facing pages, especially the main shell mobile header/menu and the diagnostics page header/back action.
-
-**Plan**
-- Extract a shared page-header partial or macro for standalone pages so `diag.html`, `permalink.html`, and any future mobile-friendly page can share the same title/meta/action scaffold instead of repeating header structure and responsive overrides.
-- Move the mobile shell header/menu state updates out of page-specific DOM writes where possible so desktop and mobile labels for timestamps, line numbers, status, and menu actions come from the same helper path.
-- Pull the mobile header sizing and spacing rules into reusable CSS tokens or a shared mobile chrome block, then keep only page-specific overrides local to `index.html` and `diag.html`.
-- Keep the export renderers shared; do not add a separate mobile export pipeline. Any mobile save/share surface should call the existing `ExportHtmlUtils` / `ExportPdfUtils` helpers.
-- Add a mobile viewport smoke test for the main shell header/menu, the diagnostics page back button, and a save/export action to catch regressions in the shared chrome layer.
 
 ---
 
@@ -97,10 +43,8 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 | Idea | Benefit | Complexity | Notes |
 |------|---------|------------|-------|
-| Browser notifications on run completion | H | L | Hooks into existing SSE lifecycle; single opt-in prompt — highest ratio on the list |
 | Better output navigation | H | L | Line classes already exist; only navigation logic needed |
-| Full history search | H | L | SQLite FTS + search input; no schema change required |
-| Session token audit | H | L | One backend endpoint + two built-in commands; follows existing patterns exactly |
+| Full history search | H | L | Done in v1.5 — FTS5 trigram index on command + output content |
 | Run labels from terminal | M | L | Fake command + DB column + history drawer display |
 | Richer run metadata in history UI | M | L | Data already stored; surfacing only |
 
@@ -112,7 +56,7 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 | Additional export formats | M | L–M | JSONL is straightforward; Markdown needs formatting logic |
 | Bulk history operations | M | L–M | Checkbox mode in history drawer + bulk endpoints |
 | Share package | H | M | Unified design reduces total work vs building annotations, notes, and lifecycle separately |
-| Mobile share flow | M | L | Web Share API; contained to mobile menu |
+| Mobile share ergonomics | M | L–M | Basic native share-sheet done (v1.5); remaining work is one-handed save/share UX and clearer affordances |
 | Tool-specific guidance + onboarding hints | M | L | Primarily content work |
 | Session dashboards (`stats` command) | M | L | Fake command + queries that already exist for the diagnostics page |
 
@@ -152,7 +96,7 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 | Environment capability hints | L–M | M | Pre-run hints have lower per-use value than post-run summaries |
 | Interactive PTY mode | M | H | Full PTY + WebSocket architecture for a small allowlisted set |
 | Plugin-style helper command registry | L | M | Internal quality; revisit when fake-command layer needs more structure |
-| Lightweight Jinja base template | L | L | Only worth doing with a third distinct page type |
+| Lightweight Jinja base template | L | L | Third page type now exists (`diag.html`); three templates share the same `<head>` bootstrap |
 
 ---
 
@@ -222,17 +166,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - Start narrow: nmap (open ports + service table), dig (records returned), curl (status code + redirect chain), openssl s_client (cert expiry + trust chain).
   - The structured output model (see Architecture) is the right long-term foundation; build this feature to be retro-fittable once that model is in place rather than requiring it up front.
 
-- **Full history search**
-  - The history drawer searches the last 50 runs. There is no way to find a specific result from months ago without knowing the exact command.
-  - Full-text search across all stored run history (command text + output) closes a real gap for operators who reuse the tool over extended engagements.
-  - SQLite FTS is the natural backend; this is a query problem not an architecture change.
-
-- **Browser notifications on run completion**
-  - Scans frequently take 5–15 minutes. Operators work in another tab while waiting and miss the result.
-  - Wire the existing run timer and SSE lifecycle tracking to the browser Notifications API with a one-time opt-in.
-  - Notification body: command text, exit status, elapsed time.
-  - Scope to completed and killed events only — do not notify for intermediate output.
-
 ### Later
 
 - **Saved command presets**
@@ -277,12 +210,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 - **Environment capability hints**
   - Surface when a tool is likely to be slow, noisy, truncated, or constrained by the container/runtime before it runs.
 
-- **Session token audit**
-  - The current token lifecycle is missing two safety operations: `session-token list` and `session-token revoke`.
-  - `session-token list` — show all tokens issued under the current identity with creation dates, so operators know which tokens are active across devices.
-  - `session-token revoke <token>` — server-side DELETE from `session_tokens` to retire a compromised or lost token without triggering a full rotation. Currently the only recourse for a leaked token is `session-token rotate`, which migrates to a new token but does not explicitly invalidate the old one server-side.
-  - Follows existing backend and terminal command patterns exactly.
-
 - **Run labels from the terminal**
   - A `tag <label>` built-in command that attaches a label to the most recent completed run directly from the shell flow, without opening the history drawer.
   - Labels like `baseline`, `finding`, `follow-up`, `customer-facing` are more precise than a binary star and set up richer compare/share/history workflows.
@@ -297,12 +224,11 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 ### Mobile
 
-- **Mobile share flow**
-  - Better native share-sheet integration where the platform allows it.
-  - Expand this into mobile-first action ergonomics:
+- **Mobile share ergonomics**
+  - The native share-sheet for permalink URLs is done (v1.5, `navigator.share()` with clipboard fallback). What remains is making the broader mobile save/share experience feel intentional:
     - save/share actions tuned for one-handed use
-    - better share handoff after snapshot creation
     - clearer copy/share/export affordances inside the mobile shell
+    - better share handoff after snapshot creation
 
 ### Safety and Policy
 
@@ -361,8 +287,8 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
     - this would make the feature feel much more like a real shell while reducing accidental filesystem exposure
 
 - **Lightweight Jinja base template**
-  - `index.html` and `permalink_base.html` share ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With two templates this is not worth the indirection.
-  - Revisit if the app adds a third distinct page type (e.g. a standalone diagnostics page, a mobile-specific shell view, or a public landing page) — at that point a `base.html` factoring out the common `<head>` and `data-theme` body attribute pays for itself.
+  - `index.html`, `permalink_base.html`, and `diag.html` now all share the same ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With three templates the duplication is starting to pay for the indirection.
+  - A `base.html` factoring out the common `<head>` and `data-theme` body attribute would prevent drift and make adding a fourth page type trivial.
 
 - **Interactive PTY mode for screen-based tools**
   - Explore an optional PTY + WebSocket + browser terminal emulator path for a small allowlisted set of interactive or screen-redrawing tools such as `mtr`, without turning the app into a general-purpose remote shell.

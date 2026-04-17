@@ -279,6 +279,9 @@ optionsWelcomeSelect?.addEventListener('change', e => {
 optionsShareRedactionSelect?.addEventListener('change', e => {
   applyShareRedactionDefaultPreference(e.target.value);
 });
+optionsNotifyToggle?.addEventListener('change', e => {
+  applyRunNotifyPreference(e.target.checked ? 'on' : 'off');
+});
 
 // Session token options panel — UI-native controls
 
@@ -589,6 +592,7 @@ applyTimestampPreference(getPreference('pref_timestamps') || 'off', false);
 applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
 applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
 applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
+syncOptionsControls();
 
 Promise.all([
   apiFetch('/history').then(r => r.json()).catch(err => {

@@ -4,6 +4,8 @@ History and share routes: run history, single-run permalinks, snapshot permalink
 
 import json
 import logging
+import re
+import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
@@ -43,6 +45,32 @@ def _history_cutoff_for_range(date_range):
     if date_range == "30d":
         return (now - timedelta(days=30)).isoformat()
     return None
+
+
+def _build_fts_query(raw):
+    # Strip FTS5 special chars and split into quoted terms for AND-search.
+    terms = re.split(r'\s+', re.sub(r'["\'\(\)\*\^\\]', ' ', raw).strip())
+    terms = [t for t in terms if t]
+    if not terms:
+        return None
+    return ' '.join(f'"{t}"' for t in terms)
+
+
+def _history_add_filters(sql, params, command_root, exit_code_filter, date_range):
+    if command_root:
+        sql += " AND (LOWER(r.command) = ? OR LOWER(r.command) LIKE ?)"
+        params.extend([command_root, f"{command_root} %"])
+    if exit_code_filter == "0":
+        sql += " AND r.exit_code = 0"
+    elif exit_code_filter == "nonzero":
+        sql += " AND r.exit_code IS NOT NULL AND r.exit_code != 0"
+    elif exit_code_filter == "incomplete":
+        sql += " AND r.exit_code IS NULL"
+    cutoff = _history_cutoff_for_range(date_range)
+    if cutoff:
+        sql += " AND r.started >= ?"
+        params.append(cutoff)
+    return sql, params
 
 
 def _history_command_roots(conn, session_id):
@@ -126,38 +154,56 @@ def get_history():
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
 
-    sql = (
-        "SELECT id, command, started, finished, exit_code, "
-        "preview_truncated, output_line_count, full_output_available, full_output_truncated "
-        "FROM runs WHERE session_id = ?"
-    )
-    params: list[Any] = [session_id]
+    fts_q = _build_fts_query(query) if query else None
 
-    if query:
-        sql += " AND LOWER(command) LIKE ?"
-        params.append(f"%{query.lower()}%")
+    if fts_q:
+        sql = (
+            "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
+            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
+            "FROM runs r WHERE r.session_id = ? "
+            "AND r.rowid IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)"
+        )
+        params: list[Any] = [session_id, fts_q]
+    else:
+        sql = (
+            "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
+            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
+            "FROM runs r WHERE r.session_id = ?"
+        )
+        params = [session_id]
+        if query:
+            sql += " AND LOWER(r.command) LIKE ?"
+            params.append(f"%{query.lower()}%")
 
-    if command_root:
-        sql += " AND (LOWER(command) = ? OR LOWER(command) LIKE ?)"
-        params.extend([command_root, f"{command_root} %"])
-
-    if exit_code_filter == "0":
-        sql += " AND exit_code = 0"
-    elif exit_code_filter == "nonzero":
-        sql += " AND exit_code IS NOT NULL AND exit_code != 0"
-    elif exit_code_filter == "incomplete":
-        sql += " AND exit_code IS NULL"
-
-    cutoff = _history_cutoff_for_range(date_range)
-    if cutoff:
-        sql += " AND started >= ?"
-        params.append(cutoff)
-
-    sql += " ORDER BY started DESC LIMIT ?"
+    sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
+    sql += " ORDER BY r.started DESC LIMIT ?"
     params.append(CFG["history_panel_limit"])
 
     with db_connect() as conn:
-        rows = conn.execute(sql, params).fetchall()
+        try:
+            rows = conn.execute(sql, params).fetchall()
+        except sqlite3.OperationalError as exc:
+            if fts_q:
+                log.warning("FTS_SEARCH_FALLBACK", extra={
+                    "session": session_id, "q": query, "error": str(exc),
+                })
+                fallback_sql = (
+                    "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
+                    "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
+                    "FROM runs r WHERE r.session_id = ?"
+                )
+                fallback_params: list[Any] = [session_id]
+                if query:
+                    fallback_sql += " AND LOWER(r.command) LIKE ?"
+                    fallback_params.append(f"%{query.lower()}%")
+                fallback_sql, fallback_params = _history_add_filters(
+                    fallback_sql, fallback_params, command_root, exit_code_filter, date_range
+                )
+                fallback_sql += " ORDER BY r.started DESC LIMIT ?"
+                fallback_params.append(CFG["history_panel_limit"])
+                rows = conn.execute(fallback_sql, fallback_params).fetchall()
+            else:
+                raise
         roots = _history_command_roots(conn, session_id)
     runs = []
     for row in rows:
@@ -171,6 +217,7 @@ def get_history():
         "session": session_id,
         "count": len(runs),
         "q": query or None,
+        "output_search": bool(fts_q),
         "command_root": command_root or None,
         "exit_code_filter": exit_code_filter or None,
         "date_range": date_range or None,

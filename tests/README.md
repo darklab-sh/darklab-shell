@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 770
-- `vitest`: 457
-- `playwright`: 152
-- total: 1,379
+- `pytest`: 798
+- `vitest`: 474
+- `playwright`: 156
+- total: 1,428
 
 This document is organized in two parts:
 
@@ -667,8 +667,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestKillRoute.test_kill_rejects_non_string_run_id` | Checks that kill rejects non string run id. |
 | `TestAllowedCommandsGroupingEdges.test_groups_commands_by_headers_and_excludes_denies` | Checks that groups commands by headers and excludes denies. |
 | `TestAllowedCommandsGroupingEdges.test_missing_file_returns_none` | Checks that missing file returns none. |
-| `TestAutocompleteLoadingEdges.test_ignores_blank_and_comment_lines` | Checks that ignores blank and comment lines. |
-| `TestAutocompleteLoadingEdges.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
 | `TestWelcomeLoadingEdges.test_valid_yaml_is_normalized` | Checks that valid YAML is normalized. |
 | `TestWelcomeLoadingEdges.test_missing_file_returns_empty` | Checks that missing file returns empty. |
 | `TestIsCommandAllowedEdges.test_prefix_exactness_ls_does_not_allow_lsblk` | Checks that prefix exactness ls does not allow lsblk. |
@@ -678,6 +676,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIsCommandAllowedEdges.test_deny_rule_takes_priority_over_allow` | Checks that deny rule takes priority over allow. |
 | `TestIsCommandAllowedEdges.test_tmp_url_path_is_allowed` | Checks that /tmp URL path is allowed. |
 | `TestIsCommandAllowedEdges.test_local_tmp_path_is_blocked` | Checks that local /tmp path is blocked. |
+| `TestFakeCommandResolution.test_documented_fake_commands_are_backed_by_runtime_dispatch` | Checks that every entry in `_DOCUMENTED_FAKE_COMMANDS` has a corresponding runtime dispatch handler. |
 | `TestFakeCommandResolution.test_resolves_supported_fake_commands` | Checks that resolves supported fake commands. |
 | `TestFakeCommandResolution.test_rejects_non_fake_commands` | Checks that rejects non fake commands. |
 
@@ -741,6 +740,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDiagRoute.test_ignores_forwarded_for_header_from_untrusted_proxy` | Checks that ignores forwarded for header from untrusted proxy. |
 | `TestDiagRoute.test_diag_viewed_logged_on_success` | Checks that diagnostics viewed logged on success. |
 | `TestDiagRoute.test_html_response_contains_expected_content` | Checks that HTML response contains expected content. |
+| `TestDiagRoute.test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero` | Checks that the HTML diagnostics page renders a zero custom redaction rule count as the numeric zero rather than a falsy blank. |
 | `TestDiagRoute.test_json_format_param_returns_json` | Checks that JSON format param returns JSON. |
 | `TestAllowedCommandsRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestAllowedCommandsRoute.test_response_has_restricted_key` | Checks that response has restricted key. |
@@ -806,7 +806,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWelcomeRoute.test_returns_empty_list_when_no_welcome_file` | Returns empty list when no welcome file. |
 | `TestAutocompleteRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestAutocompleteRoute.test_has_suggestions_key` | Checks has suggestions key handling. |
-| `TestAutocompleteRoute.test_returns_configured_suggestions` | Checks returns configured suggestions handling. |
+| `TestAutocompleteRoute.test_returns_configured_context` | Checks that the autocomplete endpoint returns the configured context object. |
 | `TestHistorySessionIsolation.test_empty_history_for_fresh_session` | Checks that empty history for fresh session. |
 | `TestHistorySessionIsolation.test_history_scoped_to_session` | Checks that history scoped to session. |
 | `TestHistorySessionIsolation.test_delete_only_affects_own_session` | Checks that delete only affects own session. |
@@ -885,16 +885,17 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_man_reports_when_helper_binary_is_unavailable` | Checks that fake man reports when helper binary is unavailable. |
 | `TestRunStreaming.test_fake_man_reports_when_allowlisted_topic_is_missing` | Checks that fake man reports when allowlisted topic is missing. |
 | `TestRunStreaming.test_fake_man_rejects_topics_outside_allowlist` | Checks that fake man rejects topics outside allowlist. |
-| `TestRunStreaming.test_fake_man_for_helper_topic_returns_web_shell_help` | Checks that fake man for helper topic returns web shell help. |
+| `TestRunStreaming.test_fake_man_for_built_in_topic_returns_shell_help` | Checks that `man history` and similar built-in topics return shell built-in help output. |
 | `TestRunStreaming.test_fake_man_for_shortcuts_topic_returns_web_shell_help` | Checks that fake man for shortcuts topic returns web shell help. |
 | `TestRunStreaming.test_fake_history_lists_recent_session_commands` | Checks that fake history lists recent session commands. |
 | `TestRunStreaming.test_fake_pwd_returns_synthetic_path` | Checks that fake pwd returns synthetic path. |
 | `TestRunStreaming.test_fake_uname_a_returns_web_shell_environment` | Checks that fake uname a returns web shell environment. |
 | `TestRunStreaming.test_fake_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
 | `TestRunStreaming.test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs` | Checks that the undocumented `xyzzy`, `coffee`, and fork-bomb easter eggs return their special responses. |
+| `TestRunStreaming.test_fake_autocomplete_explains_shell_completion_features` | Checks that running `autocomplete` explains tab-completion context hints and the built-in pipe suggestion support. |
 | `TestRunStreaming.test_fake_id_returns_synthetic_identity` | Checks that fake id returns synthetic identity. |
 | `TestRunStreaming.test_fake_whoami_streams_project_description` | Checks that fake whoami streams project description. |
-| `TestRunStreaming.test_fake_ps_lists_recent_session_commands` | Checks that fake ps lists recent session commands. |
+| `TestRunStreaming.test_fake_ps_lists_active_session_processes` | Checks that `ps aux` lists active run processes for the current session. |
 | `TestRunStreaming.test_run_reports_missing_allowlisted_command_without_spawning` | Checks that run reports missing allowlisted command without spawning. |
 | `TestRunStreaming.test_run_checks_missing_binary_after_rewrite` | Checks that run checks missing binary after rewrite. |
 | `TestRunOutputArtifacts.test_delete_run_removes_output_artifact` | Checks that delete run removes output artifact. |
@@ -907,21 +908,27 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 | Test | Description |
 | --- | --- |
-| `TestSessionTokenGenerate.test_generate_returns_200` | Checks that `/session/token/generate` returns HTTP 200. |
-| `TestSessionTokenGenerate.test_generate_response_has_session_token_key` | Checks that the response body contains a `session_token` key. |
-| `TestSessionTokenGenerate.test_generate_token_has_tok_prefix` | Checks that the generated token starts with the `tok_` prefix. |
-| `TestSessionTokenGenerate.test_generate_token_has_correct_length` | Checks that the generated token is 36 characters long (`tok_` + 32 hex chars). |
-| `TestSessionTokenGenerate.test_generate_token_is_persisted_in_db` | Checks that the new token is written to the `session_tokens` table. |
-| `TestSessionTokenGenerate.test_generate_returns_different_tokens_on_successive_calls` | Checks that successive calls return distinct tokens. |
-| `TestSessionMigrate.test_migrate_returns_200_for_valid_request` | Checks that `/session/migrate` returns HTTP 200 when `from_session_id` matches the `X-Session-ID` header. |
-| `TestSessionMigrate.test_migrate_returns_403_when_header_mismatch` | Checks that a 403 is returned when `from_session_id` does not match `X-Session-ID`. |
-| `TestSessionMigrate.test_migrate_returns_400_when_from_missing` | Checks that a 400 is returned when `from_session_id` is absent from the request body. |
-| `TestSessionMigrate.test_migrate_returns_400_when_to_missing` | Checks that a 400 is returned when `to_session_id` is absent from the request body. |
-| `TestSessionMigrate.test_migrate_returns_400_when_from_equals_to` | Checks that a 400 is returned when `from_session_id` and `to_session_id` are equal. |
-| `TestSessionMigrate.test_migrate_moves_runs_to_new_session` | Checks that run history rows are reassigned from the old session ID to the new one. |
-| `TestSessionMigrate.test_migrate_moves_snapshots_to_new_session` | Checks that snapshot rows are reassigned from the old session ID to the new one. |
-| `TestSessionMigrate.test_migrate_response_includes_correct_counts` | Checks that the response `migrated_runs` and `migrated_snapshots` counts match the actual rows moved. |
-| `TestSessionMigrate.test_migrate_does_not_affect_other_sessions` | Checks that rows belonging to an unrelated session are not touched. |
+| `TestSessionTokenGenerate.test_returns_200` | Checks that `/session/token/generate` returns HTTP 200. |
+| `TestSessionTokenGenerate.test_response_has_session_token_key` | Checks that the response body contains a `session_token` key. |
+| `TestSessionTokenGenerate.test_token_has_tok_prefix` | Checks that the generated token starts with the `tok_` prefix. |
+| `TestSessionTokenGenerate.test_token_length` | Checks that the generated token is 36 characters long (`tok_` + 32 hex chars). |
+| `TestSessionTokenGenerate.test_token_persisted_in_db` | Checks that the new token is written to the `session_tokens` table. |
+| `TestSessionTokenGenerate.test_multiple_calls_return_different_tokens` | Checks that successive calls return distinct tokens. |
+| `TestSessionTokenVerify.test_verify_returns_true_for_issued_token` | Checks that `/session/token/verify` returns `exists: true` for a freshly issued token. |
+| `TestSessionTokenVerify.test_verify_returns_false_for_unknown_tok_token` | Checks that a `tok_`-prefixed token never stored in the DB returns `exists: false`. |
+| `TestSessionTokenVerify.test_verify_returns_true_for_uuid` | Checks that UUID anonymous sessions are always considered valid (return `exists: true`) even without a DB entry. |
+| `TestSessionTokenVerify.test_verify_requires_token_field` | Checks that a 400 is returned when the `token` field is absent from the verify request. |
+| `TestSessionMigrate.test_returns_200_with_valid_request` | Checks that `/session/migrate` returns HTTP 200 when `from_session_id` matches the `X-Session-ID` header. |
+| `TestSessionMigrate.test_rejects_mismatched_from_session_id` | Checks that a 403 is returned when `from_session_id` does not match `X-Session-ID`. |
+| `TestSessionMigrate.test_rejects_missing_from_field` | Checks that a 400 is returned when `from_session_id` is absent from the request body. |
+| `TestSessionMigrate.test_rejects_missing_to_field` | Checks that a 400 is returned when `to_session_id` is absent from the request body. |
+| `TestSessionMigrate.test_rejects_equal_session_ids` | Checks that a 400 is returned when `from_session_id` and `to_session_id` are equal. |
+| `TestSessionMigrate.test_rejects_unissued_tok_destination` | Checks that migrating to a `tok_` destination not in `session_tokens` is rejected with 400. |
+| `TestSessionMigrate.test_allows_uuid_destination` | Checks that migrating to a UUID anonymous session is accepted (HTTP 200). |
+| `TestSessionMigrate.test_migrates_runs` | Checks that run history rows are reassigned from the old session ID to the new one. |
+| `TestSessionMigrate.test_migrates_snapshots` | Checks that snapshot rows are reassigned from the old session ID to the new one. |
+| `TestSessionMigrate.test_returns_correct_counts` | Checks that the response `migrated_runs` and `migrated_snapshots` counts match the actual rows moved. |
+| `TestSessionMigrate.test_does_not_migrate_other_sessions` | Checks that rows belonging to an unrelated session are not touched. |
 | `TestSessionMigrate.test_migrates_starred_commands` | Checks that starred commands are moved from the old session to the new one during migration. |
 | `TestSessionMigrate.test_migrate_returns_migrated_stars_count` | Checks that the response includes a `migrated_stars` count. |
 | `TestSessionMigrate.test_migrate_stars_no_duplicates_in_destination` | Checks that stars already present in the destination are not duplicated after migration. |
@@ -938,6 +945,48 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionStarred.test_delete_one_only_affects_own_session` | Checks that deleting a star from one session does not affect another session's stars. |
 | `TestSessionStarred.test_delete_all_clears_session_stars` | Checks that `DELETE /session/starred` with no body removes all stars for the session. |
 | `TestSessionStarred.test_delete_all_does_not_affect_other_sessions` | Checks that clearing all stars for one session does not affect another session's stars. |
+| `TestSessionTokenInfo.test_returns_null_for_uuid_session` | Checks that `/session/token/info` returns `null` for both fields when called with a UUID session ID. |
+| `TestSessionTokenInfo.test_returns_token_for_tok_session` | Checks that a freshly issued `tok_` token value is echoed back by the info endpoint. |
+| `TestSessionTokenInfo.test_returns_created_date_for_tok_session` | Checks that the `created` date is populated for an issued token. |
+| `TestSessionTokenInfo.test_returns_null_for_tok_not_in_db` | Checks that a `tok_`-prefixed token never stored in the DB is treated as anonymous (both fields null). |
+| `TestSessionTokenInfo.test_revoked_token_is_treated_as_anonymous` | Checks that after revocation, using the old token returns anonymous (null) info. |
+| `TestSessionTokenRevoke.test_returns_200_for_existing_token` | Checks that revoking a valid token returns HTTP 200 with `ok: true`. |
+| `TestSessionTokenRevoke.test_deletes_token_from_db` | Checks that the revoked token is deleted from `session_tokens`. |
+| `TestSessionTokenRevoke.test_returns_404_for_unknown_token` | Checks that revoking an unknown token returns 404. |
+| `TestSessionTokenRevoke.test_rejects_uuid_format` | Checks that revoking a UUID-format token is rejected with 400. |
+| `TestSessionTokenRevoke.test_rejects_missing_token_field` | Checks that a 400 is returned when the `token` field is absent from the revoke request. |
+| `TestSessionTokenRevoke.test_can_revoke_own_current_token` | Checks that revoking the caller's own active token (passed in both body and header) is permitted. |
+| `TestSessionTokenRevoke.test_second_revoke_returns_404` | Checks that attempting to revoke an already-revoked token returns 404. |
+
+#### `test_output_search.py`
+
+SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code path (when `runs_fts` is available) and the graceful fallback to `LOWER(command) LIKE` when the FTS table is absent.
+
+| Test | Description |
+| --- | --- |
+| `TestOutputSearch.test_finds_run_by_output_content` | Verifies that a term appearing in `output_search_text` (e.g. a port number from nmap output) is found by the history search endpoint. |
+| `TestOutputSearch.test_does_not_match_other_session` | Verifies that FTS results are scoped to the requesting session and do not surface runs from other sessions. |
+| `TestOutputSearch.test_finds_run_by_command_text` | Verifies that the command column is also indexed by FTS so command-text queries still work. |
+| `TestOutputSearch.test_no_match_returns_empty` | Verifies that a query with no matching runs returns an empty list, not an error. |
+| `TestOutputSearch.test_special_chars_do_not_crash` | Verifies that FTS special characters (`"`, `(`, `*`, `\`) in the query are escaped and do not raise an unhandled error. |
+| `TestOutputSearch.test_combined_with_exit_code_filter` | Verifies that an FTS query can be combined with the `exit_code` filter and returns only matching runs with the correct exit status. |
+| `TestOutputSearch.test_empty_query_returns_all_runs` | Verifies that an empty or absent `q` parameter returns all runs for the session without touching the FTS path. |
+| `TestOutputSearch.test_multiword_query_restricts_results` | Verifies that a multi-word query performs an AND search — only runs containing all terms are returned. |
+| `TestOutputSearch.test_partial_substring_match_via_trigram` | Verifies that compound tokens like `443/tcp` do not crash the search endpoint regardless of whether the trigram tokenizer is available. |
+| `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
+| `TestOutputSearch.test_fts_failure_falls_back_to_command_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text queries succeed via `LIKE` fallback and return HTTP 200; output-only queries return an empty list rather than a 500 error. |
+
+#### `test_docs.py`
+
+Meta-tests that verify documentation stays in sync with the test suite. Runs `pytest --collect-only` as a subprocess (once per module via a shared fixture) and compares results against the appendix tables and documented totals.
+
+| Test | Description |
+| --- | --- |
+| `TestAppendixDrift.test_documented_files_match_actual` | Checks that each test file's row count in the tests/README.md appendix matches the number of unique test function names collected by pytest (parameterised variants collapsed to a single entry). |
+| `TestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
+| `TestDocumentedTotals.test_tests_readme_pytest_total` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
+| `TestDocumentedTotals.test_contributing_pytest_total` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
+| `TestDocumentedTotals.test_architecture_pytest_total` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
 
 #### `test_validation.py`
 
@@ -983,9 +1032,19 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSyntheticPostFilterParsing.test_parses_default_head` | Checks that synthetic head defaults to a 10-line limit when no count is supplied. |
 | `TestSyntheticPostFilterParsing.test_parses_tail_with_explicit_count` | Checks that synthetic tail accepts `-n <count>` and preserves the base command. |
 | `TestSyntheticPostFilterParsing.test_parses_wc_line_count` | Checks that synthetic `wc -l` is recognized as the only supported wc helper. |
+| `TestSyntheticPostFilterParsing.test_parses_head_with_short_count_flag` | Checks that synthetic head accepts the short `-<count>` form (e.g. `head -5`). |
+| `TestSyntheticPostFilterParsing.test_parses_tail_with_short_count_flag` | Checks that synthetic tail accepts the short `-<count>` form (e.g. `tail -20`). |
 | `TestSyntheticPostFilterParsing.test_rejects_invalid_head_flags` | Checks that unsupported synthetic head forms are rejected. |
 | `TestSyntheticPostFilterParsing.test_rejects_non_numeric_tail_count` | Checks that synthetic tail rejects non-numeric counts. |
 | `TestSyntheticPostFilterParsing.test_rejects_wc_modes_other_than_line_count` | Checks that synthetic wc rejects modes other than `-l`. |
+| `TestSyntheticPostFilterParsing.test_parses_sort_default` | Checks that `sort` with no flags produces a spec with `reverse`, `numeric`, and `unique` all false. |
+| `TestSyntheticPostFilterParsing.test_parses_sort_flags` | Checks that `-rn` flags set `reverse` and `numeric` true. |
+| `TestSyntheticPostFilterParsing.test_parses_sort_unique` | Checks that `-u` sets `unique` true. |
+| `TestSyntheticPostFilterParsing.test_parses_sort_all_flags` | Checks that `-rnu` sets all three sort flags simultaneously. |
+| `TestSyntheticPostFilterParsing.test_rejects_invalid_sort_flags` | Checks that unsupported sort flags (e.g. `-x`) are rejected. |
+| `TestSyntheticPostFilterParsing.test_parses_uniq_default` | Checks that `uniq` with no flags produces a spec with `count` false. |
+| `TestSyntheticPostFilterParsing.test_parses_uniq_count` | Checks that `uniq -c` sets `count` true. |
+| `TestSyntheticPostFilterParsing.test_rejects_invalid_uniq_flags` | Checks that unsupported uniq flags (e.g. `-d`) are rejected. |
 | `TestDenyPrefix.test_deny_takes_priority` | Checks deny takes priority handling. |
 | `TestDenyPrefix.test_allow_still_works_without_denied_flag` | Checks that allow still works without denied flag. |
 | `TestDenyPrefix.test_deny_exact_match` | Checks deny exact match handling. |
@@ -1566,6 +1625,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
 | `mobile edit bar moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
+| `back button is visible at 850px touch viewport (shell threshold)` | Verifies that the diagnostics back button appears at 850px on a touch device — the shell's mobile-mode threshold — so chrome parity holds beyond the old 760px breakpoint. |
+| `back button is hidden at 850px non-touch viewport` | Verifies that the diagnostics back button is hidden at 850px on a non-touch (pointer: fine) device, where the shell stays in desktop mode. |
 
 #### `output.spec.js`
 

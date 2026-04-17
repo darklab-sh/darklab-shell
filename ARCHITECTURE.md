@@ -36,7 +36,7 @@ At a high level, it works like this:
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
-- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser cookies hold persistent user preferences such as timestamps, line numbers, welcome-intro mode, and the default share-snapshot redaction choice. Browser session storage holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
+- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser cookies hold persistent user preferences such as timestamps, line numbers, welcome-intro mode, the default share-snapshot redaction choice, and the run-notification toggle (`pref_run_notify`). Browser session storage holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
 
 ---
@@ -183,6 +183,14 @@ This route list belongs in the architecture document because it describes the ap
 | `GET` | `/welcome/ascii-mobile` | Returns the mobile welcome banner from `ascii_mobile.txt` as plain text |
 | `GET` | `/welcome/hints` | Returns rotating desktop welcome footer hints from `app_hints.txt` as JSON |
 | `GET` | `/welcome/hints-mobile` | Returns rotating mobile welcome footer hints from `app_hints_mobile.txt` as JSON |
+| `GET` | `/session/token/generate` | Generates a new persistent `tok_...` session token |
+| `GET` | `/session/token/info` | Returns the current named token plus creation timestamp, or `null` fields for anonymous sessions |
+| `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server |
+| `POST` | `/session/token/revoke` | Revokes a named token so future `tok_...` headers are treated as anonymous |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, and starred commands from one session ID to another |
+| `GET` | `/session/starred` | Returns the current session's starred command list |
+| `POST` | `/session/starred` | Adds one command to the current session's starred list |
+| `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session |
 | `GET` | `/history` | Returns the most recent completed runs for the current session as JSON |
 | `GET` | `/history/active` | Returns active-run metadata for the current session so reload can rebuild in-flight tabs |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
@@ -245,7 +253,7 @@ The options modal is part of that same browser-owned layer. It does not change b
 
 ### Frontend Architecture
 
-Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. CSS is split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, and `mobile.css`. Logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
+Modular frontend with no build step. `index.html` is a 169-line HTML shell — no inline styles or scripts. CSS is split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, and `mobile.css`. The diagnostics page (`/diag`) uses a separate `diag.css` rather than inline styles; it also links `terminal_export.css` to share the same header chrome foundation (`export-header`, `export-header-copy` classes) used by permalink pages. The mobile chrome on `/diag` (back button, header layout) activates at `@media (max-width: 900px) and (pointer: coarse)` — matching the same width + touch criteria used by the shell's `useMobileTerminalViewportMode()` — while layout-only changes (grid collapse, column widths) continue at `max-width: 760px` for all device types. Logic is split across `static/js/` into focused modules loaded via plain `<script src="...">` tags. Load order matters: the shared store lives in `state.js`, DOM-facing helpers live in `ui_helpers.js`, `app.js` provides shared browser helpers, and `controller.js` loads last to perform the initialization and event wiring. No bundler, no transpilation.
 
 Within that non-module shell, repeated tab/history/FAQ-limit surfaces are built with direct DOM node creation instead of stitched HTML strings, and the template’s modal chrome uses class-based wrappers for hidden state and dialog layout. That keeps the render paths more maintainable without changing the page composition model.
 
@@ -338,11 +346,14 @@ flowchart TB
 
 ### Database
 
-`./data/history.db` — SQLite, WAL mode. Three persistent tables plus file-backed run-output artifacts:
+`./data/history.db` — SQLite, WAL mode. Five persistent tables, one FTS5 virtual table, and file-backed run-output artifacts:
 
-- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Persists across restarts. Pruned by `permalink_retention_days`.
+- `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
+- `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
+- `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
+- `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
   - browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
@@ -407,7 +418,8 @@ The current event inventory is:
 | INFO | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted |
 | INFO | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
 | INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
-| INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, command_root, exit_code_filter, date_range |
+| INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, output_search, command_root, exit_code_filter, date_range |
+| WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
 | INFO | `HISTORY_DELETED` | `delete_run` | ip, run_id, session |
 | INFO | `HISTORY_CLEARED` | `clear_history` | ip, session, count |
 | INFO | `DIAG_VIEWED` | `diag()` | ip |
@@ -480,11 +492,15 @@ Session identity is a two-tier model managed in `app/static/js/session.js`:
 1. **UUID session (anonymous)** — generated by `_generateUUID()` on first visit and persisted in `localStorage` under `session_id`. Always present; never removed. `_generateUUID()` tries `crypto.randomUUID()` first (HTTPS/localhost) and falls back to `crypto.getRandomValues()` so HTTP LAN deployments (e.g. `http://192.168.x.x`) work without a secure context.
 2. **Session token (named)** — a `tok_<32 hex>` string generated server-side by `GET /session/token/generate` and persisted in `localStorage` under `session_token`. Takes precedence over the UUID when present. Stored in the `session_tokens` database table `(token TEXT PRIMARY KEY, created TEXT)`.
 
-`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History and run data is scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session.
+`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History and run data is scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session.
+
+**Server-side token validation:** `get_session_id()` in `helpers.py` validates `tok_`-prefixed header values against the `session_tokens` table on every request. A revoked or never-issued `tok_` token is treated as anonymous (returns `""`) so the caller loses access to session-scoped data immediately, without requiring a client-side logout. UUID-format session IDs pass through without a DB lookup.
 
 `maskSessionToken(token)` in `session.js` produces display-safe representations: `tok_XXXX••••••••` for named tokens and `uuid8ch••••••••` for UUIDs.
 
 History migration between identities goes through `POST /session/migrate` — see `### Session Token Security` in DECISIONS.md for the constraints on that endpoint.
+
+Open-tab sync is two-layered: the `storage` listener updates `SESSION_ID` in passive tabs, and session-scoped UI state is refreshed through `reloadSessionHistory()` and `_updateOptionsSessionTokenStatus()` so chips, starred state, history data, and the options token status stay aligned with the new identity rather than waiting for a full reload.
 
 It's not authentication — just isolation between sessions. The browser also keeps a separate `sessionStorage` snapshot for non-running tabs and draft input so reload restores can rebuild the recent workspace without persisting that UI state across browser sessions.
 
@@ -608,10 +624,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 770
-- `vitest`: 457
-- `playwright`: 152
-- total: 1,379
+- `pytest`: 798
+- `vitest`: 474
+- `playwright`: 156
+- total: 1,428
 
 ### Testing Architecture
 
