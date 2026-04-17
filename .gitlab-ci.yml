@@ -164,12 +164,11 @@ dependency-version-check:
 container-smoke-test:
   stage: build
   image: docker:27
-  services:
-    - docker:27-dind
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache python3 py3-pytest py3-yaml
+    - apk add --no-cache python3 py3-pytest py3-yaml docker-cli-compose
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
@@ -182,10 +181,9 @@ container-smoke-test:
 docker-build:
   stage: build
   image: docker:27
-  services:
-    - docker:27-dind
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
   before_script: []
   rules:
