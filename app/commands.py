@@ -899,8 +899,7 @@ def _normalize_autocomplete_context(data):
                         continue
                     seen_hints.add(key)
                     hints.append(hint)
-                if hints:
-                    arg_hints[trigger] = hints
+                arg_hints[trigger] = hints
 
         pipe_command = bool(raw_spec.get("pipe_command"))
         pipe_insert_value = str(raw_spec.get("pipe_insert_value") or "").strip()

@@ -157,7 +157,7 @@ function _buildContextAutocomplete(ctx) {
   const directHints = Object.prototype.hasOwnProperty.call(argHints, ctx.previousToken || '')
     ? argHints[ctx.previousToken || '']
     : (Object.prototype.hasOwnProperty.call(argHints, previousLower) ? argHints[previousLower] : null);
-  if (directHints && expectsValue.some(token => String(token).toLowerCase() === previousLower)) {
+  if (directHints !== null) {
     return _filterAutocompleteItems(
       directHints.map(item => _buildAutocompleteItem({
         value: item.value,

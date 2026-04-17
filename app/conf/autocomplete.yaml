@@ -12,6 +12,7 @@
 #       "<flag>":
 #         - value: <suggested-value>
 #           description: <short help text>
+#       "<terminal-flag>": []
 #       "__positional__":
 #         - value: <positional-placeholder-or-example>
 #           description: <short help text>
@@ -22,17 +23,29 @@
 #
 # - expects_value:
 #   flags whose next token is a value slot rather than another flag slot.
-#   Example: `curl -H <cursor>` uses arg_hints["-H"] instead of more flags.
+#   Example: `curl -H <cursor>` uses arg_hints["-H"] instead of showing more
+#   curl flags. Only list flags that genuinely consume a value here.
 #
 # - arg_hints:
-#   value hints shown after a specific flag, or generic positional hints via
-#   the special key "__positional__".
+#   controls what is shown after a specific token has been typed and accepted:
+#   - a list of hint items: shown as value suggestions after that token
+#   - an empty list []: suppresses the dropdown entirely after that token —
+#     use this for terminal flags that accept no further input, such as -h,
+#     --help, and subcommands like `session-token clear`. When the previous
+#     token has an arg_hints entry (even an empty one), the dropdown closes
+#     rather than falling through to the generic flag or positional list.
+#   - the special key "__positional__": generic hints shown when the cursor is
+#     at a non-flag position and no flag-specific hint is taking priority.
 #
 # Authoring rules:
 # - Every known command root should have an entry, even if minimal (`command: {}`),
 #   so it is discoverable via prefix matching.
 # - Add flags for commands where flag suggestions add value.
 # - Use expects_value when the next token should be a value, not another flag.
+# - Use arg_hints["<flag>"]: [] for terminal flags (help flags, standalone
+#   subcommands) so the dropdown collapses after they are typed. Do not add
+#   these to expects_value — expects_value is only for flags that consume a
+#   value argument.
 # - Use arg_hints["__positional__"] for normal positional arguments (targets,
 #   hosts, URLs, domains, CIDR ranges). Omit it for commands that take no args.
 # - For arg_hints values, prefer concrete examples for prefix matching
@@ -178,6 +191,7 @@ context:
       - --script
       - --top-ports
     arg_hints:
+      "-h": []
       "-p":
         - value: "80,443"
           description: Common web ports
@@ -240,6 +254,7 @@ context:
       - -H
       - -t
     arg_hints:
+      "-h": []
       "-u":
         - value: "<url-with-FUZZ>"
           description: Target URL including FUZZ
@@ -346,6 +361,7 @@ context:
       - -H
       - --max-time
     arg_hints:
+      "-h": []
       "-o":
         - value: "/dev/null"
           description: Discard body and keep metadata
@@ -392,6 +408,7 @@ context:
       - value: MX
         description: Mail exchanger lookup
     arg_hints:
+      "-h": []
       "__positional__":
         - value: "<domain>"
           description: Domain name to query
@@ -429,6 +446,7 @@ context:
       - -tags
       - -rl
     arg_hints:
+      "-h": []
       "-severity":
         - value: "low,medium,high,critical"
           description: Comma-separated severities
@@ -461,6 +479,7 @@ context:
       - -W
       - -w
     arg_hints:
+      "-h": []
       "-c":
         - value: "4"
           description: Send four probes
@@ -584,6 +603,7 @@ context:
       - -w
       - -q
     arg_hints:
+      "--help": []
       "-f":
         - value: "1"
           description: Start probing from the first hop
@@ -624,6 +644,7 @@ context:
     expects_value:
       - -c
     arg_hints:
+      "-h": []
       "-c":
         - value: "20"
           description: Twenty probes before exit
@@ -661,6 +682,7 @@ context:
       - --timeout
       - --tries
     arg_hints:
+      "-h": []
       "-O":
         - value: "/dev/null"
           description: Discard response body
@@ -706,6 +728,7 @@ context:
     expects_value:
       - --severity
     arg_hints:
+      "--help": []
       "--severity":
         - value: "HIGH"
           description: High-severity findings only
@@ -742,6 +765,7 @@ context:
       - -n
       - -D
     arg_hints:
+      "-h": []
       "-d":
         - value: "<domain>"
           description: Target domain to enumerate
@@ -787,6 +811,7 @@ context:
       - --dnsserver
       - --threads
     arg_hints:
+      "-h": []
       "--dnsserver":
         - value: "8.8.8.8"
           description: Example public resolver
@@ -823,6 +848,7 @@ context:
       - -d
       - -w
     arg_hints:
+      "-h": []
       "-d":
         - value: "<domain>"
           description: Target domain to enumerate
@@ -857,6 +883,7 @@ context:
       - --dns-servers
       - --traverse
     arg_hints:
+      "-h": []
       "--domain":
         - value: "<domain>"
           description: Target domain to enumerate
@@ -886,6 +913,7 @@ context:
     expects_value:
       - -d
     arg_hints:
+      "-h": []
       "-d":
         - value: "<domain>"
           description: Target domain to enumerate
@@ -916,6 +944,7 @@ context:
     expects_value:
       - -u
     arg_hints:
+      "-h": []
       "-u":
         - value: "https://"
           description: Start an HTTP or HTTPS URL
@@ -985,6 +1014,7 @@ context:
       - --enumerate
       - --detection-mode
     arg_hints:
+      "-h": []
       "--url":
         - value: "https://"
           description: Target WordPress URL
@@ -1031,6 +1061,7 @@ context:
       - -w
       - -x
     arg_hints:
+      "-h": []
       "-u":
         - value: "https://"
           description: Target base URL
@@ -1068,6 +1099,7 @@ context:
       - -c
       - -t
     arg_hints:
+      "-h": []
       "-c":
         - value: "4"
           description: Send four probes
@@ -1101,6 +1133,7 @@ context:
     expects_value:
       - --timeout
     arg_hints:
+      "-h": []
       "--timeout":
         - value: "10"
           description: Ten-second socket timeout
@@ -1138,6 +1171,7 @@ context:
       - value: --tlsv1_3
         description: Run TLS 1.3 cipher suite scan
     arg_hints:
+      "--help": []
       "__positional__":
         - value: "<host>"
           description: Hostname or host:port to scan
@@ -1162,6 +1196,7 @@ context:
     expects_value:
       - -t
     arg_hints:
+      "--help": []
       "-t":
         - value: "<waf-name>"
           description: Specific WAF to test for (e.g. Cloudflare)
@@ -1198,6 +1233,7 @@ context:
       - -rate
       - -exclude-ports
     arg_hints:
+      "-help": []
       "-host":
         - value: "<host>"
           description: Target hostname or IP address
@@ -1249,6 +1285,7 @@ context:
       - -ct
       - -timeout
     arg_hints:
+      "-help": []
       "-u":
         - value: "https://"
           description: Target URL to start crawling from
@@ -1288,6 +1325,7 @@ context:
       - --rate
       - --exclude
     arg_hints:
+      "--help": []
       "-p":
         - value: "80,443"
           description: Common web ports
@@ -1333,6 +1371,7 @@ context:
       - --ulimit
       - -t
     arg_hints:
+      "--help": []
       "-a":
         - value: "<host>"
           description: Target hostname or IP address
@@ -1543,7 +1582,15 @@ context:
   retention: {}
   route: {}
   session-token:
+    expects_value:
+      - set
     arg_hints:
+      "set":
+        - value: "<token>"
+          description: Paste a tok_... token or UUID from another device
+      "generate": []
+      "clear": []
+      "rotate": []
       "__positional__":
         - value: generate
           description: Generate a new session token and save it to this browser

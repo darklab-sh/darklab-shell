@@ -89,6 +89,73 @@ The recent header/export de-duplication work is already the right pattern for sa
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
+### Priority order
+
+Ranked by user benefit weighted against implementation complexity. Benefit and complexity use a three-point scale (H / M / L). Items marked ⬡ are foundational — they unlock multiple later features and should be designed before the features that depend on them are built.
+
+**Tier 1 — Quick wins (high benefit, low complexity)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Browser notifications on run completion | H | L | Hooks into existing SSE lifecycle; single opt-in prompt — highest ratio on the list |
+| Better output navigation | H | L | Line classes already exist; only navigation logic needed |
+| Full history search | H | L | SQLite FTS + search input; no schema change required |
+| Session token audit | H | L | One backend endpoint + two built-in commands; follows existing patterns exactly |
+| Run labels from terminal | M | L | Fake command + DB column + history drawer display |
+| Richer run metadata in history UI | M | L | Data already stored; surfacing only |
+
+**Tier 2 — High value, moderate effort**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Command outcome summaries | H | M | Start narrow (nmap, dig, curl, openssl); highest signal-to-noise value of any feature on the list |
+| Additional export formats | M | L–M | JSONL is straightforward; Markdown needs formatting logic |
+| Bulk history operations | M | L–M | Checkbox mode in history drawer + bulk endpoints |
+| Share package | H | M | Unified design reduces total work vs building annotations, notes, and lifecycle separately |
+| Mobile share flow | M | L | Web Share API; contained to mobile menu |
+| Tool-specific guidance + onboarding hints | M | L | Primarily content work |
+| Session dashboards (`stats` command) | M | L | Fake command + queries that already exist for the diagnostics page |
+
+**Tier 3 — Foundational ⬡ (unlock multiple later features)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Structured command catalog ⬡ | H | H | Unblocks parameterized forms, improved autocomplete, and policy metadata; design forms against this before building them |
+| Structured output model ⬡ | H | H | Unblocks command summaries, run comparison, and richer exports; build summaries to be retro-fittable once this is in place |
+
+**Tier 4 — Moderate value, moderate effort**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| History bookmarks beyond stars | M | M | Schema change + label management UI; complements run labels from terminal |
+| Saved command presets | M | M | New DB table + preset management UI |
+| Workflow replay and promotion | M | M–H | Promotion from history is the core feature; YAML parameterization is secondary |
+| Run comparison | M | H | Diff algorithm + run-selection UI; more compelling once history filtering is stronger |
+| Per-command policy metadata | M | M | Allowlist format extension + hint surfaces |
+| Richer audit trail | L–M | L | Logging additions only |
+| Autocomplete from output context | L–M | M | Narrow use case; useful but not on the critical path |
+
+**Tier 5 — Major initiatives (high benefit, high complexity)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Ephemeral per-session workspace | H | H | Needs allowlist workspace mode, quota, cleanup, and isolation model — not just tmpfs allocation |
+| Parameterized command forms | M | H | Depends on structured command catalog; do not build independently |
+| Run collections / case folders | M | H | New data model + grouping UI |
+| Snapshot diff against current tab | M | H | Builds on run comparison; defer until comparison is done |
+
+**Tier 6 — Defer (high complexity relative to incremental value)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Full reconnectable live stream | M | H | Separate architecture pass; do not conflate with incremental UI polish |
+| Environment capability hints | L–M | M | Pre-run hints have lower per-use value than post-run summaries |
+| Interactive PTY mode | M | H | Full PTY + WebSocket architecture for a small allowlisted set |
+| Plugin-style helper command registry | L | M | Internal quality; revisit when fake-command layer needs more structure |
+| Lightweight Jinja base template | L | L | Only worth doing with a third distinct page type |
+
+---
+
 ### Near-term
 
 - **Share package** (annotations, notes, and lifecycle controls)

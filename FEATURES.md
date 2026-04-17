@@ -127,9 +127,10 @@ How the keys work:
   - example:
     - `curl -o <cursor>` will use the `-o` value hints instead of showing more curl flags
 - `arg_hints`
-  - context-specific hints for values or positional arguments
-  - each key under `arg_hints` is either:
-    - a real flag like `-o`, `-u`, or `-severity`
+  - controls what is shown after a specific token has been typed and accepted
+  - each key under `arg_hints` is one of:
+    - a real flag like `-o`, `-u`, or `-severity` — shows value suggestions after that flag
+    - a flag mapped to an empty list `[]` — collapses the dropdown after that token (see terminal flags below)
     - the special key `__positional__`
 
 `__positional__` means:
@@ -170,11 +171,38 @@ That means:
 - `curl -o <cursor>` suggests file/value targets like `/dev/null`
 - `curl <cursor>` suggests generic positional URL hints
 
+**Terminal flags**
+
+Map a flag to an empty list in `arg_hints` to suppress the dropdown after it is typed. This is used for flags that accept no further input — help flags, version flags, and exclusive subcommands that end the command:
+
+```yaml
+nmap:
+  arg_hints:
+    "-h": []          # after `nmap -h `, dropdown closes
+    "-p":
+      - value: "80,443"
+        description: Common web ports
+
+session-token:
+  expects_value:
+    - set             # `set` consumes the next token (the token value)
+  arg_hints:
+    "set":
+      - value: "<token>"
+        description: Paste a tok_... token or UUID from another device
+    "generate": []    # after `session-token generate `, dropdown closes
+    "clear": []
+    "rotate": []
+```
+
+Do not add terminal flags to `expects_value` — that list is only for flags that genuinely consume a value argument. The empty `arg_hints` entry is sufficient on its own.
+
 Practical authoring guidance:
 
 - use `context` when the next useful suggestion depends on the command root or the preceding flag
 - use `pipe_command: true` when that context entry should also appear after `command |`
-- use `expects_value` only when the next token should stop showing more flags and switch to value hints
+- use `expects_value` only when the next token should be a value consumed by the preceding flag (e.g. `-p <ports>`, `-H <header>`)
+- use `arg_hints["<flag>"]: []` for terminal flags and standalone subcommands so the dropdown collapses after they are typed
 - use `arg_hints["__positional__"]` for unflagged arguments like hosts, URLs, domains, or CIDR targets
 - prefer concrete values when prefix matching should work, and placeholders when the hint is mainly explanatory
 
