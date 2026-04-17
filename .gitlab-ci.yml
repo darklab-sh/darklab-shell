@@ -99,7 +99,7 @@ lint-js:
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
   before_script:
-    - apt-get update -q && apt-get install -y -q shellcheck curl git
+    - apt-get update -q && apt-get install -y -q shellcheck curl
     - curl -sSL https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint && chmod +x /usr/local/bin/hadolint
     - npm ci
   cache:
@@ -111,6 +111,7 @@ lint-js:
     - npm run lint:shell
     - npm run lint:docker
     - npm run lint:md
+    - npm run lint:json
     - npm run vendor:check
 
 audit-py:

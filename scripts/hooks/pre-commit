@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Pre-commit checks: flake8, bandit, pytest, pip-audit, eslint, npm audit,
-#                   shellcheck, hadolint, yamllint, markdownlint, vendor:check
+#                   shellcheck, hadolint, yamllint, jsonlint, markdownlint, vendor:check
 # Install once with: git config core.hooksPath scripts/hooks
 
 set -uo pipefail
@@ -45,17 +45,21 @@ if command -v npm >/dev/null 2>&1 && [ -d "$REPO_ROOT/node_modules" ]; then
 fi
 
 # ESLint — check all tracked JS files that exist on disk
-run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
-    --config "$REPO_ROOT/config/eslint.config.js" \
-    $(git ls-files '*.js' | xargs -I{} sh -c '[ -f "{}" ] && echo "{}"')
+js_files=$(find "$REPO_ROOT" -name '*.js' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
+if [ -n "$js_files" ]; then
+    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
+    run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
+        --config "$REPO_ROOT/config/eslint.config.js" \
+        $js_files
+fi
 
 # npm audit — JS dependency CVEs (fail on high/critical only)
 run_check "npm audit" npm --prefix "$REPO_ROOT" run audit:js
 
 # shellcheck — shell script static analysis (skips non-shell .sh files)
-shell_scripts=$(git ls-files '*.sh' | while read -r f; do
-    [ -f "$f" ] && head -1 "$f" | grep -qE '#!/.*(bash|sh)' && echo "$f"
-done | tr '\n' ' ')
+shell_scripts=$(find "$REPO_ROOT" -name '*.sh' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f | while read -r f; do
+    head -1 "$f" | grep -qE '#!/.*(bash|sh)' && printf '%s ' "$f"
+done)
 if [ -n "$shell_scripts" ]; then
     # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
     run_check "shellcheck" shellcheck $shell_scripts
@@ -67,8 +71,14 @@ if [ -f "$REPO_ROOT/Dockerfile" ]; then
 fi
 
 # yamllint — YAML syntax and style
-# shellcheck disable=SC2046  # word-splitting intentional to pass list of files
-run_check "yamllint" yamllint -c "$REPO_ROOT/config/yamllint.yml" $(git ls-files '*.yml' '*.yaml')
+yaml_files=$(find "$REPO_ROOT" \( -name '*.yml' -o -name '*.yaml' \) -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
+if [ -n "$yaml_files" ]; then
+    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
+    run_check "yamllint" yamllint -c "$REPO_ROOT/config/yamllint.yml" $yaml_files
+fi
+
+# jsonlint — JSON syntax and style
+run_check "jsonlint" npm --prefix "$REPO_ROOT" run lint:json
 
 # markdownlint-cli2 — Markdown style and consistency
 run_check "markdownlint" npm --prefix "$REPO_ROOT" run lint:md

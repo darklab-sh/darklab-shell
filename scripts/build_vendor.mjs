@@ -15,7 +15,14 @@ import { fileURLToPath } from 'url';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolve(__dirname, '..');
-const VENDOR_DIR = resolve(ROOT, 'app/static/js/vendor');
+const args = process.argv.slice(2);
+let VENDOR_DIR = resolve(ROOT, 'app/static/js/vendor');
+for (let i = 0; i < args.length; i += 1) {
+  if (args[i] === '--out-dir' && typeof args[i + 1] === 'string') {
+    VENDOR_DIR = resolve(ROOT, args[i + 1]);
+    i += 1;
+  }
+}
 const NODE_MODULES = resolve(ROOT, 'node_modules');
 
 // ── jspdf ─────────────────────────────────────────────────────────────────────

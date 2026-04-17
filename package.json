@@ -10,18 +10,19 @@
     "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js",
     "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
-    "lint": "npm run lint:py && npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:md && npm run vendor:check",
+    "lint": "npm run lint:py && npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
     "lint:py": "flake8 app/ tests/py/ && bandit -r app/ -ll -q",
     "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/ app/static/js/**/*.js",
     "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",
     "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
     "lint:yaml": "yamllint -c config/yamllint.yml $(find . \\( -name '*.yml' -o -name '*.yaml' \\) -not -path './.git/*' -not -path './node_modules/*')",
+    "lint:json": "node scripts/lint_json.mjs",
     "lint:md": "markdownlint-cli2 \"**/*.md\"",
     "audit": "npm run audit:py && npm run audit:js",
     "audit:py": "pip-audit -r app/requirements.txt",
     "audit:js": "npm audit --audit-level=high",
     "vendor:sync": "node scripts/build_vendor.mjs",
-    "vendor:check": "npm run vendor:sync && git diff --exit-code app/static/js/vendor/"
+    "vendor:check": "tmp=$(mktemp -d) && node scripts/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/"
   },
   "dependencies": {
     "ansi_up": "6.0.6",

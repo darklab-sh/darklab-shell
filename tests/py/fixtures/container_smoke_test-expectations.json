@@ -533,9 +533,9 @@
       "no_output": false,
       "exit_code": 0,
       "command": "nmap -sV -p 80,443 ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap",
-        "Nmap scan report"
+      "any_of": [
+        { "expected_text": ["Starting Nmap"] },
+        { "expected_text": ["Nmap scan report"] }
       ]
     },
     {
@@ -566,9 +566,9 @@
       "no_output": false,
       "exit_code": 0,
       "command": "openssl s_client -connect ip.darklab.sh:443 -showcerts",
-      "expected_text": [
-        "depth=",
-        "verify return:1"
+      "any_of": [
+        { "expected_text": ["depth="] },
+        { "expected_text": ["verify return:1"] }
       ]
     },
     {
@@ -605,18 +605,18 @@
       "no_output": false,
       "exit_code": 0,
       "command": "dig @8.8.8.8 darklab.sh",
-      "expected_text": [
-        "; <<>> DiG",
-        "Got answer:"
+      "any_of": [
+        { "expected_text": ["; <<>> DiG"] },
+        { "expected_text": ["Got answer:"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": 0,
       "command": "nslookup -type=TXT darklab.sh",
-      "expected_text": [
-        "Non-authoritative answer:",
-        "v=spf1"
+      "any_of": [
+        { "expected_text": ["Non-authoritative answer:"] },
+        { "expected_text": ["v=spf1"] }
       ]
     },
     {
@@ -631,45 +631,45 @@
       "no_output": false,
       "exit_code": 0,
       "command": "mtr -h",
-      "expected_text": [
-        "Usage:",
-        "mtr [options] hostname"
+      "any_of": [
+        { "expected_text": ["Usage:"] },
+        { "expected_text": ["mtr [options] hostname"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": 0,
       "command": "wget -h",
-      "expected_text": [
-        "GNU Wget",
-        "Usage: wget"
+      "any_of": [
+        { "expected_text": ["GNU Wget"] },
+        { "expected_text": ["Usage: wget"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": 0,
       "command": "dnsrecon -d darklab.sh -t axfr",
-      "expected_text": [
-        "Checking for Zone Transfer",
-        "Zone Transfer Failed"
+      "any_of": [
+        { "expected_text": ["Checking for Zone Transfer"] },
+        { "expected_text": ["Zone Transfer Failed"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": 0,
       "command": "dnsrecon -d darklab.sh -t brt",
-      "expected_text": [
-        "Performing host and subdomain brute force",
-        "Records Found"
+      "any_of": [
+        { "expected_text": ["Performing host and subdomain brute force"] },
+        { "expected_text": ["Records Found"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": 1,
       "command": "dnsenum -h",
-      "expected_text": [
-        "dnsenum VERSION:",
-        "Usage: dnsenum"
+      "any_of": [
+        { "expected_text": ["dnsenum VERSION:"] },
+        { "expected_text": ["Usage: dnsenum"] }
       ]
     },
     {
@@ -692,10 +692,10 @@
       "no_output": false,
       "exit_code": null,
       "command": "dnsenum --dnsserver 8.8.8.8 darklab.sh",
-      "expected_text": [
-        "dnsenum VERSION:",
-        "AXFR record query failed"
-      ]
+      "any_of": [
+        { "expected_text": ["dnsenum VERSION:"] },
+        { "expected_text": ["AXFR record query failed"] }
+  ]
     },
     {
       "no_output": false,
@@ -717,36 +717,36 @@
       "no_output": false,
       "exit_code": 0,
       "command": "fierce -h",
-      "expected_text": [
-        "usage: fierce",
-        "--domain DOMAIN"
+      "any_of": [
+        { "expected_text": ["usage: fierce"] },
+        { "expected_text": ["--domain DOMAIN"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
       "command": "fierce --domain darklab.sh",
-      "expected_text": [
-        "NS:",
-        "SOA:"
+      "any_of": [
+        { "expected_text": ["NS:"] },
+        { "expected_text": ["SOA:"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": 0,
       "command": "fierce --domain darklab.sh --dns-servers 8.8.8.8",
-      "expected_text": [
-        "NS:",
-        "SOA:"
+      "any_of": [
+        { "expected_text": ["NS:"] },
+        { "expected_text": ["SOA:"] }
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
       "command": "fierce --domain darklab.sh --traverse 5",
-      "expected_text": [
-        "NS:",
-        "SOA:"
+      "any_of": [
+        { "expected_text": ["NS:"] },
+        { "expected_text": ["SOA:"] }
       ]
     },
     {
@@ -777,9 +777,9 @@
       "no_output": false,
       "exit_code": 0,
       "command": "sslscan --no-failed ip.darklab.sh",
-      "expected_text": [
-        "Testing SSL server",
-        "OpenSSL"
+      "any_of": [
+        { "expected_text": ["Testing SSL server"] },
+        { "expected_text": ["OpenSSL"] }
       ]
     },
     {
