@@ -22,13 +22,13 @@
   <button class="term-action-btn" id="toggle-ln">line numbers: off</button>
   <button class="term-action-btn" id="toggle-ts"{% if toggle_ts_disabled %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
   <a class="term-action-btn" href="{{ json_url }}">view json</a>
-  <button class="term-action-btn" onclick="copyTxt()">copy</button>
+  <button class="term-action-btn" data-action="copy-txt">copy</button>
   <div class="save-menu-wrap save-menu-down" id="perm-save-wrap">
     <button class="term-action-btn" id="perm-save-btn">save</button>
     <div class="save-menu">
-      <button onclick="saveTxt()">txt</button>
-      <button onclick="saveHtml()">html</button>
-      <button onclick="savePdf()">pdf</button>
+      <button data-action="save-txt">txt</button>
+      <button data-action="save-html">html</button>
+      <button data-action="save-pdf">pdf</button>
     </div>
   </div>
   <a class="term-action-btn" href="/">← back to shell</a>
@@ -37,262 +37,19 @@
 {% block output %}{% endblock %}
 
 {% block footer %}
-  <div id="copy-toast">Copied to clipboard</div>
+  <div id="permalink-toast">Copied to clipboard</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  const lines = {{ lines_json | safe }};
-  const hasTimestampMetadata = {{ has_timestamp_metadata | tojson }};
-  const ansi_up = new AnsiUp();
-  ansi_up.use_classes = false;
-  const out = document.getElementById('output');
-  const plainClasses = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
-  const tsModes = ['off', 'elapsed', 'clock'];
-
-  function getCookie(name) {
-    const prefix = `${name}=`;
-    const match = document.cookie.split(';').map(part => part.trim()).find(part => part.startsWith(prefix));
-    return match ? decodeURIComponent(match.slice(prefix.length)) : '';
-  }
-
-  const prefLineNumbers = getCookie('pref_line_numbers');
-  const prefTimestamps = getCookie('pref_timestamps');
-  let lnMode = prefLineNumbers === 'on' ? 'on' : 'off';
-  let tsMode = tsModes.includes(prefTimestamps) ? prefTimestamps : 'off';
-  if (!hasTimestampMetadata) tsMode = 'off';
-
-  function renderPromptEcho(text) {
-    const raw = String(text || '');
-    const firstSpace = raw.indexOf(' ');
-    const prefix = firstSpace === -1 ? raw : raw.slice(0, firstSpace);
-    const remainder = firstSpace === -1 ? '' : raw.slice(firstSpace + 1);
-    return '<span class="prompt-prefix">' + escHtml(prefix) + '</span>'
-      + (remainder ? escHtml(' ' + remainder) : '');
-  }
-
-  function timestampText(entry) {
-    if (tsMode === 'clock') return entry.tsC || '';
-    if (tsMode === 'elapsed') return entry.tsE || '';
-    return '';
-  }
-
-  function formatPrefix(index, entry) {
-    const parts = [];
-    if (lnMode === 'on') parts.push(String(index));
-    const ts = timestampText(entry);
-    if (ts) parts.push(ts);
-    return parts.join(' ');
-  }
-
-  function displayText(entry, index) {
-    const prefix = formatPrefix(index + 1, entry);
-    return (prefix ? prefix + '  ' : '') + String(entry.text || '');
-  }
-
-  function renderOutput() {
-    out.innerHTML = '';
-    const prefixes = lines.map((entry, index) => formatPrefix(index + 1, entry));
-    const prefixWidth = Math.max(0, ...prefixes.map(prefix => prefix.length));
-    out.style.setProperty('--perm-prefix-width', `${prefixWidth}ch`);
-
-    lines.forEach((entry, index) => {
-      const span = document.createElement('span');
-      const cls = entry.cls || '';
-      span.className = 'line' + (cls ? ' ' + cls : '');
-
-      const prefix = formatPrefix(index + 1, entry);
-      if (prefix) {
-        const prefixEl = document.createElement('span');
-        prefixEl.className = 'perm-prefix';
-        prefixEl.textContent = prefix;
-        span.appendChild(prefixEl);
-      }
-
-      const contentEl = document.createElement('span');
-      contentEl.className = 'perm-content';
-      if (cls === 'prompt-echo') {
-        contentEl.innerHTML = renderPromptEcho(entry.text);
-      } else if (plainClasses.has(cls)) {
-        contentEl.textContent = entry.text;
-      } else {
-        contentEl.innerHTML = ansi_up.ansi_to_html(entry.text);
-      }
-      span.appendChild(contentEl);
-      out.appendChild(span);
-    });
-
-    document.getElementById('toggle-ln').textContent = `line numbers: ${lnMode}`;
-    const tsBtn = document.getElementById('toggle-ts');
-    tsBtn.textContent = hasTimestampMetadata ? `timestamps: ${tsMode}` : 'timestamps: unavailable';
-  }
-
-  document.getElementById('toggle-ln').addEventListener('click', () => {
-    lnMode = lnMode === 'on' ? 'off' : 'on';
-    renderOutput();
-  });
-
-  document.getElementById('toggle-ts').addEventListener('click', () => {
-    if (!hasTimestampMetadata) return;
-    tsMode = tsModes[(tsModes.indexOf(tsMode) + 1) % tsModes.length];
-    renderOutput();
-  });
-
-  renderOutput();
-
-  // Save dropdown toggle — mirrors the terminal tab save-menu behaviour
-  (function () {
-    const wrap = document.getElementById('perm-save-wrap');
-    const btn  = document.getElementById('perm-save-btn');
-    if (!wrap || !btn) return;
-    btn.addEventListener('click', function (e) {
-      e.stopPropagation();
-      wrap.classList.toggle('open');
-    });
-    document.addEventListener('click', function () {
-      wrap.classList.remove('open');
-    });
-  })();
-
-  function _showToast() {
-    const t = document.getElementById('copy-toast');
-    t.style.display = 'block';
-    t.offsetHeight;
-    t.classList.add('show');
-    setTimeout(() => {
-      t.classList.remove('show');
-      t.style.display = 'none';
-    }, 2500);
-  }
-
-  function _copyTextFallback(text) {
-    return new Promise((resolve, reject) => {
-      const textarea = document.createElement('textarea');
-      textarea.value = String(text);
-      textarea.setAttribute('readonly', '');
-      textarea.style.position = 'fixed';
-      textarea.style.top = '-9999px';
-      textarea.style.left = '-9999px';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.focus();
-      textarea.select();
-      textarea.setSelectionRange(0, textarea.value.length);
-      let copied = false;
-      try {
-        copied = typeof document.execCommand === 'function' && document.execCommand('copy');
-      } catch (_) {
-        copied = false;
-      }
-      textarea.remove();
-      if (copied) resolve(true);
-      else reject(new Error('Copy command failed'));
-    });
-  }
-
-  function _copyTextToClipboard(text) {
-    const value = String(text || '');
-    if (navigator.clipboard && typeof navigator.clipboard.writeText === 'function') {
-      return navigator.clipboard.writeText(value).catch(() => _copyTextFallback(value));
-    }
-    return _copyTextFallback(value);
-  }
-
-  function copyTxt() {
-    const text = lines.map((entry, index) => displayText(entry, index)).join('\n');
-    _copyTextToClipboard(text).then(_showToast);
-  }
-
-  function exportTimestamp() {
-    return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-  }
-
-  function downloadName(ext) {
-    const appName = {{ app_name_json | safe }};
-    return appName + '-' + exportTimestamp() + '.' + ext;
-  }
-
-  function saveTxt() {
-    const text = lines.map((entry, index) => displayText(entry, index)).join('\n');
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([text], {type: 'text/plain'}));
-    a.download = downloadName('txt');
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  function escHtml(t) {
-    return t.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-  }
-
-  async function saveHtml() {
-    const appName = {{ app_name_json | safe }};
-    const label   = {{ label_json | safe }};
-    const created = {{ created_json | safe }};
-    const fontFacesCss = {{ font_faces_css | tojson }};
-    const permalinkMeta = {{ meta_json | safe }};
-
-    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(lines, {
-      getPrefix: (entry, i) => formatPrefix(i + 1, entry),
-      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
-    });
-
-    const runMeta = permalinkMeta ? {
-      exitCode: permalinkMeta.exit_code,
-      duration: permalinkMeta.duration || null,
-      lines:    permalinkMeta.lines    || null,
-      version:  permalinkMeta.version  || null,
-    } : null;
-
-    const exportCss = await ExportHtmlUtils.fetchTerminalExportCss().catch(() => '');
-    const createdFmt = (() => { try { return new Date(created).toLocaleString(); } catch(e) { return created; } })();
-    const html = ExportHtmlUtils.buildTerminalExportHtml({
-      appName,
-      title: label,
-      metaLine: label + '  ·  ' + createdFmt,
-      runMeta,
-      linesHtml,
-      prefixWidth,
-      fontFacesCss,
-      exportCss,
-    });
-
-    const a = document.createElement('a');
-    a.href = URL.createObjectURL(new Blob([html], {type: 'text/html'}));
-    a.download = downloadName('html');
-    a.click();
-    URL.revokeObjectURL(a.href);
-  }
-
-  function savePdf() {
-    if (!window.jspdf) { alert('PDF library not loaded'); return; }
-    const { jsPDF } = window.jspdf;
-    const appName       = {{ app_name_json | safe }};
-    const label         = {{ label_json | safe }};
-    const created       = {{ created_json | safe }};
-    const permalinkMeta = {{ meta_json | safe }};
-
-    const createdFmt = (() => { try { return new Date(created).toLocaleString(); } catch(e) { return created; } })();
-    const runMeta = permalinkMeta ? {
-      exitCode: permalinkMeta.exit_code,
-      duration: permalinkMeta.duration || null,
-      lines:    permalinkMeta.lines    || null,
-      version:  permalinkMeta.version  || null,
-    } : null;
-
-    const ansiUp = new AnsiUp();
-    ansiUp.use_classes = false;
-
-    const doc = ExportPdfUtils.buildTerminalExportPdf({
-      jsPDF,
-      appName,
-      metaLine: label + '  ·  ' + createdFmt,
-      runMeta,
-      rawLines: lines,
-      getPrefix: (entry, i) => formatPrefix(i + 1, entry),
-      ansiToHtml: (text) => ansiUp.ansi_to_html(text),
-    });
-    doc.save(downloadName('pdf'));
-  }
+  window.PermData = {
+    lines:               {{ lines_json | safe }},
+    hasTimestampMetadata: {{ has_timestamp_metadata | tojson }},
+    appName:             {{ app_name_json | safe }},
+    label:               {{ label_json | safe }},
+    created:             {{ created_json | safe }},
+    fontFacesCss:        {{ font_faces_css | tojson }},
+    permalinkMeta:       {{ meta_json | safe }},
+  };
 </script>
 {% endblock %}

@@ -296,7 +296,7 @@ test.describe('permalink / share', () => {
 
     await page.locator('button:has-text("copy")').click()
 
-    const toast = page.locator('#copy-toast')
+    const toast = page.locator('#permalink-toast')
     await expect(toast).toHaveText('Copied to clipboard')
     await expect(toast).toHaveClass(/show/, { timeout: 5_000 })
     await expect(toast).toBeHidden({ timeout: 5_000 })

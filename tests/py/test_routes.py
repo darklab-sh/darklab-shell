@@ -1265,8 +1265,10 @@ class TestShareRoute:
 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "renderPromptEcho" in body
-        assert "prompt-prefix" in body
+        # renderPromptEcho is now in the external permalink.js module; the page
+        # loads it and bridges data via window.PermData.  Confirm both are present.
+        assert "permalink.js" in body
+        assert "prompt-echo" in body
 
     def test_get_share_html_content_type(self):
         client = get_client()

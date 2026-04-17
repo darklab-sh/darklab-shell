@@ -82,66 +82,46 @@ Starred commands are currently `localStorage`-only (`starred` key, array of comm
 
 ## Technical Debt
 
-### Header/export rendering consolidation
+### Permalink / export behavior consolidation
 
-The shell renders a terminal-style header across 9 surfaces. Most are consolidated. One gap remains: the live permalink CSS diverges from the inlined export CSS.
+Export CSS, styles, and the permalink page controller are now consolidated. The remaining duplication is in server-side Python and the page bootstrap layer.
 
 Mobile is out of scope for this plan — it is a separate UI.
 
-**Current state — 9 surfaces, 4 code paths**
+**Current state**
 
-| # | Surface | Code path | Status |
-|---|---|---|---|
-| 1 | Main UI header | `index.html` `.terminal-bar` + `shell.css` | Distinct (has tabs/dots — structural divergence by design) |
-| 2 | Snapshot page `/share/<id>` | `permalink.html` via `_permalink_page()` → `components.css` | Shared with #3 |
-| 3 | Permalink page `/history/<id>` | Same template, different meta payload | Shared with #2 |
-| 4 | Save HTML from Main | `tabs.js#exportTabHtml` → `ExportHtmlUtils.buildTerminalExportHtml` | Consolidated |
-| 5 | Save HTML from Snapshot | `permalink.html#saveHtml` → same util | Consolidated |
-| 6 | Save HTML from Permalink | Same as #5 | Consolidated |
-| 7 | Save PDF from Main | `tabs.js#exportTabPdf` → `ExportPdfUtils.buildTerminalExportPdf` | Consolidated |
-| 8 | Save PDF from Snapshot | `permalink.html#savePdf` → same util | Consolidated |
-| 9 | Save PDF from Permalink | Same as #8 | Consolidated |
+| Surface | Primary path | Status |
+|---|---|---|
+| Main UI transcript | `index.html` + `output.js` + `tabs.js` | Shared module path |
+| Snapshot page `/share/<id>` | `permalink_base.html` + `permalink.js` | Shared with `/history` |
+| Permalink page `/history/<id>` | same template and script as `/share` | Shared with `/share` |
+| Save HTML from Main / Snapshot / Permalink | `ExportHtmlUtils.buildTerminalExportHtml` | Consolidated |
+| Save PDF from Main / Snapshot / Permalink | `ExportPdfUtils.buildTerminalExportPdf` | Consolidated |
+| Export CSS / styles | `terminal_export.css` via `ExportHtmlUtils.fetchTerminalExportCss` | Consolidated |
+| Permalink page controller | `permalink.js` (IIFE, `window.PermData` bridge) | Consolidated ✓ |
 
-**Remaining gap**
+**Remaining gaps**
 
-- **Gap B — Live CSS diverges from export CSS.** `components.css` defines `.permalink-header / .permalink-title / .permalink-meta / .meta-badge / .meta-item / .permalink-run-meta` (lines 507-613) and `export_html.js#buildTerminalExportStyles` defines `.export-header / .export-title / .export-meta / .meta-badge / .meta-item / .export-run-meta` (lines 143-239) — nearly identical rules with different class names. A header-spacing change has to be made twice.
+- **Gap B — theme/font bootstrap is duplicated across server and client paths.** `permalinks.py` has its own theme-cookie resolver and embedded-font manifest, while the main shell/export path keeps equivalent knowledge in `content.py` and `export_html.js`.
+- **Gap C — page bootstrap is duplicated between `index.html` and `permalink_base.html`.** The head block, theme bootstrap includes, vendor script includes, and some shell-level framing are repeated, so shared asset changes still require touching multiple templates.
 
 **Plan**
 
-#### Phase 2 — Consolidate header CSS (closes Gap B)
+#### Phase 2 — Unify theme and font metadata
 
-Extract the shared "terminal chrome" rules into one source. Two viable shapes:
+- Move theme-cookie resolution into one shared Python helper used by both `content.py` and `permalinks.py`.
+- Move the export font manifest into one source of truth so embedded export fonts, vendored font routes, and `fonts.css` cannot drift.
 
-**Option 2a (recommended): a single stylesheet used by both live pages and exports.**
+#### Phase 3 — Decide whether the shell needs a lightweight base template
 
-- Create `app/static/css/terminal_export.css` containing `.export-header`, `.export-title`, `.export-meta`, `.export-run-meta`, `.meta-badge{,-ok,-fail}`, `.meta-item`, `.perm-prefix`, `.perm-content`, `.line{,.exit-ok,.exit-fail,.denied,.notice,.prompt-prefix}`, `.export-output`.
-- `permalink_base.html` links it. `permalink.html` renames `.permalink-header/.permalink-title/.permalink-meta/.permalink-run-meta/.permalink-output` → `.export-header/.export-title/.export-meta/.export-run-meta/.export-output` (or keeps both class names during a transition).
-- `components.css` drops those `body.permalink-page .permalink-*` rules (keeps `.permalink-page body shell` + `.permalink-expiry` + `.permalink-error-*`).
-- `ExportHtmlUtils.buildTerminalExportStyles` fetches `/static/css/terminal_export.css` at export time (like `fetchVendorFontFacesCss` already does for fonts) and inlines it, replacing the big inline rule block. Theme vars and `--perm-prefix-width` stay inlined since they're per-export.
-
-**Option 2b (lighter touch):** keep both class hierarchies but factor the shared rules into a Jinja macro or a Python string constant served to both the `<style>` on `permalink_base.html` and `buildTerminalExportStyles`. Less clean but doesn't touch DOM class names.
-
-Recommend 2a — fewer indirections and makes the header truly one-source-of-truth.
-
-#### Phase 3 — Naming cleanup (small)
-
-Once Phase 2 lands, the `.permalink-*` names only describe a page identity, not a header style. Rename remaining live-page-only names (`.permalink-actions`, `.permalink-expiry`) to `.export-actions`, `.export-expiry` for consistency. `body.permalink-page` can stay as the page-identity class.
-
-**Critical files**
-
-- `app/static/css/components.css:507-613` — `.permalink-*` block to extract
-- `app/static/css/shell.css:102-108` — `.terminal-bar` chrome (stays; already token-based)
-
-**Risks / tradeoffs**
-
-- **Visual regression in Phase 2** — the class rename risks one missed selector. Mitigate by: (a) keeping `.permalink-header` as an alias temporarily, or (b) grepping for `permalink-` across CSS/JS/HTML and sweeping in one commit.
-- **Downloaded exports can't `fetch()` at view time** — the plan fetches `terminal_export.css` at export time, not at view time, and inlines the result into the `<style>` block — same pattern already used for fonts.
-- **Main UI terminal-bar** — intentionally not unified in markup. Its chrome already uses the same CSS tokens, so visually it stays aligned without a shared DOM shape. Forcing a shared `.export-header` on the main UI would break the tabs/dots layout.
+- If shared head/bootstrap changes continue to touch both templates, introduce a minimal base template for common `<head>` assets and theme bootstrapping.
+- Keep the main shell body structure distinct; only factor the duplicated document bootstrap.
 
 **Suggested sequencing**
 
-1. Phase 2 in a separate commit with visual diffing against before/after screenshots of both permalink surfaces and a sample exported HTML.
-2. Phase 3 as cleanup at the end.
+1. ~~Phase 1 complete~~ — `permalink.js` extracted; inline controller and duplicate helpers removed.
+2. Phase 2 next: theme and font changes stop needing synchronized Python and JS edits.
+3. Treat Phase 3 as optional cleanup if template duplication keeps expanding.
 
 ---
 
