@@ -5,14 +5,15 @@ Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 import logging
 import os
 import shutil
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
 
 from commands import command_root, load_allowed_commands
-from config import APP_VERSION, CFG, THEME_REGISTRY_MAP, get_theme_entry
+from config import APP_VERSION, CFG, get_theme_entry
 from database import db_connect
-from helpers import FONT_FILES, get_client_ip, get_session_id, ip_is_in_cidrs
+from helpers import FONT_FILES, current_theme_name, get_client_ip, get_session_id, ip_is_in_cidrs
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -32,12 +33,9 @@ def _fmt_elapsed(seconds):
         return f"{m}m {r}s" if r else f"{m}m"
     return f"{s}s"
 
-_ANSI_UP_PATH = Path("/usr/local/share/shell-assets/js/vendor/ansi_up.js")
-_ANSI_UP_FALLBACK = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
-_JSPDF_PATH = Path("/usr/local/share/shell-assets/js/vendor/jspdf.umd.min.js")
-_JSPDF_FALLBACK = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
-_FONT_DIR = Path("/usr/local/share/shell-assets/fonts")
-_FONT_FALLBACK_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
+_ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "ansi_up.js"
+_JSPDF_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
+_FONT_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
 _VENDOR_FONT_FILES = frozenset(filename for _, _, filename in FONT_FILES)
 
 
@@ -58,29 +56,20 @@ def client_log():
 
 @assets_bp.route("/vendor/ansi_up.js")
 def vendor_ansi_up_js():
-    """Serve ansi_up from the build-time vendor path, with a repo fallback."""
-    if _ANSI_UP_PATH.exists():
-        return send_file(_ANSI_UP_PATH, mimetype="application/javascript")
-    return send_file(_ANSI_UP_FALLBACK, mimetype="application/javascript")
+    return send_file(_ANSI_UP_JS, mimetype="application/javascript")
 
 
 @assets_bp.route("/vendor/jspdf.umd.min.js")
 def vendor_jspdf_js():
-    """Serve jsPDF from the build-time vendor path, with a repo fallback."""
-    if _JSPDF_PATH.exists():
-        return send_file(_JSPDF_PATH, mimetype="application/javascript")
-    return send_file(_JSPDF_FALLBACK, mimetype="application/javascript")
+    return send_file(_JSPDF_JS, mimetype="application/javascript")
 
 
 @assets_bp.route("/vendor/fonts/<path:filename>")
 def vendor_fonts(filename):
-    """Serve vendored font files from the build-time path, with a repo fallback."""
+    """Serve vendored font files; rejects any filename not in the committed manifest."""
     if filename not in _VENDOR_FONT_FILES:
         abort(404)
-    font_path = _FONT_DIR / filename
-    if font_path.exists():
-        return send_file(font_path)
-    return send_file(_FONT_FALLBACK_DIR / filename)
+    return send_file(_FONT_DIR / filename)
 
 
 @assets_bp.route("/favicon.ico")
@@ -196,8 +185,9 @@ def diag():
 
     # ── Vendor assets ─────────────────────────────────────────────────────────
     result["assets"] = {
-        "ansi_up": "vendor" if _ANSI_UP_PATH.exists() else "fallback",
-        "fonts":   "vendor" if _FONT_DIR.exists() and any(_FONT_DIR.iterdir()) else "fallback",
+        "ansi_up": "loaded" if _ANSI_UP_JS.exists() else "missing",
+        "jspdf":   "loaded" if _JSPDF_JS.exists() else "missing",
+        "fonts":   "loaded" if _FONT_DIR.exists() and any(_FONT_DIR.iterdir()) else "missing",
     }
 
     # ── Usage stats ──────────────────────────────────────────────────────────
@@ -205,18 +195,32 @@ def diag():
     if db_info.get("ok"):
         try:
             with db_connect() as conn:
-                # Runs in each calendar/rolling window
-                windows = [
-                    ("today",      "start of day"),
-                    ("this week",  "-7 days"),
-                    ("this month", "start of month"),
-                    ("this year",  "start of year"),
+                # Browser passes its UTC offset in minutes via ?tz_offset so
+                # calendar boundaries (today, month, year) align with local
+                # midnight rather than UTC midnight.
+                try:
+                    tz_offset_min = int(request.args.get("tz_offset", 0))
+                except (TypeError, ValueError):
+                    tz_offset_min = 0
+                # getTimezoneOffset() returns positive-east convention inverted
+                # (UTC-5 → +300), so negate to get a proper UTC offset.
+                local_tz = timezone(timedelta(minutes=-tz_offset_min))
+                now_local = datetime.now(timezone.utc).astimezone(local_tz)
+                fmt = "%Y-%m-%d %H:%M:%S"
+                cutoffs = [
+                    ("today",      now_local.replace(hour=0, minute=0, second=0, microsecond=0)
+                                            .astimezone(timezone.utc).strftime(fmt)),
+                    ("this week",  (datetime.now(timezone.utc) - timedelta(days=7)).strftime(fmt)),
+                    ("this month", now_local.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+                                            .astimezone(timezone.utc).strftime(fmt)),
+                    ("this year",  now_local.replace(month=1, day=1, hour=0, minute=0, second=0, microsecond=0)
+                                            .astimezone(timezone.utc).strftime(fmt)),
                 ]
                 activity = []
-                for label, modifier in windows:
+                for label, cutoff in cutoffs:
                     n = conn.execute(
-                        "SELECT COUNT(*) FROM runs WHERE started >= datetime('now', ?)",
-                        (modifier,),
+                        "SELECT COUNT(*) FROM runs WHERE started >= ?",
+                        (cutoff,),
                     ).fetchone()[0]
                     activity.append({"label": label, "count": n})
                 stats["activity"] = activity
@@ -279,10 +283,7 @@ def diag():
     if request.args.get("format") == "json":
         return jsonify(result)
 
-    theme_name = request.cookies.get("pref_theme_name", "").strip()
-    if not theme_name or theme_name not in THEME_REGISTRY_MAP:
-        theme_name = CFG.get("default_theme", "darklab_obsidian.yaml")
-    current_theme = get_theme_entry(theme_name, fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     return render_template(
         "diag.html",
         app_name=CFG.get("app_name", ""),

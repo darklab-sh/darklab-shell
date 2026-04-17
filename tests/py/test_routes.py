@@ -347,59 +347,28 @@ class TestThemesRoute:
 # ── /vendor assets ───────────────────────────────────────────────────────────
 
 class TestVendorAssets:
-    def test_ansi_up_prefers_build_time_asset(self, tmp_path, monkeypatch):
+    def test_ansi_up_js_is_served(self):
         client = get_client()
-        build_asset = tmp_path / "build" / "ansi_up.js"
-        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
-        build_asset.parent.mkdir(parents=True)
-        fallback_asset.parent.mkdir(parents=True)
-        build_asset.write_text("build ansi_up")
-        fallback_asset.write_text("fallback ansi_up")
-
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", build_asset)
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
-
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
-        assert resp.get_data(as_text=True) == "build ansi_up"
+        assert "javascript" in resp.content_type
 
-    def test_ansi_up_falls_back_to_repo_copy_when_build_asset_missing(self, tmp_path, monkeypatch):
+    def test_jspdf_js_is_served(self):
         client = get_client()
-        missing_build_asset = tmp_path / "missing" / "ansi_up.js"
-        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
-        fallback_asset.parent.mkdir(parents=True)
-        fallback_asset.write_text("fallback ansi_up")
-
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", missing_build_asset)
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
-
-        resp = client.get("/vendor/ansi_up.js")
+        resp = client.get("/vendor/jspdf.umd.min.js")
         assert resp.status_code == 200
-        assert resp.get_data(as_text=True) == "fallback ansi_up"
+        assert "javascript" in resp.content_type
 
-    def test_font_route_prefers_build_time_asset_and_falls_back(self, tmp_path, monkeypatch):
+    def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()
-        build_dir = tmp_path / "build-fonts"
-        fallback_dir = tmp_path / "fallback-fonts"
-        build_dir.mkdir()
-        fallback_dir.mkdir()
-
-        build_font = build_dir / "JetBrainsMono-400.ttf"
-        fallback_font = fallback_dir / "JetBrainsMono-400.ttf"
-        build_font.write_bytes(b"build font bytes")
-        fallback_font.write_bytes(b"fallback font bytes")
-
-        monkeypatch.setattr(shell_assets, "_FONT_DIR", build_dir)
-        monkeypatch.setattr(shell_assets, "_FONT_FALLBACK_DIR", fallback_dir)
+        font_dir = tmp_path / "fonts"
+        font_dir.mkdir()
+        (font_dir / "JetBrainsMono-400.ttf").write_bytes(b"font bytes")
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", font_dir)
 
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
-        assert resp.data == b"build font bytes"
-
-        monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing-fonts")
-        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
-        assert resp.status_code == 200
-        assert resp.data == b"fallback font bytes"
+        assert resp.data == b"font bytes"
 
     def test_font_route_rejects_unknown_or_traversal_paths(self):
         client = get_client()
@@ -502,15 +471,24 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         assert "configured" in data["redis"]
 
-    def test_assets_section_reports_vendor_or_fallback(self, tmp_path, monkeypatch):
+    def test_assets_section_reports_loaded_when_files_present(self):
         client = self._allowed_client()
-        # No build-time vendor dir present — both should report "fallback"
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", tmp_path / "missing_ansi_up.js")
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["assets"]["ansi_up"] == "loaded"
+        assert data["assets"]["jspdf"] == "loaded"
+        assert data["assets"]["fonts"] == "loaded"
+
+    def test_assets_section_reports_missing_when_files_absent(self, tmp_path, monkeypatch):
+        client = self._allowed_client()
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_JS", tmp_path / "missing_ansi_up.js")
+        monkeypatch.setattr(shell_assets, "_JSPDF_JS", tmp_path / "missing_jspdf.js")
         monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert data["assets"]["ansi_up"] == "fallback"
-        assert data["assets"]["fonts"] == "fallback"
+        assert data["assets"]["ansi_up"] == "missing"
+        assert data["assets"]["jspdf"] == "missing"
+        assert data["assets"]["fonts"] == "missing"
 
     def test_tools_section_has_present_and_missing_lists(self):
         client = self._allowed_client()

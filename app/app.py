@@ -30,9 +30,7 @@ log = logging.getLogger("shell")
 # Import blueprints and shared helpers after logging is configured.
 from extensions import limiter  # noqa: E402
 from helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
-from blueprints.assets import (  # noqa: E402, F401 — re-exported for test compatibility
-    assets_bp, _ANSI_UP_PATH, _ANSI_UP_FALLBACK, _FONT_DIR, _FONT_FALLBACK_DIR,
-)
+from blueprints.assets import assets_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402

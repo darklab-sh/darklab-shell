@@ -732,7 +732,7 @@ When the visiting IP is in the allowed range, a `⊕ diag` button appears in the
 | **App** | App version and configured name |
 | **Database** | Connection status (`online` / `error`), total run and snapshot counts |
 | **Redis** | Whether Redis is configured, and connection status when it is |
-| **Vendor Assets** | Whether `ansi_up.js` and the font files are served from the built-time vendor path or the repo fallback |
+| **Vendor Assets** | Whether `ansi_up.js`, `jspdf.umd.min.js`, and the font files are present (`loaded`) or missing (`missing`) from `app/static/` |
 | **Config** | All operational config values: rate limits, timeouts, output caps, retention, proxy CIDRs, log settings |
 | **Activity** | Run counts for today, last 7 days, this month, this year, and all-time, plus outcome breakdown (success / failed / incomplete by exit code) |
 | **Top Commands** | Top 10 commands by run frequency and top 5 longest individual runs |

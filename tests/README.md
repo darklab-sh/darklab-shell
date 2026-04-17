@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 732
+- `pytest`: 733
 - `vitest`: 420
 - `playwright`: 151
-- total: 1,303
+- total: 1,304
 
 This document is organized in two parts:
 
@@ -719,9 +719,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemesRoute.test_default_theme_filename_selects_variant` | Checks that default theme filename selects variant. |
 | `TestThemesRoute.test_pref_theme_name_cookie_selects_variant` | Checks that pref theme name cookie selects variant. |
 | `TestThemesRoute.test_empty_registry_falls_back_to_built_in_dark_theme` | Checks that empty registry falls back to built in dark theme. |
-| `TestVendorAssets.test_ansi_up_prefers_build_time_asset` | Checks that ansi up prefers build time asset. |
-| `TestVendorAssets.test_ansi_up_falls_back_to_repo_copy_when_build_asset_missing` | Checks that ansi up falls back to repo copy when build asset missing. |
-| `TestVendorAssets.test_font_route_prefers_build_time_asset_and_falls_back` | Checks that font route prefers build time asset and falls back. |
+| `TestVendorAssets.test_ansi_up_js_is_served` | Checks that ansi_up.js is served with correct content type. |
+| `TestVendorAssets.test_jspdf_js_is_served` | Checks that jspdf.umd.min.js is served with correct content type. |
+| `TestVendorAssets.test_font_route_serves_committed_file` | Checks that font route serves the committed file from the static fonts directory. |
 | `TestVendorAssets.test_font_route_rejects_unknown_or_traversal_paths` | Checks that font route rejects unknown or traversal paths. |
 | `TestDiagRoute.test_returns_404_when_cidrs_empty` | Returns 404 when cidrs empty. |
 | `TestDiagRoute.test_returns_404_when_cidrs_not_set` | Returns 404 when cidrs not set. |
@@ -733,7 +733,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDiagRoute.test_db_section_ok_and_has_counts` | Checks that database section ok and has counts. |
 | `TestDiagRoute.test_db_section_error_on_db_failure` | Checks that database section error on database failure. |
 | `TestDiagRoute.test_redis_section_reflects_client_presence` | Checks that Redis section reflects client presence. |
-| `TestDiagRoute.test_assets_section_reports_vendor_or_fallback` | Checks that assets section reports vendor or fallback. |
+| `TestDiagRoute.test_assets_section_reports_loaded_when_files_present` | Checks that assets section reports loaded when committed files are present. |
+| `TestDiagRoute.test_assets_section_reports_missing_when_files_absent` | Checks that assets section reports missing when static asset files are absent. |
 | `TestDiagRoute.test_tools_section_has_present_and_missing_lists` | Checks that tools section has present and missing lists. |
 | `TestDiagRoute.test_tools_present_contains_known_binary` | Checks that tools present contains known binary. |
 | `TestDiagRoute.test_honors_forwarded_for_header_from_trusted_proxy` | Checks that honors forwarded for header from trusted proxy. |

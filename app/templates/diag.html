@@ -5,6 +5,17 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ app_name }} — diagnostics</title>
+<script>
+  // Redirect once with the browser's UTC offset so activity counts use local
+  // calendar boundaries instead of UTC.  Only runs when tz_offset is absent.
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    if (!params.has('tz_offset')) {
+      params.set('tz_offset', new Date().getTimezoneOffset());
+      window.location.replace(window.location.pathname + '?' + params.toString());
+    }
+  })();
+</script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
@@ -401,15 +412,22 @@ body.diag-page::before { display: none; }
       <tr>
         <td>ansi_up</td>
         <td>
-          <span class="diag-dot {{ 'ok' if data.assets.ansi_up == 'vendor' else 'warn' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.ansi_up == 'vendor' else 'diag-warn' }}">{{ data.assets.ansi_up }}</span>
+          <span class="diag-dot {{ 'ok' if data.assets.ansi_up == 'loaded' else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.ansi_up == 'loaded' else 'diag-fail' }}">{{ data.assets.ansi_up }}</span>
+        </td>
+      </tr>
+      <tr>
+        <td>jspdf</td>
+        <td>
+          <span class="diag-dot {{ 'ok' if data.assets.jspdf == 'loaded' else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.jspdf == 'loaded' else 'diag-fail' }}">{{ data.assets.jspdf }}</span>
         </td>
       </tr>
       <tr>
         <td>fonts</td>
         <td>
-          <span class="diag-dot {{ 'ok' if data.assets.fonts == 'vendor' else 'warn' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.fonts == 'vendor' else 'diag-warn' }}">{{ data.assets.fonts }}</span>
+          <span class="diag-dot {{ 'ok' if data.assets.fonts == 'loaded' else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.fonts == 'loaded' else 'diag-fail' }}">{{ data.assets.fonts }}</span>
         </td>
       </tr>
     </table>
