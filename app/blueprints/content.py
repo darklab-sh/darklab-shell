@@ -20,7 +20,7 @@ from commands import (
     load_welcome_hints,
 )
 from fake_commands import get_special_command_keys
-from helpers import get_client_ip, get_session_id, ip_is_in_cidrs
+from helpers import get_client_ip, get_session_id, ip_is_in_cidrs, resolve_theme
 
 log = logging.getLogger("shell")
 
@@ -39,64 +39,20 @@ def _log_content_view(route: str, **extra):
     )
 
 
-def _current_theme_name():
-    # Keep cookie/default theme resolution in one place so HTML templates and
-    # JSON endpoints report the same active selection.
-    theme_name = request.cookies.get("pref_theme_name", "").strip()
-    if theme_name and theme_name in _config.THEME_REGISTRY_MAP:
-        log.debug(
-            "THEME_SELECTED",
-            extra={
-                "ip": get_client_ip(),
-                "session": get_session_id(),
-                "route": request.path,
-                "theme": theme_name,
-                "source": "pref_theme_name",
-            },
-        )
-        return theme_name
-    legacy = request.cookies.get("pref_theme", "").strip()
-    if legacy and legacy in _config.THEME_REGISTRY_MAP:
-        log.debug(
-            "THEME_SELECTED",
-            extra={
-                "ip": get_client_ip(),
-                "session": get_session_id(),
-                "route": request.path,
-                "theme": legacy,
-                "source": "pref_theme",
-            },
-        )
-        return legacy
-    default_theme = _config.CFG.get("default_theme", "darklab_obsidian.yaml")
-    if default_theme in _config.THEME_REGISTRY_MAP:
-        log.debug(
-            "THEME_SELECTED",
-            extra={
-                "ip": get_client_ip(),
-                "session": get_session_id(),
-                "route": request.path,
-                "theme": default_theme,
-                "source": "default_theme",
-            },
-        )
-        return default_theme
+def _current_theme_entry():
+    name, source = resolve_theme()
     log.debug(
         "THEME_SELECTED",
         extra={
             "ip": get_client_ip(),
             "session": get_session_id(),
             "route": request.path,
-            "theme": default_theme,
-            "source": "fallback",
+            "theme": name,
+            "source": source,
         },
     )
-    return default_theme
-
-
-def _current_theme_entry():
     return _config.get_theme_entry(
-        _current_theme_name(),
+        name,
         fallback=_config.CFG.get("default_theme", "darklab_obsidian.yaml"),
     )
 

@@ -1,7 +1,8 @@
 """
 Shared per-request helpers used across blueprints.
 
-Covers client-IP resolution (trusted-proxy aware) and session-ID extraction.
+Covers client-IP resolution (trusted-proxy aware), session-ID extraction,
+active-theme resolution, and the authoritative font manifest.
 These are kept here so multiple blueprints can import them without creating
 circular dependencies through app.py.
 """
@@ -11,9 +12,9 @@ import logging
 import re
 from functools import lru_cache
 
-from flask import g, request
+from flask import g, has_request_context, request
 
-from config import CFG
+from config import CFG, THEME_REGISTRY_MAP
 
 log = logging.getLogger("shell")
 
@@ -115,3 +116,52 @@ def get_client_ip():
 def get_session_id():
     """Extract the anonymous session ID from the X-Session-ID request header."""
     return request.headers.get("X-Session-ID", "").strip()
+
+
+# ── Font manifest ──────────────────────────────────────────────────────────────
+# Single source of truth for vendored font files.  assets.py derives its route
+# allowlist from this list; permalinks.py uses it to generate @font-face CSS.
+# Adding or removing a font here automatically propagates to both surfaces.
+
+FONT_FILES = [
+    ("JetBrains Mono", 300, "JetBrainsMono-300.ttf"),
+    ("JetBrains Mono", 400, "JetBrainsMono-400.ttf"),
+    ("JetBrains Mono", 700, "JetBrainsMono-700.ttf"),
+    ("Syne", 700, "Syne-700.ttf"),
+    ("Syne", 800, "Syne-800.ttf"),
+]
+
+
+# ── Theme resolution ───────────────────────────────────────────────────────────
+
+def resolve_theme() -> tuple[str, str]:
+    """Return ``(theme_name, source)`` for the current request.
+
+    Resolution order: pref_theme_name cookie → legacy pref_theme cookie →
+    default_theme config → hard-coded fallback.  ``source`` is one of
+    ``"pref_theme_name"``, ``"pref_theme"``, ``"default_theme"``, or
+    ``"fallback"``.  Safe to call outside a request context.
+    """
+    default = CFG.get("default_theme", "darklab_obsidian.yaml")
+    if not has_request_context():
+        return default, "fallback"
+    try:
+        theme_name = request.cookies.get("pref_theme_name", "").strip()
+        if theme_name and theme_name in THEME_REGISTRY_MAP:
+            return theme_name, "pref_theme_name"
+        legacy = request.cookies.get("pref_theme", "").strip()
+        if legacy and legacy in THEME_REGISTRY_MAP:
+            return legacy, "pref_theme"
+        source = "default_theme" if default in THEME_REGISTRY_MAP else "fallback"
+        return default, source
+    except Exception:
+        return default, "fallback"
+
+
+def current_theme_name() -> str:
+    """Return the active theme name for the current request.
+
+    Delegates to :func:`resolve_theme`; use that directly when the resolution
+    source is also needed (e.g. for debug logging).
+    """
+    return resolve_theme()[0]

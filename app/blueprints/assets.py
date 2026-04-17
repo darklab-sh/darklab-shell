@@ -12,7 +12,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from commands import command_root, load_allowed_commands
 from config import APP_VERSION, CFG, THEME_REGISTRY_MAP, get_theme_entry
 from database import db_connect
-from helpers import get_client_ip, get_session_id, ip_is_in_cidrs
+from helpers import FONT_FILES, get_client_ip, get_session_id, ip_is_in_cidrs
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -38,13 +38,7 @@ _JSPDF_PATH = Path("/usr/local/share/shell-assets/js/vendor/jspdf.umd.min.js")
 _JSPDF_FALLBACK = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
 _FONT_DIR = Path("/usr/local/share/shell-assets/fonts")
 _FONT_FALLBACK_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
-_VENDOR_FONT_FILES = frozenset({
-    "JetBrainsMono-300.ttf",
-    "JetBrainsMono-400.ttf",
-    "JetBrainsMono-700.ttf",
-    "Syne-700.ttf",
-    "Syne-800.ttf",
-})
+_VENDOR_FONT_FILES = frozenset(filename for _, _, filename in FONT_FILES)
 
 
 @assets_bp.route("/log", methods=["POST"])

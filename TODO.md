@@ -82,47 +82,6 @@ Starred commands are currently `localStorage`-only (`starred` key, array of comm
 
 ## Technical Debt
 
-### Permalink / export behavior consolidation
-
-Export CSS, styles, and the permalink page controller are now consolidated. The remaining duplication is in server-side Python and the page bootstrap layer.
-
-Mobile is out of scope for this plan — it is a separate UI.
-
-**Current state**
-
-| Surface | Primary path | Status |
-|---|---|---|
-| Main UI transcript | `index.html` + `output.js` + `tabs.js` | Shared module path |
-| Snapshot page `/share/<id>` | `permalink_base.html` + `permalink.js` | Shared with `/history` |
-| Permalink page `/history/<id>` | same template and script as `/share` | Shared with `/share` |
-| Save HTML from Main / Snapshot / Permalink | `ExportHtmlUtils.buildTerminalExportHtml` | Consolidated |
-| Save PDF from Main / Snapshot / Permalink | `ExportPdfUtils.buildTerminalExportPdf` | Consolidated |
-| Export CSS / styles | `terminal_export.css` via `ExportHtmlUtils.fetchTerminalExportCss` | Consolidated |
-| Permalink page controller | `permalink.js` (IIFE, `window.PermData` bridge) | Consolidated ✓ |
-
-**Remaining gaps**
-
-- **Gap B — theme/font bootstrap is duplicated across server and client paths.** `permalinks.py` has its own theme-cookie resolver and embedded-font manifest, while the main shell/export path keeps equivalent knowledge in `content.py` and `export_html.js`.
-- **Gap C — page bootstrap is duplicated between `index.html` and `permalink_base.html`.** The head block, theme bootstrap includes, vendor script includes, and some shell-level framing are repeated, so shared asset changes still require touching multiple templates.
-
-**Plan**
-
-#### Phase 2 — Unify theme and font metadata
-
-- Move theme-cookie resolution into one shared Python helper used by both `content.py` and `permalinks.py`.
-- Move the export font manifest into one source of truth so embedded export fonts, vendored font routes, and `fonts.css` cannot drift.
-
-#### Phase 3 — Decide whether the shell needs a lightweight base template
-
-- If shared head/bootstrap changes continue to touch both templates, introduce a minimal base template for common `<head>` assets and theme bootstrapping.
-- Keep the main shell body structure distinct; only factor the duplicated document bootstrap.
-
-**Suggested sequencing**
-
-1. ~~Phase 1 complete~~ — `permalink.js` extracted; inline controller and duplicate helpers removed.
-2. Phase 2 next: theme and font changes stop needing synchronized Python and JS edits.
-3. Treat Phase 3 as optional cleanup if template duplication keeps expanding.
-
 ---
 
 ## Ideas
@@ -218,6 +177,10 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Consider a stronger isolation path as a later phase:
     - a real per-session chroot-style jail or equivalent container-level filesystem jail so the shell process cannot see outside the session workspace at all
     - this would make the feature feel much more like a real shell while reducing accidental filesystem exposure
+
+- **Lightweight Jinja base template**
+  - `index.html` and `permalink_base.html` share ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With two templates this is not worth the indirection.
+  - Revisit if the app adds a third distinct page type (e.g. a standalone diagnostics page, a mobile-specific shell view, or a public landing page) — at that point a `base.html` factoring out the common `<head>` and `data-theme` body attribute pays for itself.
 
 - **Interactive PTY mode for screen-based tools**
   - Explore an optional PTY + WebSocket + browser terminal emulator path for a small allowlisted set of interactive or screen-redrawing tools such as `mtr`, without turning the app into a general-purpose remote shell.

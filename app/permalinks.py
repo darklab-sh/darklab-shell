@@ -7,32 +7,25 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Response, has_request_context, render_template, request
+from flask import Response, render_template
 
 from config import (
     CFG,
     DARK_THEME,
     THEME_REGISTRY,
-    THEME_REGISTRY_MAP,
     get_theme_entry,
     theme_runtime_css_vars,
 )
+from helpers import FONT_FILES, current_theme_name
 
 _FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
-_FONT_FILES = [
-    ("JetBrains Mono", 300, "JetBrainsMono-300.ttf"),
-    ("JetBrains Mono", 400, "JetBrainsMono-400.ttf"),
-    ("JetBrains Mono", 700, "JetBrainsMono-700.ttf"),
-    ("Syne", 700, "Syne-700.ttf"),
-    ("Syne", 800, "Syne-800.ttf"),
-]
 
 
 def _font_face_css(*, embed: bool = False) -> str:
     # Downloaded HTML can either reference app-hosted font files or embed them
     # directly so the export stays portable offline.
     rules = []
-    for family, weight, filename in _FONT_FILES:
+    for family, weight, filename in FONT_FILES:
         font_path = _FONT_DIR / filename
         if embed:
             try:
@@ -52,27 +45,6 @@ def _font_face_css(*, embed: bool = False) -> str:
             " }"
         )
     return "\n".join(rules)
-
-
-def _current_theme() -> str:
-    """Return the current session theme if available, otherwise default to dark."""
-    # Permalink pages and HTML exports should follow the same theme-selection
-    # rules as the main shell whenever a request context exists.
-    if not has_request_context():
-        return CFG.get("default_theme", "darklab_obsidian.yaml")
-    try:
-        theme_name = request.cookies.get("pref_theme_name", "").strip()
-        if theme_name and theme_name in THEME_REGISTRY_MAP:
-            return theme_name
-        legacy = request.cookies.get("pref_theme", "").strip()
-        if legacy and legacy in THEME_REGISTRY_MAP:
-            return legacy
-        default_theme = CFG.get("default_theme", "darklab_obsidian.yaml")
-        if default_theme in THEME_REGISTRY_MAP:
-            return default_theme
-        return default_theme
-    except Exception:
-        return CFG.get("default_theme", "darklab_obsidian.yaml")
 
 
 def _format_retention(days: int) -> str:
@@ -182,7 +154,7 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
     # Build one context shape for both live responses and downloadable HTML so
     # metadata/actions stay in sync across both surfaces.
     app_name = CFG.get("app_name", "darklab shell")
-    theme_entry = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    theme_entry = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
     created_fmt = created[:19].replace("T", " ") + " UTC"
@@ -227,7 +199,7 @@ def _permalink_error_page(noun: str) -> Response:
             f"period ({retention_str})."
         )
     app_name = CFG.get("app_name", "darklab shell")
-    current_theme = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     html = render_template(
         "permalink_error.html",
         page_title=f"{app_name} — {noun} not found",
