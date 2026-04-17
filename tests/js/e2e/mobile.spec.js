@@ -52,17 +52,10 @@ async function openMobileKeyboard(page) {
   await simulateMobileKeyboard(page)
 }
 
-// Fixed IP within the diagnostics_allowed_cidrs range (10.0.0.0/8) so the
-// /diag endpoint serves the page rather than returning 404.  The peer IP
-// (127.0.0.1) is in trusted_proxy_cidrs by default, so X-Forwarded-For is
-// honoured and the resolved client IP becomes this value.
-const DIAG_TEST_IP = '10.0.0.1'
-
+// The e2e server (run_e2e_server.sh) writes a test config.local.yaml that adds
+// 127.0.0.0/8 to diagnostics_allowed_cidrs, so Playwright's loopback connection
+// reaches /diag without any extra header manipulation.
 test.describe('diagnostics page on mobile', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': DIAG_TEST_IP })
-  })
-
   test('back button is visible at mobile viewport width', async ({ page }) => {
     await page.setViewportSize(MOBILE)
     await page.goto('/diag')
@@ -92,10 +85,6 @@ test.describe('diagnostics page on desktop at threshold width', () => {
   // A non-touch browser at 850px stays in the desktop shell, so the diag
   // page must not show the mobile back button.
   test.use({ hasTouch: false, isMobile: false })
-
-  test.beforeEach(async ({ page }) => {
-    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': DIAG_TEST_IP })
-  })
 
   test('back button is hidden at 850px non-touch viewport', async ({ page }) => {
     await page.setViewportSize({ width: 850, height: 900 })
