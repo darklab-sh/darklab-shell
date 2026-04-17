@@ -1,71 +1,92 @@
 import { vi } from 'vitest'
-import { MemoryStorage, fromScript, fromDomScripts } from './helpers/extract.js'
+import { MemoryStorage, fromDomScript, fromDomScripts } from './helpers/extract.js'
 
-// Re-extract before each test so each test gets a fresh MemoryStorage instance.
-// Extraction is cheap (one file read + new Function call).
-let _getStarred, _saveStarred, _toggleStar, store
+const _noopFetch = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
 
-beforeEach(() => {
-  ;({
-    _getStarred,
-    _saveStarred,
-    _toggleStar,
-    _storage: store,
-  } = fromScript('app/static/js/history.js', '_getStarred', '_saveStarred', '_toggleStar'))
-})
+/**
+ * Load star functions with an injectable apiFetch mock. Each call returns a
+ * fresh scope so tests stay isolated.
+ */
+function loadStarHelpers(mockApiFetch = _noopFetch) {
+  const storage = new MemoryStorage()
+  const fns = fromDomScript(
+    'app/static/js/history.js',
+    { localStorage: storage, APP_CONFIG: { recent_commands_limit: 20 }, apiFetch: mockApiFetch },
+    '_getStarred', '_saveStarred', '_toggleStar', 'loadStarredFromServer'
+  )
+  return { ...fns, _storage: storage }
+}
 
 // ── _getStarred ───────────────────────────────────────────────────────────────
+// When the in-memory cache (_starredCache) is null, falls back to localStorage.
+// When the cache has been populated (via _saveStarred or loadStarredFromServer),
+// localStorage is ignored.
 
 describe('_getStarred', () => {
-  it('returns an empty Set when no starred key exists', () => {
+  it('returns an empty Set when cache is null and no localStorage entry', () => {
+    const { _getStarred } = loadStarHelpers()
     expect(_getStarred()).toEqual(new Set())
   })
 
-  it('returns a Set of the stored command strings', () => {
-    store.setItem('starred', JSON.stringify(['foo', 'bar']))
+  it('returns localStorage values when cache is null', () => {
+    const { _getStarred, _storage } = loadStarHelpers()
+    _storage.setItem('starred', JSON.stringify(['foo', 'bar']))
     expect(_getStarred()).toEqual(new Set(['foo', 'bar']))
   })
 
-  it('returns an empty Set when the stored value is invalid JSON', () => {
-    store.setItem('starred', 'not-json{{{')
+  it('returns cache when cache is populated, ignoring localStorage', () => {
+    const { _getStarred, _saveStarred, _storage } = loadStarHelpers()
+    _storage.setItem('starred', JSON.stringify(['from-storage']))
+    _saveStarred(new Set(['from-cache']))
+    expect(_getStarred()).toEqual(new Set(['from-cache']))
+  })
+
+  it('returns an empty Set when localStorage has invalid JSON and cache is null', () => {
+    const { _getStarred, _storage } = loadStarHelpers()
+    _storage.setItem('starred', 'not-json{{{')
     expect(_getStarred()).toEqual(new Set())
   })
 
-  it('returns an empty Set when the stored value is an empty array', () => {
-    store.setItem('starred', '[]')
+  it('returns an empty Set when localStorage has an empty array and cache is null', () => {
+    const { _getStarred, _storage } = loadStarHelpers()
+    _storage.setItem('starred', '[]')
     expect(_getStarred()).toEqual(new Set())
   })
 
-  it('returns an empty Set when the stored value is a non-array JSON value', () => {
-    store.setItem('starred', JSON.stringify({ command: 'ls -la' }))
+  it('returns an empty Set when localStorage has a non-array JSON value and cache is null', () => {
+    const { _getStarred, _storage } = loadStarHelpers()
+    _storage.setItem('starred', JSON.stringify({ command: 'ls -la' }))
     expect(_getStarred()).toEqual(new Set())
   })
 })
 
 // ── _saveStarred ──────────────────────────────────────────────────────────────
+// Updates the in-memory cache only — does not write to localStorage.
 
 describe('_saveStarred', () => {
-  it('persists a Set to localStorage as a JSON array', () => {
+  it('updates the in-memory cache', () => {
+    const { _getStarred, _saveStarred } = loadStarHelpers()
     _saveStarred(new Set(['alpha', 'beta']))
-    const stored = JSON.parse(store.getItem('starred'))
-    expect(stored).toHaveLength(2)
-    expect(stored).toEqual(expect.arrayContaining(['alpha', 'beta']))
+    expect(_getStarred()).toEqual(new Set(['alpha', 'beta']))
   })
 
-  it('persists an empty Set as an empty JSON array', () => {
+  it('setting an empty Set makes _getStarred return an empty Set', () => {
+    const { _getStarred, _saveStarred } = loadStarHelpers()
+    _saveStarred(new Set(['x']))
     _saveStarred(new Set())
-    expect(store.getItem('starred')).toBe('[]')
+    expect(_getStarred()).toEqual(new Set())
   })
 
   it('round-trips correctly through _getStarred', () => {
+    const { _getStarred, _saveStarred } = loadStarHelpers()
     _saveStarred(new Set(['cmd1', 'cmd2']))
     expect(_getStarred()).toEqual(new Set(['cmd1', 'cmd2']))
   })
 
-  it('overwrites malformed stored data with a clean JSON array', () => {
-    store.setItem('starred', 'not-json{{{')
-    _saveStarred(new Set(['fixed']))
-    expect(_getStarred()).toEqual(new Set(['fixed']))
+  it('does not write to localStorage', () => {
+    const { _saveStarred, _storage } = loadStarHelpers()
+    _saveStarred(new Set(['cmd']))
+    expect(_storage.getItem('starred')).toBeNull()
   })
 })
 
@@ -73,17 +94,20 @@ describe('_saveStarred', () => {
 
 describe('_toggleStar', () => {
   it('adds a command that is not yet starred', () => {
+    const { _toggleStar, _getStarred } = loadStarHelpers()
     _toggleStar('ls -la')
     expect(_getStarred().has('ls -la')).toBe(true)
   })
 
   it('removes a command that is already starred', () => {
+    const { _toggleStar, _saveStarred, _getStarred } = loadStarHelpers()
     _saveStarred(new Set(['ls -la']))
     _toggleStar('ls -la')
     expect(_getStarred().has('ls -la')).toBe(false)
   })
 
   it('does not affect other starred commands when removing one', () => {
+    const { _toggleStar, _saveStarred, _getStarred } = loadStarHelpers()
     _saveStarred(new Set(['cmd1', 'cmd2']))
     _toggleStar('cmd1')
     const s = _getStarred()
@@ -92,15 +116,78 @@ describe('_toggleStar', () => {
   })
 
   it('toggling the same command twice returns it to its original state', () => {
+    const { _toggleStar, _saveStarred, _getStarred } = loadStarHelpers()
     _saveStarred(new Set(['cmd1']))
     _toggleStar('cmd1')
     _toggleStar('cmd1')
     expect(_getStarred().has('cmd1')).toBe(true)
   })
 
-  it('ignores duplicate command strings in the stored set representation', () => {
-    _saveStarred(new Set(['cmd1', 'cmd1']))
-    expect(_getStarred()).toEqual(new Set(['cmd1']))
+  it('calls POST when adding a star', () => {
+    const calls = []
+    const mock = (url, opts) => { calls.push({ url, method: opts?.method }); return Promise.resolve({ ok: true }) }
+    const { _toggleStar } = loadStarHelpers(mock)
+    _toggleStar('nmap target')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ url: '/session/starred', method: 'POST' })
+  })
+
+  it('calls DELETE when removing a star', () => {
+    const calls = []
+    const mock = (url, opts) => { calls.push({ url, method: opts?.method }); return Promise.resolve({ ok: true }) }
+    const { _toggleStar, _saveStarred } = loadStarHelpers(mock)
+    _saveStarred(new Set(['nmap target']))
+    _toggleStar('nmap target')
+    expect(calls).toHaveLength(1)
+    expect(calls[0]).toMatchObject({ url: '/session/starred', method: 'DELETE' })
+  })
+})
+
+// ── loadStarredFromServer ─────────────────────────────────────────────────────
+
+describe('loadStarredFromServer', () => {
+  it('populates the cache from the server response', async () => {
+    const mock = () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ commands: ['dig example.com', 'ping target'] }),
+    })
+    const { loadStarredFromServer, _getStarred } = loadStarHelpers(mock)
+    await loadStarredFromServer()
+    expect(_getStarred()).toEqual(new Set(['dig example.com', 'ping target']))
+  })
+
+  it('populates cache with an empty Set when server returns empty list', async () => {
+    const mock = () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
+    const { loadStarredFromServer, _getStarred } = loadStarHelpers(mock)
+    await loadStarredFromServer()
+    expect(_getStarred()).toEqual(new Set())
+  })
+
+  it('leaves cache unchanged when server returns a non-ok response', async () => {
+    const mock = () => Promise.resolve({ ok: false })
+    const { loadStarredFromServer, _saveStarred, _getStarred } = loadStarHelpers(mock)
+    _saveStarred(new Set(['pre-existing']))
+    await loadStarredFromServer()
+    expect(_getStarred()).toEqual(new Set(['pre-existing']))
+  })
+
+  it('does not throw when the fetch rejects', async () => {
+    const mock = () => Promise.reject(new Error('network error'))
+    const { loadStarredFromServer } = loadStarHelpers(mock)
+    await expect(loadStarredFromServer()).resolves.toBeUndefined()
+  })
+
+  it('after load, _getStarred returns server data instead of localStorage fallback', async () => {
+    const mock = () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ commands: ['server-cmd'] }),
+    })
+    const { loadStarredFromServer, _getStarred, _storage } = loadStarHelpers(mock)
+    _storage.setItem('starred', JSON.stringify(['local-cmd']))
+    await loadStarredFromServer()
+    const starred = _getStarred()
+    expect(starred.has('server-cmd')).toBe(true)
+    expect(starred.has('local-cmd')).toBe(false)
   })
 })
 
@@ -122,6 +209,7 @@ describe('command history hydration', () => {
         document,
         localStorage: new MemoryStorage(),
         APP_CONFIG: { recent_commands_limit: 3 },
+        apiFetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) }),
         histRow,
         cmdInput,
         historyPanel,
@@ -443,8 +531,6 @@ describe('history panel actions', () => {
           hideTabKillBtn,
           showToast,
           window: { open: windowOpen },
-          _getStarred,
-          _saveStarred,
           refreshHistoryPanel: () => {},
           renderHistory: () => {},
           hideHistoryPanel: vi.fn(() => {

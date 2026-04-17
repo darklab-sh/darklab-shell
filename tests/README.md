@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 733
-- `vitest`: 420
-- `playwright`: 151
-- total: 1,304
+- `pytest`: 770
+- `vitest`: 457
+- `playwright`: 152
+- total: 1,379
 
 This document is organized in two parts:
 
@@ -903,6 +903,42 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestHistoryIsolation.test_delete_run_only_deletes_for_matching_session` | Checks that delete run only deletes for matching session. |
 | `TestShareRoundTrip.test_share_json_roundtrip_preserves_structured_content` | Checks that share JSON roundtrip preserves structured content. |
 
+#### `test_session_routes.py`
+
+| Test | Description |
+| --- | --- |
+| `TestSessionTokenGenerate.test_generate_returns_200` | Checks that `/session/token/generate` returns HTTP 200. |
+| `TestSessionTokenGenerate.test_generate_response_has_session_token_key` | Checks that the response body contains a `session_token` key. |
+| `TestSessionTokenGenerate.test_generate_token_has_tok_prefix` | Checks that the generated token starts with the `tok_` prefix. |
+| `TestSessionTokenGenerate.test_generate_token_has_correct_length` | Checks that the generated token is 36 characters long (`tok_` + 32 hex chars). |
+| `TestSessionTokenGenerate.test_generate_token_is_persisted_in_db` | Checks that the new token is written to the `session_tokens` table. |
+| `TestSessionTokenGenerate.test_generate_returns_different_tokens_on_successive_calls` | Checks that successive calls return distinct tokens. |
+| `TestSessionMigrate.test_migrate_returns_200_for_valid_request` | Checks that `/session/migrate` returns HTTP 200 when `from_session_id` matches the `X-Session-ID` header. |
+| `TestSessionMigrate.test_migrate_returns_403_when_header_mismatch` | Checks that a 403 is returned when `from_session_id` does not match `X-Session-ID`. |
+| `TestSessionMigrate.test_migrate_returns_400_when_from_missing` | Checks that a 400 is returned when `from_session_id` is absent from the request body. |
+| `TestSessionMigrate.test_migrate_returns_400_when_to_missing` | Checks that a 400 is returned when `to_session_id` is absent from the request body. |
+| `TestSessionMigrate.test_migrate_returns_400_when_from_equals_to` | Checks that a 400 is returned when `from_session_id` and `to_session_id` are equal. |
+| `TestSessionMigrate.test_migrate_moves_runs_to_new_session` | Checks that run history rows are reassigned from the old session ID to the new one. |
+| `TestSessionMigrate.test_migrate_moves_snapshots_to_new_session` | Checks that snapshot rows are reassigned from the old session ID to the new one. |
+| `TestSessionMigrate.test_migrate_response_includes_correct_counts` | Checks that the response `migrated_runs` and `migrated_snapshots` counts match the actual rows moved. |
+| `TestSessionMigrate.test_migrate_does_not_affect_other_sessions` | Checks that rows belonging to an unrelated session are not touched. |
+| `TestSessionMigrate.test_migrates_starred_commands` | Checks that starred commands are moved from the old session to the new one during migration. |
+| `TestSessionMigrate.test_migrate_returns_migrated_stars_count` | Checks that the response includes a `migrated_stars` count. |
+| `TestSessionMigrate.test_migrate_stars_no_duplicates_in_destination` | Checks that stars already present in the destination are not duplicated after migration. |
+| `TestSessionMigrate.test_migrate_returns_only_newly_inserted_star_count` | Checks that `migrated_stars` reflects INSERT rowcount (newly written rows) rather than DELETE rowcount — so overlapping stars in the destination do not inflate the reported count. |
+| `TestSessionStarred.test_get_returns_empty_list_for_new_session` | Checks that `GET /session/starred` returns an empty list for a new session. |
+| `TestSessionStarred.test_get_returns_starred_commands` | Checks that starred commands are included in the GET response. |
+| `TestSessionStarred.test_get_is_scoped_to_session` | Checks that GET only returns stars belonging to the requesting session. |
+| `TestSessionStarred.test_post_adds_starred_command` | Checks that `POST /session/starred` adds a command to the starred list. |
+| `TestSessionStarred.test_post_is_idempotent` | Checks that posting the same command twice does not create a duplicate. |
+| `TestSessionStarred.test_post_rejects_missing_command` | Checks that a 400 is returned when the command field is absent. |
+| `TestSessionStarred.test_post_rejects_empty_command` | Checks that a 400 is returned when the command field is an empty string. |
+| `TestSessionStarred.test_delete_removes_one_command` | Checks that `DELETE /session/starred` with a command body removes only that command. |
+| `TestSessionStarred.test_delete_one_is_idempotent` | Checks that deleting a non-existent command returns 200 without error. |
+| `TestSessionStarred.test_delete_one_only_affects_own_session` | Checks that deleting a star from one session does not affect another session's stars. |
+| `TestSessionStarred.test_delete_all_clears_session_stars` | Checks that `DELETE /session/starred` with no body removes all stars for the session. |
+| `TestSessionStarred.test_delete_all_does_not_affect_other_sessions` | Checks that clearing all stars for one session does not affect another session's stars. |
+
 #### `test_validation.py`
 
 | Test | Description |
@@ -1136,20 +1172,27 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 
 | Test | Description |
 | --- | --- |
-| `returns an empty Set when no starred key exists` | Verifies that returns an empty Set when no starred key exists. |
-| `returns a Set of the stored command strings` | Verifies that returns a Set of the stored command strings. |
-| `returns an empty Set when the stored value is invalid JSON` | Verifies that returns an empty Set when the stored value is invalid JSON. |
-| `returns an empty Set when the stored value is an empty array` | Verifies that returns an empty Set when the stored value is an empty array. |
-| `returns an empty Set when the stored value is a non-array JSON value` | Verifies that returns an empty Set when the stored value is a non-array JSON value. |
-| `persists a Set to localStorage as a JSON array` | Verifies that persists a Set to localStorage as a JSON array. |
-| `persists an empty Set as an empty JSON array` | Verifies that persists an empty Set as an empty JSON array. |
-| `round-trips correctly through _getStarred` | Verifies that round-trips correctly through _getStarred. |
-| `overwrites malformed stored data with a clean JSON array` | Verifies that overwrites malformed stored data with a clean JSON array. |
-| `adds a command that is not yet starred` | Verifies that adds a command that is not yet starred. |
-| `removes a command that is already starred` | Verifies that removes a command that is already starred. |
-| `does not affect other starred commands when removing one` | Verifies that does not affect other starred commands when removing one. |
-| `toggling the same command twice returns it to its original state` | Verifies that toggling the same command twice returns it to its original state. |
-| `ignores duplicate command strings in the stored set representation` | Verifies that ignores duplicate command strings in the stored set representation. |
+| `returns an empty Set when cache is null and no localStorage entry` | Verifies that _getStarred returns empty Set when cache is unloaded and localStorage is empty. |
+| `returns localStorage values when cache is null` | Verifies that _getStarred falls back to localStorage while the server cache is unloaded. |
+| `returns cache when cache is populated, ignoring localStorage` | Verifies that _getStarred prefers the in-memory cache over localStorage once loaded. |
+| `returns an empty Set when localStorage has invalid JSON and cache is null` | Verifies that _getStarred handles corrupt localStorage gracefully. |
+| `returns an empty Set when localStorage has an empty array and cache is null` | Verifies that _getStarred handles an empty stored array. |
+| `returns an empty Set when localStorage has a non-array JSON value and cache is null` | Verifies that _getStarred ignores non-array JSON in localStorage. |
+| `updates the in-memory cache` | Verifies that _saveStarred populates the in-memory cache. |
+| `setting an empty Set makes _getStarred return an empty Set` | Verifies that clearing the cache via `_saveStarred` is reflected by `_getStarred`. |
+| `round-trips correctly through _getStarred` | Verifies that `_saveStarred` and `_getStarred` round-trip correctly through the cache. |
+| `does not write to localStorage` | Verifies that _saveStarred no longer writes to localStorage. |
+| `adds a command that is not yet starred` | Verifies that _toggleStar adds an unstarred command to the cache. |
+| `removes a command that is already starred` | Verifies that _toggleStar removes a starred command from the cache. |
+| `does not affect other starred commands when removing one` | Verifies that _toggleStar only touches the targeted command. |
+| `toggling the same command twice returns it to its original state` | Verifies that double-toggling a command restores the original star state. |
+| `calls POST when adding a star` | Verifies that _toggleStar fires a POST to /session/starred when starring a command. |
+| `calls DELETE when removing a star` | Verifies that _toggleStar fires a DELETE to /session/starred when unstarring a command. |
+| `populates the cache from the server response` | Verifies that loadStarredFromServer sets the cache from the /session/starred response. |
+| `populates cache with an empty Set when server returns empty list` | Verifies that loadStarredFromServer handles an empty server response. |
+| `leaves cache unchanged when server returns a non-ok response` | Verifies that loadStarredFromServer does not overwrite the cache on a server error. |
+| `does not throw when the fetch rejects` | Verifies that loadStarredFromServer swallows network errors silently. |
+| `after load, _getStarred returns server data instead of localStorage fallback` | Verifies that the server cache supersedes localStorage after loadStarredFromServer resolves. |
 | `hydrates unique recent commands from server history and enables navigation` | Verifies that hydrates unique recent commands from server history and enables navigation. |
 | `restores the typed draft after navigating through hydrated history` | Verifies that restores the typed draft after navigating through hydrated history. |
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
@@ -1257,6 +1300,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `submitVisibleComposerCommand can submit an explicit raw command` | Verifies that submitVisibleComposerCommand can submit an explicit raw command. |
 | `interruptPromptLine refocuses the visible mobile composer when present` | Verifies that interruptPromptLine refocuses the visible mobile composer when present. |
 | `returns false when the tab limit is reached` | Verifies that returns false when the tab limit is reached. |
+| `does nothing when localStorage has no starred key` | Verifies that _seedLocalStorageStarsToServer returns early without calling apiFetch when there is no starred entry in localStorage. |
+| `does nothing when the starred array is empty` | Verifies that _seedLocalStorageStarsToServer returns early when the starred localStorage array is empty. |
+| `POSTs each starred command to /session/starred` | Verifies that _seedLocalStorageStarsToServer POSTs every command in the localStorage starred array to the /session/starred endpoint. |
+| `removes the starred key from localStorage after seeding` | Verifies that _seedLocalStorageStarsToServer clears the localStorage starred entry after a successful seed. |
+| `calls loadStarredFromServer after seeding` | Verifies that _seedLocalStorageStarsToServer calls loadStarredFromServer to refresh the in-memory cache after seeding. |
+| `handles invalid localStorage JSON as empty and returns early` | Verifies that _seedLocalStorageStarsToServer treats malformed localStorage JSON as empty and does not call apiFetch. |
+| `retains failed commands in localStorage and removes only successful ones` | Verifies that _seedLocalStorageStarsToServer writes the failed commands back to localStorage when some POSTs return a non-2xx response. |
+| `retains all commands when every POST fails` | Verifies that _seedLocalStorageStarsToServer keeps the full starred array in localStorage when every POST fails. |
+| `removes the key only when all POSTs succeed` | Verifies that _seedLocalStorageStarsToServer removes the localStorage key only after all POSTs return ok. |
 
 #### `search.test.js`
 
@@ -1279,10 +1331,21 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `reuses an existing session id from localStorage` | Verifies that reuses an existing session id from localStorage. |
 | `generates and persists a session id when one does not exist` | Verifies that generates and persists a session id when one does not exist. |
 | `treats a blank stored session id as missing and generates a new one` | Verifies that treats a blank stored session id as missing and generates a new one. |
+| `falls back to getRandomValues UUID generation when randomUUID throws (insecure HTTP context)` | Verifies that `_generateUUID` falls back to `crypto.getRandomValues` and produces a valid UUID v4 when `crypto.randomUUID()` throws (e.g. Safari iOS on http://). |
 | `apiFetch injects the X-Session-ID header` | Verifies that apiFetch injects the X-Session-ID header. |
 | `apiFetch preserves existing headers while adding the session header` | Verifies that apiFetch preserves existing headers while adding the session header. |
 | `describeFetchError returns a friendly offline message for network failures` | Verifies that describeFetchError returns a friendly offline message for network failures. |
 | `describeFetchError preserves non-network error details` | Verifies that describeFetchError preserves non-network error details. |
+| `prefers session_token over session_id when both are in localStorage` | Verifies that `SESSION_ID` is initialised from `session_token` when both keys are present in localStorage. |
+| `falls back to session_id UUID when session_token is absent` | Verifies that `SESSION_ID` falls back to the UUID stored under `session_id` when no session token is set. |
+| `updateSessionId switches SESSION_ID at runtime` | Verifies that calling `updateSessionId` with a new value changes `SESSION_ID` without a page reload. |
+| `apiFetch sends updated session token after updateSessionId` | Verifies that `apiFetch` uses the new `SESSION_ID` set by `updateSessionId` in subsequent requests. |
+| `maskSessionToken masks a tok_ token showing only the first 4 hex chars` | Verifies that a `tok_`-prefixed token is masked as `tok_XXXX••••••••`. |
+| `maskSessionToken masks a UUID session showing the first 8 chars` | Verifies that a UUID session ID is masked to its first 8 characters followed by bullets. |
+| `maskSessionToken returns (none) for empty input` | Verifies that `maskSessionToken` returns `(none)` for an empty string or null. |
+| `storage event from another tab updates SESSION_ID to the new token` | Verifies that a `storage` event setting `session_token` in another tab updates `SESSION_ID` in the current tab. |
+| `storage event from another tab reverts SESSION_ID to UUID when token is cleared` | Verifies that a `storage` event clearing `session_token` in another tab reverts `SESSION_ID` to the UUID fallback. |
+| `storage event for an unrelated key does not change SESSION_ID` | Verifies that `storage` events for keys other than `session_token` have no effect on `SESSION_ID`. |
 
 #### `state.test.js`
 
@@ -1456,6 +1519,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `clicking outside the drawer closes the history panel` | Verifies that clicking outside the drawer closes the history panel. |
 | `pressing Escape closes the history panel` | Verifies that pressing Escape closes the history panel. |
 | `Delete Non-Favorites keeps starred runs and removes the rest` | Delete Non-Favorites keeps starred runs and removes the rest. |
+| `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
 
 #### `kill.spec.js`

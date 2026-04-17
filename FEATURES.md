@@ -29,6 +29,7 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 - [Theme Selector](#theme-selector)
 - [Options Modal](#options-modal)
 - [Persistence & Retention](#persistence--retention)
+- [Session Tokens](#session-tokens)
 - [Security and Process Isolation](#security-and-process-isolation)
 - [Structured Logging](#structured-logging)
 - [Operator Diagnostics](#operator-diagnostics)
@@ -667,6 +668,55 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 ```
 
 For the schema and persistence-layer details, use [ARCHITECTURE.md](ARCHITECTURE.md).
+
+---
+
+## Session Tokens
+
+By default the shell assigns each browser an anonymous UUID stored in `localStorage` under `session_id`. Session tokens let you replace that anonymous identity with a persistent named token so your run history, snapshots, and shell identity follow you across browsers and workstations — without a login screen.
+
+**Terminal commands**
+
+Run `session-token` (no subcommand) to see the current status: active token in masked form or "anonymous session" if none is set.
+
+- **`session-token generate`** — requests a new `tok_<32 hex>` token from the server, stores it in `localStorage` under `session_token`, and makes it the active session identity immediately. If the current anonymous session has any run history you will be asked: _"you have N run(s) in your previous session. migrate history to your new session token? [yes/no]"_ — answering yes calls `/session/migrate`; answering no leaves the anonymous history in place and starts fresh.
+
+- **`session-token set <token>`** — adopts an existing token, for example one generated on another device. The value is validated (must start with `tok_` or be a valid UUID) before being applied. If the current session has run history, the same migration prompt is offered.
+
+- **`session-token clear`** — removes `session_token` from `localStorage` and reverts to the original anonymous UUID session. The token's run history remains in the server database and can be reclaimed with `session-token set` at any time.
+
+- **`session-token rotate`** — generates a new token and migrates all run history and snapshots from the old identity to the new one before switching. The switch is **atomic**: if the migration call fails, the rotation is aborted and the old token stays active. The old token is retired after a successful rotate.
+
+All subcommands (`generate`, `set`, `clear`, `rotate`) are intercepted client-side and never reach the server, so token values are not written to the command log.
+
+**Options panel**
+
+The options panel (⚙) shows the active session token in masked form (e.g. `tok_abcd••••••••`) when one is set, or "No session token — anonymous session" otherwise. Four shortcut buttons cover the full lifecycle — their visibility is conditional on whether a token is currently active:
+
+| Button | Shown when | Action |
+|---|---|---|
+| **Generate** | No token active | Generates a new session token directly; copies the new token to the clipboard with a toast notification |
+| **Set** | No token active | Opens a dedicated input modal to paste an existing token from another device |
+| **Rotate** | Token active | Generates a new token and migrates all history to it; copies the new token to the clipboard with a toast notification |
+| **Clear** | Token active | Removes the active session token and reverts to the anonymous UUID session |
+
+If a session has run history, a history migration confirmation modal is shown before completing Generate, Set, or Rotate — the same migration prompt that appears when using the terminal commands. After any operation, the masked token display updates immediately without a page reload, and the recent command chips and starred commands also refresh to reflect the new session.
+
+**Cross-tab sync**
+
+When you change your session token in one tab, all other open tabs adopt the new identity automatically via the browser `storage` event — no reload required for subsequent API requests to carry the correct `X-Session-ID`.
+
+**Token format and storage**
+
+Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random). The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback. Issued tokens are recorded in the `session_tokens` table `(token TEXT PRIMARY KEY, created TEXT)`.
+
+**History migration**
+
+`POST /session/migrate` reassigns all `runs` and `snapshots` rows from one `session_id` to another in a single transaction. The `from_session_id` in the request body must match the caller's `X-Session-ID` header — any mismatch returns 403 — so users can only migrate their own session data.
+
+**Current scope**
+
+Run history, snapshots, and starred commands all migrate across sessions. Starred commands are backed by the `starred_commands` server table and `/session/starred` endpoints, so they follow a session token to any browser or workstation. On first token activation, commands already starred in `localStorage` are seeded to the server automatically.
 
 ---
 

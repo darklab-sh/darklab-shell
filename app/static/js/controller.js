@@ -280,6 +280,286 @@ optionsShareRedactionSelect?.addEventListener('change', e => {
   applyShareRedactionDefaultPreference(e.target.value);
 });
 
+// Session token options panel — UI-native controls
+
+function _updateOptionsSessionTokenStatus() {
+  const el = document.getElementById('options-session-token-status');
+  if (!el) return;
+  const token = localStorage.getItem('session_token');
+  const hasToken = Boolean(token);
+  el.textContent = hasToken ? maskSessionToken(token) : 'No session token — anonymous session';
+  el.classList.toggle('is-active', hasToken);
+  // Generate only when no token; Rotate, Clear, Copy only when one is active.
+  const generateBtn = document.getElementById('options-session-token-generate-btn');
+  const rotateBtn   = document.getElementById('options-session-token-rotate-btn');
+  const clearBtn    = document.getElementById('options-session-token-clear-btn');
+  const copyBtn     = document.getElementById('options-session-token-copy-btn');
+  if (generateBtn) generateBtn.style.display = hasToken ? 'none' : '';
+  if (rotateBtn)   rotateBtn.style.display   = hasToken ? '' : 'none';
+  if (clearBtn)    clearBtn.style.display    = hasToken ? '' : 'none';
+  if (copyBtn)     copyBtn.style.display     = hasToken ? '' : 'none';
+  _optionsTokenShowMsg('');
+}
+
+function _optionsTokenSetBusy(busy) {
+  ['options-session-token-generate-btn', 'options-session-token-set-btn',
+   'options-session-token-rotate-btn',   'options-session-token-clear-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
+}
+
+function _optionsTokenShowMsg(msg, isError = false) {
+  const el = document.getElementById('options-session-token-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = msg ? '' : 'none';
+  el.classList.toggle('is-error', isError);
+}
+
+function _waitForMigrateChoice(msg) {
+  return new Promise(resolve => {
+    const overlay = document.getElementById('session-token-migrate-overlay');
+    const msgEl   = document.getElementById('session-token-migrate-msg');
+    let yesBtn  = document.getElementById('session-token-migrate-yes');
+    let noBtn   = document.getElementById('session-token-migrate-no');
+    if (!overlay || !yesBtn || !noBtn) { resolve(false); return; }
+    if (msgEl) msgEl.textContent = msg;
+    overlay.style.display = 'flex';
+    // Replace each button with a fresh clone so no listener from a prior open
+    // survives to fire stale callbacks when the modal is re-opened.
+    const freshYes = yesBtn.cloneNode(true);
+    const freshNo  = noBtn.cloneNode(true);
+    yesBtn.parentNode.replaceChild(freshYes, yesBtn);
+    noBtn.parentNode.replaceChild(freshNo,  noBtn);
+    const done = (choice) => { overlay.style.display = 'none'; resolve(choice); };
+    freshYes.addEventListener('click', () => done(true),  { once: true });
+    freshNo.addEventListener('click',  () => done(false), { once: true });
+  });
+}
+
+document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
+  const token = localStorage.getItem('session_token');
+  if (!token) return;
+  copyTextToClipboard(token)
+    .then(() => showToast('Token copied to clipboard'))
+    .catch(() => showToast('Failed to copy token', 'error'));
+});
+
+document.getElementById('options-session-token-generate-btn')?.addEventListener('click', async () => {
+  const oldSessionId = SESSION_ID;
+  _optionsTokenSetBusy(true);
+  _optionsTokenShowMsg('');
+  try {
+    const resp = await apiFetch('/session/token/generate');
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      _optionsTokenShowMsg(`Failed to generate token — ${d.error || resp.status}`, true);
+      return;
+    }
+    const { session_token: newToken } = await resp.json();
+
+    // Count runs on OLD session before switching identity.
+    let runCount = 0;
+    try {
+      const histResp = await apiFetch('/history');
+      if (histResp.ok) runCount = ((await histResp.json()).runs || []).length;
+    } catch (_) {}
+
+    // Migrate BEFORE switching identity so a failed /session/migrate does not
+    // leave the user on the new token with their runs still on the old session.
+    if (runCount > 0) {
+      const migrate = await _waitForMigrateChoice(
+        `You have ${runCount} run(s) in your previous session. Migrate history to the new token?`
+      );
+      if (migrate) {
+        const migrateResp = await fetch('/session/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
+          body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: newToken }),
+        }).catch(() => null);
+        if (!migrateResp?.ok) {
+          const d = await migrateResp?.json().catch(() => ({})) ?? {};
+          _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
+          return;
+        }
+      }
+    }
+
+    localStorage.setItem('session_token', newToken);
+    updateSessionId(newToken);
+    if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
+    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    _updateOptionsSessionTokenStatus();
+    copyTextToClipboard(newToken)
+      .then(() => showToast('New token copied to clipboard'))
+      .catch(() => {});
+  } catch (err) {
+    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+  } finally {
+    _optionsTokenSetBusy(false);
+  }
+});
+
+// Set token modal
+document.getElementById('options-session-token-set-btn')?.addEventListener('click', () => {
+  _optionsTokenShowMsg('');
+  const overlay = document.getElementById('session-token-set-overlay');
+  const input   = document.getElementById('session-token-set-input');
+  const errEl   = document.getElementById('session-token-set-error');
+  if (overlay) overlay.style.display = 'flex';
+  if (input)   { input.value = ''; input.focus(); }
+  if (errEl)   errEl.style.display = 'none';
+});
+
+document.getElementById('session-token-set-overlay')?.addEventListener('click', e => {
+  if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
+});
+
+document.getElementById('session-token-set-cancel')?.addEventListener('click', () => {
+  document.getElementById('session-token-set-overlay').style.display = 'none';
+});
+
+document.getElementById('session-token-set-input')?.addEventListener('keydown', e => {
+  if (e.key === 'Enter')  document.getElementById('session-token-set-confirm')?.click();
+  if (e.key === 'Escape') document.getElementById('session-token-set-cancel')?.click();
+});
+
+document.getElementById('session-token-set-confirm')?.addEventListener('click', async () => {
+  const input = document.getElementById('session-token-set-input');
+  const errEl = document.getElementById('session-token-set-error');
+  const value = (input?.value || '').trim();
+  const isTok  = value.startsWith('tok_');
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  if (!value || (!isTok && !isUuid)) {
+    if (errEl) { errEl.textContent = 'Invalid token — expected tok_... or a UUID'; errEl.style.display = ''; }
+    return;
+  }
+
+  // For tok_ tokens, verify server-side existence before switching.
+  // A typo would otherwise silently create a brand-new empty session.
+  // Fail closed: any failure (network error, non-OK response, missing exists flag)
+  // blocks the switch rather than allowing an unverified token through.
+  if (isTok) {
+    let verifyErr = null;
+    try {
+      const vResp = await apiFetch('/session/token/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: value }),
+      });
+      const vData = await vResp.json().catch(() => ({}));
+      if (!vResp.ok) {
+        verifyErr = 'Token verification failed — server returned an error';
+      } else if (vData.exists === false) {
+        verifyErr = 'Token not found — this token was not issued by this server';
+      }
+    } catch (_) {
+      verifyErr = 'Token verification failed — server is unreachable';
+    }
+    if (verifyErr !== null) {
+      if (errEl) { errEl.textContent = verifyErr; errEl.style.display = ''; }
+      return;
+    }
+  }
+
+  if (errEl) errEl.style.display = 'none';
+  document.getElementById('session-token-set-overlay').style.display = 'none';
+
+  const oldSessionId = SESSION_ID;
+  _optionsTokenSetBusy(true);
+  _optionsTokenShowMsg('');
+  try {
+    let runCount = 0;
+    try {
+      const histResp = await apiFetch('/history');
+      if (histResp.ok) runCount = ((await histResp.json()).runs || []).length;
+    } catch (_) {}
+
+    // Migrate BEFORE switching identity so a failed /session/migrate does not
+    // leave the user on the new token with their runs still on the old session.
+    if (runCount > 0) {
+      const migrate = await _waitForMigrateChoice(
+        `You have ${runCount} run(s) in your current session. Migrate history to this token?`
+      );
+      if (migrate) {
+        const migrateResp = await fetch('/session/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
+          body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: value }),
+        }).catch(() => null);
+        if (!migrateResp?.ok) {
+          const d = await migrateResp?.json().catch(() => ({})) ?? {};
+          _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
+          return;
+        }
+      }
+    }
+
+    localStorage.setItem('session_token', value);
+    updateSessionId(value);
+    if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
+    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    if (input) input.value = '';
+    _updateOptionsSessionTokenStatus();
+    showToast('Session token applied');
+  } catch (err) {
+    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+  } finally {
+    _optionsTokenSetBusy(false);
+  }
+});
+
+document.getElementById('options-session-token-rotate-btn')?.addEventListener('click', async () => {
+  const oldSessionId = SESSION_ID;
+  _optionsTokenSetBusy(true);
+  _optionsTokenShowMsg('');
+  try {
+    const genResp = await apiFetch('/session/token/generate');
+    if (!genResp.ok) {
+      const d = await genResp.json().catch(() => ({}));
+      _optionsTokenShowMsg(`Failed to generate token — ${d.error || genResp.status}`, true);
+      return;
+    }
+    const { session_token: newToken } = await genResp.json();
+
+    // Migrate BEFORE updating SESSION_ID so the old identity is sent in the header.
+    const migrateResp = await fetch('/session/migrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
+      body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: newToken }),
+    });
+    const migrateData = await migrateResp.json().catch(() => ({}));
+    if (!migrateResp.ok || !migrateData.ok) {
+      _optionsTokenShowMsg(`Migration failed — token not rotated: ${migrateData.error || migrateResp.status}`, true);
+      return;
+    }
+
+    localStorage.setItem('session_token', newToken);
+    updateSessionId(newToken);
+    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+
+    _updateOptionsSessionTokenStatus();
+    copyTextToClipboard(newToken)
+      .then(() => showToast('New token copied to clipboard'))
+      .catch(() => showToast('Token rotated'));
+  } catch (err) {
+    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+  } finally {
+    _optionsTokenSetBusy(false);
+  }
+});
+
+document.getElementById('options-session-token-clear-btn')?.addEventListener('click', () => {
+  if (!localStorage.getItem('session_token')) return;
+  localStorage.removeItem('session_token');
+  const uuid = localStorage.getItem('session_id') || SESSION_ID;
+  updateSessionId(uuid);
+  if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+  _updateOptionsSessionTokenStatus();
+  showToast('Session token cleared');
+});
+
 apiFetch('/allowed-commands').then(r => r.json()).then(data => {
   allowedCommandsFaqData = data;
   renderAllowedCommandsFaq(data);
@@ -297,6 +577,10 @@ apiFetch('/workflows').then(r => r.json()).then(data => {
   renderWorkflowItems(data.items || []);
 }).catch(err => {
   logClientError('failed to load /workflows', err);
+});
+
+loadStarredFromServer().catch(err => {
+  logClientError('failed to load /session/starred', err);
 });
 
 // ── Tabs ──

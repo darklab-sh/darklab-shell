@@ -247,6 +247,33 @@
   </div>
 </div>
 
+<!-- Session token: Set modal -->
+<div id="session-token-set-overlay" class="modal-overlay" style="display:none">
+  <div id="session-token-set-modal" class="modal-card">
+    <div class="modal-copy">
+      Enter a session token to switch to.<br>
+      <span class="modal-copy-note">Accepts tok_... format or a UUID from another session.</span>
+    </div>
+    <input id="session-token-set-input" class="options-token-input modal-token-input" type="text" placeholder="tok_... or UUID" autocomplete="off" spellcheck="false" />
+    <div id="session-token-set-error" class="options-session-token-msg is-error" style="display:none"></div>
+    <div class="modal-actions">
+      <button id="session-token-set-cancel" class="term-action-btn" type="button">Cancel</button>
+      <button id="session-token-set-confirm" class="modal-primary modal-primary-accent" type="button">Apply</button>
+    </div>
+  </div>
+</div>
+
+<!-- Session token: migration confirmation modal -->
+<div id="session-token-migrate-overlay" class="modal-overlay" style="display:none">
+  <div id="session-token-migrate-modal" class="modal-card">
+    <div id="session-token-migrate-msg" class="modal-copy"></div>
+    <div class="modal-actions">
+      <button id="session-token-migrate-no" class="modal-secondary modal-secondary-neutral" type="button">Skip</button>
+      <button id="session-token-migrate-yes" class="modal-primary modal-primary-accent" type="button">Yes, migrate</button>
+    </div>
+  </div>
+</div>
+
 <!-- Workflows Modal -->
 <div id="workflows-overlay">
   <div id="workflows-modal">
@@ -327,6 +354,23 @@
             <option value="redacted">Default To Redacted</option>
             <option value="raw">Default To Raw</option>
           </select>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Session Token</div>
+        <div class="faq-a options-fieldset">
+          <div class="options-session-token-desc">Carry your run history across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
+          <div class="options-session-token-status-row">
+            <div id="options-session-token-status" class="options-session-token-status"></div>
+            <button id="options-session-token-copy-btn" class="term-action-btn" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+          </div>
+          <div class="options-session-token-actions">
+            <button id="options-session-token-generate-btn" class="term-action-btn" type="button">Generate</button>
+            <button id="options-session-token-set-btn" class="term-action-btn" type="button">Set</button>
+            <button id="options-session-token-rotate-btn" class="term-action-btn" type="button">Rotate</button>
+            <button id="options-session-token-clear-btn" class="term-action-btn" type="button">Clear</button>
+          </div>
+          <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
         </div>
       </div>
       <div class="faq-item">

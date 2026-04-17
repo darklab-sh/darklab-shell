@@ -3,7 +3,7 @@
   "version": "1.5.0",
   "type": "module",
   "scripts": {
-    "test": "pytest; npm run test:unit; npm run test:e2e",
+    "test": "pytest && npm run test:unit && npm run test:e2e",
     "test:pytest": "pytest",
     "test:unit": "vitest run --config config/vitest.config.js",
     "test:unit:watch": "vitest --config config/vitest.config.js",

@@ -163,6 +163,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "pwd", "description": "Show the web shell workspace path.", "root": "pwd"},
     {"name": "retention", "description": "Show retention and persisted-output settings.", "root": "retention"},
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
+    {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
     {"name": "status", "description": "Show the current session and shell configuration summary.", "root": "status"},
     {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},
@@ -244,6 +245,7 @@ _FAKE_COMMAND_DISPATCH = {
     "retention": lambda cmd, sid: _run_fake_retention(),
     "rm_root":   lambda cmd, sid: _run_fake_rm_root(),
     "route":     lambda cmd, sid: _run_fake_route(),
+    "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
     "status":    lambda cmd, sid: _run_fake_status(sid),
     "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
@@ -382,6 +384,44 @@ def _run_fake_help() -> list[dict[str, str]]:
     for name, example in pipe_examples:
         lines.append(_output_line(f"  {name:<{pipe_width}}  {example}", "fake-help-row"))
     return lines
+
+
+def _mask_session_token(token: str) -> str:
+    """Return a display-safe masked version of a session token or session UUID."""
+    if token.startswith("tok_"):
+        return "tok_" + token[4:8] + "••••••••"
+    return token[:8] + "••••••••"
+
+
+def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
+    parts = _split_command(cmd)
+    subcommand = parts[1].lower() if len(parts) > 1 else ""
+
+    if subcommand in ("generate", "set", "clear", "rotate"):
+        # These subcommands are intercepted and executed client-side; they
+        # should never reach the server.  Return a safe fallback message.
+        return [_output_line("session-token: subcommands run client-side — reload the page and try again.")]
+
+    if subcommand:
+        return [
+            _output_line(f"session-token: unknown subcommand '{subcommand}'"),
+            _output_line("Usage: session-token [generate | set <value> | clear | rotate]"),
+        ]
+
+    # Bare session-token — show status from the server-side session_id
+    masked = _mask_session_token(session_id)
+    width = 14
+    if session_id.startswith("tok_"):
+        return [
+            _output_line(_format_native_record("session token", masked, width), "fake-kv"),
+            _output_line(_format_native_record("status", "active", width), "fake-kv"),
+            _output_line(_format_native_record("storage", "localStorage (session_token)", width), "fake-kv"),
+        ]
+    return [
+        _output_line(_format_native_record("session", masked, width), "fake-kv"),
+        _output_line(_format_native_record("status", "anonymous (no session token set)", width), "fake-kv"),
+        _output_line(_format_native_record("tip", "run 'session-token generate' to create a persistent token", width), "fake-kv"),
+    ]
 
 
 def _run_fake_shortcuts() -> list[dict[str, str]]:

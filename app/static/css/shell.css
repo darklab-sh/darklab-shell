@@ -1064,6 +1064,84 @@ body.mobile-terminal-mode .output-follow-btn {
   box-shadow: 0 0 0 3px var(--green-glow);
 }
 
+.options-session-token-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.options-session-token-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.options-session-token-status.is-active {
+  color: var(--green);
+}
+
+/* Session token sub-modals — must sit above the options overlay (z-index 320) */
+#session-token-set-overlay,
+#session-token-migrate-overlay {
+  z-index: 340;
+}
+
+#session-token-set-modal,
+#session-token-migrate-modal {
+  width: min(480px, 92vw);
+  padding: 18px 20px;
+}
+
+.modal-token-input {
+  margin: 2px 0 6px;
+}
+
+.options-session-token-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.options-session-token-status-row .options-session-token-status {
+  margin-bottom: 0;
+}
+
+.options-session-token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.options-token-input {
+  width: 100%;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  box-sizing: border-box;
+}
+
+.options-token-input:focus-visible {
+  outline: 1px solid var(--green-dim);
+  box-shadow: 0 0 0 3px var(--green-glow);
+}
+
+.options-session-token-msg {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.options-session-token-msg.is-error {
+  color: var(--red);
+}
+
 .faq-q {
   font-family: var(--font-display);
   font-size: 13px;

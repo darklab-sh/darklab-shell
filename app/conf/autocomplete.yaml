@@ -1441,6 +1441,8 @@ context:
           description: "built-in: show retention and persisted-output settings"
         - value: route
           description: "built-in: show the shell routing table summary"
+        - value: session-token
+          description: "built-in: show session token status"
         - value: shortcuts
           description: "built-in: show current keyboard shortcuts"
         - value: status
@@ -1540,6 +1542,18 @@ context:
   pwd: {}
   retention: {}
   route: {}
+  session-token:
+    arg_hints:
+      "__positional__":
+        - value: generate
+          description: Generate a new session token and save it to this browser
+        - value: "set <token>"
+          insertValue: "set "
+          description: Activate an existing session token from another device
+        - value: clear
+          description: Remove the session token and revert to an anonymous session
+        - value: rotate
+          description: Generate a new token and migrate all history to it
   shortcuts: {}
   status: {}
   tty: {}

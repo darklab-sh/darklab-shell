@@ -221,6 +221,35 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             ),
         },
         {
+            "question": "How do session tokens work?",
+            "answer": (
+                "Without a session token, your history is tied to your current browser — switch browsers "
+                "or workstations and you start fresh. Set a token and any browser that uses the same "
+                "token shares your run history and starred commands."
+            ),
+            "answer_html": (
+                "Without a session token, your history is tied to your current browser. Switch to a "
+                "different browser or workstation and you start fresh.<br><br>"
+                "Set a <strong>session token</strong> and any browser that uses the same token shares "
+                "your run history and starred commands — useful if you work across multiple machines or "
+                "want to pick up where you left off after clearing your browser.<br><br>"
+                "Use these commands to manage your session token:<br><br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token\">session-token</span>"
+                " — show whether a token is active.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token generate\">session-token generate</span>"
+                " — create and activate a new random token.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token set \">session-token set</span>"
+                " — activate a specific token you already have.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token rotate\">session-token rotate</span>"
+                " — replace your current token with a new random one.<br>"
+                "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token clear\">session-token clear</span>"
+                " — remove your token and return to a browser-local session.<br><br>"
+                "You can also use the <strong>Generate</strong>, <strong>Set</strong>, "
+                "<strong>Rotate</strong>, and <strong>Clear</strong> buttons in the "
+                "<strong>Options</strong> panel."
+            ),
+        },
+        {
             "question": "What are the retention and limit settings for this instance?",
             "answer": "See the live retention and limit table in the FAQ modal or run retention in the web shell.",
             "ui_kind": "limits",

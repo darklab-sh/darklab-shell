@@ -17,6 +17,7 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
   - [Two-User Security Model](#two-user-security-model)
   - [Path Blocking (/data and /tmp)](#path-blocking-data-and-tmp)
   - [Loopback Address Blocking](#loopback-address-blocking)
+  - [Session Token Security](#session-token-security)
   - [Deny Flag Matching (anywhere in command)](#deny-flag-matching-anywhere-in-command)
 - [Deployment and Packaging Decisions](#deployment-and-packaging-decisions)
   - [Startup Sequence (entrypoint.sh)](#startup-sequence-entrypointsh)
@@ -120,6 +121,28 @@ Three complementary layers enforce the restriction:
 3. **iptables rule** (`entrypoint.sh`) — OS-level TCP block for the `scanner` uid on the app port; fires before the Flask app sees the request and covers tools that bypass command validation (e.g. scripting languages)
 
 The iptables rule is added by `entrypoint.sh` as root before the `gosu` drop. It uses `REJECT --reject-with tcp-reset` so connections from the scanner user fail immediately rather than timing out. The `|| true` ensures the rule failure does not abort startup in environments where `xt_owner` is unavailable.
+
+### Session Token Security
+
+**Three non-obvious constraints in the session token design:**
+
+**1. `/session/migrate` requires `from_session_id == X-Session-ID`**
+
+The migrate endpoint accepts `from_session_id` and `to_session_id` in the POST body. Without the header check, any client that knew another user's session ID could call `/session/migrate` with `from_session_id=<victim>` and redirect the victim's entire run history to their own token. The `X-Session-ID` header is the requester's current identity — enforcing that it matches `from_session_id` means you can only migrate *your own* session.
+
+**2. `SESSION_ID` must not be updated until after `/session/migrate` completes during rotate, and the switch is gated on migration success**
+
+`session-token rotate` must call `/session/migrate` with `X-Session-ID: <old id>` before calling `updateSessionId(<new token>)`. If `SESSION_ID` were updated first, the migrate request would carry the new token as `X-Session-ID`, which would fail the `from_session_id == X-Session-ID` check (since `from_session_id` is the old ID). The `_doSessionMigration` helper therefore calls `fetch()` directly with an explicit `X-Session-ID` override rather than going through `apiFetch()`, which always uses the current `SESSION_ID`.
+
+Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) only happens if migration succeeds. A failed migration aborts rotate and leaves the old token active — otherwise a transient network failure would strand the user on a fresh token with their history still on the old session.
+
+**3. Other open tabs are kept in sync via the `storage` event**
+
+The `storage` event fires in every same-origin tab that did NOT make the change. `session.js` registers a listener that calls `SESSION_ID = e.newValue || _sessionUuid` when `e.key === 'session_token'`. This means tabs that are already open pick up a token change immediately without a reload — they won't keep sending a stale `X-Session-ID` after another tab runs `session-token set/clear/rotate`. The listener intentionally does not call `updateSessionId()` (which reads back from `localStorage`) because `e.newValue` already carries the new value directly, and `localStorage` reads in another tab may not yet reflect the change on some browsers.
+
+**4. Session-token subcommands are intercepted client-side; bare `session-token` is not**
+
+`generate`, `set`, `clear`, and `rotate` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present.
 
 ### Deny Flag Matching (anywhere in command)
 

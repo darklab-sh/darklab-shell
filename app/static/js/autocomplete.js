@@ -193,9 +193,11 @@ function _buildContextAutocomplete(ctx) {
     if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length) {
       const positionalItems = positionalHints.map(item => _buildAutocompleteItem({
         value: item.value,
+        label: item.label || item.value,
         description: item.description || '',
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
+        insertValue: item.insertValue || item.value,
       }));
       return filteredFlags.concat(positionalItems);
     }
@@ -206,9 +208,11 @@ function _buildContextAutocomplete(ctx) {
     return _filterAutocompleteItems(
       positionalHints.map(item => _buildAutocompleteItem({
         value: item.value,
+        label: item.label || item.value,
         description: item.description || '',
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
+        insertValue: item.insertValue || item.value,
       })),
       ctx.currentToken,
     );

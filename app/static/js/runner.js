@@ -7,6 +7,11 @@
 const _stalledTimeouts = new Map();
 let _activeRunPollTimer = null;
 
+// Pending session migration: set when the user runs 'session-token generate'
+// or 'session-token set' and the current session has existing runs.  The next
+// command typed is treated as the yes/no answer to the migration prompt.
+let _pendingSessionMigration = null;
+
 function _resetStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
   _stalledTimeouts.set(tabId, setTimeout(() => {
@@ -454,6 +459,297 @@ function _isExactSpecialBuiltInCommand(cmd) {
   return /^:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:$/.test(String(cmd || '').trim());
 }
 
+// ── Session token client-side command handlers ─────────────────────────────
+
+function _isSessionTokenSubcommand(cmd) {
+  // Only intercept subcommand variants; bare 'session-token' (status) goes to
+  // the server so it can be handled as a normal fake command with ANSI styling.
+  const lower = (cmd || '').trim().toLowerCase();
+  return lower.startsWith('session-token ');
+}
+
+async function _doSessionMigration(fromId, toId, tabId) {
+  // Use an explicit fetch (not apiFetch) so X-Session-ID is the OLD session ID
+  // regardless of what SESSION_ID has been updated to.
+  // Returns true on success so the caller switches identity only after a
+  // successful migration — leaving the old session active on failure.
+  let succeeded = false;
+  try {
+    const resp = await fetch('/session/migrate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': fromId,
+      },
+      body: JSON.stringify({ from_session_id: fromId, to_session_id: toId }),
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.ok) {
+      appendLine(
+        `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), ${data.migrated_stars ?? 0} starred command(s)`,
+        '', tabId
+      );
+      succeeded = true;
+    } else {
+      appendLine(`[migration failed] ${data.error || resp.status}`, 'exit-fail', tabId);
+    }
+  } catch (err) {
+    appendLine(`[migration failed] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError('session-token migrate', err);
+  }
+  return succeeded;
+}
+
+async function _seedLocalStorageStarsToServer() {
+  // Migrate any stars stored in localStorage (pre-Phase-2 or anonymous session)
+  // to the current server session, then clear the localStorage entry.
+  // Only the successfully seeded commands are removed; any that fail are kept
+  // in localStorage so they are not silently lost on a flaky network.
+  let localStars;
+  try { localStars = new Set(JSON.parse(localStorage.getItem('starred') || '[]')); }
+  catch { localStars = new Set(); }
+  if (!localStars.size) return;
+  const cmds = [...localStars];
+  const results = await Promise.allSettled(cmds.map(async cmd => {
+    const resp = await apiFetch('/session/starred', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: cmd }),
+    });
+    if (!resp.ok) throw new Error(String(resp.status));
+    return cmd;
+  }));
+  const failed = cmds.filter((_, i) => results[i].status === 'rejected');
+  if (failed.length === 0) {
+    localStorage.removeItem('starred');
+  } else {
+    localStorage.setItem('starred', JSON.stringify(failed));
+  }
+  if (typeof loadStarredFromServer === 'function') await loadStarredFromServer();
+}
+
+async function _sessionTokenGenerate(tabId) {
+  const oldSessionId = SESSION_ID;
+  try {
+    const resp = await apiFetch('/session/token/generate');
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      appendLine(`[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
+      setStatus('fail');
+      appendPromptNewline(tabId);
+      return;
+    }
+    const data = await resp.json();
+    const newToken = data.session_token;
+
+    // Check run count on old session before switching identity.
+    let runCount = 0;
+    try {
+      const histResp = await apiFetch('/history');
+      if (histResp.ok) {
+        const histData = await histResp.json();
+        runCount = (histData.runs || []).length;
+      }
+    } catch (_) {}
+
+    appendLine(`session token generated:  ${maskSessionToken(newToken)}`, '', tabId);
+    appendLine('stored in localStorage as session_token', '', tabId);
+    appendLine('use session-token set <value> on another device to continue your session', '', tabId);
+    appendLine('warning: your session token grants full access to your session history — treat it like a password', 'notice', tabId);
+
+    if (runCount > 0) {
+      // Defer identity switch until the user answers the migration prompt so a
+      // failed /session/migrate does not strand runs on the old session while
+      // the active identity is already the new token.
+      appendLine(`you have ${runCount} run(s) in your previous session. migrate history to your new session token? [yes/no]`, '', tabId);
+      _pendingSessionMigration = { from: oldSessionId, to: newToken };
+      setStatus('idle');
+    } else {
+      localStorage.setItem('session_token', newToken);
+      updateSessionId(newToken);
+      await _seedLocalStorageStarsToServer();
+      if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+      setStatus('ok');
+      appendPromptNewline(tabId);
+    }
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError('session-token generate', err);
+    setStatus('fail');
+    appendPromptNewline(tabId);
+  }
+}
+
+async function _sessionTokenSet(value, tabId) {
+  if (!value) {
+    appendLine('usage: session-token set <token>', '', tabId);
+    setStatus('fail');
+    appendPromptNewline(tabId);
+    return;
+  }
+  const isTok = value.startsWith('tok_');
+  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+  if (!isTok && !isUuid) {
+    appendLine(`[error] invalid session token format — expected tok_... or a UUID`, 'exit-fail', tabId);
+    setStatus('fail');
+    appendPromptNewline(tabId);
+    return;
+  }
+
+  // For tok_ tokens, verify server-side existence before switching.
+  // A typo would otherwise silently create a brand-new empty session.
+  // Fail closed: any failure (network error, non-OK response, missing exists flag)
+  // blocks the switch rather than allowing an unverified token through.
+  if (isTok) {
+    let verifyErr = null;
+    try {
+      const vResp = await apiFetch('/session/token/verify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ token: value }),
+      });
+      const vData = await vResp.json().catch(() => ({}));
+      if (!vResp.ok) {
+        verifyErr = 'token verification failed — server returned an error';
+      } else if (vData.exists === false) {
+        verifyErr = 'session token not found — this token was not issued by this server';
+      }
+    } catch (_) {
+      verifyErr = 'token verification failed — server is unreachable';
+    }
+    if (verifyErr !== null) {
+      appendLine(`[error] ${verifyErr}`, 'exit-fail', tabId);
+      setStatus('fail');
+      appendPromptNewline(tabId);
+      return;
+    }
+  }
+
+  const oldSessionId = SESSION_ID;
+
+  // Check current session's run count before switching identity.
+  let runCount = 0;
+  try {
+    const histResp = await apiFetch('/history');
+    if (histResp.ok) {
+      const histData = await histResp.json();
+      runCount = (histData.runs || []).length;
+    }
+  } catch (_) {}
+
+  appendLine(`session token set: ${maskSessionToken(value)}`, '', tabId);
+  appendLine('reload other tabs to apply the new session token', '', tabId);
+
+  if (runCount > 0) {
+    // Defer identity switch until the user answers the migration prompt so a
+    // failed /session/migrate does not strand runs on the old session while
+    // the active identity is already the new token.
+    appendLine(`you have ${runCount} run(s) in your current session. migrate history to this session token? [yes/no]`, '', tabId);
+    _pendingSessionMigration = { from: oldSessionId, to: value };
+    setStatus('idle');
+  } else {
+    localStorage.setItem('session_token', value);
+    updateSessionId(value);
+    await _seedLocalStorageStarsToServer();
+    if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+    setStatus('ok');
+    appendPromptNewline(tabId);
+  }
+}
+
+function _sessionTokenClear(tabId) {
+  if (!localStorage.getItem('session_token')) {
+    appendLine('no session token is set — already using an anonymous session', '', tabId);
+    setStatus('idle');
+    appendPromptNewline(tabId);
+    return;
+  }
+  localStorage.removeItem('session_token');
+  const uuid = localStorage.getItem('session_id') || SESSION_ID;
+  updateSessionId(uuid);
+  if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+  appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
+  appendLine('your session token data remains in the server database', '', tabId);
+  setStatus('ok');
+  appendPromptNewline(tabId);
+}
+
+async function _sessionTokenRotate(tabId) {
+  const oldSessionId = SESSION_ID;
+  try {
+    const resp = await apiFetch('/session/token/generate');
+    if (!resp.ok) {
+      const data = await resp.json().catch(() => ({}));
+      appendLine(`[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
+      setStatus('fail');
+      appendPromptNewline(tabId);
+      return;
+    }
+    const data = await resp.json();
+    const newToken = data.session_token;
+
+    // Migrate BEFORE updating SESSION_ID so the old ID is sent as X-Session-ID
+    const migrateResp = await fetch('/session/migrate', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-Session-ID': oldSessionId,
+      },
+      body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: newToken }),
+    });
+    const migrateData = await migrateResp.json().catch(() => ({}));
+
+    if (!migrateResp.ok || !migrateData.ok) {
+      appendLine(`[error] migration failed — session token NOT rotated: ${migrateData.error || migrateResp.status}`, 'exit-fail', tabId);
+      appendLine('your previous session token is still active', '', tabId);
+      setStatus('fail');
+      appendPromptNewline(tabId);
+      return;
+    }
+
+    localStorage.setItem('session_token', newToken);
+    updateSessionId(newToken);
+    if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+
+    appendLine(`session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
+    appendLine(
+      `migrated — ${migrateData.migrated_runs} run(s), ${migrateData.migrated_snapshots} snapshot(s), ${migrateData.migrated_stars ?? 0} starred command(s)`,
+      '', tabId
+    );
+    appendLine('old session token is now inactive — reload other tabs to use the new token', '', tabId);
+    setStatus('ok');
+    appendPromptNewline(tabId);
+  } catch (err) {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
+    logClientError('session-token rotate', err);
+    setStatus('fail');
+    appendPromptNewline(tabId);
+  }
+}
+
+async function _handleSessionTokenCommand(cmd, tabId) {
+  const parts = cmd.trim().split(/\s+/);
+  const sub = (parts[1] || '').toLowerCase();
+  appendCommandEcho(cmd);
+  if (sub === 'generate') {
+    await _sessionTokenGenerate(tabId);
+  } else if (sub === 'set') {
+    const value = parts.slice(2).join(' ').trim();
+    await _sessionTokenSet(value, tabId);
+  } else if (sub === 'clear') {
+    _sessionTokenClear(tabId);
+  } else if (sub === 'rotate') {
+    await _sessionTokenRotate(tabId);
+  } else {
+    appendLine(`session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
+    appendLine('usage: session-token [generate | set <value> | clear | rotate]', '', tabId);
+    setStatus('fail');
+    appendPromptNewline(tabId);
+  }
+}
+
+// ── End session token handlers ───────────────────────────────────────────────
+
 function submitCommand(rawCmd) {
   // This is the main run path: validate local state, open the SSE stream, then
   // feed output into the active tab while mirroring completion into persistence.
@@ -467,6 +763,41 @@ function submitCommand(rawCmd) {
     if (_activeTab && _activeTab.st === 'running') return true;
     appendPromptNewline(activeTabId);
     setStatus('idle');
+    return true;
+  }
+
+  // Intercept yes/no answer to a pending session migration prompt
+  if (_pendingSessionMigration) {
+    const answer = cmd.trim().toLowerCase();
+    const pending = _pendingSessionMigration;
+    _pendingSessionMigration = null;
+    addToHistory(cmd);
+    appendCommandEcho(cmd);
+    if (answer === 'yes' || answer === 'y') {
+      // _doSessionMigration returns true on success; switch identity only then
+      // so a failed migrate leaves the old session active rather than stranding
+      // the user on the new token with their runs still on the old session.
+      _doSessionMigration(pending.from, pending.to, activeTabId).then(async (migrated) => {
+        if (migrated) {
+          localStorage.setItem('session_token', pending.to);
+          updateSessionId(pending.to);
+          await _seedLocalStorageStarsToServer();
+          if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+        }
+        setStatus('idle');
+        appendPromptNewline(activeTabId);
+      });
+    } else {
+      // User declined migration — switch to new token without migrating runs.
+      localStorage.setItem('session_token', pending.to);
+      updateSessionId(pending.to);
+      _seedLocalStorageStarsToServer().then(() => {
+        if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+      });
+      appendLine('History migration skipped.', '', activeTabId);
+      setStatus('idle');
+      appendPromptNewline(activeTabId);
+    }
     return true;
   }
 
@@ -505,6 +836,14 @@ function submitCommand(rawCmd) {
   }
 
   addToHistory(cmd);
+
+  // Session-token subcommands (generate / set / clear / rotate) run entirely
+  // client-side.  The bare 'session-token' status command goes to the server.
+  if (_isSessionTokenSubcommand(cmd)) {
+    _handleSessionTokenCommand(cmd, activeTabId);
+    return true;
+  }
+
   // Re-lookup the active tab after the potential createTab() call above, which
   // may have changed activeTabId to point at the newly created tab.
   const _runTab = getActiveTab();

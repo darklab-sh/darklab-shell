@@ -1,6 +1,8 @@
 """
 SQLite persistence — connection helper, schema initialisation, and retention pruning.
 Database lives in /data (writable volume mount). Falls back to /tmp for local dev.
+
+Tables: runs, run_output_artifacts, snapshots, session_tokens.
 """
 
 import logging
@@ -81,6 +83,19 @@ def _create_schema(conn):
             content    TEXT NOT NULL
         )
     """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_tokens (
+            token   TEXT PRIMARY KEY,
+            created TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS starred_commands (
+            session_id TEXT NOT NULL,
+            command    TEXT NOT NULL,
+            PRIMARY KEY (session_id, command)
+        )
+    """)
 
 
 def _create_indexes(conn):
@@ -88,6 +103,7 @@ def _create_indexes(conn):
     conn.execute("CREATE INDEX IF NOT EXISTS idx_session ON runs (session_id)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_run_output_artifacts_created ON run_output_artifacts (created)")
     conn.execute("CREATE INDEX IF NOT EXISTS idx_snapshots_session ON snapshots (session_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_starred_commands_session ON starred_commands (session_id)")
 
 
 def _migrate_schema(conn):
@@ -113,6 +129,29 @@ def _migrate_schema(conn):
             UPDATE runs
                SET output_preview = output
              WHERE output_preview IS NULL AND output IS NOT NULL
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # session_tokens table — added in v1.5
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_tokens (
+                token   TEXT PRIMARY KEY,
+                created TEXT NOT NULL
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    # starred_commands table — added in v1.5 Phase 2
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS starred_commands (
+                session_id TEXT NOT NULL,
+                command    TEXT NOT NULL,
+                PRIMARY KEY (session_id, command)
+            )
         """)
     except sqlite3.OperationalError:
         pass

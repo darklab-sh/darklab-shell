@@ -159,6 +159,31 @@ test.describe('history drawer', () => {
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
   })
 
+  test('starred commands are remembered across page reload', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    // Star the run from the history panel
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="star"]').click()
+    await closeHistory(page)
+
+    // Set up the response waiter before reload so it captures the /session/starred
+    // request that loadStarredFromServer() makes on page initialization.
+    const starredResponse = page.waitForResponse(
+      resp => resp.url().includes('/session/starred') && resp.status() === 200,
+    )
+
+    // Reload without clearing localStorage — session_id is preserved, so starred
+    // commands are still in the server DB for this session.
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+    await starredResponse
+
+    // History panel entries should reflect the server-side starred state.
+    await openHistoryWithEntries(page)
+    await expect(page.locator('.history-entry.starred')).toHaveCount(1)
+  })
+
   test('loading a synthetic tail run from history restores the filtered transcript', async ({
     page,
   }) => {

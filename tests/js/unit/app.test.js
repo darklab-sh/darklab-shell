@@ -150,6 +150,12 @@ async function loadAppFns({
     <div id="options-overlay"></div>
     <button class="options-close"></button>
     <div id="options-modal"></div>
+    <span id="options-session-token-status"></span>
+    <button id="options-session-token-generate-btn"></button>
+    <button id="options-session-token-rotate-btn"></button>
+    <button id="options-session-token-clear-btn"></button>
+    <button id="options-session-token-copy-btn"></button>
+    <div id="options-session-token-msg"></div>
     <div id="workflows-overlay"></div>
     <button id="workflows-btn"></button>
     <button class="workflows-close"></button>
@@ -483,6 +489,8 @@ async function loadAppFns({
       permalinkToast: document.getElementById('permalink-toast'),
       mobileComposerHostEl,
       acDropdown,
+      loadStarredFromServer: () => Promise.resolve(),
+      maskSessionToken: (t) => (t ? t.slice(0, 8) + '••••••••' : '(none)'),
       requestWelcomeSettle: requestWelcomeSettleOverride,
       runCommand: runCommandOverride,
       submitComposerCommand: submitComposerCommandOverride,
@@ -3202,6 +3210,37 @@ describe('app helpers', () => {
     expect(visibleInput.blur).toHaveBeenCalled()
 
     restoreViewport()
+  })
+
+  it('hides rotate/clear/copy session token buttons when no token is set — desktop open', async () => {
+    await loadAppFns()  // no session_token in localStorage
+
+    document.getElementById('options-btn').click()
+
+    expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('none')
+    expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('none')
+    expect(document.getElementById('options-session-token-copy-btn').style.display).toBe('none')
+  })
+
+  it('hides rotate/clear/copy session token buttons when no token is set — mobile menu open', async () => {
+    await loadAppFns()  // no session_token in localStorage
+
+    document.querySelector('#mobile-menu [data-action="options"]').click()
+
+    expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('none')
+    expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('none')
+    expect(document.getElementById('options-session-token-copy-btn').style.display).toBe('none')
+  })
+
+  it('shows rotate/clear/copy session token buttons when a token is active — mobile menu open', async () => {
+    const { storage } = await loadAppFns()
+    storage.setItem('session_token', 'tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    document.querySelector('#mobile-menu [data-action="options"]').click()
+
+    expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('')
+    expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('')
+    expect(document.getElementById('options-session-token-copy-btn').style.display).toBe('')
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {

@@ -34,6 +34,7 @@ from blueprints.assets import assets_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402
+from blueprints.session import session_bp  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
 app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
@@ -75,6 +76,7 @@ app.register_blueprint(assets_bp)
 app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)
+app.register_blueprint(session_bp)
 
 
 if __name__ == "__main__":

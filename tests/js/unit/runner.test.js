@@ -1,5 +1,4 @@
-import { fromScript } from './helpers/extract.js'
-import { fromDomScripts } from './helpers/extract.js'
+import { fromScript, fromDomScript, fromDomScripts, MemoryStorage } from './helpers/extract.js'
 
 const { _formatElapsed } = fromScript('app/static/js/runner.js', '_formatElapsed')
 const { _isSyntheticGrepCommand } = fromScript('app/static/js/runner.js', '_isSyntheticGrepCommand')
@@ -1059,5 +1058,228 @@ describe('submitCommand return contract', () => {
       createTab: () => null, // signals tab limit reached
     })
     expect(submitCommand('ping darklab.sh')).toBe(false)
+  })
+})
+
+// ── _seedLocalStorageStarsToServer ────────────────────────────────────────────
+
+function loadSeedFns({
+  localStarred = [],
+  apiFetch = vi.fn(() => Promise.resolve({ ok: true })),
+  loadStarredFromServer = vi.fn(() => Promise.resolve()),
+} = {}) {
+  const storage = new MemoryStorage()
+  if (localStarred.length) {
+    storage.setItem('starred', JSON.stringify(localStarred))
+  }
+  const fns = fromDomScript(
+    'app/static/js/runner.js',
+    { localStorage: storage, apiFetch, loadStarredFromServer },
+    '_seedLocalStorageStarsToServer',
+  )
+  return { ...fns, _storage: storage, apiFetch, loadStarredFromServer }
+}
+
+describe('_seedLocalStorageStarsToServer', () => {
+  it('does nothing when localStorage has no starred key', async () => {
+    const { _seedLocalStorageStarsToServer, apiFetch, loadStarredFromServer, _storage } =
+      loadSeedFns()
+
+    await _seedLocalStorageStarsToServer()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(loadStarredFromServer).not.toHaveBeenCalled()
+    expect(_storage.getItem('starred')).toBeNull()
+  })
+
+  it('does nothing when the starred array is empty', async () => {
+    const { _seedLocalStorageStarsToServer, apiFetch } = loadSeedFns({ localStarred: [] })
+
+    await _seedLocalStorageStarsToServer()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it('POSTs each starred command to /session/starred', async () => {
+    const { _seedLocalStorageStarsToServer, apiFetch } = loadSeedFns({
+      localStarred: ['ping darklab.sh', 'dig darklab.sh A'],
+    })
+
+    await _seedLocalStorageStarsToServer()
+
+    expect(apiFetch).toHaveBeenCalledTimes(2)
+    expect(apiFetch).toHaveBeenCalledWith('/session/starred', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'ping darklab.sh' }),
+    })
+    expect(apiFetch).toHaveBeenCalledWith('/session/starred', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ command: 'dig darklab.sh A' }),
+    })
+  })
+
+  it('removes the starred key from localStorage after seeding', async () => {
+    const { _seedLocalStorageStarsToServer, _storage } = loadSeedFns({
+      localStarred: ['hostname'],
+    })
+
+    await _seedLocalStorageStarsToServer()
+
+    expect(_storage.getItem('starred')).toBeNull()
+  })
+
+  it('calls loadStarredFromServer after seeding', async () => {
+    const { _seedLocalStorageStarsToServer, loadStarredFromServer } = loadSeedFns({
+      localStarred: ['hostname'],
+    })
+
+    await _seedLocalStorageStarsToServer()
+
+    expect(loadStarredFromServer).toHaveBeenCalledTimes(1)
+  })
+
+  it('handles invalid localStorage JSON as empty and returns early', async () => {
+    const storage = new MemoryStorage()
+    storage.setItem('starred', 'not-json{{{')
+    const apiFetch = vi.fn()
+    const fns = fromDomScript(
+      'app/static/js/runner.js',
+      { localStorage: storage, apiFetch, loadStarredFromServer: vi.fn() },
+      '_seedLocalStorageStarsToServer',
+    )
+
+    await fns._seedLocalStorageStarsToServer()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+
+  it('retains failed commands in localStorage and removes only successful ones', async () => {
+    const apiFetch = vi.fn()
+      .mockResolvedValueOnce({ ok: true })   // ping succeeds
+      .mockResolvedValueOnce({ ok: false, status: 500 }) // dig fails
+    const { _seedLocalStorageStarsToServer, _storage } = loadSeedFns({
+      localStarred: ['ping darklab.sh', 'dig darklab.sh A'],
+      apiFetch,
+    })
+
+    await _seedLocalStorageStarsToServer()
+
+    const remaining = JSON.parse(_storage.getItem('starred'))
+    expect(remaining).toEqual(['dig darklab.sh A'])
+  })
+
+  it('retains all commands when every POST fails', async () => {
+    const apiFetch = vi.fn().mockResolvedValue({ ok: false, status: 503 })
+    const { _seedLocalStorageStarsToServer, _storage } = loadSeedFns({
+      localStarred: ['ping darklab.sh', 'dig darklab.sh A'],
+      apiFetch,
+    })
+
+    await _seedLocalStorageStarsToServer()
+
+    const remaining = JSON.parse(_storage.getItem('starred'))
+    expect(remaining).toHaveLength(2)
+  })
+
+  it('removes the key only when all POSTs succeed', async () => {
+    const apiFetch = vi.fn().mockResolvedValue({ ok: true })
+    const { _seedLocalStorageStarsToServer, _storage } = loadSeedFns({
+      localStarred: ['ping darklab.sh', 'dig darklab.sh A'],
+      apiFetch,
+    })
+
+    await _seedLocalStorageStarsToServer()
+
+    expect(_storage.getItem('starred')).toBeNull()
+  })
+})
+
+// ── _sessionTokenSet verify-failure behavior ──────────────────────────────────
+
+function loadTokenSetFns({ apiFetch = vi.fn() } = {}) {
+  const storage = new MemoryStorage()
+  storage.setItem('session_id', 'uuid-base-session')
+  const appendLine = vi.fn()
+  const setStatus = vi.fn()
+  const appendPromptNewline = vi.fn()
+  const fns = fromDomScript(
+    'app/static/js/runner.js',
+    {
+      localStorage: storage,
+      apiFetch,
+      appendLine,
+      setStatus,
+      appendPromptNewline,
+      updateSessionId: vi.fn(),
+      logClientError: vi.fn(),
+      reloadSessionHistory: vi.fn(() => Promise.resolve()),
+      _seedLocalStorageStarsToServer: vi.fn(() => Promise.resolve()),
+      // session.js globals needed by the non-verify code paths in _sessionTokenSet
+      SESSION_ID: 'uuid-base-session',
+      maskSessionToken: (t) => (t ? t.slice(0, 8) + '••••' : '(none)'),
+    },
+    '_sessionTokenSet',
+  )
+  return { ...fns, appendLine, setStatus, appendPromptNewline, _storage: storage }
+}
+
+describe('_sessionTokenSet verify failure behavior', () => {
+  it('blocks token activation when /session/token/verify returns non-OK', async () => {
+    const apiFetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
+    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+
+    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('token verification failed'),
+      'exit-fail',
+      'tab-1',
+    )
+    expect(_storage.getItem('session_token')).toBeNull()
+  })
+
+  it('blocks token activation when /session/token/verify throws a network error', async () => {
+    const apiFetch = vi.fn().mockRejectedValue(new Error('Failed to fetch'))
+    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+
+    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('server is unreachable'),
+      'exit-fail',
+      'tab-1',
+    )
+    expect(_storage.getItem('session_token')).toBeNull()
+  })
+
+  it('blocks token activation when verify returns ok but exists is false', async () => {
+    const apiFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, exists: false }),
+    })
+    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+
+    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      expect.stringContaining('not issued by this server'),
+      'exit-fail',
+      'tab-1',
+    )
+    expect(_storage.getItem('session_token')).toBeNull()
+  })
+
+  it('skips verify entirely for UUID-format tokens', async () => {
+    // UUIDs are anonymous sessions — no tok_ prefix, so /session/token/verify
+    // must not be called regardless of how apiFetch is configured.
+    const apiFetch = vi.fn().mockResolvedValue({ ok: true, json: () => Promise.resolve({ runs: [] }) })
+    const { _sessionTokenSet } = loadTokenSetFns({ apiFetch })
+
+    await _sessionTokenSet('a1b2c3d4-1234-4abc-8def-1234567890ab', 'tab-1')
+
+    const verifyCalls = apiFetch.mock.calls.filter(([url]) => url === '/session/token/verify')
+    expect(verifyCalls).toHaveLength(0)
   })
 })

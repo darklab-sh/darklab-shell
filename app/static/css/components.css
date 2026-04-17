@@ -426,7 +426,7 @@ mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transp
   font-size: 12px;
   padding: 10px 18px;
   border-radius: 4px;
-  z-index: 300;
+  z-index: 400;
   transition: transform 0.3s ease;
   pointer-events: none;
   opacity: 0;

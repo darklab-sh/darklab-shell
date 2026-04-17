@@ -1,23 +1,61 @@
 // ── Shared history/permalink logic ──
-// Stored in localStorage as a JSON array of command strings.
-// Stars float starred items to the top of both the chips row and history panel.
+// Stars are server-backed via /session/starred. A local in-memory cache
+// (_starredCache) avoids blocking the UI on every render. Falls back to
+// localStorage while the cache is loading (first page load before the fetch
+// completes, or if the server is unreachable).
+
+let _starredCache = null; // null = not yet loaded from server
 
 function _getStarred() {
+  if (_starredCache !== null) return _starredCache;
+  // localStorage fallback while cache is loading
   try { return new Set(JSON.parse(localStorage.getItem('starred') || '[]')); }
   catch { return new Set(); }
 }
+
 function _saveStarred(set) {
-  localStorage.setItem('starred', JSON.stringify([...set]));
+  // Updates in-memory cache only. Server sync is handled by _toggleStar and
+  // executeHistAction; localStorage is no longer the source of truth.
+  _starredCache = new Set(set);
 }
+
 function _toggleStar(cmd) {
   const s = _getStarred();
-  if (s.has(cmd)) s.delete(cmd); else s.add(cmd);
-  _saveStarred(s);
+  const adding = !s.has(cmd);
+  if (adding) s.add(cmd); else s.delete(cmd);
+  _starredCache = s;
+  // fire-and-forget server sync — UI is already updated optimistically
+  apiFetch('/session/starred', {
+    method: adding ? 'POST' : 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: cmd }),
+  }).catch(() => {});
+}
+
+async function loadStarredFromServer() {
+  try {
+    const resp = await apiFetch('/session/starred');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    _starredCache = new Set(data.commands || []);
+  } catch (_) {}
+}
+
+async function reloadSessionHistory() {
+  await loadStarredFromServer();
+  try {
+    const resp = await apiFetch('/history');
+    if (resp.ok) {
+      const data = await resp.json();
+      hydrateCmdHistory(data.runs || []);
+    }
+  } catch (_) {}
+  if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) refreshHistoryPanel();
 }
 
 // History drawer filters are deliberately simple in the first pass:
 // server-backed search/filtering for persisted run attributes, plus a local
-// starred-only toggle that continues to use the existing localStorage model.
+// starred-only toggle backed by the server cache.
 let _historyFilterRefreshTimer = null;
 let _historyFilters = {
   q: '',
@@ -586,8 +624,15 @@ function executeHistAction(type) {
     apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => {
       // Remove from starred set and chips — deleted history should not stay pinned
       const s = _getStarred();
-      s.delete(command);
-      _saveStarred(s);
+      if (s.has(command)) {
+        s.delete(command);
+        _saveStarred(s);
+        apiFetch('/session/starred', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command }),
+        }).catch(() => {});
+      }
       cmdHistory = cmdHistory.filter(c => c !== command);
       renderHistory();
       refreshHistoryPanel();
@@ -610,6 +655,7 @@ function executeHistAction(type) {
     apiFetch('/history', { method: 'DELETE' }).then(() => {
       // Wipe all starred state and chips — nothing left in history to pin
       _saveStarred(new Set());
+      apiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
       cmdHistory = [];
       renderHistory();
       refreshHistoryPanel();
