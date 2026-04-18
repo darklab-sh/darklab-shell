@@ -191,6 +191,8 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   renderFaqLimits(cfg);
   if (cfg.diag_enabled) {
     if (diagBtn) diagBtn.classList.remove('u-hidden');
+    const railDiagBtn = document.getElementById('rail-diag-btn');
+    if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
     const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-action="diag"]');
     if (mobileDiagBtn) mobileDiagBtn.classList.remove('u-hidden');
   }
@@ -577,7 +579,9 @@ apiFetch('/faq').then(r => r.json()).then(data => {
 });
 
 apiFetch('/workflows').then(r => r.json()).then(data => {
-  renderWorkflowItems(data.items || []);
+  const items = data.items || [];
+  renderWorkflowItems(items);
+  if (typeof window.renderRailWorkflows === 'function') window.renderRailWorkflows(items);
 }).catch(err => {
   logClientError('failed to load /workflows', err);
 });

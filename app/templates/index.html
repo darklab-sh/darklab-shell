@@ -90,54 +90,136 @@
   <span class="history-label">Recent:</span>
 </div>
 
-<div class="terminal-wrap">
-  <div class="terminal-bar">
-    <span class="dot dot-r"></span>
-    <span class="dot dot-y"></span>
-    <span class="dot dot-g"></span>
-    <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
-    <div class="tabs-bar" id="tabs-bar">
-      <!-- tabs injected here -->
-      <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+<div class="shell-root">
+  <aside class="rail" id="rail" aria-label="Shell sidebar">
+    <div class="rail-header">
+      <div class="rail-wordmark">
+        <div class="rail-wordmark-title">{{ app_name }}</div>
+        <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}sandboxed</div>
+      </div>
+      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">«</button>
     </div>
-    <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
-    <div class="terminal-bar-btns">
-      <button id="search-toggle-btn" title="Search output (Ctrl+F)">search</button>
-      <button id="ln-btn" title="Toggle line numbers">line numbers: off</button>
-      <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
+
+    <div class="rail-split-area" id="rail-split-area">
+      <div class="rail-section rail-section-recent" id="rail-section-recent">
+        <button class="rail-section-header" id="rail-recent-header" type="button" aria-label="Toggle Recent">
+          <span class="rail-section-header-left">
+            <span class="rail-section-chev">▸</span>
+            <span class="rail-section-label">Recent</span>
+          </span>
+          <span class="rail-section-count" id="rail-recent-count">0</span>
+        </button>
+        <div class="rail-section-body nice-scroll" id="rail-recent-list" aria-live="polite"></div>
+      </div>
+
+      <div class="rail-splitter" id="rail-splitter" hidden></div>
+
+      <div class="rail-spacer" id="rail-spacer"></div>
+
+      <div class="rail-section rail-section-workflows closed" id="rail-section-workflows">
+        <button class="rail-section-header" id="rail-workflows-header" type="button" aria-label="Toggle Workflows">
+          <span class="rail-section-header-left">
+            <span class="rail-section-chev">▸</span>
+            <span class="rail-section-label">Workflows</span>
+          </span>
+        </button>
+        <div class="rail-section-body nice-scroll" id="rail-workflows-list"></div>
+      </div>
     </div>
-    <span id="status" class="status-pill idle">IDLE</span>
-    <span id="run-timer" class="run-timer u-hidden"></span>
-  </div>
-  <div class="search-bar u-hidden" id="search-bar">
-    <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
-    <div class="search-toggles">
-      <button id="search-case-btn" class="search-toggle" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
-      <button id="search-regex-btn" class="search-toggle" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
+
+    <nav class="rail-nav" id="rail-nav">
+      <button class="rail-nav-item" data-action="history" type="button" title="Run history"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+      <button class="rail-nav-item" data-action="faq" type="button" title="FAQ"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
+      <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
+    </nav>
+
+    <div class="rail-resize-handle" id="rail-resize-handle" title="Drag to resize"></div>
+  </aside>
+
+  <main class="main-col">
+    <div class="terminal-bar tabbar">
+      <div class="tabbar-scroll tab-scroll">
+        <div class="tabbar-traffic-lights">
+          <span class="dot dot-r"></span>
+          <span class="dot dot-y"></span>
+          <span class="dot dot-g"></span>
+        </div>
+        <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
+        <div class="tabs-bar" id="tabs-bar">
+          <!-- tabs injected here -->
+          <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+        </div>
+        <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
+      </div>
+      <div class="tabbar-chrome">
+        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Ctrl+F)">⌕ search</button>
+        <button id="ln-btn" class="chrome-btn" title="Toggle line numbers">ln: off</button>
+        <button id="ts-btn" class="chrome-btn" title="Toggle timestamp display">ts: off</button>
+      </div>
     </div>
-    <span class="search-count" id="search-count"></span>
-    <div class="search-nav">
-      <button id="search-prev">↑</button>
-      <button id="search-next">↓</button>
+
+    <div class="terminal-wrap">
+      <div class="search-bar u-hidden" id="search-bar">
+        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
+        <div class="search-toggles">
+          <button id="search-case-btn" class="search-toggle" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
+          <button id="search-regex-btn" class="search-toggle" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
+        </div>
+        <span class="search-count" id="search-count"></span>
+        <div class="search-nav">
+          <button id="search-prev">↑</button>
+          <button id="search-next">↓</button>
+        </div>
+        <button id="search-close-btn" class="search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
+      </div>
+      <div id="tab-panels">
+        <!-- panels injected here -->
+      </div>
+      <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
+        <span class="prompt-prefix">{{ prompt_prefix }}</span>
+        <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
+          <span class="shell-prompt-text" id="shell-prompt-text"></span>
+          <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
+        </div>
+      </div>
+      <div id="ac-dropdown" class="ac-dropdown u-hidden"></div>
+      <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
+      <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
+        <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
+        <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
+      </div>
     </div>
-    <button id="search-close-btn" class="search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
-  </div>
-  <div id="tab-panels">
-    <!-- panels injected here -->
-  </div>
-  <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
-    <span class="prompt-prefix">{{ prompt_prefix }}</span>
-    <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
-      <span class="shell-prompt-text" id="shell-prompt-text"></span>
-      <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
+
+    <div class="hud" id="hud" aria-label="Run HUD">
+      <div class="hud-cell hud-status" id="hud-status-cell">
+        <span class="hud-label">status</span>
+        <span id="status" class="status-pill idle hud-value">IDLE</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">transport</span>
+        <span class="hud-value hud-value-green">SSE</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">mode</span>
+        <span class="hud-value">SANDBOXED</span>
+      </div>
+      <div class="hud-cell">
+        <span class="hud-label">db</span>
+        <span class="hud-value hud-value-green hud-value-dot">ONLINE</span>
+      </div>
+      <div class="hud-cell hud-runtime u-hidden" id="hud-runtime-cell">
+        <span class="hud-label">runtime</span>
+        <span id="run-timer" class="run-timer hud-value hud-value-amber"></span>
+      </div>
+      <div class="hud-spacer"></div>
+      <div class="hud-actions" id="hud-actions">
+        <!-- Kill + share/copy/save/clear mounted here by shell_chrome.js in step 2 -->
+      </div>
     </div>
-  </div>
-  <div id="ac-dropdown" class="ac-dropdown u-hidden"></div>
-  <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
-  <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
-    <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
-    <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
-  </div>
+  </main>
 </div>
 
 <!-- Run History panel -->
@@ -408,5 +490,6 @@
 <script src="/static/js/runner.js"></script>
 <script src="/static/js/app.js"></script>
 <script src="/static/js/controller.js"></script>
+<script src="/static/js/shell_chrome.js"></script>
 </body>
 </html>
