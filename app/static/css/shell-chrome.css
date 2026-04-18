@@ -76,6 +76,11 @@
   body:not(.mobile-terminal-mode) > header { display: none; }
   body:not(.mobile-terminal-mode) > #history-row { display: none !important; }
 
+  /* Hide the per-tab footer on desktop — share/copy/save/clear/Kill now
+     live in the HUD bar. The footer remains in the DOM for the mobile
+     path, which re-parents the tab panels into the mobile shell. */
+  body:not(.mobile-terminal-mode) .terminal-actions { display: none !important; }
+
   /* Shell root — flex row, padded 10px on top to match the prototype. */
   .shell-root {
     display: flex;

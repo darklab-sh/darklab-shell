@@ -319,14 +319,118 @@
     // forced from UI. Left in place to preserve cursor affordance.
   });
 
+  // ── HUD action buttons ──────────────────────────────────────────
+  // Desktop-only mirror of the per-tab `.terminal-actions` footer. Each
+  // button resolves the active tab at click time so no per-tab wiring is
+  // needed; the per-tab footer still exists in the DOM for mobile.
+  const hudActions = document.getElementById('hud-actions');
+  let hudKillBtn = null;
+
+  function _currentTabId() {
+    return (typeof getActiveTabId === 'function') ? getActiveTabId() : null;
+  }
+
+  function _closeHudSaveMenu() {
+    document.querySelectorAll('.hud-save-wrap.open').forEach(w => w.classList.remove('open'));
+  }
+
+  function _makeHudBtn(label, onClick, cls = 'hud-action-btn') {
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = cls;
+    btn.textContent = label;
+    btn.addEventListener('click', e => {
+      e.preventDefault();
+      onClick(e, btn);
+    });
+    return btn;
+  }
+
+  function buildHudActions() {
+    if (!hudActions) return;
+    hudActions.replaceChildren();
+
+    hudKillBtn = _makeHudBtn('\u25A0 Kill', () => {
+      const id = _currentTabId();
+      if (id && typeof confirmKill === 'function') confirmKill(id);
+    }, 'hud-kill-btn u-hidden');
+    hudActions.appendChild(hudKillBtn);
+
+    hudActions.appendChild(_makeHudBtn('share snapshot', () => {
+      const id = _currentTabId();
+      if (id && typeof permalinkTab === 'function') permalinkTab(id);
+    }));
+
+    hudActions.appendChild(_makeHudBtn('copy', () => {
+      const id = _currentTabId();
+      if (id && typeof copyTab === 'function') copyTab(id);
+    }));
+
+    // Save menu — shares .save-menu markup so existing CSS applies.
+    const saveWrap = document.createElement('div');
+    saveWrap.className = 'hud-save-wrap';
+    const saveBtn = _makeHudBtn('save', e => {
+      e.stopPropagation();
+      saveWrap.classList.toggle('open');
+    });
+    const saveMenu = document.createElement('div');
+    saveMenu.className = 'save-menu';
+    [
+      ['txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
+      ['html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
+      ['pdf',  () => { const id = _currentTabId(); if (id && typeof exportTabPdf === 'function') exportTabPdf(id); }],
+    ].forEach(([label, fn]) => {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.textContent = label;
+      item.addEventListener('click', e => {
+        e.preventDefault();
+        e.stopPropagation();
+        saveWrap.classList.remove('open');
+        fn();
+      });
+      saveMenu.appendChild(item);
+    });
+    saveWrap.appendChild(saveBtn);
+    saveWrap.appendChild(saveMenu);
+    hudActions.appendChild(saveWrap);
+
+    hudActions.appendChild(_makeHudBtn('clear', () => {
+      const id = _currentTabId();
+      if (!id) return;
+      if (typeof cancelWelcome === 'function') cancelWelcome(id);
+      if (typeof clearTab === 'function') clearTab(id, { preserveRunState: true });
+    }));
+
+    document.addEventListener('click', e => {
+      if (!e.target.closest?.('.hud-save-wrap')) _closeHudSaveMenu();
+    });
+  }
+
+  function _setHudKillVisible(show) {
+    if (!hudKillBtn) return;
+    hudKillBtn.classList.toggle('u-hidden', !show);
+  }
+
+  function refreshHudActions(tabId) {
+    const id = tabId || _currentTabId();
+    const tab = (typeof getTab === 'function') ? getTab(id) : null;
+    _setHudKillVisible(!!(tab && tab.st === 'running'));
+  }
+
+  buildHudActions();
+
   // ── Init ─────────────────────────────────────────────────────────
   applyCollapsed();
   applyWidth();
   applySectionsState();
   renderRailRecent();
+  refreshHudActions();
 
   // Expose the workflows renderer for controller.js to call after /workflows loads.
   global.renderRailWorkflows = renderRailWorkflows;
   global.renderRailRecent = renderRailRecent;
+  global.refreshHudActions = refreshHudActions;
+  global.setHudKillVisible = _setHudKillVisible;
 
 })(globalThis);
