@@ -133,24 +133,13 @@ describe('appendLine', () => {
     document.body.innerHTML = `
       <button id="ln-btn"></button>
       <button id="ts-btn"></button>
-      <div id="mobile-menu"><button data-action="ln"></button></div>
       <div id="out"></div>
     `
-    const { _setLnMode } = loadOutputFns({
-      extraGlobals: {
-        _setMobileActionLabel: (action, label) => {
-          const el = document.querySelector(`#mobile-menu [data-action="${action}"]`)
-          if (el) el.textContent = label
-        },
-      },
-    })
+    const { _setLnMode } = loadOutputFns()
 
     _setLnMode('on')
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
-    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe(
-      'line numbers: on',
-    )
 
     _setLnMode('off')
     expect(document.body.classList.contains('ln-on')).toBe(false)

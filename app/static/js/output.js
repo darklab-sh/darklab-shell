@@ -349,7 +349,6 @@ function _setLnMode(mode) {
     lnBtn.textContent = label;
     lnBtn.classList.toggle('active', mode === 'on');
   }
-  if (typeof _setMobileActionLabel === 'function') _setMobileActionLabel('ln', label);
   syncOutputPrefixes();
   try {
     _refreshFollowingOutputsAfterLayout();

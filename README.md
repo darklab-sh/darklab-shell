@@ -167,7 +167,7 @@ All application settings live in `app/conf/config.yaml`. The file is read at sta
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop rail and the mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
 | `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
-| `recent_commands_limit` | `8` | Number of recent commands shown as clickable chips (in the desktop rail's Recent section and the mobile chip row) |
+| `recent_commands_limit` | `8` | Number of recent commands surfaced in the Recent row (desktop rail chips; mobile peek row and pull-up recents sheet) |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
 | `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |

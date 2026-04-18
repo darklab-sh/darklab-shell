@@ -508,17 +508,19 @@
     const activeId = typeof getActiveTabId === 'function' ? getActiveTabId() : null;
     if (typeof setHudKillVisible === 'function' && tabId === activeId) setHudKillVisible(false);
   };
+  // Fallbacks. mobile_chrome.js overrides these with sheet-aware versions when
+  // the mobile shell initializes; these stubs only run if that init didn't.
   global.showMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();
-    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('open');
+    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('u-hidden');
   };
   global.hideMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();
-    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('open');
+    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('u-hidden');
   };
   global.isMobileMenuOpen = () => {
     const mobileMenu = getMobileMenuEl();
-    return !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
+    return !!(mobileMenu && mobileMenu.classList && !mobileMenu.classList.contains('u-hidden'));
   };
   global.showAcDropdown = () => {
     if (!acDropdown) return;

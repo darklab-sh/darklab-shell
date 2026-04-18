@@ -337,6 +337,10 @@
     gap: 0;
     margin-left: auto;
     flex: 0 0 auto;
+    /* Suppress double-tap-to-zoom on the hamburger wrapper. The button itself
+       also sets this, but the wrapper has non-zero width past the button's
+       negative margin — a double tap landing there would otherwise zoom. */
+    touch-action: manipulation;
   }
   body.mobile-terminal-mode header h1 {
     flex: 1 1 auto;

@@ -92,20 +92,6 @@
     </div>
   </div>
   <div id="mobile-shell-overlays">
-    <div id="mobile-menu">
-      <button data-action="search">⌕ search</button>
-      <button data-action="history">⧖ history</button>
-      <button data-action="options">≡ options</button>
-      <button data-action="ln">line numbers: off</button>
-      <button data-action="ts">timestamps: off</button>
-      <button data-action="theme">◑ theme</button>
-      <button data-action="workflows">⊡ workflows</button>
-      <button data-action="faq">? FAQ</button>
-      <button data-action="diag" class="u-hidden">⊕ diag</button>
-      <a class="mobile-menu-wordmark" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">
-        GitLab: {{ app_name }}{% if version %} v{{ version }}{% endif %}
-      </a>
-    </div>
     <div id="mobile-recents-sheet-scrim" class="recents-sheet-scrim u-hidden" aria-hidden="true"></div>
     <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="Recent commands" aria-modal="true">
       <div class="sheet-grab" role="button" tabindex="0" aria-label="Close recents"></div>
@@ -177,12 +163,28 @@
           <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
           <span class="menu-item-chev">›</span>
         </button>
-        <button type="button" class="menu-item" data-menu-action="ts" aria-pressed="false">
+        <button type="button" class="menu-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
           <span class="menu-item-icon" aria-hidden="true">◷</span>
           <span class="menu-item-label">timestamps</span>
           <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
           <span class="menu-item-chev">›</span>
         </button>
+        <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="off">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">off</span>
+          </button>
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="elapsed">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">elapsed</span>
+            <span class="menu-subitem-hint">+1.2s</span>
+          </button>
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="clock">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">clock</span>
+            <span class="menu-subitem-hint">14:03:27</span>
+          </button>
+        </div>
       </div>
 
       <div class="menu-group-divider" aria-hidden="true"></div>

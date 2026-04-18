@@ -53,7 +53,7 @@ While a command is running the live input prompt hides so output has full focus.
 
 ## Recent Commands
 
-Clickable command chips for recently-run commands appear in the desktop rail's Recent section and (on mobile) in a chip row below the prompt. Clicking a chip loads that command into the prompt without running it, so you can re-run or edit it quickly. The list shows the most recent distinct commands up to the `recent_commands_limit` configured in `config.yaml` (default 8). The section is hidden until there is at least one command in history and updates live as commands are run.
+Recent commands are surfaced in two places: the desktop rail's Recent section (clickable chips that load a command into the prompt), and on mobile a persistent "Recent" peek row between the transcript and the composer that shows a count plus a one-line preview and opens a full pull-up recents sheet on tap. The sheet lists recent runs as tappable rows with per-row copy / permalink / restore actions, search, filter chips (root / exit / date / starred), and a clear-all control. Both surfaces show the most recent distinct commands up to the `recent_commands_limit` configured in `config.yaml` (default 8), are hidden until there is at least one command in history, and update live as commands are run.
 
 ---
 
@@ -423,7 +423,7 @@ If the page reloads while a command is still running, the shell restores a runni
 
 Non-running tabs are restored separately from browser `sessionStorage`. That restore path brings back tab labels, transcript previews, statuses, and saved draft input for the current browser session, and restored completed tabs remount a usable live prompt immediately so you can continue working without tab-switching to wake the prompt back up.
 
-On mobile, the **☰** menu in the top-right corner of the header provides access to all toolbar actions including search, history, options, theme, workflows, and FAQ.
+On mobile, the **☰** menu in the top-right corner of the header opens a bottom-sheet menu that groups session-scoped actions (search, line numbers, timestamps) and overlays (history, workflows, options, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
 ---
 
@@ -493,11 +493,12 @@ On touch-sized screens the app switches to a dedicated mobile layout:
 
 - **Mobile composer dock** — a visible composer with its own Run button replaces the desktop inline input
 - **Keyboard helper row** — a row of touch targets above the keyboard provides `Home`, `End`, single-character left/right moves, word-left / word-right jumps, delete-word, and delete-line without requiring a hardware keyboard
+- **Recent peek + pull-up sheet** — an idle peek row between the transcript and the composer shows the recent-run count plus a one-line preview; tapping it opens a full-height recents sheet with search, filter chips (root / exit / date / starred), per-row copy/permalink/restore actions, and a clear-all control
 - **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible
 - **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions
 - **Shared state** — desktop and mobile Run buttons are kept in sync: both disable together for blank prompts and running tabs
 
-On mobile, the **☰** menu in the top-right corner of the header provides access to: search, history, options, line numbers toggle, timestamps toggle, theme, workflows, FAQ, and the diagnostics page (for IPs in `diagnostics_allowed_cidrs`). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+On mobile, the **☰** menu in the top-right corner of the header opens a bottom-sheet menu with two grouped sections: a session group (search, line numbers toggle, timestamps picker) that affects the current terminal in place, and an overlays group (history, workflows, options, theme, FAQ, and the diagnostics page for IPs in `diagnostics_allowed_cidrs`) that opens full-screen surfaces. `line numbers` is a single on/off row; `timestamps` expands inline to a three-mode picker (off / elapsed / clock) so the active mode is always visible. The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
 
 ---
 

@@ -406,25 +406,25 @@ test('demo-mobile', async ({ page }) => {
 
   // ── History drawer ────────────────────────────────────────────────────────
   await page.locator('#hamburger-btn').click()
-  await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
+  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
   await page.waitForTimeout(500)
 
-  await page.locator('#mobile-menu [data-action="history"]').click()
-  await expect(page.locator('#history-panel')).toHaveClass(/open/)
+  await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
+  await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
   await page
-    .locator('#history-list .history-entry')
+    .locator('#mobile-recents-list .sheet-item')
     .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
   // Pause so the viewer can read the top of the list before scrolling.
   await page.waitForTimeout(2_000)
   // Smooth scroll down then back up at a natural reading pace.
-  await smoothScroll(page, '.history-panel-body', 425, { durationMs: 1_100 })
+  await smoothScroll(page, '#mobile-recents-list', 425, { durationMs: 1_100 })
   await page.waitForTimeout(600)
-  await smoothScroll(page, '.history-panel-body', 0, { durationMs: 800 })
+  await smoothScroll(page, '#mobile-recents-list', 0, { durationMs: 800 })
   await page.waitForTimeout(500)
 
-  await page.locator('#history-close').click()
-  await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+  await page.locator('#mobile-recents-close').click()
+  await expect(page.locator('#mobile-recents-sheet')).toBeHidden()
   await page.waitForTimeout(800)
 
   // ── Theme switching ───────────────────────────────────────────────────────
@@ -432,10 +432,10 @@ test('demo-mobile', async ({ page }) => {
   // Browsing uses three segments — quick peek, longer look, slight overshoot-
   // and-back — so the motion reads as a person scanning rather than a script.
   await page.locator('#hamburger-btn').click()
-  await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
+  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
   await page.waitForTimeout(500)
 
-  await page.locator('#mobile-menu [data-action="theme"]').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
   await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0
@@ -467,10 +467,10 @@ test('demo-mobile', async ({ page }) => {
   // picking an intermediate one. Browse down to explore, then scroll back up
   // toward the top where darklab_obsidian lives.
   await page.locator('#hamburger-btn').click()
-  await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
+  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
   await page.waitForTimeout(500)
 
-  await page.locator('#mobile-menu [data-action="theme"]').click()
+  await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
   await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0

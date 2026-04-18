@@ -18,7 +18,6 @@
   const mobileComposer        = document.getElementById('mobile-composer');
   const mobileKillBtn         = document.getElementById('mobile-kill-btn');
   const mobileEditBar         = document.getElementById('mobile-edit-bar');
-  const legacyMobileMenu      = document.getElementById('mobile-menu');
   const hamburgerBtnEl        = document.getElementById('hamburger-btn');
   const statusPillEl          = document.getElementById('status');
   const runTimerEl            = document.getElementById('run-timer');
@@ -91,8 +90,10 @@
     // Mobile only: the desktop pill intentionally shows only IDLE/RUNNING
     // (HUD LAST EXIT carries the rest), but with no HUD on mobile, an IDLE
     // label sitting inside a red killed/fail pill reads as a bug. Reflect the
-    // terminal state in the pill text so the color and label agree.
-    if (statusPillEl && statusPillEl.classList) {
+    // terminal state in the pill text so the color and label agree. Gated on
+    // body.mobile-terminal-mode so the desktop pill stays binary when the
+    // mobile DOM is present but the shell is rendering desktop chrome.
+    if (statusPillEl && statusPillEl.classList && document.body.classList.contains('mobile-terminal-mode')) {
       if (statusPillEl.classList.contains('killed')) statusPillEl.textContent = 'KILLED';
       else if (statusPillEl.classList.contains('fail')) statusPillEl.textContent = 'FAILED';
     }
@@ -133,20 +134,23 @@
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
   function refreshMenuStateHints() {
-    const ln = legacyMobileMenu?.querySelector('button[data-action="ln"]');
-    const ts = legacyMobileMenu?.querySelector('button[data-action="ts"]');
-    if (ln) {
-      const match = /line numbers:\s*(\S+)/i.exec(ln.textContent || '');
-      const value = match ? match[1] : '';
-      setActionHint(menuLnState, value);
-      setTogglePressed(menuLnState, value);
-    }
-    if (ts) {
-      const match = /timestamps:\s*(\S+)/i.exec(ts.textContent || '');
-      const value = match ? match[1] : '';
-      setActionHint(menuTsState, value);
-      setTogglePressed(menuTsState, value);
-    }
+    // Read current modes from body classes — the canonical source of truth set
+    // by output.js / app.js when the user toggles either preference.
+    const cls = (document.body && document.body.classList) || null;
+    const lnValue = cls && cls.contains('ln-on') ? 'on' : 'off';
+    let tsValue = 'off';
+    if (cls && cls.contains('ts-elapsed')) tsValue = 'elapsed';
+    else if (cls && cls.contains('ts-clock')) tsValue = 'clock';
+    setActionHint(menuLnState, lnValue);
+    setTogglePressed(menuLnState, lnValue);
+    setActionHint(menuTsState, tsValue);
+    setTogglePressed(menuTsState, tsValue);
+    // Sync the timestamps sub-menu: pressed state on the currently-selected
+    // mode, unpressed on the other two. Aria-pressed drives the radio styling.
+    menuSheet?.querySelectorAll('[data-menu-action="ts-set"]').forEach((btn) => {
+      const isActive = btn.dataset.tsMode === tsValue;
+      btn.setAttribute('aria-pressed', isActive ? 'true' : 'false');
+    });
   }
   function refreshWorkflowsCount(items) {
     if (!menuWorkflowsCount) return;
@@ -169,6 +173,12 @@
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
+    // Reset the timestamps sub-menu to collapsed each time the sheet opens so
+    // the user doesn't return to a previously-expanded surface state.
+    const tsToggle = menuSheet?.querySelector('[data-menu-action="ts-toggle"]');
+    const tsSubmenu = document.getElementById('mobile-menu-ts-submenu');
+    tsToggle?.setAttribute('aria-expanded', 'false');
+    tsSubmenu?.classList.add('u-hidden');
     show(menuSheetScrim);
     show(menuSheet);
   }
@@ -182,38 +192,24 @@
 
   // Take over the shared mobile-menu helpers so every caller (hamburger click,
   // outside-click dismissal, overlay coordination) opens the new sheet instead.
-  // The legacy #mobile-menu node stays in the DOM so its action click handlers
-  // (registered in controller.js) still run when we proxy through it below.
   global.showMobileMenu = openMenuSheet;
   global.hideMobileMenu = closeMenuSheet;
   global.isMobileMenuOpen = isMenuSheetOpen;
 
-  // Proxy menu-sheet button clicks to the legacy mobile-menu buttons so the
-  // existing action dispatch in controller.js runs unchanged. The 'history'
-  // action is re-routed to the new pull-up recents sheet instead of the
-  // legacy history panel.
+  // Mobile re-routes the 'history' action to the recents pull-up sheet rather
+  // than the legacy history panel. controller.js owns the rest of the dispatch.
   menuSheet?.querySelectorAll('button[data-menu-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
+    btn.addEventListener('click', (e) => {
       const action = btn.dataset.menuAction;
-      closeMenuSheet();
       if (action === 'history') {
+        e.stopImmediatePropagation();
+        closeMenuSheet();
         showRecentsSheet();
-        return;
       }
-      const proxy = legacyMobileMenu?.querySelector(`button[data-action="${action}"]`);
-      if (proxy) proxy.click();
-    });
+    }, true);
   });
   menuSheetScrim?.addEventListener('click', closeMenuSheet);
   menuSheetCloseBtn?.addEventListener('click', closeMenuSheet);
-
-  // controller.js's global click listener dismisses the mobile menu when the
-  // target is outside _uiOverlayRefs.mobileMenu. Repoint that reference at
-  // the new sheet so taps inside the sheet are recognized as "inside" and
-  // don't trigger an immediate close.
-  if (global._uiOverlayRefs && menuSheet) {
-    global._uiOverlayRefs.mobileMenu = menuSheet;
-  }
 
   // ── 2D: Recent peek ─────────────────────────────────────────────
   function readCmdHistory() {

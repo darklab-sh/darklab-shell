@@ -1577,14 +1577,6 @@ function applyThemeSelection(themeName, persist = true) {
 const _tsModes  = ['off', 'elapsed', 'clock'];
 const _tsLabels = { off: 'timestamps: off', elapsed: 'timestamps: elapsed', clock: 'timestamps: clock' };
 
-// Update the label text on a mobile menu action button.  Centralises the
-// pattern used by _setTsMode (app.js) and _setLnMode (output.js) so both
-// go through the same mobileMenu reference instead of re-querying the DOM.
-function _setMobileActionLabel(action, label) {
-  const el = mobileMenu ? mobileMenu.querySelector(`[data-action="${action}"]`) : null;
-  if (el) el.textContent = label;
-}
-
 function _setTsMode(mode) {
   // Timestamp mode is expressed via body classes so both active transcript
   // rendering and exported/permalink views can share the same styling model.
@@ -1594,7 +1586,6 @@ function _setTsMode(mode) {
   if (mode === 'clock')   document.body.classList.add('ts-clock');
   const label = _tsLabels[mode];
   if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
-  _setMobileActionLabel('ts', label);
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
 }
