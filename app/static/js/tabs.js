@@ -401,6 +401,14 @@ function _createTabHeader(id, label) {
   tab.className = 'tab';
   tab.dataset.id = id;
 
+  // Mobile tab chrome shows a drag-grip glyph on the left; desktop hides it
+  // via CSS. Rendered unconditionally so a viewport switch doesn't require
+  // re-minting tab nodes.
+  const grip = document.createElement('span');
+  grip.className = 'tab-grip';
+  grip.setAttribute('aria-hidden', 'true');
+  tab.appendChild(grip);
+
   const status = document.createElement('span');
   status.className = 'tab-status idle';
   tab.appendChild(status);

@@ -196,24 +196,112 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  /* ── Mobile tab bar (Phase 5) ──
+     Rounded-top pill tabs with drag grip, active-only close, and inset green
+     glow on active. See mobile_ui_refactor v2 handoff for the source design. */
+  body.mobile-terminal-mode .tabs-bar {
+    background: var(--theme-panel-alt-bg);
+    border-bottom: 1px solid var(--border-bright);
+    gap: 6px;
+    padding: 6px 10px 0;
+  }
+  /* Shared geometry for every mobile tab. isolation: isolate puts every tab
+     on its own compositor layer to stop iOS Safari from smearing the active
+     tab's bright green border-top across adjacent tabs at 3x DPR. */
   body.mobile-terminal-mode .terminal-bar .tab {
-    min-height: 44px;
-    padding: 0 14px;
-    font-size: 13px;
-    gap: 8px;
-    border-radius: 10px 10px 0 0;
+    min-height: 40px;
+    padding: 9px 12px;
+    gap: 6px;
+    font-size: 11px;
+    border-radius: 8px 8px 0 0;
     margin-bottom: -1px;
+    isolation: isolate;
   }
+  /* Inactive appearance — mirrors active's specificity via :not(.active) so
+     the two rules don't race through the cascade (base components.css
+     .tab.active provides active box-shadow/background that would otherwise
+     bleed in unless explicitly reset here). The 2px transparent border-top
+     keeps inactive and active tabs visually aligned (the active tab carries
+     a 2px green border-top instead of an inset shadow to avoid Safari
+     subpixel halos that bleed onto adjacent tabs at 3x DPR). */
+  body.mobile-terminal-mode .terminal-bar .tab:not(.active) {
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    border-top: 2px solid var(--border-bright);
+    border-bottom: 1px solid transparent;
+    box-shadow: none !important;
+  }
+  body.mobile-terminal-mode .terminal-bar .tab.active {
+    color: var(--green);
+    background: var(--surface);
+    border: 1px solid var(--border-bright);
+    border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
+    border-bottom-color: var(--surface);
+    box-shadow: none;
+  }
+  body.mobile-terminal-mode .tab .tab-grip {
+    display: inline-block;
+    width: 2px;
+    height: 2px;
+    margin: 0 4px 0 -2px;
+    border-radius: 1px;
+    background: currentColor;
+    opacity: 0.3;
+    box-shadow:
+      3px 0 0 currentColor,
+      0 3px 0 currentColor,
+      3px 3px 0 currentColor,
+      0 6px 0 currentColor,
+      3px 6px 0 currentColor;
+    flex: 0 0 auto;
+    align-self: center;
+    transform: translateY(-2px);
+  }
+  body.mobile-terminal-mode .tab.active .tab-grip { opacity: 0.55; }
+  /* Inactive tabs collapse idle/ok/fail/killed to border-bright so only the
+     one active tab carries semantic color. Running stays amber-pulse on every
+     tab so a background run remains visible at a glance. */
+  body.mobile-terminal-mode .tab .tab-status { width: 5px; height: 5px; }
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.idle,
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.ok,
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.fail,
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.killed {
+    background: var(--border-bright);
+  }
+  body.mobile-terminal-mode .tab.active .tab-status.idle,
+  body.mobile-terminal-mode .tab.active .tab-status.ok {
+    background: var(--green);
+  }
+  /* Close renders on every tab for DOM symmetry but only reveals on active. */
+  body.mobile-terminal-mode .tab .tab-close {
+    width: 16px;
+    height: 16px;
+    font-size: 13px;
+    line-height: 14px;
+    border-radius: 3px;
+    border: 1px solid color-mix(in srgb, var(--border-bright) 60%, transparent);
+    opacity: 0;
+    pointer-events: none;
+  }
+  body.mobile-terminal-mode .tab.active .tab-close {
+    opacity: 0.55;
+    pointer-events: auto;
+  }
+  body.mobile-terminal-mode .tab.active .tab-close:hover,
+  body.mobile-terminal-mode .tab.active .tab-close:active {
+    opacity: 1;
+  }
+  /* Flat glyph, not a bordered button. */
   body.mobile-terminal-mode .terminal-bar #new-tab-btn {
-    min-height: 44px;
-    padding: 0 16px;
-    font-size: 16px;
-  }
-  body.mobile-terminal-mode .terminal-bar .tab .tab-close {
-    width: 24px;
-    height: 24px;
-    font-size: 15px;
-    line-height: 24px;
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    align-self: stretch;
+    margin-bottom: -1px;
   }
   body.mobile-terminal-mode .terminal-bar .status-pill {
     font-size: 9px;
@@ -327,16 +415,6 @@
     user-select: none;
     -webkit-touch-callout: none;
   }
-  body.mobile-terminal-mode .tab:hover .tab-close,
-  body.mobile-terminal-mode .tab .tab-close:hover,
-  body.mobile-terminal-mode .tab .tab-close:active,
-  body.mobile-terminal-mode .tab .tab-close:focus,
-  body.mobile-terminal-mode .tab .tab-close:focus-visible {
-    opacity: 0.55;
-    background: var(--theme-tab-close-bg);
-    border-color: var(--theme-tab-close-border);
-    color: inherit;
-  }
   body.mobile-terminal-mode .term-action-btn:focus,
   body.mobile-terminal-mode .term-action-btn:focus-visible,
   body.mobile-terminal-mode .history-action-btn:focus,
@@ -356,10 +434,12 @@
     background: transparent;
   }
   body.mobile-terminal-mode .terminal-actions {
-    padding: 8px 12px;
+    padding: 5px 10px;
+    gap: 4px;
   }
   body.mobile-terminal-mode .terminal-actions .term-action-btn {
-    min-height: 32px;
+    min-height: 26px;
+    padding: 3px 8px;
   }
   body.mobile-terminal-mode .history-entry {
     padding-top: 12px;
@@ -390,10 +470,9 @@
     justify-content: center;
     text-align: center;
   }
-  body.mobile-terminal-mode .terminal-actions.terminal-actions-has-visible-kill .term-action-btn {
-    min-height: 42px;
-    align-self: stretch;
-  }
+  /* Kill lives in the mobile composer (see #mobile-kill-btn) so the per-tab
+     action-bar duplicate is redundant on mobile. */
+  body.mobile-terminal-mode .terminal-actions .tab-kill-btn { display: none !important; }
 
   /* Mobile overlays: bottom sheet layout for FAQ and options */
   body.mobile-terminal-mode #workflows-overlay,

@@ -127,6 +127,11 @@ body.mobile-terminal-mode {
     display: none;
   }
 
+  /* The legacy top-of-page "Recent:" chip row is replaced on mobile by the
+     pull-up recents sheet (opened from the bottom peek bar). Hide it so we
+     don't render two overlapping recents surfaces. */
+  #history-row { display: none !important; }
+
   /* Pull-up recents sheet (opens when the peek row is tapped). */
   .recents-sheet-scrim {
     position: fixed; inset: 0;
@@ -604,15 +609,56 @@ body.mobile-terminal-mode {
     color: var(--muted);
     font-size: 10.5px;
     letter-spacing: 1.5px;
-    text-transform: uppercase;
+    text-transform: lowercase;
     font-family: var(--font-mono);
+    text-decoration: none;
+  }
+  .menu-sheet .menu-footer:hover,
+  .menu-sheet .menu-footer:focus-visible {
+    color: var(--text);
+    outline: none;
   }
 
   /* Composer picks up an amber ring while a command is running so typing
      feels distinct from the idle prompt. Scoped so desktop is untouched. */
   #mobile-composer.is-running {
-    box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 55%, transparent);
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--amber) 35%, transparent),
+      0 0 0 3px color-mix(in srgb, var(--amber) 10%, transparent);
     transition: box-shadow 160ms ease;
+  }
+  #mobile-composer.is-running #mobile-cmd {
+    caret-color: var(--amber);
+    border-bottom-color: color-mix(in srgb, var(--amber) 40%, var(--border-bright));
+  }
+
+  /* Run ↔ Kill swap in the composer. The Kill button mirrors the desktop
+     .hud-kill-btn styling but tuned for the tighter mobile row. */
+  #mobile-composer.is-running #mobile-run-btn { display: none; }
+  #mobile-composer:not(.is-running) #mobile-kill-btn { display: none; }
+  #mobile-kill-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    color: var(--red);
+    border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    min-height: 34px;
+    letter-spacing: 0.3px;
+  }
+  #mobile-kill-btn:active {
+    background: color-mix(in srgb, var(--red) 22%, transparent);
+  }
+  #mobile-kill-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
   }
 
   /* Edit-helper row above the composer when the soft keyboard is open. */

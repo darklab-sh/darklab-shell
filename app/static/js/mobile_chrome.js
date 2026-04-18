@@ -16,6 +16,7 @@
   // ── Elements ────────────────────────────────────────────────────
   const mobileShellChrome     = document.getElementById('mobile-shell-chrome');
   const mobileComposer        = document.getElementById('mobile-composer');
+  const mobileKillBtn         = document.getElementById('mobile-kill-btn');
   const mobileEditBar         = document.getElementById('mobile-edit-bar');
   const legacyMobileMenu      = document.getElementById('mobile-menu');
   const hamburgerBtnEl        = document.getElementById('hamburger-btn');
@@ -38,6 +39,7 @@
   const menuLnState           = document.getElementById('mobile-menu-ln-state');
   const menuTsState           = document.getElementById('mobile-menu-ts-state');
   const menuWorkflowsCount    = document.getElementById('mobile-menu-workflows-count');
+  const menuHistoryCount      = document.getElementById('mobile-menu-history-count');
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
   const kbHelper              = document.getElementById('mobile-kb-helper');
 
@@ -86,6 +88,21 @@
       if (runtimeLabel) runtimeLabel.textContent = '0s';
       if (mobileComposer && mobileComposer.classList) mobileComposer.classList.remove('is-running');
     }
+    // Mobile only: the desktop pill intentionally shows only IDLE/RUNNING
+    // (HUD LAST EXIT carries the rest), but with no HUD on mobile, an IDLE
+    // label sitting inside a red killed/fail pill reads as a bug. Reflect the
+    // terminal state in the pill text so the color and label agree.
+    if (statusPillEl && statusPillEl.classList) {
+      if (statusPillEl.classList.contains('killed')) statusPillEl.textContent = 'KILLED';
+      else if (statusPillEl.classList.contains('fail')) statusPillEl.textContent = 'FAILED';
+    }
+  }
+
+  if (mobileKillBtn) {
+    mobileKillBtn.addEventListener('click', () => {
+      const tabId = typeof global.getActiveTabId === 'function' ? global.getActiveTabId() : null;
+      if (tabId && typeof confirmKill === 'function') confirmKill(tabId);
+    });
   }
   if (statusPillEl && typeof MutationObserver === 'function') {
     const obs = new MutationObserver(syncRunState);
@@ -109,7 +126,10 @@
     if (!labelEl) return;
     const btn = labelEl.closest('button[data-menu-action]');
     if (!btn) return;
-    const on = typeof value === 'string' && /^on$/i.test(value.trim());
+    // Any value other than empty/off counts as "on" — line numbers toggles on/off,
+    // but timestamps cycles through off / elapsed / clock so we can't match /^on$/.
+    const normalized = typeof value === 'string' ? value.trim().toLowerCase() : '';
+    const on = normalized && normalized !== 'off';
     btn.setAttribute('aria-pressed', on ? 'true' : 'false');
   }
   function refreshMenuStateHints() {
@@ -133,6 +153,13 @@
     const list = Array.isArray(items) ? items : [];
     menuWorkflowsCount.textContent = list.length ? `${list.length} saved` : '';
   }
+  function refreshHistoryCount() {
+    if (!menuHistoryCount) return;
+    const runs = Array.isArray(_recentsRuns) && _recentsRuns.length
+      ? _recentsRuns
+      : readCmdHistory();
+    menuHistoryCount.textContent = runs.length ? `${runs.length}` : '';
+  }
   function refreshThemeHint() {
     if (!menuThemeHint) return;
     const name = (document.body && document.body.dataset && document.body.dataset.theme) || '';
@@ -141,6 +168,7 @@
   function openMenuSheet() {
     refreshMenuStateHints();
     refreshThemeHint();
+    refreshHistoryCount();
     show(menuSheetScrim);
     show(menuSheet);
   }
