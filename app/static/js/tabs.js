@@ -504,14 +504,6 @@ function _createTabPanel(id) {
 
   const terminalActions = document.createElement('div');
   terminalActions.className = 'terminal-actions';
-  const wordmark = document.createElement('a');
-  wordmark.className = 'terminal-wordmark';
-  wordmark.href = APP_CONFIG.project_readme || '#';
-  wordmark.target = '_blank';
-  wordmark.rel = 'noopener noreferrer';
-  const wmVersion = APP_CONFIG.version ? ` v${APP_CONFIG.version}` : '';
-  wordmark.textContent = `${APP_CONFIG.app_name || 'darklab shell'}${wmVersion}`;
-  terminalActions.appendChild(wordmark);
   terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
   terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'share snapshot'));
   terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
@@ -703,6 +695,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   updateOutputFollowButton(id);
+  if (typeof refreshHudActions === 'function') refreshHudActions(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 

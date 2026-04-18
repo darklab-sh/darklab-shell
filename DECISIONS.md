@@ -266,7 +266,7 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 
 ### Save Menu UX (save ▾ dropdown)
 
-**Why one dropdown instead of separate buttons:** Three export formats (txt, html, pdf) in the tab action bar would consume too much horizontal space, especially at narrow tab widths. The `save ▾` dropdown groups them under a single button matching the model already used by other action menus in the shell.
+**Why one dropdown instead of separate buttons:** Three export formats (txt, html, pdf) in the HUD action row would consume too much horizontal space alongside the other status pills and action buttons. The `save ▾` dropdown groups them under a single button matching the model already used by other action menus in the shell.
 
 **Consistency across surfaces:** The same dropdown pattern was applied to the permalink page header and the mobile menu so the export interaction is predictable regardless of which surface the user is on.
 

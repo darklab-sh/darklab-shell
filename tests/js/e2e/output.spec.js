@@ -21,7 +21,7 @@ test.describe('output actions', () => {
   // ── Copy ──────────────────────────────────────────────────────────────────
 
   test('copy button shows the "Copied" toast', async ({ page }) => {
-    await page.locator('[data-action="copy"]').click()
+    await page.locator('.hud-actions [data-action="copy"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
   })
@@ -41,7 +41,7 @@ test.describe('output actions', () => {
       })
     })
 
-    await page.locator('[data-action="copy"]').click()
+    await page.locator('.hud-actions [data-action="copy"]').click()
 
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText(/copied/i)
@@ -54,24 +54,24 @@ test.describe('output actions', () => {
     // Confirm there is output to start with
     await expect(page.locator('.tab-panel.active .output')).not.toBeEmpty()
 
-    await page.locator('[data-action="clear"]').click()
+    await page.locator('.hud-actions [data-action="clear"]').click()
 
     await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
     await expect(page.locator('.tab-panel.active .output .shell-prompt-wrap')).toBeVisible()
   })
 
   test('status reverts to idle after clearing output', async ({ page }) => {
-    await page.locator('[data-action="clear"]').click()
+    await page.locator('.hud-actions [data-action="clear"]').click()
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })
 
   // ── Save .txt ─────────────────────────────────────────────────────────────
 
   test('save-txt button triggers a .txt file download', async ({ page }) => {
-    await page.locator('[data-action="save-menu"]').click()
+    await page.locator('.hud-actions [data-action="save-menu"]').click()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('[data-action="save-txt"]').click(),
+      page.locator('.hud-actions [data-action="save-txt"]').click(),
     ])
 
     expect(download.suggestedFilename()).toMatch(/\.txt$/)
@@ -80,20 +80,20 @@ test.describe('output actions', () => {
   // ── Save .html ────────────────────────────────────────────────────────────
 
   test('save-html button triggers a .html file download', async ({ page }) => {
-    await page.locator('[data-action="save-menu"]').click()
+    await page.locator('.hud-actions [data-action="save-menu"]').click()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('[data-action="save-html"]').click(),
+      page.locator('.hud-actions [data-action="save-html"]').click(),
     ])
 
     expect(download.suggestedFilename()).toMatch(/\.html$/)
   })
 
   test('downloaded html file contains the command text', async ({ page }) => {
-    await page.locator('[data-action="save-menu"]').click()
+    await page.locator('.hud-actions [data-action="save-menu"]').click()
     const [download] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('[data-action="save-html"]').click(),
+      page.locator('.hud-actions [data-action="save-html"]').click(),
     ])
 
     const stream = await download.createReadStream()
@@ -123,14 +123,14 @@ test.describe('output actions with no exportable output', () => {
   })
 
   test('copy button shows a toast when there is no output to copy', async ({ page }) => {
-    await page.locator('[data-action="copy"]').click()
+    await page.locator('.hud-actions [data-action="copy"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output to copy yet')
   })
 
   test('save-txt button shows a toast when there is no output to export', async ({ page }) => {
-    await page.locator('[data-action="save-menu"]').click()
-    await page.locator('[data-action="save-txt"]').click()
+    await page.locator('.hud-actions [data-action="save-menu"]').click()
+    await page.locator('.hud-actions [data-action="save-txt"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output to export')
   })

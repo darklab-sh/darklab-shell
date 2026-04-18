@@ -72,6 +72,7 @@ def index():
         "index.html",
         app_name=_config.CFG["app_name"],
         version=_config.APP_VERSION,
+        project_readme=_config.PROJECT_README,
         prompt_prefix=_config.CFG["prompt_prefix"],
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],

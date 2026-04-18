@@ -13,6 +13,7 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Output Streaming and Display](#output-streaming-and-display)
 - [Kill Running Processes](#kill-running-processes)
+- [Status HUD](#status-hud)
 - [Built-In Pipe Support](#built-in-pipe-support)
 - [Output Search](#output-search)
 - [Copy, Save, and Export](#copy-save-and-export)
@@ -52,7 +53,7 @@ While a command is running the live input prompt hides so output has full focus.
 
 ## Recent Commands
 
-A row of clickable command chips appears below the prompt after the first command is run. Clicking a chip loads that command into the prompt without running it, so you can re-run or edit it quickly. The row shows the most recent distinct commands up to the `recent_commands_limit` configured in `config.yaml` (default 8). The row is hidden until there is at least one command in history and updates live as commands are run.
+Clickable command chips for recently-run commands appear in the desktop rail's Recent section and (on mobile) in a chip row below the prompt. Clicking a chip loads that command into the prompt without running it, so you can re-run or edit it quickly. The list shows the most recent distinct commands up to the `recent_commands_limit` configured in `config.yaml` (default 8). The section is hidden until there is at least one command in history and updates live as commands are run.
 
 ---
 
@@ -299,7 +300,7 @@ A live elapsed timer sits next to the status pill while a command runs. The fina
 
 **Timestamps and line numbers**
 
-Both are off by default and can be toggled independently from the tab toolbar:
+Both are off by default and can be toggled independently from the tabbar's inline controls (and from the mobile menu):
 
 - **Elapsed timestamps** — show time-since-start for each line
 - **Clock timestamps** — show wall-clock time for each line
@@ -318,6 +319,30 @@ When you scroll away from the bottom of a streaming tab, a jump-to-live / jump-t
 Each tab shows a **■ Kill** button while a command is running. Clicking it opens a confirmation dialog before sending `SIGTERM` to the full process group, so accidental clicks don't interrupt a long scan.
 
 `Enter` confirms and `Escape` cancels the dialog, matching the button labels. The same confirmation flow applies whether you use the button or `Ctrl+C`.
+
+---
+
+## Status HUD
+
+The persistent bottom bar on desktop surfaces eleven live pills that describe the current run, transport, and environment state. The left cluster covers run state, connection, and identity; the right cluster carries the output actions (share, copy, save, clear, kill). Pills start with a muted `—` placeholder at page load and transition to live values on the first poll.
+
+| Pill | Source | Notes |
+|------|--------|-------|
+| **STATUS** | Active tab's run state (`running` / `ok` / `fail` / `killed` / `idle`) | Coloured pill identical to the inline tab status dot |
+| **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed amber, `—` muted when no run has finished yet |
+| **RUNS** | Number of running tabs over total tabs | Amber while any tab is running, muted when no tabs are active |
+| **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
+| **LATENCY** | Round-trip time to `/status` in ms | Green `<150ms`, amber `<500ms`, red `>=500ms` |
+| **MODE** | Current shell mode indicator | Reserved for future sandbox/lockdown modes |
+| **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
+| **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
+| **CLOCK** | Wall-clock `HH:MM:SS UTC` | Ticks every second in the browser |
+| **DB** | SQLite connection state | `ONLINE` green, `OFFLINE` red |
+| **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
+
+The backing endpoint is a lightweight `GET /status` that returns `{uptime, db, redis, server_time}` as always-200 JSON so a degraded component never flaps the HUD or triggers reconnect logic — it reports `"down"` for that component while the rest of the UI continues to work. `/status` is polled every 15 seconds; latency is measured client-side with `performance.now()` around the fetch call.
+
+On narrow desktop widths the pill row falls back to horizontal overflow scrolling so the right-side HUD actions never get pushed off-screen. Mobile hides the HUD entirely; per-tab status and exit codes remain visible inline next to the prompt echo, and the run notifications toggle in the Options modal covers the background-watch use case.
 
 ---
 
@@ -353,7 +378,7 @@ Behavior:
 
 ## Output Search
 
-Click **⌕ search** in the terminal bar (next to the tabs) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
+Click **⌕ search** in the tabbar (on the right, alongside the timestamp and line-number toggles) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
 
 Two toggle buttons sit between the input and the match counter:
 
@@ -368,7 +393,7 @@ Both toggles re-run the search immediately when clicked.
 
 ## Copy, Save, and Export
 
-Four actions are available from the tab action bar:
+Four actions are available from the desktop HUD bar at the bottom of the shell (and from the per-tab footer on mobile):
 
 - **Copy** — copies the full plain-text output to the clipboard
 - **save ▾** — a dropdown with three export formats:
@@ -376,7 +401,7 @@ Four actions are available from the tab action bar:
   - **html** — themed HTML file with ANSI colors preserved, renders correctly in a browser without the shell; fonts and theme colors are inlined so the file is fully self-contained
   - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output
 
-The same `save ▾` dropdown is available on the desktop tab action bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
+The same `save ▾` dropdown is available on the desktop HUD bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
 
 All local exports (txt, html, pdf) produce unredacted output — they show the true command output as it appeared in the terminal. Redaction is scoped exclusively to the permalink share flow.
 
@@ -657,18 +682,18 @@ Use `answer_html` if you need exact HTML. Built-in entries can still use richer 
 
 ## Theme Selector
 
-Click **◑ theme** in the header to open the dedicated theme selector modal. Pick any registered theme variant and the choice is saved in `localStorage` and persists across sessions. The theme applies to the live shell, permalink pages, and HTML exports. For theme authoring details, see [THEME.md](THEME.md).
+Click **◑ theme** in the desktop rail (or the **☰** menu on mobile) to open the dedicated theme selector modal. Pick any registered theme variant and the choice is saved in `localStorage` and persists across sessions. The theme applies to the live shell, permalink pages, and HTML exports. For theme authoring details, see [THEME.md](THEME.md).
 
 ---
 
 ## Options Modal
 
-Click **≡ options** in the header (or the **☰** menu on mobile) to open the Options modal. It exposes per-browser display and sharing preferences that are saved in cookies and applied on every page load:
+Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the Options modal. It exposes per-browser display and sharing preferences that are saved in cookies and applied on every page load:
 
 | Setting | Choices | Description |
 |---------|---------|-------------|
-| **Timestamps** | Off / Elapsed / Clock | Controls the timestamp mode for output lines. Equivalent to the quick toggle in the tab toolbar |
-| **Line Numbers** | on / off | Shows or hides sequential line numbers beside output and the live prompt. Equivalent to the tab toolbar toggle |
+| **Timestamps** | Off / Elapsed / Clock | Controls the timestamp mode for output lines. Equivalent to the quick toggle in the tabbar |
+| **Line Numbers** | on / off | Shows or hides sequential line numbers beside output and the live prompt. Equivalent to the tabbar toggle |
 | **Welcome Intro** | Animated / Disable Animation / Remove Completely | Controls whether the welcome animation plays on the first tab: full animated sequence, instant settle, or no welcome tab at all |
 | **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Sets the default redaction choice for snapshot sharing so the prompt is skipped once a preference is saved |
 | **Run Notifications** | on / off | When enabled, a browser desktop notification fires each time a run exits or is killed. The notification title shows only the command root (e.g. `$ curl`) to avoid exposing arguments or token values; the body shows exit code and elapsed time. Enabling triggers the native browser permission prompt if needed; if the browser has already blocked notifications, the toggle reverts and a toast is shown |
@@ -806,7 +831,7 @@ diagnostics_allowed_cidrs:
 
 Access is checked against the resolved client IP, using the same trusted-proxy path as logging and rate limiting. `X-Forwarded-For` is only honored when the direct peer IP is inside `trusted_proxy_cidrs`; otherwise the app falls back to the direct peer IP and logs `UNTRUSTED_PROXY` when a forwarded header was supplied. The page returns 404 for all other requests. Denied access is logged as `DIAG_DENIED` with the resolved client IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
 
-When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop header and the mobile menu alongside the other toolbar buttons. It is hidden for all other visitors.
+When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop rail and the mobile menu alongside the other toolbar buttons. It is hidden for all other visitors.
 
 ### What the page shows
 

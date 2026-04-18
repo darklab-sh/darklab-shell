@@ -270,21 +270,6 @@ describe('tabs helpers', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe('Tab limit reached (max 1)')
   })
 
-  it('createTab renders a terminal-wordmark anchor with app name and version', () => {
-    const { createTab } = loadTabsFns({
-      version: '2.0',
-      projectReadme: 'https://example.invalid/readme',
-    })
-
-    createTab('tab 1')
-
-    const wordmark = document.querySelector('.terminal-wordmark')
-    expect(wordmark).not.toBeNull()
-    expect(wordmark.tagName).toBe('A')
-    expect(wordmark.textContent).toBe('darklab shell v2.0')
-    expect(wordmark.getAttribute('href')).toBe('https://example.invalid/readme')
-  })
-
   it('createTab labels the active-tab permalink action as share snapshot', () => {
     const { createTab } = loadTabsFns()
 
@@ -294,17 +279,6 @@ describe('tabs helpers', () => {
     )
 
     expect(btn.textContent).toBe('share snapshot')
-  })
-
-  it('createTab renders wordmark with just the app name when version is absent', () => {
-    const { createTab } = loadTabsFns()
-
-    createTab('tab 1')
-
-    const wordmark = document.querySelector('.terminal-wordmark')
-    expect(wordmark).not.toBeNull()
-    expect(wordmark.textContent).toBe('darklab shell')
-    expect(wordmark.getAttribute('href')).toBe('#')
   })
 
   it('activateTab resets the command input instead of repopulating from tab state', () => {

@@ -33,7 +33,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
 
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       '[denied] Command not allowed.',
     )
@@ -50,7 +50,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
 
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       '[rate limited] Too many requests. Please wait a moment.',
     )
@@ -63,7 +63,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
 
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       '[connection error] Unable to reach the server. Check that it is running and try again.',
     )
@@ -79,7 +79,7 @@ test.describe('failure paths', () => {
     })
 
     await runCommand(page, CMD)
-    await page.locator('[data-action="permalink"]').click()
+    await page.locator('.hud-actions [data-action="permalink"]').click()
     await page.locator('#share-redaction-confirm').click()
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to create permalink')
@@ -119,7 +119,7 @@ test.describe('failure paths', () => {
     await runCommand(page, CMD)
     await page.waitForTimeout(1200)
     await runCommand(page, 'date')
-    await page.locator('#hist-btn').click()
+    await page.locator('.rail-nav [data-action="history"]').click()
     await page.locator('#history-list > *').first().waitFor({ state: 'visible' })
     await page.locator('#hist-clear-all-btn').click()
     await page.locator('#hist-del-confirm').click()

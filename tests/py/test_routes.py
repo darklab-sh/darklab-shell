@@ -115,6 +115,70 @@ class TestHealthRoute:
         assert data["redis"] is False
 
 
+# ── /status ───────────────────────────────────────────────────────────────────
+
+class TestStatusRoute:
+    def test_returns_200_even_when_db_fails(self):
+        # /status is for live HUD polling; it must never return 503 so a
+        # blip doesn't tear down the UI. Fields report state instead.
+        client = get_client()
+        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+            resp = client.get("/status")
+        assert resp.status_code == 200
+
+    def test_response_contains_expected_keys(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        for key in ("uptime", "db", "redis", "server_time"):
+            assert key in data
+
+    def test_uptime_is_non_negative_integer(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert isinstance(data["uptime"], int)
+        assert data["uptime"] >= 0
+
+    def test_db_ok_when_sqlite_available(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert data["db"] == "ok"
+
+    def test_db_down_when_sqlite_fails(self):
+        client = get_client()
+        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+            data = json.loads(client.get("/status").data)
+        assert data["db"] == "down"
+
+    def test_redis_none_when_not_configured(self):
+        # In the test environment there is no Redis configured.
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert data["redis"] == "none"
+
+    def test_redis_ok_when_ping_succeeds(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.return_value = True
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
+            data = json.loads(client.get("/status").data)
+        assert data["redis"] == "ok"
+
+    def test_redis_down_when_ping_fails(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.side_effect = Exception("redis down")
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
+            data = json.loads(client.get("/status").data)
+        assert data["redis"] == "down"
+
+    def test_server_time_is_ms_epoch(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert isinstance(data["server_time"], int)
+        # Any plausible ms-epoch timestamp in 2026 fits in 13 digits.
+        assert 1e12 < data["server_time"] < 1e13
+
+
 # ── /config ───────────────────────────────────────────────────────────────────
 
 class TestConfigRoute:

@@ -151,7 +151,7 @@ export async function openHistory(page) {
   const panel = page.locator('#history-panel')
   const isOpen = await panel.evaluate((node) => node.classList.contains('open')).catch(() => false)
   if (!isOpen) {
-    await page.locator('#hist-btn').click()
+    await page.locator('.rail-nav [data-action="history"]').click()
     await panel.waitFor({ state: 'visible' })
   }
   // refreshHistoryPanel() fires an async /history fetch after the panel opens.
@@ -202,7 +202,7 @@ export async function waitForHistoryRuns(page, minRuns) {
 
 /**
  * Close the history panel using the in-panel close button (avoids pointer-event
- * conflicts when the panel overlays the toolbar #hist-btn).
+ * conflicts when the panel overlays the rail history button).
  */
 export async function closeHistory(page) {
   const panel = page.locator('#history-panel')
@@ -222,7 +222,15 @@ export async function createShareSnapshot(page, { choice = 'redacted' } = {}) {
     (r) => r.url().includes('/share') && r.request().method() === 'POST',
   )
 
-  await page.locator('[data-action="permalink"]').click()
+  // Prefer the HUD button on desktop; fall back to the per-tab footer button
+  // on mobile, where the HUD is hidden and the tab panel owns the action row.
+  const hudBtn = page.locator('.hud-actions [data-action="permalink"]')
+  const hudVisible = await hudBtn.isVisible().catch(() => false)
+  if (hudVisible) {
+    await hudBtn.click()
+  } else {
+    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+  }
   await page.locator('#share-redaction-overlay').waitFor({ state: 'visible' })
 
   if (choice === 'raw') {

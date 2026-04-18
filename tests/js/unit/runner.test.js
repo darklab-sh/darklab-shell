@@ -303,13 +303,24 @@ function loadRunnerFns({
 }
 
 describe('runner helpers', () => {
-  it('setStatus maps known states to status-pill text', () => {
+  it('setStatus shows RUNNING only while running and IDLE otherwise', () => {
     const { setStatus, status } = loadRunnerFns()
 
-    setStatus('ok')
+    setStatus('running')
+    expect(status.className).toBe('status-pill running')
+    expect(status.textContent).toBe('RUNNING')
 
+    setStatus('ok')
     expect(status.className).toBe('status-pill ok')
-    expect(status.textContent).toBe('EXIT 0')
+    expect(status.textContent).toBe('IDLE')
+
+    setStatus('fail')
+    expect(status.className).toBe('status-pill fail')
+    expect(status.textContent).toBe('IDLE')
+
+    setStatus('killed')
+    expect(status.className).toBe('status-pill killed')
+    expect(status.textContent).toBe('IDLE')
   })
 
   it('doKill sends /kill immediately when runId is already known', () => {
