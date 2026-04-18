@@ -33,7 +33,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
 
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       '[denied] Command not allowed.',
     )
@@ -50,7 +50,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
 
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       '[rate limited] Too many requests. Please wait a moment.',
     )
@@ -63,7 +63,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
 
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
       '[connection error] Unable to reach the server. Check that it is running and try again.',
     )

@@ -87,8 +87,10 @@ test.describe('kill running command', () => {
     await page.locator('#kill-confirm').waitFor({ state: 'visible' })
     await page.locator('#kill-confirm').click()
 
-    // Status should transition to KILLED
-    await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
+    // STATUS pill is binary (RUNNING/IDLE); the KILLED signal moved to the
+    // LAST EXIT pill to avoid duplicating state across two adjacent pills.
+    await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
+    await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
   })
 
   test('kill button disappears after the command is killed', async ({ page }) => {
@@ -101,7 +103,8 @@ test.describe('kill running command', () => {
     await page.locator('#kill-confirm').waitFor({ state: 'visible' })
     await page.locator('#kill-confirm').click()
 
-    await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
+    await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
+    await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
     // Kill button should no longer be visible once the command has ended
     await expect(page.locator('.hud-kill-btn')).toBeHidden()
   })
@@ -143,7 +146,8 @@ test.describe('kill running command', () => {
 
     await page.keyboard.press('Enter')
 
-    await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
+    await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
+    await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
     await expect(page.locator('#kill-overlay')).toBeHidden()
   })
 
@@ -163,7 +167,8 @@ test.describe('kill running command', () => {
     // Clean up the still-running command so the next test starts from a blank session.
     await page.locator('#cmd').press('Control+c')
     await page.locator('#kill-confirm').click()
-    await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
+    await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
+    await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
   })
 
   test('Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation', async ({

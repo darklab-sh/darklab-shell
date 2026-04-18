@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 808
+- `pytest`: 817
 - `vitest`: 472
 - `playwright`: 156
-- total: 1,436
+- total: 1,445
 
 This document is organized in two parts:
 
@@ -694,6 +694,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestHealthRoute.test_status_degraded_when_db_fails` | Checks that status degraded when database fails. |
 | `TestHealthRoute.test_status_ok_when_redis_pings_successfully` | Checks that status ok when Redis pings successfully. |
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
+| `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
+| `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
+| `TestStatusRoute.test_uptime_is_non_negative_integer` | Uptime is a non-negative integer count of seconds since app boot. |
+| `TestStatusRoute.test_db_ok_when_sqlite_available` | `db` is `"ok"` when SQLite responds. |
+| `TestStatusRoute.test_db_down_when_sqlite_fails` | `db` is `"down"` when SQLite raises. |
+| `TestStatusRoute.test_redis_none_when_not_configured` | `redis` is `"none"` when Redis is not configured. |
+| `TestStatusRoute.test_redis_ok_when_ping_succeeds` | `redis` is `"ok"` when a configured client pings successfully. |
+| `TestStatusRoute.test_redis_down_when_ping_fails` | `redis` is `"down"` when a configured client fails to ping. |
+| `TestStatusRoute.test_server_time_is_ms_epoch` | `server_time` is a millisecond-epoch integer in a plausible range. |
 | `TestConfigRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestConfigRoute.test_contains_expected_keys` | Checks contains expected keys handling. |
 | `TestConfigRoute.test_max_tabs_is_int` | Checks that max tabs is int. |
@@ -1411,7 +1420,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `accepts uniq with no flags` | Verifies that accepts uniq with no flags. |
 | `accepts uniq -c` | Verifies that accepts uniq -c. |
 | `rejects unsupported uniq flags` | Verifies that rejects unsupported uniq flags. |
-| `setStatus maps known states to status-pill text` | Verifies that setStatus maps known states to status-pill text. |
+| `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
@@ -1659,8 +1668,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | Test | Description |
 | --- | --- |
 | `output appears in the terminal after running a command` | Verifies that output appears in the terminal after running a command. |
-| `status pill shows EXIT 0 and output has an exit-ok line` | Verifies that status pill shows EXIT 0 and output has an exit-ok line. |
-| `denied command shows [denied] in output and ERROR status` | Verifies that denied command shows [denied] in output and ERROR status. |
+| `HUD LAST EXIT shows 0 after a successful run and output has exit-ok line` | Verifies that HUD LAST EXIT shows 0 after a successful run and output has exit-ok line. |
+| `denied command shows [denied] in output and non-zero LAST EXIT` | Verifies that denied command shows [denied] in output and non-zero LAST EXIT. |
 
 #### `failure-paths.spec.js`
 

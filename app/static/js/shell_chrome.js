@@ -25,6 +25,14 @@
 
   const hudStatusCell     = document.getElementById('hud-status-cell');
   const hudRuntimeCell    = document.getElementById('hud-runtime-cell');
+  const hudLastExitEl     = document.getElementById('hud-last-exit');
+  const hudRunsEl         = document.getElementById('hud-runs');
+  const hudLatencyEl      = document.getElementById('hud-latency');
+  const hudSessionEl      = document.getElementById('hud-session');
+  const hudUptimeEl       = document.getElementById('hud-uptime');
+  const hudClockEl        = document.getElementById('hud-clock');
+  const hudDbEl           = document.getElementById('hud-db');
+  const hudRedisEl        = document.getElementById('hud-redis');
 
   // ── Prefs (cookie-backed) ───────────────────────────────────────
   const PREF_COLLAPSED = 'pref_rail_collapsed';
@@ -422,6 +430,227 @@
 
   buildHudActions();
 
+  // ── HUD metrics ─────────────────────────────────────────────────
+  // Live-updating pills on the left side of the HUD. State is owned here;
+  // setters are exposed on `global` so runner.js and session.js can push in.
+  const STATUS_POLL_MS = 15000;
+  const CLOCK_TICK_MS  = 1000;
+  const LAT_WARN_MS    = 150;
+  const LAT_BAD_MS     = 500;
+
+  const hudState = {
+    lastExit: null,     // number | 'killed' | null
+    latencyMs: null,    // number | null
+    serverUptime: null, // seconds as reported by /status
+    serverUptimeAt: 0,  // performance.now() when serverUptime was recorded
+    db: null,           // 'ok' | 'down' | null
+    redis: null,        // 'ok' | 'down' | 'none' | null
+  };
+
+  function _setValueColor(el, variant) {
+    if (!el) return;
+    el.classList.remove('hud-value-green', 'hud-value-amber', 'hud-value-red', 'hud-muted');
+    if (variant) el.classList.add(variant);
+  }
+
+  function _formatUptime(totalSeconds) {
+    if (!Number.isFinite(totalSeconds) || totalSeconds < 0) return '—';
+    const s = Math.floor(totalSeconds);
+    if (s < 60) return `${s}s`;
+    if (s < 3600) {
+      const m = Math.floor(s / 60);
+      const r = s % 60;
+      return r ? `${m}m ${r}s` : `${m}m`;
+    }
+    if (s < 86400) {
+      const h = Math.floor(s / 3600);
+      const m = Math.floor((s % 3600) / 60);
+      return m ? `${h}h ${m}m` : `${h}h`;
+    }
+    const d = Math.floor(s / 86400);
+    const h = Math.floor((s % 86400) / 3600);
+    return h ? `${d}d ${h}h` : `${d}d`;
+  }
+
+  function _formatUtcClock(ms) {
+    const d = new Date(Number.isFinite(ms) ? ms : Date.now());
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+  }
+
+  function _renderLastExit() {
+    if (!hudLastExitEl) return;
+    const v = hudState.lastExit;
+    if (v === null || v === undefined) {
+      hudLastExitEl.textContent = '—';
+      _setValueColor(hudLastExitEl, 'hud-muted');
+    } else if (v === 'killed') {
+      hudLastExitEl.textContent = 'KILLED';
+      _setValueColor(hudLastExitEl, 'hud-value-red');
+    } else if (v === 0) {
+      hudLastExitEl.textContent = '0';
+      _setValueColor(hudLastExitEl, 'hud-value-green');
+    } else {
+      hudLastExitEl.textContent = String(v);
+      _setValueColor(hudLastExitEl, 'hud-value-red');
+    }
+  }
+
+  function _renderLatency() {
+    if (!hudLatencyEl) return;
+    const ms = hudState.latencyMs;
+    if (ms === null || ms === undefined) {
+      hudLatencyEl.textContent = '— ms';
+      _setValueColor(hudLatencyEl, 'hud-muted');
+      return;
+    }
+    hudLatencyEl.textContent = `${Math.round(ms)} ms`;
+    if (ms >= LAT_BAD_MS) _setValueColor(hudLatencyEl, 'hud-value-red');
+    else if (ms >= LAT_WARN_MS) _setValueColor(hudLatencyEl, 'hud-value-amber');
+    else _setValueColor(hudLatencyEl, 'hud-value-green');
+  }
+
+  function _renderRuns() {
+    if (!hudRunsEl) return;
+    const list = Array.isArray(global.tabs) ? global.tabs : [];
+    const running = list.reduce((n, t) => n + (t && t.st === 'running' ? 1 : 0), 0);
+    const total = list.length;
+    hudRunsEl.textContent = total ? `${running} / ${total}` : '0';
+    _setValueColor(hudRunsEl, running > 0 ? 'hud-value-amber' : 'hud-muted');
+  }
+
+  function _renderSession() {
+    if (!hudSessionEl) return;
+    // Read directly from localStorage: SESSION_ID in session.js is declared
+    // with `let` so it is not attached to window; localStorage is the
+    // underlying source of truth and updates synchronously across all paths
+    // that change the active session token.
+    let token = '';
+    try { token = localStorage.getItem('session_token') || ''; } catch (_) {}
+    if (token && token.startsWith('tok_')) {
+      const masked = (typeof maskSessionToken === 'function') ? maskSessionToken(token) : token;
+      hudSessionEl.textContent = masked;
+      hudSessionEl.title = `Active session token (${masked})`;
+      _setValueColor(hudSessionEl, 'hud-value-green');
+    } else {
+      hudSessionEl.textContent = 'ANON';
+      hudSessionEl.title = 'Anonymous UUID session — generate a token in Options to carry history across devices';
+      _setValueColor(hudSessionEl, 'hud-muted');
+    }
+  }
+
+  function _renderUptime() {
+    if (!hudUptimeEl) return;
+    if (hudState.serverUptime === null) {
+      hudUptimeEl.textContent = '—';
+      _setValueColor(hudUptimeEl, 'hud-muted');
+      return;
+    }
+    const deltaS = (performance.now() - hudState.serverUptimeAt) / 1000;
+    hudUptimeEl.textContent = _formatUptime(hudState.serverUptime + deltaS);
+    _setValueColor(hudUptimeEl, null);
+  }
+
+  function _renderClock() {
+    if (!hudClockEl) return;
+    hudClockEl.textContent = _formatUtcClock(Date.now());
+    _setValueColor(hudClockEl, null);
+  }
+
+  function _renderDb() {
+    if (!hudDbEl) return;
+    if (hudState.db === 'ok') {
+      hudDbEl.textContent = 'ONLINE';
+      _setValueColor(hudDbEl, 'hud-value-green');
+    } else if (hudState.db === 'down') {
+      hudDbEl.textContent = 'OFFLINE';
+      _setValueColor(hudDbEl, 'hud-value-red');
+    } else {
+      hudDbEl.textContent = '—';
+      _setValueColor(hudDbEl, 'hud-muted');
+    }
+  }
+
+  function _renderRedis() {
+    if (!hudRedisEl) return;
+    if (hudState.redis === 'ok') {
+      hudRedisEl.textContent = 'ONLINE';
+      _setValueColor(hudRedisEl, 'hud-value-green');
+      hudRedisEl.title = 'Redis backend is reachable';
+    } else if (hudState.redis === 'down') {
+      hudRedisEl.textContent = 'OFFLINE';
+      _setValueColor(hudRedisEl, 'hud-value-red');
+      hudRedisEl.title = 'Redis configured but unreachable';
+    } else if (hudState.redis === 'none') {
+      hudRedisEl.textContent = 'N/A';
+      _setValueColor(hudRedisEl, 'hud-muted');
+      hudRedisEl.title = 'Redis not configured — rate limiting and process tracking run in-process';
+    } else {
+      hudRedisEl.textContent = '—';
+      _setValueColor(hudRedisEl, 'hud-muted');
+    }
+  }
+
+  function setHudLastExit(codeOrStatus) {
+    hudState.lastExit = codeOrStatus;
+    _renderLastExit();
+  }
+
+  async function pollHudStatus() {
+    const t0 = performance.now();
+    try {
+      const resp = await fetch('/status', { cache: 'no-store', credentials: 'same-origin' });
+      const t1 = performance.now();
+      hudState.latencyMs = t1 - t0;
+      if (resp.ok) {
+        const data = await resp.json();
+        if (typeof data.uptime === 'number') {
+          hudState.serverUptime = data.uptime;
+          hudState.serverUptimeAt = performance.now();
+        }
+        if (typeof data.db === 'string')    hudState.db = data.db;
+        if (typeof data.redis === 'string') hudState.redis = data.redis;
+      }
+    } catch (_) {
+      hudState.latencyMs = null;
+      hudState.db = 'down';
+    }
+    _renderLatency();
+    _renderUptime();
+    _renderDb();
+    _renderRedis();
+  }
+
+  // Cross-tab SESSION_ID changes fire the 'storage' event, so refresh there
+  // as well as on every poll (cheap) so token rotations reflect immediately.
+  window.addEventListener('storage', e => {
+    if (e.key === 'session_token') _renderSession();
+  });
+
+  // Hook setTabStatus so RUNS re-renders whenever any tab changes state.
+  if (typeof global.setTabStatus === 'function') {
+    const originalSetTabStatus = global.setTabStatus;
+    global.setTabStatus = function wrappedSetTabStatus(...args) {
+      const result = originalSetTabStatus.apply(this, args);
+      try { _renderRuns(); } catch (e) { /* non-critical */ }
+      return result;
+    };
+  }
+
+  // Initial render and pollers.
+  _renderLastExit();
+  _renderRuns();
+  _renderSession();
+  _renderClock();
+  _renderLatency();
+  _renderUptime();
+  _renderDb();
+  _renderRedis();
+
+  pollHudStatus();
+  setInterval(pollHudStatus, STATUS_POLL_MS);
+  setInterval(() => { _renderClock(); _renderUptime(); _renderSession(); }, CLOCK_TICK_MS);
+
   // ── Init ─────────────────────────────────────────────────────────
   applyCollapsed();
   applyWidth();
@@ -434,5 +663,6 @@
   global.renderRailRecent = renderRailRecent;
   global.refreshHudActions = refreshHudActions;
   global.setHudKillVisible = _setHudKillVisible;
+  global.setHudLastExit = setHudLastExit;
 
 })(globalThis);

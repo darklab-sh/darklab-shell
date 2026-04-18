@@ -31,10 +31,24 @@ function _clearStalledTimeout(tabId) {
 }
 
 // ── Status pill ──
+// The HUD STATUS pill is a binary running-or-not indicator; the outcome of
+// the last run (exit code, killed) is surfaced by the adjacent LAST EXIT
+// pill, so the text only ever reads RUNNING or IDLE. The class name still
+// tracks the underlying state (ok/fail/killed/idle/running) so existing CSS
+// and test assertions that key off the pill's class keep working.
+//
+// setStatus also mirrors terminal states into the LAST EXIT pill so synthetic
+// failures (denied, rate-limited, transport errors) surface there without
+// every caller having to wire the two pills up separately. Callers that have
+// a real exit code (the SSE exit handler, kill) override afterwards.
 function setStatus(s) {
   status.className = 'status-pill ' + s;
-  const labels = { idle: 'IDLE', running: 'RUNNING', ok: 'EXIT 0', fail: 'ERROR', killed: 'KILLED' };
-  status.textContent = labels[s] || s;
+  status.textContent = s === 'running' ? 'RUNNING' : 'IDLE';
+  if (typeof setHudLastExit === 'function') {
+    if (s === 'ok') setHudLastExit(0);
+    else if (s === 'fail') setHudLastExit(1);
+    else if (s === 'killed') setHudLastExit('killed');
+  }
 }
 
 // ── Run notifications ──
@@ -339,6 +353,7 @@ function doKill(tabId) {
   stopTimer();
   appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
+  if (typeof setHudLastExit === 'function') setHudLastExit('killed');
   setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
@@ -1085,6 +1100,7 @@ function submitCommand(rawCmd) {
                 }
                 if (t) t.syntheticClear = false;
                 _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
+                if (typeof setHudLastExit === 'function') setHudLastExit(msg.code);
                 _setRunButtonDisabled(false); hideTabKillBtn(tabId);
                 if (t && t.closing && typeof finalizeClosingTab === 'function') {
                   finalizeClosingTab(tabId);

@@ -71,7 +71,7 @@ test.describe('timestamp toggle', () => {
     await page.locator('#cmd').fill(CMD)
     await page.locator('#cmd').press('Enter')
 
-    await expect(page.locator('#status')).toHaveText('EXIT 0')
+    await expect(page.locator('#hud-last-exit')).toHaveText('0')
 
     const prefixedLine = page.locator('.tab-panel.active .output .line[data-prefix]').first()
     await expect(prefixedLine).toHaveAttribute('data-prefix', /^\d+(\s+\+\d+\.\ds)?$/)
@@ -92,7 +92,7 @@ test.describe('timestamp toggle', () => {
         submitComposerCommand('man curl', { dismissKeyboard: true })
       }
     })
-    await expect(page.locator('#status')).toHaveText('EXIT 0')
+    await expect(page.locator('#hud-last-exit')).toHaveText('0')
 
     const output = page.locator('.tab-panel.active .output')
     await output.evaluate((el) => {

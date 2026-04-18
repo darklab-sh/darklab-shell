@@ -5,6 +5,7 @@ Asset and ops routes: vendor JS/fonts, favicon, and the health-check endpoint.
 import logging
 import os
 import shutil
+import time
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -37,6 +38,7 @@ _ANSI_UP_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor
 _JSPDF_JS = Path(__file__).resolve().parent.parent / "static" / "js" / "vendor" / "jspdf.umd.min.js"
 _FONT_DIR = Path(__file__).resolve().parent.parent / "static" / "fonts"
 _VENDOR_FONT_FILES = frozenset(filename for _, _, filename in FONT_FILES)
+_APP_BOOT_TIME = time.time()
 
 
 @assets_bp.route("/log", methods=["POST"])
@@ -111,6 +113,36 @@ def health():
     else:
         log.warning("HEALTH_DEGRADED", extra={"db": result["db"], "redis": result["redis"]})
     return jsonify(result), http_status
+
+
+@assets_bp.route("/status")
+def status():
+    """Lightweight HUD polling endpoint. Always 200 so probes don't flap the UI."""
+    uptime_s = int(time.time() - _APP_BOOT_TIME)
+
+    db_state = "down"
+    try:
+        with db_connect() as conn:
+            conn.execute("SELECT 1")
+        db_state = "ok"
+    except Exception:
+        pass
+
+    if redis_client:
+        try:
+            redis_client.ping()
+            redis_state = "ok"
+        except Exception:
+            redis_state = "down"
+    else:
+        redis_state = "none"
+
+    return jsonify({
+        "uptime": uptime_s,
+        "db": db_state,
+        "redis": redis_state,
+        "server_time": int(time.time() * 1000),
+    })
 
 
 @assets_bp.route("/diag")

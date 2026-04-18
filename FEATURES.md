@@ -13,6 +13,7 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 - [Keyboard Shortcuts](#keyboard-shortcuts)
 - [Output Streaming and Display](#output-streaming-and-display)
 - [Kill Running Processes](#kill-running-processes)
+- [Status HUD](#status-hud)
 - [Built-In Pipe Support](#built-in-pipe-support)
 - [Output Search](#output-search)
 - [Copy, Save, and Export](#copy-save-and-export)
@@ -318,6 +319,30 @@ When you scroll away from the bottom of a streaming tab, a jump-to-live / jump-t
 Each tab shows a **■ Kill** button while a command is running. Clicking it opens a confirmation dialog before sending `SIGTERM` to the full process group, so accidental clicks don't interrupt a long scan.
 
 `Enter` confirms and `Escape` cancels the dialog, matching the button labels. The same confirmation flow applies whether you use the button or `Ctrl+C`.
+
+---
+
+## Status HUD
+
+The persistent bottom bar on desktop surfaces eleven live pills that describe the current run, transport, and environment state. The left cluster covers run state, connection, and identity; the right cluster carries the output actions (share, copy, save, clear, kill). Pills start with a muted `—` placeholder at page load and transition to live values on the first poll.
+
+| Pill | Source | Notes |
+|------|--------|-------|
+| **STATUS** | Active tab's run state (`running` / `ok` / `fail` / `killed` / `idle`) | Coloured pill identical to the inline tab status dot |
+| **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed amber, `—` muted when no run has finished yet |
+| **RUNS** | Number of running tabs over total tabs | Amber while any tab is running, muted when no tabs are active |
+| **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
+| **LATENCY** | Round-trip time to `/status` in ms | Green `<150ms`, amber `<500ms`, red `>=500ms` |
+| **MODE** | Current shell mode indicator | Reserved for future sandbox/lockdown modes |
+| **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
+| **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
+| **CLOCK** | Wall-clock `HH:MM:SS UTC` | Ticks every second in the browser |
+| **DB** | SQLite connection state | `ONLINE` green, `OFFLINE` red |
+| **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
+
+The backing endpoint is a lightweight `GET /status` that returns `{uptime, db, redis, server_time}` as always-200 JSON so a degraded component never flaps the HUD or triggers reconnect logic — it reports `"down"` for that component while the rest of the UI continues to work. `/status` is polled every 15 seconds; latency is measured client-side with `performance.now()` around the fetch call.
+
+On narrow desktop widths the pill row falls back to horizontal overflow scrolling so the right-side HUD actions never get pushed off-screen. Mobile hides the HUD entirely; per-tab status and exit codes remain visible inline next to the prompt echo, and the run notifications toggle in the Options modal covers the background-watch use case.
 
 ---
 

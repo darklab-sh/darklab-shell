@@ -95,7 +95,7 @@
     <div class="rail-header">
       <div class="rail-wordmark">
         <div class="rail-wordmark-title">{{ app_name }}</div>
-        <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}sandboxed</div>
+        <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
       </div>
       <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">«</button>
     </div>
@@ -194,25 +194,55 @@
     </div>
 
     <div class="hud" id="hud" aria-label="Run HUD">
-      <div class="hud-cell hud-status" id="hud-status-cell">
-        <span class="hud-label">status</span>
-        <span id="status" class="status-pill idle hud-value">IDLE</span>
-      </div>
-      <div class="hud-cell">
-        <span class="hud-label">transport</span>
-        <span class="hud-value hud-value-green">SSE</span>
-      </div>
-      <div class="hud-cell">
-        <span class="hud-label">mode</span>
-        <span class="hud-value">SANDBOXED</span>
-      </div>
-      <div class="hud-cell">
-        <span class="hud-label">db</span>
-        <span class="hud-value hud-value-green hud-value-dot">ONLINE</span>
-      </div>
-      <div class="hud-cell hud-runtime u-hidden" id="hud-runtime-cell">
-        <span class="hud-label">runtime</span>
-        <span id="run-timer" class="run-timer hud-value hud-value-amber"></span>
+      <div class="hud-pills" id="hud-pills">
+        <div class="hud-cell hud-status" id="hud-status-cell">
+          <span class="hud-label">status</span>
+          <span id="status" class="status-pill idle hud-value">IDLE</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">last exit</span>
+          <span id="hud-last-exit" class="hud-value hud-muted">—</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">runs</span>
+          <span id="hud-runs" class="hud-value hud-muted">0</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">transport</span>
+          <span class="hud-value hud-value-green">SSE</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">latency</span>
+          <span id="hud-latency" class="hud-value hud-muted">— ms</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">mode</span>
+          <span class="hud-value">ISOLATED</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">session</span>
+          <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">uptime</span>
+          <span id="hud-uptime" class="hud-value hud-muted">—</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">clock</span>
+          <span id="hud-clock" class="hud-value hud-muted">—</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">db</span>
+          <span id="hud-db" class="hud-value hud-value-green hud-value-dot">ONLINE</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">redis</span>
+          <span id="hud-redis" class="hud-value hud-muted hud-value-dot">—</span>
+        </div>
+        <div class="hud-cell hud-runtime u-hidden" id="hud-runtime-cell">
+          <span class="hud-label">runtime</span>
+          <span id="run-timer" class="run-timer hud-value hud-value-amber"></span>
+        </div>
       </div>
       <div class="hud-spacer"></div>
       <div class="hud-actions" id="hud-actions">

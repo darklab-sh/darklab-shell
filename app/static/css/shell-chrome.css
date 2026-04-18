@@ -464,11 +464,20 @@
     font-family: var(--font-mono);
   }
 
+  .hud-pills {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .hud-pills::-webkit-scrollbar { display: none; }
+
   .hud-cell {
     display: flex;
     flex-direction: column;
     gap: 3px;
-    padding: 12px 24px;
+    padding: 10px 16px;
     border-right: 1px solid var(--border);
     flex: 0 0 auto;
     white-space: nowrap;
@@ -500,6 +509,14 @@
     color: var(--amber);
     text-shadow: 0 0 8px color-mix(in srgb, var(--amber) 22%, transparent);
   }
+  .hud-value-red {
+    color: var(--red);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--red) 22%, transparent);
+  }
+  .hud-muted {
+    color: var(--muted);
+    opacity: 0.85;
+  }
   .hud-value-dot::before {
     content: '';
     display: inline-block;
@@ -510,6 +527,7 @@
     box-shadow: 0 0 6px currentColor;
     flex: 0 0 6px;
   }
+  .hud-muted.hud-value-dot::before { box-shadow: none; }
 
   /* Status pill living inside a HUD cell sheds its pill chrome. */
   .hud-cell .status-pill {
@@ -524,20 +542,21 @@
     box-shadow: none !important;
     animation: none;
   }
-  .hud-cell .status-pill.idle    { color: var(--muted); }
+  /* STATUS is a binary running-or-not pill in the HUD; any non-running class
+     (idle/ok/fail/killed) renders identically as muted text so the outcome
+     colour lives on the adjacent LAST EXIT pill, not here. */
+  .hud-cell .status-pill.idle,
+  .hud-cell .status-pill.ok,
+  .hud-cell .status-pill.fail,
+  .hud-cell .status-pill.killed {
+    color: var(--muted);
+    text-shadow: none;
+    animation: none;
+  }
   .hud-cell .status-pill.running {
     color: var(--amber);
     text-shadow: 0 0 8px color-mix(in srgb, var(--amber) 22%, transparent);
     animation: hud-status-pulse 1s ease-in-out infinite;
-  }
-  .hud-cell .status-pill.ok {
-    color: var(--green);
-    text-shadow: 0 0 8px color-mix(in srgb, var(--green) 22%, transparent);
-  }
-  .hud-cell .status-pill.fail,
-  .hud-cell .status-pill.killed {
-    color: var(--red);
-    text-shadow: 0 0 8px color-mix(in srgb, var(--red) 22%, transparent);
   }
   @keyframes hud-status-pulse {
     0%, 100% { opacity: 1; }
