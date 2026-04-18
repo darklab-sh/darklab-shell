@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 798
-- `vitest`: 474
+- `pytest`: 808
+- `vitest`: 472
 - `playwright`: 156
-- total: 1,428
+- total: 1,436
 
 This document is organized in two parts:
 
@@ -978,15 +978,25 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 
 #### `test_docs.py`
 
-Meta-tests that verify documentation stays in sync with the test suite. Runs `pytest --collect-only` as a subprocess (once per module via a shared fixture) and compares results against the appendix tables and documented totals.
+Meta-tests that verify documentation stays in sync with the test suite. Runs `pytest --collect-only`, `npx vitest list`, and `npx playwright test --list` as subprocesses (once per module via shared fixtures) and compares results against the appendix tables and documented totals for all three runtimes.
 
 | Test | Description |
 | --- | --- |
-| `TestAppendixDrift.test_documented_files_match_actual` | Checks that each test file's row count in the tests/README.md appendix matches the number of unique test function names collected by pytest (parameterised variants collapsed to a single entry). |
-| `TestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
-| `TestDocumentedTotals.test_tests_readme_pytest_total` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
-| `TestDocumentedTotals.test_contributing_pytest_total` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
-| `TestDocumentedTotals.test_architecture_pytest_total` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
+| `TestPytestAppendixDrift.test_documented_files_match_actual` | Checks that each pytest file's row count in the tests/README.md appendix matches the number of unique test function names collected by pytest (parameterised variants collapsed to a single entry). |
+| `TestPytestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
+| `TestVitestAppendixDrift.test_documented_files_match_actual` | Checks that each Vitest `*.test.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx vitest list`. |
+| `TestVitestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.test.js` file listed by Vitest has a corresponding appendix section in tests/README.md. |
+| `TestPlaywrightAppendixDrift.test_documented_files_match_actual` | Checks that each Playwright `*.spec.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx playwright test --list`. |
+| `TestPlaywrightAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.spec.js` file listed by Playwright has a corresponding appendix section in tests/README.md. |
+| `TestDocumentedPytestTotals.test_tests_readme` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
+| `TestDocumentedPytestTotals.test_contributing` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
+| `TestDocumentedPytestTotals.test_architecture` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
+| `TestDocumentedVitestTotals.test_tests_readme` | Checks that the `vitest` total recorded in tests/README.md matches the raw Vitest test count from `npx vitest list`. |
+| `TestDocumentedVitestTotals.test_contributing` | Checks that the `Vitest` total recorded in CONTRIBUTING.md matches the raw Vitest test count. |
+| `TestDocumentedVitestTotals.test_architecture` | Checks that the `vitest` total recorded in ARCHITECTURE.md matches the raw Vitest test count. |
+| `TestDocumentedPlaywrightTotals.test_tests_readme` | Checks that the `playwright` total recorded in tests/README.md matches the raw Playwright total reported by `npx playwright test --list`. |
+| `TestDocumentedPlaywrightTotals.test_contributing` | Checks that the `Playwright` total recorded in CONTRIBUTING.md matches the raw Playwright total. |
+| `TestDocumentedPlaywrightTotals.test_architecture` | Checks that the `playwright` total recorded in ARCHITECTURE.md matches the raw Playwright total. |
 
 #### `test_validation.py`
 
@@ -1115,6 +1125,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `preserves a non-active tab draft even when createTab activation would overwrite it during restore` | Verifies that the restore flow reapplies saved drafts after tab creation so a non-active tab draft survives restore-time activation churn. |
 | `preserves the last created non-active tab draft when the final restored active tab is different` | Verifies that the final active-tab selection in session restore does not wipe the last created non-active tab's saved draft. |
 | `manually inserts printable desktop keydown input once` | Verifies that manually inserts printable desktop keydown input once. |
+| `replays { key: 'ArrowDown', keydown: { key: 'ArrowDown' }, expectAction: [Function expectAction] } after desktop output text is selected` | Verifies that replays { key: 'ArrowDown', keydown: { key: 'ArrowDown' }, expectAction: [Function expectAction] } after desktop output text is selected. |
+| `replays { key: 'Enter', keydown: { key: 'Enter' }, expectAction: [Function expectAction] } after desktop output text is selected` | Verifies that replays { key: 'Enter', keydown: { key: 'Enter' }, expectAction: [Function expectAction] } after desktop output text is selected. |
+| `replays { key: 'Ctrl+R', keydown: { key: 'r', ctrlKey: true }, expectAction: [Function expectAction] } after desktop output text is selected` | Verifies that replays { key: 'Ctrl+R', keydown: { key: 'r', ctrlKey: true }, expectAction: [Function expectAction] } after desktop output text is selected. |
 | `updates the visible cursor when the selection changes without typing` | Verifies that updates the visible cursor when the selection changes without typing. |
 | `moves the cursor from composer state instead of stale DOM selection` | Verifies that moves the cursor from composer state instead of stale DOM selection. |
 | `tracks mobile keyboard state and keeps the prompt visible while typing` | Verifies that tracks mobile keyboard state and keeps the prompt visible while typing. |
@@ -1146,8 +1159,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `closes transient ui while the mobile keyboard is open` | Verifies that closes transient ui while the mobile keyboard is open. |
 | `matches autocomplete suggestions from the beginning of each command only` | Verifies that matches autocomplete suggestions from the beginning of each command only. |
 | `hides autocomplete when the typed command exactly matches a suggestion` | Verifies that hides autocomplete when the typed command exactly matches a suggestion. |
-| `Tab expands the typed value to the longest shared autocomplete prefix before cycling` | Verifies that Tab expands the typed value to the longest shared autocomplete prefix before cycling. |
-| `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
+| `prefers contextual autocomplete suggestions after the command root` | Verifies that prefers contextual autocomplete suggestions after the command root. |
+| `suppresses duplicate contextual flags that were already used in the command` | Verifies that suppresses duplicate contextual flags that were already used in the command. |
 | `renders cursor and selection state from composer state` | Verifies that renders cursor and selection state from composer state. |
 | `supports ctrl+w to delete one word to the left` | Verifies that supports ctrl+w to delete one word to the left. |
 | `supports ctrl+u to delete to the beginning of the line` | Verifies that supports ctrl+u to delete to the beginning of the line. |
@@ -1157,6 +1170,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `supports Alt+B and Alt+F to move by word` | Verifies that supports Alt+B and Alt+F to move by word. |
 | `supports macOS Option+B and Option+F word movement via physical key codes` | Verifies that supports macOS Option+B and Option+F word movement via physical key codes. |
 | `supports the mobile edit bar actions` | Verifies character moves, word-left / word-right jumps, Home / End, and delete-word actions in the mobile helper row. |
+| `keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input. |
 | `uses Ctrl+C to open kill confirm when active tab is running` | Verifies that uses Ctrl+C to open kill confirm when active tab is running. |
 | `uses Ctrl+C to jump to a new prompt line when no command is running` | Verifies that uses Ctrl+C to jump to a new prompt line when no command is running. |
 | `supports Alt+T to create a new tab from the terminal prompt` | Verifies that supports Alt+T to create a new tab from the terminal prompt. |
@@ -1174,6 +1188,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does not apply Alt-based tab shortcuts while typing in non-terminal inputs` | Verifies that does not apply Alt-based tab shortcuts while typing in non-terminal inputs. |
 | `does not apply action shortcuts while typing in non-terminal inputs` | Verifies that does not apply action shortcuts while typing in non-terminal inputs. |
 | `ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt` | ArrowDown/Up wrap around and navigate the same direction regardless of whether the list is above or below the prompt. |
+| `Tab expands the typed value to the longest shared autocomplete prefix before cycling` | Verifies that Tab expands the typed value to the longest shared autocomplete prefix before cycling. |
+| `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
 | `Tab key with a modifier does not trigger autocomplete accept or selection` | Tab key with a modifier does not trigger autocomplete accept or selection. |
 | `wires the history delete modal buttons and backdrop correctly` | Verifies that wires the history delete modal buttons and backdrop correctly. |
 | `wires the kill modal buttons and backdrop correctly` | Verifies that wires the kill modal buttons and backdrop correctly. |
@@ -1186,10 +1202,23 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `closes the theme overlay and refocuses the terminal on Escape` | Verifies that closes the theme overlay and refocuses the terminal on Escape. |
 | `does not refocus the mobile composer when closing options` | Verifies that does not refocus the mobile composer when closing options. |
 | `blurs the visible mobile composer when opening options` | Verifies that blurs the visible mobile composer when opening options. |
+| `hides rotate/clear/copy session token buttons when no token is set — desktop open` | Verifies that hides rotate/clear/copy session token buttons when no token is set — desktop open. |
+| `hides rotate/clear/copy session token buttons when no token is set — mobile menu open` | Verifies that hides rotate/clear/copy session token buttons when no token is set — mobile menu open. |
+| `shows rotate/clear/copy session token buttons when a token is active — mobile menu open` | Verifies that shows rotate/clear/copy session token buttons when a token is active — mobile menu open. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that persists options changes through cookies and syncs quick-toggle state. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
 | `loads FAQ command chips into the visible mobile composer and refocuses it` | Verifies that loads FAQ command chips into the visible mobile composer and refocuses it. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
+| `returns off when no cookie is set` | Verifies that returns off when no cookie is set. |
+| `returns on when cookie is set to on` | Verifies that returns on when cookie is set to on. |
+| `returns off for any value other than on` | Verifies that returns off for any value other than on. |
+| `saves on and syncs toggle when permission is already granted` | Verifies that saves on and syncs toggle when permission is already granted. |
+| `requests permission when it is default and saves on if granted` | Verifies that requests permission when it is default and saves on if granted. |
+| `falls back to off and unchecks toggle when permission request is denied` | Verifies that falls back to off and unchecks toggle when permission request is denied. |
+| `falls back to off and shows toast when permission is already denied by browser` | Verifies that falls back to off and shows toast when permission is already denied by browser. |
+| `saves off and unchecks toggle when mode is off` | Verifies that saves off and unchecks toggle when mode is off. |
+| `reflects off preference as unchecked toggle` | Verifies that reflects off preference as unchecked toggle. |
+| `reflects on preference as checked toggle` | Verifies that reflects on preference as checked toggle. |
 
 #### `autocomplete.test.js`
 
@@ -1319,6 +1348,48 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
 
+#### `permalink.test.js`
+
+| Test | Description |
+| --- | --- |
+| `clears and re-populates #output on load` | Verifies that clears and re-populates #output on load. |
+| `produces no child nodes for an empty lines array` | Verifies that produces no child nodes for an empty lines array. |
+| `creates a .line span for each entry` | Verifies that creates a .line span for each entry. |
+| `adds the cls class alongside "line"` | Verifies that adds the cls class alongside "line". |
+| `calls ansi_to_html for normal output lines` | Verifies that calls ansi_to_html for normal output lines. |
+| `uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines` | Verifies that uses ExportHtmlUtils.renderExportPromptEcho for prompt-echo lines. |
+| `uses textContent (not ansi_to_html) for plain classes` | Verifies that uses textContent (not ansi_to_html) for plain classes. |
+| `sets #toggle-ln text to "line numbers: off" initially` | Verifies that sets #toggle-ln text to "line numbers: off" initially. |
+| `sets #toggle-ts text to "timestamps: unavailable" when no metadata` | Verifies that sets #toggle-ts text to "timestamps: unavailable" when no metadata. |
+| `sets #toggle-ts text to "timestamps: off" when metadata present` | Verifies that sets #toggle-ts text to "timestamps: off" when metadata present. |
+| `does not render a perm-prefix span when line numbers and timestamps are off` | Verifies that does not render a perm-prefix span when line numbers and timestamps are off. |
+| `renders a perm-prefix span with line number when line numbers cookie is on` | Verifies that renders a perm-prefix span with line number when line numbers cookie is on. |
+| `renders elapsed timestamp in perm-prefix when tsMode is elapsed` | Verifies that renders elapsed timestamp in perm-prefix when tsMode is elapsed. |
+| `renders clock timestamp in perm-prefix when tsMode is clock` | Verifies that renders clock timestamp in perm-prefix when tsMode is clock. |
+| `ignores timestamp cookie when hasTimestampMetadata is false` | Verifies that ignores timestamp cookie when hasTimestampMetadata is false. |
+| `sets --perm-prefix-width CSS variable based on widest prefix` | Verifies that sets --perm-prefix-width CSS variable based on widest prefix. |
+| `clicking toggle-ln flips label to "line numbers: on"` | Verifies that clicking toggle-ln flips label to "line numbers: on". |
+| `clicking toggle-ln twice returns to "line numbers: off"` | Verifies that clicking toggle-ln twice returns to "line numbers: off". |
+| `clicking toggle-ln re-renders output with prefix spans` | Verifies that clicking toggle-ln re-renders output with prefix spans. |
+| `does nothing when hasTimestampMetadata is false` | Verifies that does nothing when hasTimestampMetadata is false. |
+| `cycles off → elapsed → clock → off when metadata present` | Verifies that cycles off → elapsed → clock → off when metadata present. |
+| `re-renders output when mode changes` | Verifies that re-renders output when mode changes. |
+| `copy-txt calls copyTextToClipboard with joined line text` | Verifies that copy-txt calls copyTextToClipboard with joined line text. |
+| `copy-txt calls showToast on success` | Verifies that copy-txt calls showToast on success. |
+| `save-txt triggers blob download with txt content` | Verifies that save-txt triggers blob download with txt content. |
+| `save-html calls ExportHtmlUtils chain` | Verifies that save-html calls ExportHtmlUtils chain. |
+| `save-html passes runMeta with exit_code, duration, lines, version` | Verifies that save-html passes runMeta with exit_code, duration, lines, version. |
+| `save-html passes null runMeta when permalinkMeta is null` | Verifies that save-html passes null runMeta when permalinkMeta is null. |
+| `save-pdf calls ExportPdfUtils.buildTerminalExportPdf and doc.save` | Verifies that save-pdf calls ExportPdfUtils.buildTerminalExportPdf and doc.save. |
+| `save-pdf download filename uses appName and exportTimestamp` | Verifies that save-pdf download filename uses appName and exportTimestamp. |
+| `does nothing for unknown data-action values` | Verifies that does nothing for unknown data-action values. |
+| `clicking perm-save-btn toggles open class` | Verifies that clicking perm-save-btn toggles open class. |
+| `clicking perm-save-btn again closes the dropdown` | Verifies that clicking perm-save-btn again closes the dropdown. |
+| `save-txt download uses appName and exportTimestamp` | Verifies that save-txt download uses appName and exportTimestamp. |
+| `save-html download uses appName and exportTimestamp` | Verifies that save-html download uses appName and exportTimestamp. |
+| `includes line numbers in copied text when lnMode is on` | Verifies that includes line numbers in copied text when lnMode is on. |
+| `omits prefix in copied text when both lnMode and tsMode are off` | Verifies that omits prefix in copied text when both lnMode and tsMode are off. |
+
 #### `runner.test.js`
 
 | Test | Description |
@@ -1329,6 +1400,17 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `formats multi-minute durations without hours` | Verifies that formats multi-minute durations without hours. |
 | `formats exactly one hour` | Verifies that formats exactly one hour. |
 | `formats hour + minutes + seconds` | Verifies that formats hour + minutes + seconds. |
+| `accepts the narrow phase-1 grep form` | Verifies that accepts the narrow phase-1 grep form. |
+| `accepts no-space pipe variants` | Verifies that accepts no-space pipe variants. |
+| `rejects unsupported shell operator forms` | Verifies that rejects unsupported shell operator forms. |
+| `accepts the narrow head/tail/wc forms` | Verifies that accepts the narrow head/tail/wc forms. |
+| `rejects unsupported forms` | Verifies that rejects unsupported forms. |
+| `accepts sort with no flags` | Verifies that accepts sort with no flags. |
+| `accepts sort with valid flag combinations` | Verifies that accepts sort with valid flag combinations. |
+| `rejects invalid sort flags` | Verifies that rejects invalid sort flags. |
+| `accepts uniq with no flags` | Verifies that accepts uniq with no flags. |
+| `accepts uniq -c` | Verifies that accepts uniq -c. |
+| `rejects unsupported uniq flags` | Verifies that rejects unsupported uniq flags. |
 | `setStatus maps known states to status-pill text` | Verifies that setStatus maps known states to status-pill text. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
@@ -1336,6 +1418,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
+| `runCommand allows phase-1 synthetic grep through to the API` | Verifies that runCommand allows phase-1 synthetic grep through to the API. |
+| `runCommand allows other synthetic post-filters through to the API` | Verifies that runCommand allows other synthetic post-filters through to the API. |
+| `runCommand allows exact special built-in commands with shell punctuation through to the API` | Verifies that runCommand allows exact special built-in commands with shell punctuation through to the API. |
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
 | `runCommand on blank input while a command is running does not append a prompt line` | Verifies that runCommand on blank input while a command is running does not append a prompt line. |
 | `runCommand blocks direct /tmp and /data paths client-side before calling the API` | Verifies that runCommand blocks direct /tmp and /data paths client-side before calling the API. |
@@ -1347,6 +1432,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
+| `runCommand preserves output classes from streamed events` | Verifies that runCommand preserves output classes from streamed events. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |
 | `returns true on empty input (blank Enter)` | Verifies that returns true on empty input (blank Enter). |
 | `returns 'settle' on empty input during active welcome` | Verifies that returns 'settle' on empty input during active welcome. |
@@ -1368,6 +1454,17 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `retains failed commands in localStorage and removes only successful ones` | Verifies that _seedLocalStorageStarsToServer writes the failed commands back to localStorage when some POSTs return a non-2xx response. |
 | `retains all commands when every POST fails` | Verifies that _seedLocalStorageStarsToServer keeps the full starred array in localStorage when every POST fails. |
 | `removes the key only when all POSTs succeed` | Verifies that _seedLocalStorageStarsToServer removes the localStorage key only after all POSTs return ok. |
+| `blocks token activation when /session/token/verify returns non-OK` | Verifies that blocks token activation when /session/token/verify returns non-OK. |
+| `blocks token activation when /session/token/verify throws a network error` | Verifies that blocks token activation when /session/token/verify throws a network error. |
+| `blocks token activation when verify returns ok but exists is false` | Verifies that blocks token activation when verify returns ok but exists is false. |
+| `skips verify entirely for UUID-format tokens` | Verifies that skips verify entirely for UUID-format tokens. |
+| `does nothing when pref is off` | Verifies that does nothing when pref is off. |
+| `does nothing when Notification is not available` | Verifies that does nothing when Notification is not available. |
+| `does nothing when permission is not granted` | Verifies that does nothing when permission is not granted. |
+| `fires with command root as title and exit code + elapsed in body for exit 0` | Verifies that fires with command root as title and exit code + elapsed in body for exit 0. |
+| `fires with non-zero exit code in body for failed run` | Verifies that fires with non-zero exit code in body for failed run. |
+| `fires with killed status and elapsed in body when run is killed` | Verifies that fires with killed status and elapsed in body when run is killed. |
+| `shows only the command root in the title, not arguments` | Verifies that shows only the command root in the title, not arguments. |
 
 #### `search.test.js`
 
@@ -1405,6 +1502,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `storage event from another tab updates SESSION_ID to the new token` | Verifies that a `storage` event setting `session_token` in another tab updates `SESSION_ID` in the current tab. |
 | `storage event from another tab reverts SESSION_ID to UUID when token is cleared` | Verifies that a `storage` event clearing `session_token` in another tab reverts `SESSION_ID` to the UUID fallback. |
 | `storage event for an unrelated key does not change SESSION_ID` | Verifies that `storage` events for keys other than `session_token` have no effect on `SESSION_ID`. |
+| `storage event calls reloadSessionHistory when available to refresh passive tab UI` | Verifies that storage event calls reloadSessionHistory when available to refresh passive tab UI. |
+| `storage event calls _updateOptionsSessionTokenStatus when available` | Verifies that storage event calls _updateOptionsSessionTokenStatus when available. |
+| `storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent` | Verifies that storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent. |
 
 #### `state.test.js`
 
@@ -1419,8 +1519,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | --- | --- |
 | `updateNewTabBtn disables the button and sets a title at the tab limit` | Verifies that updateNewTabBtn disables the button and sets a title at the tab limit. |
 | `createTab shows a toast and returns null when the tab limit is reached` | Verifies that createTab shows a toast and returns null when the tab limit is reached. |
-| `createTab renders a terminal-wordmark anchor with app name and version` | Verifies that createTab renders a terminal-wordmark anchor with app name and version. |
-| `createTab renders wordmark with just the app name when version is absent` | Verifies that createTab renders wordmark with just the app name when version is absent. |
+| `createTab labels the active-tab permalink action as share snapshot` | Verifies that createTab labels the active-tab permalink action as share snapshot. |
 | `activateTab resets the command input instead of repopulating from tab state` | Verifies that activateTab resets the command input instead of repopulating from tab state. |
 | `draftInput is initialized to empty string on new tab` | Verifies that draftInput is initialized to empty string on new tab. |
 | `activateTab saves the draft of the previous tab when switching` | Verifies that activateTab saves the draft of the previous tab when switching. |
@@ -1441,6 +1540,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps follow-output enabled when the terminal scrolls itself to the bottom` | Verifies that keeps follow-output enabled when the terminal scrolls itself to the bottom. |
 | `defers remounting the prompt until the output queue is drained` | Verifies that defers remounting the prompt until the output queue is drained. |
 | `mountShellPrompt stays hidden during the desktop welcome boot` | Verifies that mountShellPrompt stays hidden during the desktop welcome boot. |
+| `renderRestoredTabOutput rebuilds prompt-echo lines with the prompt prefix span` | Verifies that renderRestoredTabOutput rebuilds prompt-echo lines with the prompt prefix span. |
 | `keeps currentRunStartIndex aligned when old raw lines are pruned from the front` | Verifies that keeps currentRunStartIndex aligned when old raw lines are pruned from the front. |
 | `setTabLabel truncates the rendered label but preserves the full label in state` | Verifies that setTabLabel truncates the rendered label but preserves the full label in state. |
 | `permalinkTab shows a toast when there is no output to share` | Verifies that permalinkTab shows a toast when there is no output to share. |
@@ -1454,13 +1554,18 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `builds exported HTML styles from the injected theme vars object` | Verifies that builds exported HTML styles from the injected theme vars object. |
 | `builds exported HTML with color-scheme metadata and themed shell surfaces` | Verifies that builds exported HTML with color-scheme metadata and themed shell surfaces. |
 | `saveTab shows a toast when there is only welcome output` | Verifies that saveTab shows a toast when there is only welcome output. |
-| `saveTab applies configured redaction rules to exported text` | Verifies that saveTab applies configured redaction rules to exported text. |
-| `exportTabHtml applies configured redaction rules to rendered HTML output` | Verifies that exportTabHtml applies configured redaction rules to rendered HTML output. |
+| `saveTab does not apply redaction rules to exported text` | Verifies that saveTab does not apply redaction rules to exported text. |
+| `exportTabHtml does not apply redaction rules to rendered HTML output` | Verifies that exportTabHtml does not apply redaction rules to rendered HTML output. |
+| `exportTabHtml shows a toast when the tab has no lines` | Verifies that exportTabHtml shows a toast when the tab has no lines. |
+| `exportTabHtml shows a toast when ExportHtmlUtils is not loaded` | Verifies that exportTabHtml shows a toast when ExportHtmlUtils is not loaded. |
+| `exportTabPdf shows a toast when the tab has no lines` | Verifies that exportTabPdf shows a toast when the tab has no lines. |
+| `exportTabPdf shows a toast when jsPDF is not loaded` | Verifies that exportTabPdf shows a toast when jsPDF is not loaded. |
 | `permalinkTab applies configured redaction rules before creating a snapshot` | Verifies that permalinkTab applies configured redaction rules before creating a snapshot. |
 | `startTabRename updates scroll buttons when the strip begins overflowing during edit` | Verifies that startTabRename updates scroll buttons when the strip begins overflowing during edit. |
 | `refocuses the terminal input after clicking the left tab scroll button` | Verifies that refocuses the terminal input after clicking the left tab scroll button. |
 | `refocuses the terminal input after clicking the right tab scroll button` | Verifies that refocuses the terminal input after clicking the right tab scroll button. |
 | `reorders tabs through touch pointer dragging on mobile` | Verifies that reorders tabs through touch pointer dragging on mobile. |
+| `reorders desktop tabs through pointer dragging` | Verifies that reorders desktop tabs through pointer dragging. |
 
 #### `utils.test.js`
 
@@ -1472,26 +1577,28 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `escapes greater-than` | Verifies that escapes greater-than. |
 | `escapes multiple entities in one string` | Verifies that escapes multiple entities in one string. |
 | `returns empty string unchanged` | Verifies that returns empty string unchanged. |
-| `leaves plain text unchanged` | Verifies that leaves plain text unchanged. |
 | `escapes dot` | Verifies that escapes dot. |
 | `escapes star` | Verifies that escapes star. |
 | `escapes parentheses` | Verifies that escapes parentheses. |
 | `escapes square brackets` | Verifies that escapes square brackets. |
 | `escaped string matches literally when used in RegExp` | Verifies that escaped string matches literally when used in RegExp. |
-| `drops invalid rules and preserves supported replacement metadata` | Verifies that normalizeRedactionRules drops invalid rules and preserves supported replacement metadata. |
-| `applies multiple redaction rules in order` | Verifies that applyRedactionRules applies multiple redaction rules in order. |
-| `redacts structured line entries without mutating other fields` | Verifies that redactLineEntries redacts structured line entries without mutating other fields. |
-| `leaves plain text unchanged` | Verifies that leaves plain text unchanged. |
 | `converts **text** to <strong>` | Verifies that converts **text** to <strong>. |
-| `converts `code` to <code>` | Verifies that converts `code` to <code>. |
+| ``converts `code` to <code>`` | Verifies that converts `code` to <code>. |
 | `converts [text](https://url) to an <a> with target and rel` | Verifies that converts [text](https://url) to an <a> with target and rel. |
 | `also renders http:// links (not just https)` | Verifies that also renders http:// links (not just https). |
 | `does not linkify non-http schemes (XSS guard)` | Verifies that does not linkify non-http schemes (XSS guard). |
 | `converts newlines to <br>` | Verifies that converts newlines to <br>. |
 | `escapes HTML before applying Markdown (XSS prevention)` | Verifies that escapes HTML before applying Markdown (XSS prevention). |
 | `renders multiple Markdown constructs in one string` | Verifies that renders multiple Markdown constructs in one string. |
+| `keeps valid rules and drops invalid ones` | Verifies that keeps valid rules and drops invalid ones. |
+| `applies regex replacements in order` | Verifies that applies regex replacements in order. |
+| `redacts only the text field while preserving line metadata` | Verifies that redacts only the text field while preserving line metadata. |
 | `marks failure toasts with an error tone` | Verifies that marks failure toasts with an error tone. |
 | `marks success toasts with the success tone` | Verifies that marks success toasts with the success tone. |
+| `copies to clipboard and shows a share button in the toast when navigator.share is available` | Verifies that copies to clipboard and shows a share button in the toast when navigator.share is available. |
+| `tapping the share button in the toast calls navigator.share with the url` | Verifies that tapping the share button in the toast calls navigator.share with the url. |
+| `copies to clipboard and shows a plain toast when navigator.share is unavailable` | Verifies that copies to clipboard and shows a plain toast when navigator.share is unavailable. |
+| `falls back to window.prompt when clipboard is unavailable` | Verifies that falls back to window.prompt when clipboard is unavailable. |
 | `falls back to execCommand when the clipboard API rejects` | Verifies that falls back to execCommand when the clipboard API rejects. |
 
 #### `welcome.test.js`
@@ -1597,6 +1704,10 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 
 | Test | Description |
 | --- | --- |
+| `back button is visible at mobile viewport width` | Verifies that back button is visible at mobile viewport width. |
+| `back button navigates back to the shell` | Verifies that back button navigates back to the shell. |
+| `back button is visible at 850px touch viewport (shell threshold)` | Verifies that the diagnostics back button appears at 850px on a touch device — the shell's mobile-mode threshold — so chrome parity holds beyond the old 760px breakpoint. |
+| `back button is hidden at 850px non-touch viewport` | Verifies that the diagnostics back button is hidden at 850px on a non-touch (pointer: fine) device, where the shell stays in desktop mode. |
 | `mobile startup uses the mobile welcome and keeps the composer visible` | Verifies that mobile startup uses the mobile welcome and keeps the composer visible. |
 | `mobile edit bar appears when the mobile command input is focused` | Verifies that mobile edit bar appears when the mobile command input is focused. |
 | `tapping the mobile command input opens the keyboard without jumping the page` | Verifies that tapping the mobile command input opens the keyboard without jumping the page. |
@@ -1625,8 +1736,6 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
 | `mobile edit bar moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
-| `back button is visible at 850px touch viewport (shell threshold)` | Verifies that the diagnostics back button appears at 850px on a touch device — the shell's mobile-mode threshold — so chrome parity holds beyond the old 760px breakpoint. |
-| `back button is hidden at 850px non-touch viewport` | Verifies that the diagnostics back button is hidden at 850px on a non-touch (pointer: fine) device, where the shell stays in desktop mode. |
 
 #### `output.spec.js`
 
@@ -1671,10 +1780,10 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 
 | Test | Description |
 | --- | --- |
-| `permalink button shows the ` | Verifies that permalink button shows the. |
+| `permalink button shows the "copied" toast after a successful run` | Verifies that permalink button shows the "copied" toast after a successful run. |
 | `navigating to a share URL renders the command output` | Verifies that navigating to a share URL renders the command output. |
 | `permalink page honors the theme cookie for the live view and export` | Verifies that permalink page honors the theme cookie for the live view and export. |
-| `permalink button on a fresh tab shows ` | Verifies that permalink button on a fresh tab shows. |
+| `permalink button on a fresh tab shows "No output" toast` | Verifies that permalink button on a fresh tab shows "No output" toast. |
 | `permalink button falls back to execCommand when clipboard writeText rejects` | Verifies that permalink button falls back to execCommand when clipboard writeText rejects. |
 | `history entry permalink copies a single-run URL and the page renders JSON and HTML views` | Verifies that history entry permalink copies a single-run URL and the page renders JSON and HTML views. |
 | `fresh run permalink supports line-number and timestamp display toggles` | Verifies that fresh run permalink supports line-number and timestamp display toggles. |
@@ -1740,7 +1849,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 
 | Test | Description |
 | --- | --- |
-| `clicking theme-btn opens the theme selector` | Verifies that clicking theme-btn opens the theme selector. |
+| `clicking the theme button opens the theme selector` | Verifies that clicking the theme button opens the theme selector. |
 | `selecting a theme applies it from the selector` | Verifies that selecting a theme applies it from the selector. |
 | `falls back to the configured default theme when localStorage references a missing theme` | Verifies that falls back to the configured default theme when localStorage references a missing theme. |
 | `FAQ button opens the overlay` | FAQ button opens the overlay. |

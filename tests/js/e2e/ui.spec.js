@@ -6,14 +6,14 @@ test.describe('theme selector', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('clicking theme-btn opens the theme selector', async ({ page }) => {
-    await page.locator('#theme-btn').click()
+  test('clicking the theme button opens the theme selector', async ({ page }) => {
+    await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
   })
 
   test('selecting a theme applies it from the selector', async ({ page }) => {
-    await page.locator('#theme-btn').click()
+    await page.locator('.rail-nav [data-action="theme"]').click()
     const optionLabels = await page
       .locator('#theme-select .theme-card-label')
       .evaluateAll((labels) => labels.map((label) => label.textContent))
@@ -74,12 +74,12 @@ test.describe('FAQ modal', () => {
 
   test('FAQ button opens the overlay', async ({ page }) => {
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
   })
 
   test('close button inside the FAQ modal closes it', async ({ page }) => {
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await page.locator('.faq-close').click()
@@ -87,7 +87,7 @@ test.describe('FAQ modal', () => {
   })
 
   test('clicking the overlay backdrop closes the FAQ modal', async ({ page }) => {
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     // Click on the overlay element itself (outside the modal content box)
@@ -96,7 +96,7 @@ test.describe('FAQ modal', () => {
   })
 
   test('renders backend-driven FAQ content and allowlist chips', async ({ page }) => {
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await expect(page.locator('.faq-q')).toContainText([
@@ -122,12 +122,12 @@ test.describe('options modal', () => {
   test('persists theme, timestamps, and line number preferences across reload', async ({
     page,
   }) => {
-    await page.locator('#theme-btn').click()
+    await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
     await page.locator('.theme-close').click()
 
-    await page.locator('#options-btn').click()
+    await page.locator('.rail-nav [data-action="options"]').click()
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
     await page.locator('#options-ts-select').selectOption('elapsed')
     await page.locator('#options-ln-toggle').check()

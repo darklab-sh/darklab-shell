@@ -92,7 +92,7 @@ test.describe('permalink / share', () => {
     // leaving the new tab's permalink button in a non-active (invisible) panel.
     await page.waitForFunction(() => window._welcomeDone === true, { timeout: 15_000 })
     await page.locator('#new-tab-btn').click()
-    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+    await page.locator('.hud-actions [data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output')
   })

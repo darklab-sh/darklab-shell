@@ -1,9 +1,9 @@
 /* darklab shell CSS module: shell-chrome
-   V07 UI overhaul — left sidebar, top tab bar, bottom HUD.
-   Desktop-only. Mobile continues to use the stacked layout in mobile.css. */
+   Desktop shell: left rail, tabbar, and bottom HUD.
+   Mobile uses the stacked layout in mobile.css. */
 
 /* ============================================================
-   Helpers from design/v07-helpers.css (drop-in)
+   Shared helpers (scrollbars, buttons)
    ============================================================ */
 
 .nice-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
@@ -57,12 +57,12 @@
 
 /* ============================================================
    Desktop layout.  All rules scoped behind min-width: 601px so the
-   existing mobile path in mobile.css remains untouched.
+   mobile path in mobile.css is untouched.
    ============================================================ */
 
 @media (min-width: 601px) {
 
-  /* Body reset: the new layout owns the full viewport. */
+  /* Body reset: the shell owns the full viewport. */
   body:not(.mobile-terminal-mode) {
     padding: 0;
     gap: 0;
@@ -71,17 +71,18 @@
     overflow: hidden;
   }
 
-  /* Hide the legacy top header and recent-command chip row on desktop —
-     their functions have moved into the sidebar. */
-  body:not(.mobile-terminal-mode) > header { display: none; }
-  body:not(.mobile-terminal-mode) > #history-row { display: none !important; }
+  /* The top header and recent-command chip row are owned by the rail on
+     desktop. Scope to the main shell so the permalink and diag pages keep
+     their own <header>. */
+  body:not(.mobile-terminal-mode):not(.permalink-page):not(.diag-page) > header { display: none; }
+  body:not(.mobile-terminal-mode):not(.permalink-page):not(.diag-page) > #history-row { display: none !important; }
 
-  /* Hide the per-tab footer on desktop — share/copy/save/clear/Kill now
-     live in the HUD bar. The footer remains in the DOM for the mobile
-     path, which re-parents the tab panels into the mobile shell. */
+  /* The per-tab footer is owned by the HUD on desktop. The footer stays in
+     the DOM for the mobile path, which re-parents the tab panels into the
+     mobile shell. */
   body:not(.mobile-terminal-mode) .terminal-actions { display: none !important; }
 
-  /* Shell root — flex row, padded 10px on top to match the prototype. */
+  /* Shell root — flex row with a 10px top gutter above the tabbar. */
   .shell-root {
     display: flex;
     flex: 1 1 auto;
@@ -631,12 +632,12 @@
 }
 
 /* ============================================================
-   Mobile: hide all new chrome and let the existing stacked layout
+   Mobile: hide the desktop chrome and let the stacked layout
    (mobile.css + mobile-terminal-mode re-parenting) take over.
    ============================================================ */
 
 @media (max-width: 600px) {
-  .shell-root, .main-col { display: contents; }
+  .shell-root, .main-col, .tabbar-scroll { display: contents; }
   .rail, .hud, .tabbar-traffic-lights, .tabbar-chrome { display: none !important; }
 }
 
@@ -646,4 +647,5 @@ body.mobile-terminal-mode .tabbar-traffic-lights,
 body.mobile-terminal-mode .tabbar-chrome { display: none !important; }
 
 body.mobile-terminal-mode .shell-root,
-body.mobile-terminal-mode .main-col { display: contents; }
+body.mobile-terminal-mode .main-col,
+body.mobile-terminal-mode .tabbar-scroll { display: contents; }

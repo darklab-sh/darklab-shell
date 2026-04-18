@@ -79,7 +79,7 @@ test.describe('failure paths', () => {
     })
 
     await runCommand(page, CMD)
-    await page.locator('[data-action="permalink"]').click()
+    await page.locator('.hud-actions [data-action="permalink"]').click()
     await page.locator('#share-redaction-confirm').click()
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to create permalink')
@@ -119,7 +119,7 @@ test.describe('failure paths', () => {
     await runCommand(page, CMD)
     await page.waitForTimeout(1200)
     await runCommand(page, 'date')
-    await page.locator('#hist-btn').click()
+    await page.locator('.rail-nav [data-action="history"]').click()
     await page.locator('#history-list > *').first().waitFor({ state: 'visible' })
     await page.locator('#hist-clear-all-btn').click()
     await page.locator('#hist-del-confirm').click()

@@ -1,5 +1,5 @@
 // ── Shell chrome controller ──
-// Owns the V07 left sidebar (Recent, Workflows, nav) and the bottom HUD.
+// Owns the desktop rail (Recent, Workflows, nav) and the bottom HUD.
 // Loaded after dom.js, state.js, ui_helpers.js, history.js, tabs.js, app.js, controller.js
 // so the helpers and overlays it delegates to are already defined.
 
@@ -334,11 +334,12 @@
     document.querySelectorAll('.hud-save-wrap.open').forEach(w => w.classList.remove('open'));
   }
 
-  function _makeHudBtn(label, onClick, cls = 'hud-action-btn') {
+  function _makeHudBtn(label, action, onClick, cls = 'hud-action-btn') {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = cls;
     btn.textContent = label;
+    if (action) btn.dataset.action = action;
     btn.addEventListener('click', e => {
       e.preventDefault();
       onClick(e, btn);
@@ -350,18 +351,18 @@
     if (!hudActions) return;
     hudActions.replaceChildren();
 
-    hudKillBtn = _makeHudBtn('\u25A0 Kill', () => {
+    hudKillBtn = _makeHudBtn('\u25A0 Kill', 'kill', () => {
       const id = _currentTabId();
       if (id && typeof confirmKill === 'function') confirmKill(id);
     }, 'hud-kill-btn u-hidden');
     hudActions.appendChild(hudKillBtn);
 
-    hudActions.appendChild(_makeHudBtn('share snapshot', () => {
+    hudActions.appendChild(_makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
       if (id && typeof permalinkTab === 'function') permalinkTab(id);
     }));
 
-    hudActions.appendChild(_makeHudBtn('copy', () => {
+    hudActions.appendChild(_makeHudBtn('copy', 'copy', () => {
       const id = _currentTabId();
       if (id && typeof copyTab === 'function') copyTab(id);
     }));
@@ -369,20 +370,21 @@
     // Save menu — shares .save-menu markup so existing CSS applies.
     const saveWrap = document.createElement('div');
     saveWrap.className = 'hud-save-wrap';
-    const saveBtn = _makeHudBtn('save', e => {
+    const saveBtn = _makeHudBtn('save', 'save-menu', e => {
       e.stopPropagation();
       saveWrap.classList.toggle('open');
     });
     const saveMenu = document.createElement('div');
     saveMenu.className = 'save-menu';
     [
-      ['txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
-      ['html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
-      ['pdf',  () => { const id = _currentTabId(); if (id && typeof exportTabPdf === 'function') exportTabPdf(id); }],
-    ].forEach(([label, fn]) => {
+      ['txt',  'save-txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
+      ['html', 'save-html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
+      ['pdf',  'save-pdf',  () => { const id = _currentTabId(); if (id && typeof exportTabPdf === 'function') exportTabPdf(id); }],
+    ].forEach(([label, action, fn]) => {
       const item = document.createElement('button');
       item.type = 'button';
       item.textContent = label;
+      item.dataset.action = action;
       item.addEventListener('click', e => {
         e.preventDefault();
         e.stopPropagation();
@@ -395,7 +397,7 @@
     saveWrap.appendChild(saveMenu);
     hudActions.appendChild(saveWrap);
 
-    hudActions.appendChild(_makeHudBtn('clear', () => {
+    hudActions.appendChild(_makeHudBtn('clear', 'clear', () => {
       const id = _currentTabId();
       if (!id) return;
       if (typeof cancelWelcome === 'function') cancelWelcome(id);

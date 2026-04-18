@@ -207,6 +207,29 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
   - The compelling feature is "promote this run sequence to a workflow": select 3–5 history entries and save them as a named reusable sequence. That is more useful than just parameterizing the existing YAML format.
   - Turn guided workflows into reusable multi-step sequences that can be replayed, edited, and saved.
 
+- **Additional built-in workflows**
+  - New workflow cards to add to the guided workflows panel. Each complements the existing five (DNS troubleshooting, TLS/HTTPS check, HTTP triage, quick reachability, email server check):
+  - **Subdomain Enumeration & Validation** — subfinder to discover subdomains passively, dnsx to resolve and filter live ones, pd-httpx to probe which ones serve HTTP/S. Natural three-phase recon sequence.
+  - **Fast Port Discovery → Service Fingerprint** — naabu or rustscan for a quick full-port sweep, then nmap -sV on the discovered open ports only. Two-phase approach: broad-then-deep.
+  - **Web Directory Discovery** — gobuster or ffuf against a target URL with a wordlist, then curl to follow up on interesting paths. Good companion to HTTP triage.
+  - **SSL/TLS Deep Dive** — sslscan for cipher enumeration, sslyze for known protocol vulnerabilities (BEAST, POODLE, ROBOT, etc.), openssl s_client for raw cert chain inspection. Extends the existing TLS check with the newer dedicated tools.
+  - **WAF Detection** — wafw00f to identify the WAF vendor, curl with unexpected headers/paths to observe the blocking behavior, nmap WAF NSE scripts for a second opinion.
+  - **WordPress Audit** — wpscan for known plugin/theme CVEs and user enumeration, curl to confirm common WP paths and the XML-RPC endpoint.
+  - **Network Path Analysis** — mtr for live traceroute with packet-loss stats, fping for fast multi-host sweep, traceroute for a static path dump. Useful when a host is reachable but intermittently slow.
+  - **Domain OSINT / Passive Recon** — whois, subfinder in passive mode, dnsrecon for zone-transfer attempts and common record enumeration. All read-only queries; no active scanning.
+  - **DNS Delegation Diff** — host/nslookup for quick answers, dig @authoritative vs @public-resolver for disagreement checks, dig +trace to walk the delegation chain. More focused than the existing DNS card when the problem is split-brain or propagation lag.
+  - **Hostname / Virtual Host Discovery** — gobuster vhost or ffuf Host-header fuzzing to identify name-based virtual hosts, then curl -H 'Host: ...' to validate which ones actually answer. Useful when an IP serves multiple sites and plain HTTP triage is too shallow.
+  - **Surface Crawl → Endpoint Follow-up** — katana to crawl reachable URLs, pd-httpx or curl -I to classify what came back, then targeted curl checks against the interesting endpoints. Good middle ground between HTTP triage and heavier vuln scanning.
+  - **Screenshot / Tech Fingerprint Sweep** — pd-httpx with title/tech-detect/status probes to quickly map many hosts, then curl on the standouts. Strong fit for the modal because it helps operators decide where to spend deeper scanning budget next.
+  - **Certificate Inventory Across Hosts** — subfinder or assetfinder to build a host set, dnsx to keep only resolvable names, then openssl s_client or testssl against the likely HTTPS services. More operationally useful than a single-host TLS check when reviewing a whole domain footprint.
+  - **Resolver Reputation / Mail Deliverability Baseline** — dig MX/TXT, nslookup against multiple resolvers, and whois on the sending domain or mail host. Distinct from the existing email card because it aims at “will this domain look sane to remote receivers?” rather than just “is SMTP open?”
+  - **Crawlable Web App Triage** — curl -sIL for redirect/header shape, katana for path discovery, nikto for quick misconfig findings. A better default web-app sequence than running nikto cold against an unknown target.
+  - **API Recon** — katana to discover paths, curl with `Accept: application/json` / OPTIONS / HEAD requests to inspect behavior, then ffuf against likely versioned or documented prefixes. Worth a dedicated card because JSON APIs behave differently from brochure sites and need a different first-pass sequence.
+  - **CDN / Edge Behavior Check** — dig and whois to infer provider ownership, curl from HTTP and HTTPS variants to inspect redirect/cache headers, wafw00f to distinguish CDN vs WAF edge behavior. Useful for debugging “works from browser, weird from scanner” cases.
+  - **Service Exposure Drift** — repeatable baseline using nmap -F, nc -zv on expected ports, and curl or openssl s_client on the important services. This is less about discovery and more about quickly validating that a host still looks like the last known-good state.
+  - Prefer workflow cards that chain 3-4 commands with a clear operator decision at each step; avoid modal entries that are just “run one big scanner.”
+  - Prefer sequences that mix cheap classification first and heavier scanning second so the modal remains useful on mobile and in constrained environments.
+
 - **Environment capability hints**
   - Surface when a tool is likely to be slow, noisy, truncated, or constrained by the container/runtime before it runs.
 

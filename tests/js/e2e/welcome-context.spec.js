@@ -37,7 +37,7 @@ test.describe('welcome context', () => {
 
     const originalTab = page.locator('.tab').first()
     await page.locator('#new-tab-btn').click()
-    await page.locator('.tab-panel.active [data-action="clear"]').click()
+    await page.locator('.hud-actions [data-action="clear"]').click()
 
     await originalTab.click()
     await expect(page.locator('.tab-panel.active .welcome-banner')).toHaveCount(1)

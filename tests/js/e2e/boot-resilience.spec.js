@@ -13,9 +13,9 @@ test.describe('boot resilience', () => {
   test('the app still boots and core controls still work when startup fetches fail', async ({
     page,
   }) => {
-    await expect(page.locator('header h1')).toHaveText(/darklab shell/)
+    await expect(page.locator('.rail-wordmark-title')).toHaveText(/darklab shell/)
 
-    await page.locator('#theme-btn').click()
+    await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await expect(page.locator('#theme-select .theme-card-active')).toBeFocused()
     await page.locator('.theme-close').click()
@@ -23,7 +23,7 @@ test.describe('boot resilience', () => {
     await page.locator('#search-toggle-btn').click()
     await expect(page.locator('#search-bar')).toBeVisible()
 
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
   })
 

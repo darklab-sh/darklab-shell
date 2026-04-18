@@ -320,7 +320,7 @@ test('demo', async ({ page }) => {
   await page.waitForTimeout(2_500)
 
   // ── History drawer ────────────────────────────────────────────────────────
-  await page.locator('#hist-btn').click()
+  await page.locator('.rail-nav [data-action="history"]').click()
   await page.locator('#history-panel').waitFor({ state: 'visible' })
   await page
     .locator('#history-list .history-entry')
@@ -343,7 +343,7 @@ test('demo', async ({ page }) => {
   // mobile rhythm: scroll down, continue down, slight back-up before hovering.
   // No mid-browse reversals — continuous downward intent with one correction.
 
-  await page.locator('#theme-btn').click()
+  await page.locator('.rail-nav [data-action="theme"]').click()
   await page.locator('#theme-overlay').waitFor({ state: 'visible' })
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0
@@ -372,7 +372,7 @@ test('demo', async ({ page }) => {
 
   // Second session: pick ember_obsidian then return to the original in one
   // continuous browse — no intermediate close so the viewer sees the contrast.
-  await page.locator('#theme-btn').click()
+  await page.locator('.rail-nav [data-action="theme"]').click()
   await page.locator('#theme-overlay').waitFor({ state: 'visible' })
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0

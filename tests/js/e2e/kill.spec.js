@@ -79,7 +79,7 @@ test.describe('kill running command', () => {
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
     // Kill button should be visible while the command is running
-    const killBtn = page.locator('.tab-kill-btn')
+    const killBtn = page.locator('.hud-kill-btn')
     await killBtn.waitFor({ state: 'visible', timeout: 5_000 })
     await killBtn.click()
 
@@ -96,14 +96,14 @@ test.describe('kill running command', () => {
     await page.keyboard.press('Enter')
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
-    await page.locator('.tab-kill-btn').waitFor({ state: 'visible' })
-    await page.locator('.tab-kill-btn').click()
+    await page.locator('.hud-kill-btn').waitFor({ state: 'visible' })
+    await page.locator('.hud-kill-btn').click()
     await page.locator('#kill-confirm').waitFor({ state: 'visible' })
     await page.locator('#kill-confirm').click()
 
     await expect(page.locator('.status-pill')).toHaveText('KILLED', { timeout: 10_000 })
     // Kill button should no longer be visible once the command has ended
-    await expect(page.locator('.tab-kill-btn')).toBeHidden()
+    await expect(page.locator('.hud-kill-btn')).toBeHidden()
   })
 
   test('Ctrl+C opens the kill confirmation modal while a command is running', async ({ page }) => {
@@ -130,7 +130,7 @@ test.describe('kill running command', () => {
     await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
     await expect(page.locator('.tab .tab-label')).toHaveText('tab 1')
     await expect(page.locator('.tab-panel .output .line')).toHaveCount(0)
-    await expect(page.locator('.tab-kill-btn')).toBeHidden()
+    await expect(page.locator('.hud-kill-btn')).toBeHidden()
   })
 
   test('Enter confirms kill while the kill confirmation modal is open', async ({ page }) => {

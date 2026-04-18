@@ -224,15 +224,15 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `toolbar_button_bg` | `transparent` | `#c8d4e0` | Header and toolbar button backgrounds |
-| `toolbar_button_border` | `#2e2e2e` | `#8898b0` | Header and toolbar button borders |
-| `toolbar_button_text` | `#7a7a7a` | `#202838` | Header and toolbar button text |
-| `toolbar_button_hover_bg` | `transparent` | `#b8c8d8` | Hover background for header buttons |
-| `toolbar_button_hover_border` | `#1a7a08` | `#6880a0` | Hover border for header buttons |
-| `toolbar_button_hover_text` | `#39ff14` | `#101820` | Hover text for header buttons |
-| `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active header button background |
-| `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active header button border |
-| `toolbar_button_active_text` | `#39ff14` | `#101820` | Active header button text |
+| `toolbar_button_bg` | `transparent` | `#c8d4e0` | Chrome button (rail, HUD, toolbar) backgrounds |
+| `toolbar_button_border` | `#2e2e2e` | `#8898b0` | Chrome button (rail, HUD, toolbar) borders |
+| `toolbar_button_text` | `#7a7a7a` | `#202838` | Chrome button (rail, HUD, toolbar) text |
+| `toolbar_button_hover_bg` | `transparent` | `#b8c8d8` | Hover background for chrome buttons |
+| `toolbar_button_hover_border` | `#1a7a08` | `#6880a0` | Hover border for chrome buttons |
+| `toolbar_button_hover_text` | `#39ff14` | `#101820` | Hover text for chrome buttons |
+| `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active chrome button background |
+| `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active chrome button border |
+| `toolbar_button_active_text` | `#39ff14` | `#101820` | Active chrome button text |
 | `chip_bg` | `transparent` | `#c8d4e0` | History chips and starred chips |
 | `chip_border` | `#2e2e2e` | `#8898b0` | Chip borders |
 | `chip_text` | `#7a7a7a` | `#202838` | Default chip text |
