@@ -14,7 +14,7 @@ If a run is still active after refresh, the tab reconnects and restores the save
 Idle tabs and draft text come back after reload in the same browser session.
 The mobile history drawer keeps search visible and hides advanced filters until you need them.
 The filters button shows how many history filters are active.
-Tap a recent chip to reload a command without retyping it.
+Pull up the Recent peek row to reopen the recents sheet and reload a past command.
 Starred history entries stay easier to find when the drawer gets crowded.
 Use the search bar to scan long output without leaving the current tab.
 Timestamps and line numbers make copied mobile output easier to reference later.

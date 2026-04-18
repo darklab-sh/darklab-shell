@@ -90,14 +90,19 @@ async function loadAppFns({
         </div>
       </div>
       <div id="mobile-shell-overlays">
-        <div id="mobile-menu">
-          <button data-action="ln"></button>
-          <button data-action="ts"></button>
-          <button data-action="search"></button>
-          <button data-action="history"></button>
-          <button data-action="options"></button>
-          <button data-action="theme"></button>
-          <button data-action="faq"></button>
+        <div id="mobile-menu-sheet" class="menu-sheet u-hidden">
+          <button data-menu-action="ln"></button>
+          <button data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu"></button>
+          <div id="mobile-menu-ts-submenu" class="menu-submenu u-hidden">
+            <button data-menu-action="ts-set" data-ts-mode="off"></button>
+            <button data-menu-action="ts-set" data-ts-mode="elapsed"></button>
+            <button data-menu-action="ts-set" data-ts-mode="clock"></button>
+          </div>
+          <button data-menu-action="search"></button>
+          <button data-menu-action="history"></button>
+          <button data-menu-action="options"></button>
+          <button data-menu-action="theme"></button>
+          <button data-menu-action="faq"></button>
         </div>
       </div>
     </div>
@@ -304,7 +309,7 @@ async function loadAppFns({
     mobileEditBar: document.getElementById('mobile-edit-bar'),
     mobileCmdInput: document.getElementById('mobile-cmd'),
     mobileRunBtn: document.getElementById('mobile-run-btn'),
-    mobileMenu: document.getElementById('mobile-menu'),
+    mobileMenu: document.getElementById('mobile-menu-sheet'),
     searchBar: document.getElementById('search-bar'),
     searchInput: document.getElementById('search-input'),
     searchCount: document.getElementById('search-count'),
@@ -484,7 +489,7 @@ async function loadAppFns({
       mobileComposerHost: document.getElementById('mobile-composer-host'),
       mobileComposerRow: document.getElementById('mobile-composer-row'),
       mobileEditBar: document.getElementById('mobile-edit-bar'),
-      mobileMenu: document.getElementById('mobile-menu'),
+      mobileMenu: document.getElementById('mobile-menu-sheet'),
       faqOverlay: document.getElementById('faq-overlay'),
       optionsOverlay: document.getElementById('options-overlay'),
       workflowsOverlay: document.getElementById('workflows-overlay'),
@@ -679,9 +684,6 @@ describe('app helpers', () => {
     expect(document.body.classList.contains('ts-clock')).toBe(false)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: elapsed')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: off')
-    expect(document.querySelector('#mobile-menu [data-action="ts"]').textContent).toBe(
-      'timestamps: elapsed',
-    )
   })
 
   it('_setLnMode updates body classes and button labels', async () => {
@@ -691,9 +693,6 @@ describe('app helpers', () => {
 
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
-    expect(document.querySelector('#mobile-menu [data-action="ln"]').textContent).toBe(
-      'line numbers: on',
-    )
 
     _setLnMode('off')
 
@@ -724,12 +723,49 @@ describe('app helpers', () => {
     expect(cmdInput.focus).toHaveBeenCalled()
 
     cmdInput.focus.mockClear()
-    document.querySelector('#mobile-menu [data-action="ts"]').click()
+    document.querySelector('#mobile-menu-sheet [data-menu-action="ts-set"][data-ts-mode="elapsed"]').click()
     expect(cmdInput.focus).toHaveBeenCalled()
 
     cmdInput.focus.mockClear()
-    document.querySelector('#mobile-menu [data-action="ln"]').click()
+    document.querySelector('#mobile-menu-sheet [data-menu-action="ln"]').click()
     expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
+  it('ts-toggle expands the inline sub-menu without closing the sheet', async () => {
+    await loadAppFns()
+    const sheet = document.getElementById('mobile-menu-sheet')
+    const toggle = sheet.querySelector('[data-menu-action="ts-toggle"]')
+    const submenu = document.getElementById('mobile-menu-ts-submenu')
+
+    sheet.classList.remove('u-hidden')
+    expect(submenu.classList.contains('u-hidden')).toBe(true)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+
+    // Direct dispatch so the document-level outside-click listener (which
+    // dismisses the sheet for any click outside the menu in jsdom tests) can't
+    // interfere. The element-level binding is what we're verifying.
+    window.dispatchMobileMenuAction('ts-toggle', toggle)
+    expect(sheet.classList.contains('u-hidden')).toBe(false)
+    expect(submenu.classList.contains('u-hidden')).toBe(false)
+    expect(toggle.getAttribute('aria-expanded')).toBe('true')
+
+    window.dispatchMobileMenuAction('ts-toggle', toggle)
+    expect(submenu.classList.contains('u-hidden')).toBe(true)
+    expect(toggle.getAttribute('aria-expanded')).toBe('false')
+  })
+
+  it('ts-set applies the selected mode and closes the sheet', async () => {
+    const { _setTsMode } = await loadAppFns()
+    _setTsMode('off')
+    const sheet = document.getElementById('mobile-menu-sheet')
+    sheet.classList.remove('u-hidden')
+
+    document
+      .querySelector('#mobile-menu-sheet [data-menu-action="ts-set"][data-ts-mode="clock"]')
+      .click()
+
+    expect(document.body.classList.contains('ts-clock')).toBe(true)
+    expect(sheet.classList.contains('u-hidden')).toBe(true)
   })
 
   it('opens the theme selector from the theme button', async () => {
@@ -1068,13 +1104,18 @@ describe('app helpers', () => {
       <button id="kill-confirm"></button>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
-      <div id="mobile-menu">
-        <button data-action="ln"></button>
-        <button data-action="ts"></button>
-        <button data-action="search"></button>
-        <button data-action="history"></button>
-        <button data-action="theme"></button>
-        <button data-action="faq"></button>
+      <div id="mobile-menu-sheet" class="menu-sheet u-hidden">
+        <button data-menu-action="ln"></button>
+        <button data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu"></button>
+        <div id="mobile-menu-ts-submenu" class="menu-submenu u-hidden">
+          <button data-menu-action="ts-set" data-ts-mode="off"></button>
+          <button data-menu-action="ts-set" data-ts-mode="elapsed"></button>
+          <button data-menu-action="ts-set" data-ts-mode="clock"></button>
+        </div>
+        <button data-menu-action="search"></button>
+        <button data-menu-action="history"></button>
+        <button data-menu-action="theme"></button>
+        <button data-menu-action="faq"></button>
       </div>
       <div id="faq-overlay"></div>
       <button class="faq-close"></button>
@@ -2183,7 +2224,8 @@ describe('app helpers', () => {
     })
     const mobileCmdInput = document.getElementById('mobile-cmd')
 
-    document.getElementById('mobile-menu').classList.add('open')
+    const menuSheet = document.getElementById('mobile-menu-sheet')
+    menuSheet.classList.remove('u-hidden')
     document.getElementById('history-panel').classList.add('open')
 
     Object.defineProperty(document, 'activeElement', {
@@ -2195,7 +2237,7 @@ describe('app helpers', () => {
     mobileCmdInput.value = 'curl'
     mobileCmdInput.dispatchEvent(new Event('input'))
 
-    expect(document.getElementById('mobile-menu').classList.contains('open')).toBe(false)
+    expect(menuSheet.classList.contains('u-hidden')).toBe(true)
     expect(document.getElementById('history-panel').classList.contains('open')).toBe(false)
 
     restoreViewport()
@@ -3198,7 +3240,7 @@ describe('app helpers', () => {
     expect(overlay.classList.contains('open')).toBe(false)
     expect(visibleInput.focus).not.toHaveBeenCalled()
 
-    document.querySelector('#mobile-menu [data-action="options"]').click()
+    document.querySelector('#mobile-menu-sheet [data-menu-action="options"]').click()
     expect(overlay.classList.contains('open')).toBe(true)
 
     overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -3234,7 +3276,7 @@ describe('app helpers', () => {
   it('hides rotate/clear/copy session token buttons when no token is set — mobile menu open', async () => {
     await loadAppFns()  // no session_token in localStorage
 
-    document.querySelector('#mobile-menu [data-action="options"]').click()
+    document.querySelector('#mobile-menu-sheet [data-menu-action="options"]').click()
 
     expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('none')
     expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('none')
@@ -3245,7 +3287,7 @@ describe('app helpers', () => {
     const { storage } = await loadAppFns()
     storage.setItem('session_token', 'tok_abcd1234efgh5678ijkl9012mnop3456')
 
-    document.querySelector('#mobile-menu [data-action="options"]').click()
+    document.querySelector('#mobile-menu-sheet [data-menu-action="options"]').click()
 
     expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('')
     expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('')

@@ -182,8 +182,8 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
     el.textContent = wmText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
-  document.querySelectorAll('.mobile-menu-wordmark').forEach(el => {
-    el.textContent = `GitLab: ${wmText}`;
+  document.querySelectorAll('.menu-footer').forEach(el => {
+    el.textContent = wmText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
   syncThemeSelectionControls();
@@ -193,7 +193,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
     if (diagBtn) diagBtn.classList.remove('u-hidden');
     const railDiagBtn = document.getElementById('rail-diag-btn');
     if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
-    const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-action="diag"]');
+    const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-menu-action="diag"]');
     if (mobileDiagBtn) mobileDiagBtn.classList.remove('u-hidden');
   }
 }).catch(err => {
@@ -207,43 +207,64 @@ _uiOverlayRefs.hamburgerBtn.addEventListener('click', e => {
   else showMobileMenu();
 });
 
-_uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn => {
+// Mobile menu action dispatch. Exposed globally so the mobile-shell sheet
+// (mobile_chrome.js) can route its own data-menu-action button clicks here
+// without re-implementing the action body, and so a few flows (e.g. routing
+// 'history' to the recents pull-up sheet on mobile) can override one branch.
+function dispatchMobileMenuAction(action, btn = null) {
+  if (action === 'search') {
+    const visible = isSearchBarOpen();
+    if (visible) {
+      hideSearchBar();
+      clearSearch();
+    } else {
+      showSearchBar();
+      searchInput.focus();
+      runSearch();
+    }
+  }
+  if (action === 'history') {
+    _closeMajorOverlays();
+    const isOpen = togglePanelOverlay(historyPanel);
+    if (isOpen) {
+      if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
+      if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+      refreshHistoryPanel();
+    }
+  }
+  if (action === 'ts-toggle') {
+    // Inline expand so the user can see all three timestamp modes at once
+    // instead of tap-cycling blind through off → elapsed → clock.
+    const submenu = document.getElementById('mobile-menu-ts-submenu');
+    const expanded = btn?.getAttribute('aria-expanded') === 'true';
+    if (btn) btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
+    submenu?.classList.toggle('u-hidden', expanded);
+    return;
+  }
+  if (action === 'ts-set') {
+    applyTimestampPreference(btn?.dataset.tsMode || 'off');
+    refocusTerminalInput();
+  }
+  if (action === 'ln') {
+    applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
+    refocusTerminalInput();
+  }
+  if (action === 'options') openOptions();
+  if (action === 'theme') openThemeSelector();
+  if (action === 'workflows') openWorkflows();
+  if (action === 'faq') openFaq();
+  if (action === 'diag') window.location.href = '/diag';
+}
+window.dispatchMobileMenuAction = dispatchMobileMenuAction;
+
+_uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(btn => {
   btn.addEventListener('click', () => {
-    hideMobileMenu();
-    const action = btn.dataset.action;
-    if (action === 'search') {
-      const visible = isSearchBarOpen();
-      if (visible) {
-        hideSearchBar();
-        clearSearch();
-      } else {
-        showSearchBar();
-        searchInput.focus();
-        runSearch();
-      }
-    }
-    if (action === 'history') {
-      _closeMajorOverlays();
-      const isOpen = togglePanelOverlay(historyPanel);
-      if (isOpen) {
-        if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
-        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-        refreshHistoryPanel();
-      }
-    }
-    if (action === 'ts') {
-      applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-      refocusTerminalInput();
-    }
-    if (action === 'ln') {
-      applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-      refocusTerminalInput();
-    }
-    if (action === 'options') openOptions();
-    if (action === 'theme') openThemeSelector();
-    if (action === 'workflows') openWorkflows();
-    if (action === 'faq') openFaq();
-    if (action === 'diag') window.location.href = '/diag';
+    const action = btn.dataset.menuAction;
+    // ts-toggle keeps the sheet open; its whole purpose is to expand an inline
+    // sub-menu beneath the timestamps row. Every other action closes the sheet
+    // as it transitions to another surface.
+    if (action !== 'ts-toggle') hideMobileMenu();
+    dispatchMobileMenuAction(action, btn);
   });
 });
 

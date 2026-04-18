@@ -52,7 +52,7 @@ class TestIndexRoute:
         assert 'href="/diag"' in body
         assert 'target="_blank"' in body
         assert 'rel="noopener noreferrer"' in body
-        assert 'button data-action="diag"' in body
+        assert 'data-menu-action="diag"' in body
 
 # ── /health ───────────────────────────────────────────────────────────────────
 

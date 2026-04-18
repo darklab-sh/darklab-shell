@@ -212,10 +212,17 @@ body #ln-btn:hover {
   border-color: var(--theme-toolbar-button-hover-border);
   color: var(--theme-toolbar-button-hover-text);
 }
-body #hamburger-btn:hover {
+body #hamburger-btn:active {
   background: transparent;
   border-color: transparent;
   color: var(--theme-toolbar-button-hover-text);
+}
+@media (hover: hover) {
+  body #hamburger-btn:hover {
+    background: transparent;
+    border-color: transparent;
+    color: var(--theme-toolbar-button-hover-text);
+  }
 }
 body #ts-btn.active,
 body #ln-btn.active {
@@ -971,83 +978,19 @@ body #diag-btn:hover {
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s;
   margin-left: auto;
+  /* Opt out of the 300ms double-tap-to-zoom gesture on this control. Without
+     it, a double tap on the hamburger (or the empty space immediately around
+     it) triggers the browser's double-tap zoom instead of a second click. */
+  touch-action: manipulation;
 }
-#hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
-
-#mobile-menu {
-  display: none;
-  flex-direction: column;
-  background: var(--theme-mobile-menu-bg);
-  border: 1px solid var(--border-bright);
-  border-radius: 4px;
-  overflow: hidden;
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 300;
-  min-width: 160px;
-  box-shadow: 0 8px 24px var(--theme-mobile-menu-shadow);
-}
-body #mobile-menu {
-  background: var(--theme-mobile-menu-bg);
-  border-color: var(--theme-mobile-menu-border);
-}
-#mobile-menu.open { display: flex; }
-#mobile-menu button {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--theme-mobile-menu-button-border);
-  color: var(--text);
-  font-family: var(--font-mono);
-  font-size: 12px;
-  padding: 12px 16px;
-  text-align: left;
-  cursor: pointer;
-  transition: background 0.15s, color 0.15s;
-  -webkit-tap-highlight-color: transparent;
-}
-#mobile-menu button:last-child { border-bottom: none; }
-#mobile-menu button:hover { background: var(--theme-mobile-menu-button-hover-bg); color: var(--theme-mobile-menu-button-hover-text); }
-
-#mobile-menu .mobile-menu-wordmark {
-  display: block;
-  padding: 12px 16px;
-  border-top: 1px solid color-mix(in srgb, var(--theme-mobile-menu-button-border) 88%, transparent);
-  color: color-mix(in srgb, var(--muted) 88%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  text-decoration: none;
-  opacity: 0.86;
+/* Press-only glow. Hover-capable pointers (desktop) get the same cue on real
+   hover; touch devices show the glow only while the finger is down so the
+   button does not stay green after release until focus moves elsewhere. */
+#hamburger-btn:active { color: var(--green); border-color: var(--green-dim); }
+@media (hover: hover) {
+  #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
 }
 
-#mobile-menu .mobile-menu-wordmark:hover {
-  background: color-mix(in srgb, var(--surface) 58%, transparent);
-  color: var(--text);
-}
-
-body.mobile-terminal-mode #mobile-menu {
-  position: fixed;
-  top: auto;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  border-radius: 14px 14px 0 0;
-  border-left: none;
-  border-right: none;
-  border-bottom: none;
-  min-width: 0;
-  box-shadow: 0 -4px 32px var(--theme-mobile-menu-shadow);
-  padding-bottom: env(safe-area-inset-bottom, 0);
-  z-index: 310;
-}
-body.mobile-terminal-mode #mobile-menu button {
-  font-size: 15px;
-  padding: 16px 20px;
-  min-height: 52px;
-  display: flex;
-  align-items: center;
-}
 body.mobile-terminal-mode .mobile-sheet-handle {
   display: block;
   width: 40px;
@@ -1067,13 +1010,4 @@ body.mobile-terminal-mode .mobile-sheet-handle::before {
   background: var(--border-bright);
   border-radius: 2px;
   transform: translateX(-50%);
-}
-
-body.mobile-terminal-mode #mobile-menu .mobile-menu-wordmark {
-  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0));
-  font-size: 12px;
-  min-height: 0;
-}
-body.mobile-terminal-mode #mobile-menu::before {
-  display: none;
 }

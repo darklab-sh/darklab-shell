@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 817
-- `vitest`: 472
-- `playwright`: 156
-- total: 1,445
+- `vitest`: 474
+- `playwright`: 158
+- total: 1,449
 
 This document is organized in two parts:
 
@@ -1115,6 +1115,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `_setLnMode updates body classes and button labels` | _setLnMode updates body classes and button labels. |
 | `allows timestamps and line numbers to be enabled at the same time` | Verifies that allows timestamps and line numbers to be enabled at the same time. |
 | `refocuses the terminal input after toggling timestamps and line numbers` | Verifies that refocuses the terminal input after toggling timestamps and line numbers. |
+| `ts-toggle expands the inline sub-menu without closing the sheet` | Verifies that the mobile menu `ts-toggle` row flips `aria-expanded` and reveals the sub-menu without dismissing the menu sheet. |
+| `ts-set applies the selected mode and closes the sheet` | Verifies that tapping a `ts-set` sub-menu row applies the chosen timestamps mode (off/elapsed/clock) and closes the menu sheet. |
 | `opens the theme selector from the theme button` | Verifies that opens the theme selector from the theme button. |
 | `populates the theme select from the registry and applies the selected theme` | Verifies that populates the theme select from the registry and applies the selected theme. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
@@ -1734,11 +1736,12 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `clicking the hamburger opens the mobile menu` | Verifies that clicking the hamburger opens the mobile menu. |
 | `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell. |
 | `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history and theme action buttons. |
+| `timestamps menu expands inline and applies the selected mode` | Verifies that the mobile menu `timestamps` row expands inline to a three-mode picker (off / elapsed / clock), keeps the sheet open while expanded, applies the selected mode on tap, closes the sheet, and resets the sub-menu to collapsed on the next sheet open. |
 | `mobile theme selector opens full screen with evenly sized grouped sections` | Verifies that mobile theme selector opens full screen with evenly sized grouped sections. |
 | `selecting a theme on mobile applies the shell palette, not just the modal preview` | Verifies that selecting a theme on mobile applies the shell palette, not just the modal preview. |
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
-| `mobile recent chips collapse to one row and overflow opens history` | Verifies that mobile recent chips collapse to one row and overflow opens history. |
-| `mobile recent chips can load a visible command back into the prompt` | Verifies that mobile recent chips can load a visible command back into the prompt. |
+| `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
+| `mobile recents sheet restores a previous run into the active tab` | Verifies that selecting a row in the mobile recents pull-up sheet restores the corresponding run into the active tab. |
 | `mobile history restore works from a newly created session via the mobile menu` | Verifies that mobile history restore works from a newly created session via the mobile menu. |
 | `mobile history copy and permalink actions keep the drawer open` | Verifies that common mobile history actions do not dismiss the drawer after each tap, reducing repeated reopen churn. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
@@ -1843,6 +1846,12 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `closing the only tab resets it instead of removing it` | Verifies that closing the only tab resets it instead of removing it. |
 | `drag reordering the active tab returns focus to the terminal input` | Verifies that drag reordering the active tab returns focus to the terminal input. |
 | `touch dragging reorders tabs and clears mobile drag state on release` | Verifies that touch dragging reorders tabs and clears mobile drag state on release. |
+
+#### `theme-audit.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `audit mobile surfaces across every installed theme` | Reusable theme audit tool — iterates every theme in `app/conf/themes/`, force-opens each mobile sheet, reads computed styles, and asserts WCAG contrast ratios with alpha compositing on ten representative pairs (`--text` / `--muted` / `--green` / `--amber` / `--red` / `--border-bright` over `--surface` and `--theme-panel-alt-bg`, plus the menu scrim and sub-menu radio states). Prints a per-theme contrast table and hard-fails only on pairs below 1.20. |
 
 #### `timestamps.spec.js`
 

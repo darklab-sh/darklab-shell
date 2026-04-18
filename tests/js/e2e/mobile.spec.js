@@ -133,7 +133,7 @@ test.describe('mobile menu', () => {
 
   test('mobile edit bar appears when the mobile command input is focused', async ({ page }) => {
     await openMobileKeyboard(page)
-    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
   })
 
   test('tapping the mobile command input opens the keyboard without jumping the page', async ({
@@ -154,7 +154,7 @@ test.describe('mobile menu', () => {
     })
 
     await expect(page.locator('#mobile-cmd')).toBeFocused()
-    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
     await expect
       .poll(async () => page.evaluate(() => window.scrollY))
       .toBeLessThanOrEqual(startScrollY + 12)
@@ -279,15 +279,15 @@ test.describe('mobile menu', () => {
 
   test('clicking the mobile transcript closes the keyboard and helper row', async ({ page }) => {
     await openMobileKeyboard(page)
-    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 
     await page.locator('#mobile-shell-transcript').tap()
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
   })
 
   test('mobile tab action buttons still work while the keyboard is open', async ({ page }) => {
     await openMobileKeyboard(page)
-    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 
     const startScrollY = await page.evaluate(() => window.scrollY)
     await runCommandMobile(page, 'hostname')
@@ -298,7 +298,7 @@ test.describe('mobile menu', () => {
     await page.locator('.tab-panel.active [data-action="clear"]').click()
 
     await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
-    await expect(page.locator('#mobile-edit-bar')).toBeHidden()
+    await expect(page.locator('#mobile-kb-helper')).toBeHidden()
     await expect(page.locator('.tab-panel.active [data-action="clear"]')).not.toBeFocused()
     await expect
       .poll(async () => page.evaluate(() => window.scrollY))
@@ -388,19 +388,19 @@ test.describe('mobile menu', () => {
 
   test('clicking the hamburger opens the mobile menu', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
-    await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
+    await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
   })
 
   test('mobile menu FAQ and options open overlays in the mobile shell', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu [data-action="faq"]').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await page.locator('#faq-overlay .faq-close').click()
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
 
     await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu [data-action="options"]').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
 
     await page.locator('#options-overlay .options-close').click()
@@ -409,16 +409,42 @@ test.describe('mobile menu', () => {
 
   test('mobile menu contains history and theme action buttons', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
-    const menu = page.locator('#mobile-menu')
-    await expect(menu.locator('[data-action="history"]')).toBeVisible()
-    await expect(menu.locator('[data-action="theme"]')).toBeVisible()
+    const menu = page.locator('#mobile-menu-sheet')
+    await expect(menu.locator('[data-menu-action="history"]')).toBeVisible()
+    await expect(menu.locator('[data-menu-action="theme"]')).toBeVisible()
+  })
+
+  test('timestamps menu expands inline and applies the selected mode', async ({ page }) => {
+    await page.locator('#hamburger-btn').click()
+    const sheet = page.locator('#mobile-menu-sheet')
+    const toggle = sheet.locator('[data-menu-action="ts-toggle"]')
+    const submenu = page.locator('#mobile-menu-ts-submenu')
+
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await expect(submenu).toBeHidden()
+
+    await toggle.click()
+    await expect(sheet).toBeVisible()
+    await expect(submenu).toBeVisible()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'true')
+
+    await submenu.locator('[data-ts-mode="elapsed"]').click()
+    await expect(sheet).toBeHidden()
+    await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
+
+    await page.locator('#hamburger-btn').click()
+    await expect(submenu).toBeHidden()
+    await expect(toggle).toHaveAttribute('aria-expanded', 'false')
+    await toggle.click()
+    await expect(submenu.locator('[data-ts-mode="elapsed"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(submenu.locator('[data-ts-mode="off"]')).toHaveAttribute('aria-pressed', 'false')
   })
 
   test('mobile theme selector opens full screen with evenly sized grouped sections', async ({
     page,
   }) => {
     await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu [data-action="theme"]').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
 
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await expect(page.locator('#theme-modal')).toBeVisible()
@@ -447,7 +473,7 @@ test.describe('mobile menu', () => {
     page,
   }) => {
     await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu [data-action="theme"]').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
 
     await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
@@ -470,14 +496,16 @@ test.describe('mobile menu', () => {
 
   test('clicking outside the menu closes it', async ({ page }) => {
     await page.locator('#hamburger-btn').click()
-    await expect(page.locator('#mobile-menu')).toHaveClass(/open/)
+    await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
 
-    // Click somewhere neutral in the header area
-    await page.locator('header').click()
-    await expect(page.locator('#mobile-menu')).not.toHaveClass(/open/)
+    // Tap the scrim (the canonical "outside the sheet" surface)
+    await page.locator('#mobile-menu-sheet-scrim').click()
+    await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
   })
 
-  test('mobile recent chips collapse to one row and overflow opens history', async ({ page }) => {
+  test('mobile recent peek summarizes recent runs and opens the recents sheet on tap', async ({
+    page,
+  }) => {
     const commands = [
       'banner chip-overflow-test-1',
       'banner chip-overflow-test-2',
@@ -490,30 +518,35 @@ test.describe('mobile menu', () => {
       if (index < commands.length - 1) await page.waitForTimeout(250)
     }
 
-    const chips = page.locator('#history-row .hist-chip')
-    await expect(chips).toHaveCount(4)
-    await expect(page.locator('#history-row .hist-chip-overflow')).toContainText('+ more')
-    await expect(chips.nth(0)).toContainText('test-4')
-    await expect(chips.nth(1)).toContainText('test-3')
-    await expect(chips.nth(2)).toContainText('test-2')
+    const peek = page.locator('#mobile-recent-peek')
+    await expect(peek).toBeVisible()
+    await expect(page.locator('#mobile-recent-peek-count')).toHaveText(`${commands.length}`)
 
-    await page.locator('#history-row .hist-chip-overflow').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await peek.click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    const items = page.locator('#mobile-recents-list .sheet-item')
+    await expect(items.first()).toBeVisible()
+    await expect(items).toHaveCount(commands.length)
   })
 
-  test('mobile recent chips can load a visible command back into the prompt', async ({ page }) => {
+  test('mobile recents sheet restores a previous run into the active tab', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
     for (const [index, command] of commands.entries()) {
       await runCommandMobile(page, command)
       if (index < commands.length - 1) await page.waitForTimeout(250)
     }
+    await waitForHistoryRuns(page, commands.length)
 
-    const chip = page.locator('#history-row .hist-chip').first()
-    const commandText = await chip.getAttribute('title')
-    await chip.click()
+    await page.locator('#mobile-recent-peek').click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
 
-    await expect(page.locator('#mobile-cmd')).toHaveValue(commandText || '')
+    await page
+      .locator('#mobile-recents-list .sheet-item')
+      .filter({ hasText: 'hostname' })
+      .first()
+      .click()
+    await expect(page.locator('.tab-panel.active .output')).toContainText('hostname')
     await expect(page.locator('#mobile-composer')).toBeVisible()
   })
 
@@ -531,10 +564,14 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
 
     await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu [data-action="history"]').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
 
-    await page.locator('.history-entry').first().click()
+    await page
+      .locator('#mobile-recents-list .sheet-item')
+      .filter({ hasText: 'date' })
+      .first()
+      .click()
     await expect(page.locator('.tab-panel.active .output')).toContainText('date')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
@@ -544,16 +581,16 @@ test.describe('mobile menu', () => {
     await waitForHistoryRuns(page, 1)
 
     await page.locator('#hamburger-btn').click()
-    await page.locator('#mobile-menu [data-action="history"]').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
 
-    const firstEntry = page.locator('.history-entry').first()
-    await firstEntry.locator('[data-action="copy"]').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/open/)
-    await expect(page.locator('#permalink-toast')).toContainText('Command copied to clipboard')
+    const firstEntry = page.locator('#mobile-recents-list .sheet-item').first()
+    await firstEntry.locator('.sheet-item-action', { hasText: 'copy' }).click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+    await expect(page.locator('#permalink-toast')).toContainText('Command copied')
 
-    await firstEntry.locator('[data-action="permalink"]').click()
-    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await firstEntry.locator('.sheet-item-action', { hasText: 'permalink' }).click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
   })
 
@@ -601,10 +638,10 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {
-    // Show the edit bar (normally shown only when the keyboard is open)
+    // Show the helper row (normally shown only when the keyboard is open)
     await page.evaluate(() => document.body.classList.add('mobile-keyboard-open'))
 
-    await expect(page.locator('#mobile-edit-bar')).toBeVisible()
+    await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 
     await page.locator('#mobile-cmd').evaluate((el) => {
       el.value = 'ping -c 4 example.com'
@@ -622,72 +659,47 @@ test.describe('mobile menu', () => {
       })
     })
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="left"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    const fireKbAction = (action) =>
+      page.evaluate((act) => {
+        document
+          .querySelector(`#mobile-kb-helper [data-kb-action="${act}"]`)
+          .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
+      }, action)
+
+    await fireKbAction('left')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))
       .toBe(20)
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="home"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('home')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))
       .toBe(0)
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="word-right"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('word-right')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))
       .toBe(4)
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="right"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('right')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))
       .toBe(5)
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="word-left"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('word-left')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))
       .toBe(0)
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="end"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('end')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))
       .toBe(21)
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="delete-word"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('delete-word')
     await expect(page.locator('#mobile-cmd')).toHaveValue('ping -c 4 ')
 
-    await page.evaluate(() => {
-      document
-        .querySelector('[data-mobile-edit="delete-line"]')
-        .dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }))
-    })
+    await fireKbAction('delete-line')
     await expect(page.locator('#mobile-cmd')).toHaveValue('')
     await expect
       .poll(async () => page.locator('#mobile-cmd').evaluate((el) => el.selectionStart))

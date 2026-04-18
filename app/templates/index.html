@@ -44,6 +44,12 @@
 <div id="mobile-shell" aria-hidden="true">
   <div id="mobile-shell-chrome"></div>
   <div id="mobile-shell-transcript"></div>
+  <div id="mobile-recent-peek" class="recent-peek u-hidden" role="button" tabindex="0" aria-label="Show recent commands">
+    <span class="recent-peek-handle" aria-hidden="true"></span>
+    <span class="recent-peek-label">Recent</span>
+    <span class="recent-peek-count" id="mobile-recent-peek-count">0</span>
+    <span class="recent-peek-preview" id="mobile-recent-peek-preview"></span>
+  </div>
   <div id="mobile-shell-composer">
     <div id="mobile-composer-host" aria-hidden="true">
       <div id="mobile-composer">
@@ -57,6 +63,22 @@
           <button type="button" data-mobile-edit="right" data-edit-action="right" aria-label="Move right">→</button>
           <button type="button" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
         </div>
+        <div id="mobile-kb-helper" class="kb-helper u-hidden" aria-label="Edit helper" role="toolbar">
+          <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">⇤</button>
+          <button type="button" class="kb-key" data-kb-action="left" aria-label="Left">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3 L5 8 L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="kb-key" data-kb-action="right" aria-label="Right">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3 L11 8 L6 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="kb-key" data-kb-action="word-right" aria-label="Word right">⇥</button>
+          <span class="kb-helper-sep" aria-hidden="true"></span>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="home" aria-label="Start of line">Home</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="end" aria-label="End of line">End</button>
+          <span class="kb-helper-sep" aria-hidden="true"></span>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="delete-word" aria-label="Delete word">⌫ word</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="delete-line" aria-label="Delete line">⌫ line</button>
+        </div>
         <div id="mobile-composer-row">
           <span class="mobile-prompt-label">$</span>
           <input id="mobile-cmd" type="text"
@@ -64,24 +86,146 @@
                  spellcheck="false" inputmode="text" enterkeyhint="go"
                  placeholder="Type a command" aria-label="Command">
           <button id="mobile-run-btn" type="button">Run</button>
+          <button id="mobile-kill-btn" type="button" aria-label="Kill current run">■ Kill</button>
         </div>
       </div>
     </div>
   </div>
   <div id="mobile-shell-overlays">
-    <div id="mobile-menu">
-      <button data-action="search">⌕ search</button>
-      <button data-action="history">⧖ history</button>
-      <button data-action="options">≡ options</button>
-      <button data-action="ln">line numbers: off</button>
-      <button data-action="ts">timestamps: off</button>
-      <button data-action="theme">◑ theme</button>
-      <button data-action="workflows">⊡ workflows</button>
-      <button data-action="faq">? FAQ</button>
-      <button data-action="diag" class="u-hidden">⊕ diag</button>
-      <a class="mobile-menu-wordmark" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">
-        GitLab: {{ app_name }}{% if version %} v{{ version }}{% endif %}
-      </a>
+    <div id="mobile-recents-sheet-scrim" class="recents-sheet-scrim u-hidden" aria-hidden="true"></div>
+    <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="Recent commands" aria-modal="true">
+      <div class="sheet-grab" role="button" tabindex="0" aria-label="Close recents"></div>
+      <div class="sheet-title">
+        <span class="sheet-title-label">Recent</span>
+        <span class="sheet-title-spacer"></span>
+        <button type="button" class="sheet-clear-btn" id="mobile-recents-clear" aria-label="Clear all history">clear all</button>
+        <button type="button" class="sheet-close" id="mobile-recents-close" aria-label="Close recents">✕</button>
+      </div>
+      <div class="sheet-filters">
+        <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search commands" autocomplete="off" spellcheck="false" aria-label="Search recent commands">
+        <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false">filters</button>
+        <div class="sheet-filter-expanded u-hidden" id="mobile-recents-filters-expanded">
+          <label class="sheet-filter-row sheet-filter-input">
+            <span class="sheet-filter-label">root:</span>
+            <input type="text" id="mobile-recents-filter-root" placeholder="any" autocomplete="off" spellcheck="false" aria-label="Filter by root command">
+          </label>
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="exit">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">exit:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">⌄</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="success">success (0)</button>
+              <button type="button" role="option" data-dropdown-value="failed">failed (non-zero)</button>
+            </div>
+          </div>
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="date">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">date:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">⌄</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="today">today</button>
+              <button type="button" role="option" data-dropdown-value="week">this week</button>
+            </div>
+          </div>
+          <button type="button" class="sheet-filter-row sheet-filter-check" data-recents-filter="starred" aria-pressed="false" aria-label="Show starred only">
+            <span class="sheet-filter-checkbox" aria-hidden="true"></span>
+            <span class="sheet-filter-label">starred only</span>
+          </button>
+          <button type="button" class="sheet-filter-row sheet-filter-clear" id="mobile-recents-filters-clear">clear filters</button>
+        </div>
+        <div class="filter-chips" id="mobile-recents-chips"></div>
+      </div>
+      <div class="sheet-list" id="mobile-recents-list" aria-live="polite"></div>
+    </div>
+    <div id="mobile-menu-sheet-scrim" class="menu-sheet-scrim u-hidden" aria-hidden="true"></div>
+    <div id="mobile-menu-sheet" class="menu-sheet u-hidden" role="dialog" aria-label="Menu" aria-modal="true">
+      <div class="sheet-grab" aria-hidden="true"></div>
+      <div class="menu-title">
+        <span class="menu-title-label">Menu</span>
+        <button type="button" class="sheet-close" id="mobile-menu-sheet-close" aria-label="Close menu">✕</button>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="search">
+          <span class="menu-item-icon" aria-hidden="true">⌕</span>
+          <span class="menu-item-label">search</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="ln" aria-pressed="false">
+          <span class="menu-item-icon" aria-hidden="true">#</span>
+          <span class="menu-item-label">line numbers</span>
+          <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+          <span class="menu-item-icon" aria-hidden="true">◷</span>
+          <span class="menu-item-label">timestamps</span>
+          <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="off">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">off</span>
+          </button>
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="elapsed">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">elapsed</span>
+            <span class="menu-subitem-hint">+1.2s</span>
+          </button>
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="clock">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">clock</span>
+            <span class="menu-subitem-hint">14:03:27</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="menu-group-divider" aria-hidden="true"></div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="history">
+          <span class="menu-item-icon" aria-hidden="true">⧖</span>
+          <span class="menu-item-label">history</span>
+          <span class="menu-item-hint" id="mobile-menu-history-count"></span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="workflows">
+          <span class="menu-item-icon" aria-hidden="true">⚙</span>
+          <span class="menu-item-label">workflows</span>
+          <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="options">
+          <span class="menu-item-icon" aria-hidden="true">≡</span>
+          <span class="menu-item-label">options</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="theme">
+          <span class="menu-item-icon" aria-hidden="true">◐</span>
+          <span class="menu-item-label">theme</span>
+          <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="faq">
+          <span class="menu-item-icon" aria-hidden="true">?</span>
+          <span class="menu-item-label">FAQ</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
+          <span class="menu-item-icon" aria-hidden="true">◇</span>
+          <span class="menu-item-label">diag</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+      </div>
+
+      <a class="menu-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>
@@ -521,5 +665,6 @@
 <script src="/static/js/app.js"></script>
 <script src="/static/js/controller.js"></script>
 <script src="/static/js/shell_chrome.js"></script>
+<script src="/static/js/mobile_chrome.js"></script>
 </body>
 </html>
