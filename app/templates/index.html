@@ -107,14 +107,51 @@
     </div>
     <div id="mobile-recents-sheet-scrim" class="recents-sheet-scrim u-hidden" aria-hidden="true"></div>
     <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="Recent commands" aria-modal="true">
-      <div class="sheet-grab" aria-hidden="true"></div>
+      <div class="sheet-grab" role="button" tabindex="0" aria-label="Close recents"></div>
       <div class="sheet-title">
         <span class="sheet-title-label">Recent</span>
-        <button type="button" class="sheet-clear-btn" id="mobile-recents-clear">clear</button>
+        <span class="sheet-title-spacer"></span>
+        <button type="button" class="sheet-clear-btn" id="mobile-recents-clear" aria-label="Clear all history">clear all</button>
         <button type="button" class="sheet-close" id="mobile-recents-close" aria-label="Close recents">✕</button>
       </div>
       <div class="sheet-filters">
         <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search commands" autocomplete="off" spellcheck="false" aria-label="Search recent commands">
+        <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false">filters</button>
+        <div class="sheet-filter-expanded u-hidden" id="mobile-recents-filters-expanded">
+          <label class="sheet-filter-row sheet-filter-input">
+            <span class="sheet-filter-label">root:</span>
+            <input type="text" id="mobile-recents-filter-root" placeholder="any" autocomplete="off" spellcheck="false" aria-label="Filter by root command">
+          </label>
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="exit">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">exit:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">⌄</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="success">success (0)</button>
+              <button type="button" role="option" data-dropdown-value="failed">failed (non-zero)</button>
+            </div>
+          </div>
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="date">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">date:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">⌄</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="today">today</button>
+              <button type="button" role="option" data-dropdown-value="week">this week</button>
+            </div>
+          </div>
+          <button type="button" class="sheet-filter-row sheet-filter-check" data-recents-filter="starred" aria-pressed="false" aria-label="Show starred only">
+            <span class="sheet-filter-checkbox" aria-hidden="true"></span>
+            <span class="sheet-filter-label">starred only</span>
+          </button>
+          <button type="button" class="sheet-filter-row sheet-filter-clear" id="mobile-recents-filters-clear">clear filters</button>
+        </div>
         <div class="filter-chips" id="mobile-recents-chips"></div>
       </div>
       <div class="sheet-list" id="mobile-recents-list" aria-live="polite"></div>
