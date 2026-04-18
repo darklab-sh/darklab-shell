@@ -344,22 +344,69 @@ body.mobile-terminal-mode {
     font-weight: 600;
     flex: 1;
   }
+  .menu-sheet .menu-group {
+    display: flex;
+    flex-direction: column;
+  }
+  .menu-sheet .menu-group-divider {
+    /* Clear section break without fragmenting the sheet: a --surface band
+       with padded air above/below and a 2px bar in --border-bright centered
+       inside it. Earlier iterations (hairline, tonal band) were rejected. */
+    padding: 16px 0;
+    background: var(--surface);
+  }
+  .menu-sheet .menu-group-divider::before {
+    content: '';
+    display: block;
+    height: 2px;
+    margin: 0 16px;
+    background: var(--border-bright);
+    border-radius: 1px;
+  }
   .menu-sheet .menu-item {
     display: flex;
     align-items: center;
-    gap: 10px;
-    padding: 14px 16px;
+    gap: 12px;
+    padding: 13px 16px;
     border-bottom: 1px solid var(--border);
     color: var(--text);
     font-size: 13px;
     letter-spacing: 0.3px;
     min-height: 48px;
+    background: transparent;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    text-align: left;
+    width: 100%;
   }
-  .menu-sheet .menu-item:first-of-type {
+  .menu-sheet .menu-group:first-of-type .menu-item:first-child {
     border-top: 1px solid var(--border);
   }
+  .menu-sheet .menu-group .menu-item:last-child {
+    border-bottom: none;
+  }
   .menu-sheet .menu-item.muted { color: var(--muted); }
+  .menu-sheet .menu-item-icon {
+    color: var(--muted);
+    font-size: 13px;
+    width: 16px;
+    text-align: center;
+    font-family: var(--font-mono);
+    flex: 0 0 16px;
+  }
   .menu-sheet .menu-item-label { flex: 1; }
+  .menu-sheet .menu-item-toggle {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+    opacity: 0.85;
+  }
+  .menu-sheet .menu-item[aria-pressed="true"] .menu-item-toggle {
+    color: var(--green);
+    opacity: 1;
+  }
   .menu-sheet .menu-item-hint {
     color: var(--muted);
     font-size: 11px;
@@ -368,6 +415,25 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-item-chev {
     color: var(--border-bright);
     font-size: 14px;
+  }
+  .menu-sheet .menu-footer {
+    padding: 14px 16px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 10.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-family: var(--font-mono);
+  }
+
+  /* Composer picks up an amber ring while a command is running so typing
+     feels distinct from the idle prompt. Scoped so desktop is untouched. */
+  #mobile-composer.is-running {
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--amber) 55%, transparent);
+    transition: box-shadow 160ms ease;
   }
 
   /* Edit-helper row above the composer when the soft keyboard is open. */
@@ -387,10 +453,12 @@ body.mobile-terminal-mode {
   .kb-helper::-webkit-scrollbar { display: none; }
   .kb-helper-sep {
     width: 1px;
+    min-width: 1px;
     height: 18px;
     background: var(--border);
     margin: 0 4px;
-    flex: 0 0 auto;
+    flex: 0 0 1px;
+    align-self: center;
   }
   .kb-key {
     height: 28px;

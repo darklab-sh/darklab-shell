@@ -64,16 +64,20 @@
           <button type="button" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
         </div>
         <div id="mobile-kb-helper" class="kb-helper u-hidden" aria-label="Edit helper" role="toolbar">
-          <button type="button" class="kb-key" data-kb-action="home" aria-label="Start of line">⇤</button>
-          <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">⌫w</button>
-          <button type="button" class="kb-key" data-kb-action="left" aria-label="Left">←</button>
+          <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">⇤</button>
+          <button type="button" class="kb-key" data-kb-action="left" aria-label="Left">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3 L5 8 L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="kb-key" data-kb-action="right" aria-label="Right">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3 L11 8 L6 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="kb-key" data-kb-action="word-right" aria-label="Word right">⇥</button>
           <span class="kb-helper-sep" aria-hidden="true"></span>
-          <button type="button" class="kb-key" data-kb-action="delete-word" aria-label="Delete word">del w</button>
-          <button type="button" class="kb-key" data-kb-action="delete-line" aria-label="Delete line">del ln</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="home" aria-label="Start of line">Home</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="end" aria-label="End of line">End</button>
           <span class="kb-helper-sep" aria-hidden="true"></span>
-          <button type="button" class="kb-key" data-kb-action="right" aria-label="Right">→</button>
-          <button type="button" class="kb-key" data-kb-action="word-right" aria-label="Word right">w⌦</button>
-          <button type="button" class="kb-key" data-kb-action="end" aria-label="End of line">⇥</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="delete-word" aria-label="Delete word">⌫ word</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="delete-line" aria-label="Delete line">⌫ line</button>
         </div>
         <div id="mobile-composer-row">
           <span class="mobile-prompt-label">$</span>
@@ -122,15 +126,65 @@
         <span class="menu-title-label">Menu</span>
         <button type="button" class="sheet-close" id="mobile-menu-sheet-close" aria-label="Close menu">✕</button>
       </div>
-      <button type="button" class="menu-item" data-menu-action="search"><span class="menu-item-label">⌕ search</span><span class="menu-item-chev">›</span></button>
-      <button type="button" class="menu-item" data-menu-action="history"><span class="menu-item-label">⧖ history</span><span class="menu-item-chev">›</span></button>
-      <button type="button" class="menu-item" data-menu-action="options"><span class="menu-item-label">≡ options</span><span class="menu-item-chev">›</span></button>
-      <button type="button" class="menu-item" data-menu-action="ln"><span class="menu-item-label">line numbers</span><span class="menu-item-hint" id="mobile-menu-ln-state">off</span></button>
-      <button type="button" class="menu-item" data-menu-action="ts"><span class="menu-item-label">timestamps</span><span class="menu-item-hint" id="mobile-menu-ts-state">off</span></button>
-      <button type="button" class="menu-item" data-menu-action="theme"><span class="menu-item-label">◑ theme</span><span class="menu-item-chev">›</span></button>
-      <button type="button" class="menu-item" data-menu-action="workflows"><span class="menu-item-label">⊡ workflows</span><span class="menu-item-chev">›</span></button>
-      <button type="button" class="menu-item" data-menu-action="faq"><span class="menu-item-label">? FAQ</span><span class="menu-item-chev">›</span></button>
-      <button type="button" class="menu-item muted u-hidden" id="mobile-menu-diag" data-menu-action="diag"><span class="menu-item-label">⊕ diag</span><span class="menu-item-chev">›</span></button>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="search">
+          <span class="menu-item-icon" aria-hidden="true">⌕</span>
+          <span class="menu-item-label">search</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="ln" aria-pressed="false">
+          <span class="menu-item-icon" aria-hidden="true"></span>
+          <span class="menu-item-label">line numbers</span>
+          <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="ts" aria-pressed="false">
+          <span class="menu-item-icon" aria-hidden="true"></span>
+          <span class="menu-item-label">timestamps</span>
+          <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+      </div>
+
+      <div class="menu-group-divider" aria-hidden="true"></div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="history">
+          <span class="menu-item-icon" aria-hidden="true">⧖</span>
+          <span class="menu-item-label">history</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="workflows">
+          <span class="menu-item-icon" aria-hidden="true">⚙</span>
+          <span class="menu-item-label">workflows</span>
+          <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="options">
+          <span class="menu-item-icon" aria-hidden="true">≡</span>
+          <span class="menu-item-label">options</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="theme">
+          <span class="menu-item-icon" aria-hidden="true">◐</span>
+          <span class="menu-item-label">theme</span>
+          <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="faq">
+          <span class="menu-item-icon" aria-hidden="true">?</span>
+          <span class="menu-item-label">FAQ</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+        <button type="button" class="menu-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
+          <span class="menu-item-icon" aria-hidden="true">◇</span>
+          <span class="menu-item-label">diag</span>
+          <span class="menu-item-chev">›</span>
+        </button>
+      </div>
+
+      <div class="menu-footer" aria-hidden="true">{{ app_name }}{% if version %} v{{ version }}{% endif %}</div>
     </div>
   </div>
 </div>
