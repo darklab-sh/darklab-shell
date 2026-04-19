@@ -10,12 +10,12 @@ else syncThemeSelectionControls();
 
 tsBtn.addEventListener('click', () => {
   applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 });
 
 lnBtn.addEventListener('click', () => {
   applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 });
 
 themeBtn.addEventListener('click', () => {
@@ -30,7 +30,7 @@ function openWorkflows() {
 
 function closeWorkflows() {
   hideWorkflowsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openFaq() {
@@ -41,7 +41,7 @@ function openFaq() {
 
 function closeFaq() {
   hideFaqOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openShortcuts() {
@@ -52,7 +52,7 @@ function openShortcuts() {
 
 function closeShortcuts() {
   if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function renderShortcuts(data) {
@@ -204,11 +204,11 @@ function dispatchMobileMenuAction(action, btn = null) {
   }
   if (action === 'ts-set') {
     applyTimestampPreference(btn?.dataset.tsMode || 'off');
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
   if (action === 'ln') {
     applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
   if (action === 'theme') openThemeSelector();
@@ -668,7 +668,7 @@ setTimeout(() => {
   if (useMobileTerminalViewportMode()) {
     return;
   }
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }, 0);
 syncMobileViewportState();
 setupMobileSheetDragClose();
@@ -702,7 +702,7 @@ searchInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideSearchBar();
     clearSearch();
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
 });
 
@@ -727,7 +727,7 @@ histBtn.addEventListener('click', () => {
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     refreshHistoryPanel();
   } else {
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
 });
 historyCloseBtn.addEventListener('click', () => {
@@ -838,19 +838,19 @@ document.addEventListener('keydown', e => {
     if (isCtrlC) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (e.key === 'Escape' || e.key === 'Enter' || isSpace) {
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (isPrintable) {
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
       e.preventDefault();
       return;
@@ -866,7 +866,7 @@ document.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
@@ -887,7 +887,7 @@ document.addEventListener('keydown', e => {
     && e.key.length === 1
   ) {
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
     e.preventDefault();
     return;
@@ -895,13 +895,13 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
     if ((typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) return;
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
   if (e.key === 'Escape' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
@@ -932,7 +932,7 @@ document.addEventListener('keydown', e => {
     && !isShareRedactionOverlayOpen()
   ) {
     e.preventDefault();
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+    refocusComposerAfterAction({ preventScroll: true });
     const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
     const { start, end } = getCmdSelection(value);
     replaceCmdRange(value, start, end, e.key);
@@ -954,7 +954,7 @@ function _replayPromptShortcutAfterSelection(e) {
   if (!selectedText) return false;
 
   e.preventDefault();
-  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  refocusComposerAfterAction({ preventScroll: true });
   if (isCtrlR) {
     if (typeof enterHistSearch === 'function') enterHistSearch();
     return true;
@@ -1121,7 +1121,7 @@ cmdInput.addEventListener('keydown', e => {
   if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isShareRedactionOverlayOpen()) {
     if (e.key === 'Escape') {
       closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector(); cancelShareRedactionChoice();
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
     }
     return;
@@ -1141,7 +1141,7 @@ cmdInput.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       return;
     }
     const activeTab = getActiveTab();
@@ -1240,7 +1240,7 @@ cmdInput.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
       e.preventDefault();
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       return;
     }
     if (acIndex >= 0 && acFiltered[acIndex]) {

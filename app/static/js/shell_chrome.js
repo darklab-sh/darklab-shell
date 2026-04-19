@@ -220,9 +220,7 @@
         if (typeof setComposerValue === 'function') {
           setComposerValue(cmd, cmd.length, cmd.length);
         }
-        if (typeof focusAnyComposerInput === 'function') {
-          focusAnyComposerInput({ preventScroll: true });
-        }
+        refocusComposerAfterAction({ preventScroll: true });
         if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
       });
       railRecentBody.appendChild(row);

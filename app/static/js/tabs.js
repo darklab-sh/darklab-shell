@@ -56,11 +56,6 @@ function _getNeighborTabIdAfterClose(idx, closingId) {
   return fallback ? fallback.id : null;
 }
 
-function refocusTabsTerminalInput() {
-  if (typeof focusAnyComposerInput !== 'function') return;
-  setTimeout(() => focusAnyComposerInput(), 0);
-}
-
 function updateTabScrollButtons() {
   const leftBtn = tabsScrollLeftBtn;
   const rightBtn = tabsScrollRightBtn;
@@ -85,7 +80,7 @@ function scrollTabsBar(direction) {
   if (!tabsBar || typeof tabsBar.scrollBy !== 'function') return;
   tabsBar.scrollBy({ left: direction * 220, behavior: 'smooth' });
   setTimeout(updateTabScrollButtons, 180);
-  refocusTabsTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function setupTabScrollControls() {
@@ -280,7 +275,7 @@ function _onTouchDragEnd(e) {
   updateTabScrollButtons();
   ensureActiveTabVisible(activeTabId);
   _tabDragSuppressClickUntil = Date.now() + (state.source === 'touch' ? 220 : 140);
-  if (state.id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+  if (state.id === activeTabId) refocusComposerAfterAction();
 }
 
 function _startTouchTabDrag(tab, id, e) {
@@ -599,7 +594,7 @@ function createTab(label) {
     if (e.target.closest('.welcome-command-loadable')) return;
     // Don't steal focus while the user has text selected — they may be about to copy.
     if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
   });
   document.addEventListener('click', () => {
     document.querySelectorAll('.save-menu-wrap.open').forEach(w => w.classList.remove('open'));
@@ -701,7 +696,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   }
   resetCmdHistoryNav();
   if (typeof syncActiveRunTimer === 'function') syncActiveRunTimer(id);
-  if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  if (focusComposer) refocusComposerAfterAction({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   updateOutputFollowButton(id);
   if (typeof refreshHudActions === 'function') refreshHudActions(id);
@@ -1169,7 +1164,7 @@ async function permalinkTab(id) {
     ? await confirmPermalinkRedactionChoice()
     : (_shareRedactionEnabled() ? 'redacted' : 'raw');
   if (redactionMode !== 'raw' && redactionMode !== 'redacted') {
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
     return;
   }
   let shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
@@ -1193,6 +1188,6 @@ async function permalinkTab(id) {
     shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
   }).catch(() => showToast('Failed to create permalink', 'error'))
     .finally(() => {
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+      refocusComposerAfterAction();
     });
 }

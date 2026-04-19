@@ -58,13 +58,6 @@ function syncShellPrompt() {
   if (end < len) shellPromptText.appendChild(document.createTextNode(value.slice(end)));
 }
 
-function refocusTerminalInput() {
-  setTimeout(() => {
-    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return;
-    if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
-  }, 0);
-}
-
 function focusCommandInputFromGesture({ preventScroll = true } = {}) {
   if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
     const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
@@ -540,7 +533,7 @@ function openOptions() {
 
 function closeOptions() {
   hideOptionsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openThemeSelector() {
@@ -572,7 +565,7 @@ function openThemeSelector() {
 
 function closeThemeSelector() {
   hideThemeOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function isEditableTarget(target) {
@@ -624,7 +617,7 @@ function clearActiveShortcutTab() {
 function closeKillOverlay() {
   hideKillOverlay();
   pendingKillTabId = null;
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function getRememberedShareRedactionChoice() {
@@ -674,7 +667,7 @@ function cancelShareRedactionChoice() {
     _pendingShareRedactionResolver = null;
     resolver(null);
   }
-  if (wasOpen || hadPending) refocusTerminalInput();
+  if (wasOpen || hadPending) refocusComposerAfterAction({ defer: true });
 }
 
 function confirmPermalinkRedactionChoice() {
@@ -850,7 +843,7 @@ function confirmPendingKill() {
     doKill(pendingKillTabId);
     pendingKillTabId = null;
   }
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function eventMatchesCode(e, code) {
@@ -1735,7 +1728,7 @@ function activateFaqCommandChip(cmd) {
   if (!cmd) return;
   setComposerValue(cmd + ' ');
   _closeMajorOverlays();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function wireFaqCommandChips(root = faqBody) {

@@ -527,7 +527,7 @@ async function loadAppFns({
     blurVisibleComposerInput,
     blurVisibleComposerInputIfMobile,
     _replayPromptShortcutAfterSelection,
-    refocusTerminalInput,
+    refocusComposerAfterAction,
     getVisibleComposerInput,
     getComposerValue,
     setRunButtonDisabled,
@@ -1818,14 +1818,14 @@ describe('app helpers', () => {
   })
 
   it('does not programmatically focus the mobile composer', async () => {
-    const { refocusTerminalInput, restoreViewport } = await loadAppFns({
+    const { refocusComposerAfterAction, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const cmdInput = document.getElementById('cmd')
     const mobileCmdInput = document.getElementById('mobile-cmd')
     document.body.classList.add('mobile-terminal-mode')
 
-    expect(refocusTerminalInput()).toBeUndefined()
+    expect(refocusComposerAfterAction({ defer: true })).toBeUndefined()
 
     expect(mobileCmdInput.focus).not.toHaveBeenCalled()
     expect(cmdInput.focus).not.toHaveBeenCalled()

@@ -76,19 +76,16 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 - **Phase dependencies** — Phases 1 (refocus) and 2 (pressable) are tightly coupled and should be **designed together** even if shipped incrementally: without Phase 2's press-clear path, Phase 1's refocus still leaves lingering highlight on `role="button"` elements (the concrete FAQ bug), and without Phase 1's refocus target, Phase 2's pressable has no coherent place to hand focus after activation. Phase 3 (disclosure) composes on top of Phase 2 — a disclosure trigger is a pressable. Phase 4 (dismissible) also composes on top of Phase 2 — close buttons and triggers are pressables. Build Phase 2 thick enough that Phases 3 and 4 don't need their own parallel activation paths.
 
-- **Phase 1: unify post-action focus and cleanup**
-  - `refocusComposerAfterAction()` already exists in `ui_helpers.js` and is the most complete of the current helpers (handles mobile/desktop split, `preventScroll`, fallback to `refocusTerminalInput`). The problem is that it is almost only used from `tabs.js`; everywhere else mixes `refocusTerminalInput()` (22 sites in `controller.js`, 6 in `app.js`), `focusAnyComposerInput()`, `runner.js`'s local `focusComposerInputAfterRun()`, raw `cmdInput.focus()`, or no refocus at all.
-  - The shared path should handle:
-    - returning focus to the visible desktop/mobile composer when appropriate
-    - skipping refocus for surfaces that intentionally retain focus
-    - clearing transient pressed/highlight state after click/tap activation
-    - remaining safe in mobile terminal viewport mode
-  - Convert repeated call sites first:
-    - desktop rail Recent / Workflows section toggles (`shell_chrome.js:193–194` — today they call no refocus helper; this is the concrete bug the user filed)
-    - FAQ expand/collapse controls (`app.js:1836`)
-    - `history.js` chip clicks and per-row action buttons (star/copy/permalink/delete) where the current cleanup is a manual `setTimeout(() => btn.blur(), 0)`
-    - `controller.js` chrome close/cancel handlers that call `refocusTerminalInput()` directly
-    - `runner.js` run-completion path — collapse `focusComposerInputAfterRun()` into the shared helper
+- **Phase 1: unify post-action focus and cleanup** — ✅ **Done (2026-04-19)**
+  - `refocusComposerAfterAction()` in `ui_helpers.js` is now the canonical refocus helper. It gained a `{ defer: true }` option to preserve the `setTimeout(0)` semantics of the retired `refocusTerminalInput()`, and `preventScroll` now defaults to `true` (eliminates scroll-into-view jank on chrome close).
+  - Retired: `refocusTerminalInput()` in `app.js`, `refocusTabsTerminalInput()` in `tabs.js`, `focusComposerInputAfterRun()` in `runner.js`, the raw `cmdInput.focus()` fallback in `ui_helpers.js`'s `hideSearchBar`.
+  - Migrated ~46 call sites across `controller.js` (20 + 2 keypress-redirect paths), `app.js` (6), `tabs.js` (6 + local wrapper removal), `welcome.js` (5), `runner.js` (3 + local wrapper removal), `autocomplete.js` (2), `shell_chrome.js` (1 rail Recent item click), `history.js` (1 chip click).
+  - Test harness updated (`tests/js/unit/app.test.js` export list + the `does not programmatically focus the mobile composer` case). All 475 Vitest, 731 pytest, 169 Playwright tests pass.
+  - **Intentionally not migrated** (mobile edit path, opposite semantics): 2 bare `focusAnyComposerInput({ preventScroll: true })` calls inside `performMobileEditAction` in `app.js` (lines 1060 and 1132 post-migration). Those force focus onto the mobile composer, whereas the canonical helper skips on mobile. A future phase will introduce a sibling `refocusMobileEditingInput()` helper for that path.
+  - **Pending follow-ups not part of Phase 1** (still open — roll into Phase 2 or a later phase):
+    - `history.js` per-row action buttons (star/copy/permalink/delete) still use `setTimeout(() => btn.blur(), 0)` for cleanup (Phase 2 pressable target).
+    - Desktop rail Recent / Workflows section toggles (`shell_chrome.js:193–194`) do not currently call any refocus helper. Adding refocus here is blocked on Phase 2's press-clear path — without it, the rail section headers' `role="button"` divs will keep their press highlight even after focus returns to the composer. Phase 2 will address both simultaneously.
+    - FAQ expand/collapse controls (`app.js:1836`) — same as above, blocked on Phase 2.
 
 - **Phase 2: add a reusable pressable helper** (build this before the disclosure helper — a disclosure is a pressable that toggles state, and the concrete "press highlight lingers" bug is a pressable-level problem that occurs whether or not the control also toggles a panel)
   - Generalise the consistency approach already used by `bindMobileSheet()` so non-sheet UI controls can share one activation model for click / tap / keyboard behavior.

@@ -477,7 +477,7 @@ function renderHistory() {
     chip.addEventListener('click', () => {
       chip.blur();
       setComposerValue(cmd, cmd.length, cmd.length);
-      if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
+      if (refocusComposerAfterAction({ preventScroll: true })) return;
       resetCmdHistoryNav();
     });
     histRow.appendChild(chip);

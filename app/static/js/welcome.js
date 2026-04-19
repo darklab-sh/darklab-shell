@@ -274,12 +274,12 @@ function cancelWelcome(tabId = null) {
   _resetWelcomePlan();
   if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
+    refocusComposerAfterAction({ defer: true });
     setTimeout(() => {
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
       if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
     }, 0);
   }
-  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+  refocusComposerAfterAction();
   if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   return true;
 }
@@ -417,7 +417,7 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
   function loadCommand() {
     if (!interactive) return;
     if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
     setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
     // Defer so the document click handler has already run before autocomplete updates.
     setTimeout(() => {
@@ -464,7 +464,7 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
     const boundCmdText = line.querySelector('.welcome-command-text');
     function loadCommand() {
       if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+      refocusComposerAfterAction();
       setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
       setTimeout(() => {
         if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
@@ -653,7 +653,7 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
   await _showWelcomeHint(tabId, current, true);
   if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
     if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   }
 
