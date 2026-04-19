@@ -27,6 +27,8 @@ const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/state.js'), 'ut
 const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_helpers.js'), 'utf8')
 const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_pressable.js'), 'utf8')
 const UI_DISCLOSURE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_disclosure.js'), 'utf8')
+const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_dismissible.js'), 'utf8')
+const UI_OUTSIDE_CLICK_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_outside_click.js'), 'utf8')
 
 /** Minimal but complete in-memory Storage implementation. */
 export class MemoryStorage {
@@ -85,6 +87,10 @@ export function fromDomScript(relPath, globals, ...names) {
     '\n' +
     UI_DISCLOSURE_SRC +
     '\n' +
+    UI_DISMISSIBLE_SRC +
+    '\n' +
+    UI_OUTSIDE_CLICK_SRC +
+    '\n' +
     readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
   const globalNames = Object.keys(globals)
   const globalValues = Object.values(globals)
@@ -111,6 +117,10 @@ export function fromDomScripts(relPaths, globals, returnExpr, initCode = '') {
     UI_PRESSABLE_SRC +
     '\n' +
     UI_DISCLOSURE_SRC +
+    '\n' +
+    UI_DISMISSIBLE_SRC +
+    '\n' +
+    UI_OUTSIDE_CLICK_SRC +
     '\n' +
     initCode +
     '\n' +

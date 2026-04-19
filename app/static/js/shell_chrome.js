@@ -402,8 +402,7 @@
     // Save menu — shares .save-menu markup so existing CSS applies.
     const saveWrap = document.createElement('div');
     saveWrap.className = 'hud-save-wrap';
-    const saveBtn = _makeHudBtn('save', 'save-menu', e => {
-      e.stopPropagation();
+    const saveBtn = _makeHudBtn('save', 'save-menu', () => {
       saveWrap.classList.toggle('open');
     }, 'hud-action-btn', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');
@@ -438,8 +437,10 @@
       if (typeof clearTab === 'function') clearTab(id, { preserveRunState: true });
     }, 'hud-action-btn', 'Clear active tab (Ctrl+L)'));
 
-    document.addEventListener('click', e => {
-      if (!e.target.closest?.('.hud-save-wrap')) _closeHudSaveMenu();
+    bindOutsideClickClose(saveWrap, {
+      triggers: saveBtn,
+      isOpen: () => saveWrap.classList.contains('open'),
+      onClose: () => _closeHudSaveMenu(),
     });
   }
 

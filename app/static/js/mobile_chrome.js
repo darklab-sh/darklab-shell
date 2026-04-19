@@ -214,8 +214,18 @@
       }
     }, true);
   });
-  menuSheetScrim?.addEventListener('click', closeMenuSheet);
-  menuSheetCloseBtn?.addEventListener('click', closeMenuSheet);
+  // Scrim click + close button + Escape are owned by bindDismissible
+  // (ui_dismissible.js) so every sheet/panel/modal surface uses the same
+  // registry-driven close cascade instead of hand-rolled wiring.
+  if (typeof global.bindDismissible === 'function') {
+    global.bindDismissible(menuSheet, {
+      level: 'sheet',
+      isOpen: isMenuSheetOpen,
+      onClose: closeMenuSheet,
+      backdropEl: menuSheetScrim,
+      closeButtons: menuSheetCloseBtn,
+    });
+  }
 
   // ── 2D: Recent peek ─────────────────────────────────────────────
   function readCmdHistory() {
@@ -450,8 +460,18 @@
     return !!(recentsSheet && recentsSheet.classList && !recentsSheet.classList.contains('u-hidden'));
   }
 
-  recentsSheetScrim?.addEventListener('click', closeRecentsSheet);
-  recentsSheetCloseBtn?.addEventListener('click', closeRecentsSheet);
+  // Scrim click + close button + Escape are owned by bindDismissible so
+  // the sheet participates in the unified modal > sheet > panel Escape
+  // cascade (see ui_dismissible.js).
+  if (typeof global.bindDismissible === 'function') {
+    global.bindDismissible(recentsSheet, {
+      level: 'sheet',
+      isOpen: isRecentsSheetOpen,
+      onClose: closeRecentsSheet,
+      backdropEl: recentsSheetScrim,
+      closeButtons: recentsSheetCloseBtn,
+    });
+  }
   recentsSheetClearBtn?.addEventListener('click', () => {
     if (typeof global.confirmHistAction === 'function') {
       global.confirmHistAction('clear');
@@ -606,16 +626,14 @@
   recentsDropdowns.forEach(wrap => {
     const key = wrap.dataset.recentsDropdown;
     const trigger = wrap.querySelector('.sheet-filter-dropdown');
-    trigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
+    trigger?.addEventListener('click', () => {
       const open = wrap.classList.contains('open');
       _closeRecentsDropdowns(open ? null : wrap);
       wrap.classList.toggle('open', !open);
       trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
     });
     wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
-      opt.addEventListener('click', (e) => {
-        e.stopPropagation();
+      opt.addEventListener('click', () => {
         _recentsFilterState[key] = opt.dataset.dropdownValue;
         wrap.classList.remove('open');
         trigger?.setAttribute('aria-expanded', 'false');
@@ -625,10 +643,18 @@
     });
   });
 
-  // Close dropdowns on outside click within the sheet.
-  recentsSheet?.addEventListener('click', (e) => {
-    if (!e.target.closest?.('[data-recents-dropdown]')) _closeRecentsDropdowns();
-  });
+  // Close dropdowns on ambient click anywhere in the recents sheet that
+  // doesn't land inside a dropdown. bindOutsideClickClose owns the trigger
+  // exemption: clicks on the dropdown triggers / option items bubble up but
+  // are skipped because they're inside [data-recents-dropdown].
+  if (recentsSheet && typeof bindOutsideClickClose === 'function') {
+    bindOutsideClickClose(null, {
+      scope: recentsSheet,
+      isOpen: () => recentsDropdowns.some(w => w.classList.contains('open')),
+      onClose: () => _closeRecentsDropdowns(),
+      exemptSelectors: ['[data-recents-dropdown]'],
+    });
+  }
 
   recentsFilterStarred?.addEventListener('click', () => {
     _recentsFilterState.starred = !_recentsFilterState.starred;
@@ -646,12 +672,10 @@
     _recentsRenderList();
   });
 
-  // Escape dismisses whichever sheet is on top.
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (isRecentsSheetOpen()) { e.preventDefault(); closeRecentsSheet(); return; }
-    if (isMenuSheetOpen()) { e.preventDefault(); closeMenuSheet(); }
-  });
+  // Escape-to-close is owned by bindDismissible's unified dispatcher
+  // (closeTopmostDismissible). The sheets are registered above so they
+  // participate in the same modal > sheet > panel cascade as every
+  // other surface.
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
   function openRecentsFromPeek() { showRecentsSheet(); }

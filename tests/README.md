@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 518
+- `vitest`: 566
 - `playwright`: 171
-- total: 1,525
+- total: 1,573
 
 This document is organized in two parts:
 
@@ -1710,6 +1710,64 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `clearPressStyle:true is forwarded to bindPressable (data-attr lifecycle)` | Verifies clearPressStyle is delegated to the underlying pressable. |
 | `Enter/Space activates disclosure on role="button" divs (inherits from pressable)` | Verifies keyboard activation works through the bindPressable composition. |
 | `sets data-disclosure-bound marker on the trigger` | Verifies the idempotency marker is set. |
+
+#### `ui_dismissible.test.js`
+
+| Test | Description |
+| --- | --- |
+| `returns null when el is missing` | Verifies guard against missing overlay element. |
+| `returns null when opts is missing` | Verifies guard against missing options bag. |
+| `returns null for unknown level` | Verifies guard against levels outside modal/sheet/panel. |
+| `returns null when onClose is not a function` | Verifies the helper fails closed without a close callback. |
+| `is idempotent via data-dismissible-bound` | Verifies the idempotency guard prevents duplicate bindings. |
+| `closes when click target is the overlay itself` | Verifies default backdrop click (target === el) closes the surface. |
+| `does not close when click target is a child` | Verifies clicks on inner content do not trigger backdrop dismissal. |
+| `skips backdrop wiring when closeOnBackdrop is false` | Verifies closeOnBackdrop:false disables backdrop dismissal entirely. |
+| `does not call onClose when isOpen returns false` | Verifies the helper respects the runtime isOpen guard. |
+| `uses backdropEl override instead of el` | Verifies sheets can route backdrop dismissal through a separate scrim element. |
+| `backdropEl: null disables backdrop wiring entirely` | Verifies callers can opt out of backdrop dismissal with a null backdrop. |
+| `wires a single close button` | Verifies closeButtons accepts a single element. |
+| `wires an array of close buttons` | Verifies closeButtons accepts an array. |
+| `ignores falsy entries in the closeButtons array` | Verifies the helper tolerates null/undefined entries in the array. |
+| `does not call onClose when surface is closed` | Verifies close-button clicks are gated by isOpen. |
+| `uses bindPressable when available so Enter activates the close button` | Verifies the helper composes on top of bindPressable for close buttons. |
+| `falls back to plain click listener when bindPressable is unavailable` | Verifies graceful degradation when the pressable helper is absent. |
+| `respects a pre-existing pressable binding on the close button` | Verifies the helper does not double-bind an already-bound button. |
+| `isOpen() mirrors the supplied isOpen fn` | Verifies the handle reflects the runtime open state. |
+| `close() calls onClose when open` | Verifies the imperative close path. |
+| `close() is a no-op when closed` | Verifies handle.close() respects the closed state. |
+| `dispose() removes the entry from the registry` | Verifies dispose unregisters so closeTopmostDismissible no longer sees it. |
+| `dispose() clears the bound marker so the element can rebind` | Verifies dispose clears data-dismissible-bound for rebinding. |
+| `returns false and does nothing when nothing is open` | Verifies closeTopmostDismissible is a no-op when no dismissible is open. |
+| `modal beats sheet beats panel` | Verifies the modal > sheet > panel priority ordering. |
+| `sheet wins over panel when no modal is open` | Verifies sheets outrank panels. |
+| `most recently registered wins within the same level` | Verifies within-level ordering favours the most recent registration. |
+| `skips entries that report closed` | Verifies closed entries are ignored during cascade dispatch. |
+| `closes only one surface per call` | Verifies closeTopmostDismissible closes at most one surface. |
+
+#### `ui_outside_click.test.js`
+
+| Test | Description |
+| --- | --- |
+| `accepts a null panel and exempts purely via triggers/selectors` | Verifies the helper allows callers with no single containing element to use exempt selectors only. |
+| `returns null when opts is missing` | Verifies guard against missing options bag. |
+| `returns null when isOpen is not a function` | Verifies the helper fails closed without an isOpen predicate. |
+| `returns null when onClose is not a function` | Verifies the helper fails closed without a close callback. |
+| `returns a handle with dispose()` | Verifies the caller receives a disposable handle. |
+| `closes when click lands outside the panel` | Verifies ambient dismissal fires when the click target is outside the panel. |
+| `does not close when click lands inside the panel` | Verifies nested clicks inside the panel are skipped. |
+| `does not close when click lands on the panel element itself` | Verifies direct clicks on the panel root are skipped. |
+| `does not close when isOpen() returns false` | Verifies the helper respects the runtime isOpen guard. |
+| `does not close when click lands on a registered trigger` | Verifies the trigger-exemption contract for direct clicks on the trigger. |
+| `does not close when click lands inside a registered trigger` | Verifies the trigger-exemption contract covers nested clicks inside the trigger. |
+| `accepts an array of triggers and exempts each one` | Verifies triggers accepts an array. |
+| `ignores falsy entries in the triggers array` | Verifies the helper tolerates null/undefined entries in the array. |
+| `does not close when the click target matches an exempt selector` | Verifies exempt selectors short-circuit the close. |
+| `does not close when the click target is nested inside an exempt selector` | Verifies exempt selectors match via closest(). |
+| `accepts an array of exempt selectors` | Verifies multiple exempt selectors are supported. |
+| `only fires when clicks land inside the scope` | Verifies scope override scopes the listener to a subtree. |
+| `dispose() removes the listener so further clicks do not close` | Verifies dispose detaches the handler. |
+| `dispose() on a scope-override handle removes the listener from that scope` | Verifies dispose on a scoped handle removes the listener from its scope. |
 
 #### `utils.test.js`
 

@@ -536,6 +536,13 @@ function _createTabPanel(id) {
   terminalBody.appendChild(terminalActions);
 
   panel.appendChild(terminalBody);
+  if (typeof bindOutsideClickClose === 'function') {
+    bindOutsideClickClose(saveWrap, {
+      triggers: saveBtn,
+      isOpen: () => saveWrap.classList.contains('open'),
+      onClose: () => saveWrap.classList.remove('open'),
+    });
+  }
   return { panel, output, terminalBody };
 }
 
@@ -596,9 +603,6 @@ function createTab(label) {
     if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;
     refocusComposerAfterAction();
   });
-  document.addEventListener('click', () => {
-    document.querySelectorAll('.save-menu-wrap.open').forEach(w => w.classList.remove('open'));
-  });
   panel.querySelectorAll('[data-action]').forEach(btn => {
     const action = btn.dataset.action;
     // save-menu is a disclosure trigger: keep the dropdown-open affordance by
@@ -607,7 +611,7 @@ function createTab(label) {
     const isDisclosure = action === 'save-menu';
     bindPressable(btn, {
       refocusComposer: !isDisclosure,
-      onActivate: e => {
+      onActivate: () => {
         if (typeof useMobileTerminalViewportMode === 'function'
           && useMobileTerminalViewportMode()
           && typeof blurVisibleComposerInputIfMobile === 'function') {
@@ -618,9 +622,12 @@ function createTab(label) {
         if (action === 'copy')      copyTab(id);
         if (action === 'permalink') permalinkTab(id);
         if (action === 'save-menu') {
-          e.stopPropagation(); // prevent the document close-handler from immediately collapsing the menu
           btn.closest('.save-menu-wrap').classList.toggle('open');
           return;
+        }
+        if (action === 'save-txt' || action === 'save-html' || action === 'save-pdf') {
+          const wrap = btn.closest('.save-menu-wrap');
+          if (wrap) wrap.classList.remove('open');
         }
         if (action === 'save-txt')  saveTab(id);
         if (action === 'save-html') exportTabHtml(id);
