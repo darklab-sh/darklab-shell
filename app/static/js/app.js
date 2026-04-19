@@ -1801,6 +1801,7 @@ function renderFaqItems(items) {
   // special UI sections are still wired client-side after the HTML is inserted.
   if (!faqBody) return;
   faqBody.innerHTML = '';
+  const faqHandles = [];
   (items || []).forEach(item => {
     const div = document.createElement('div');
     div.className = 'faq-item';
@@ -1825,31 +1826,22 @@ function renderFaqItems(items) {
 
     q.setAttribute('role', 'button');
     q.setAttribute('tabindex', '0');
-    q.setAttribute('aria-expanded', 'false');
-    // FAQ is a disclosure surface. role="button" divs never receive DOM focus
-    // from click, so blur alone won't clear sticky :hover highlights — opt
-    // into clearPressStyle. Keep focus on the question so keyboard users can
-    // continue tabbing through items (no composer refocus).
-    bindPressable(q, {
-      refocusComposer: false,
+    // FAQ question is a disclosure trigger. role="button" divs never receive
+    // DOM focus from click, so the pressable's blur is a no-op — the
+    // disclosure helper inherits clearPressStyle to punch through sticky
+    // :hover highlights.
+    faqHandles.push(bindDisclosure(q, {
+      panel: div,
+      openClass: 'faq-open',
       clearPressStyle: true,
-      onActivate: () => {
-        const open = div.classList.toggle('faq-open');
-        q.setAttribute('aria-expanded', String(open));
-      },
-    });
+    }));
 
     div.appendChild(q);
     div.appendChild(a);
     faqBody.appendChild(div);
   });
 
-  const firstItem = faqBody.querySelector('.faq-item');
-  if (firstItem) {
-    firstItem.classList.add('faq-open');
-    const firstQ = firstItem.querySelector('.faq-q');
-    if (firstQ) firstQ.setAttribute('aria-expanded', 'true');
-  }
+  if (faqHandles[0]) faqHandles[0].open();
 
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);

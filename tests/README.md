@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 495
+- `vitest`: 518
 - `playwright`: 171
-- total: 1,502
+- total: 1,525
 
 This document is organized in two parts:
 
@@ -1682,6 +1682,34 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does nothing when el is null` | Verifies guard against missing element. |
 | `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
 | `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
+
+#### `ui_disclosure.test.js`
+
+| Test | Description |
+| --- | --- |
+| `initializes aria-expanded=false when closed and does not set openClass on the panel` | Verifies initial sync applies the closed state to trigger and panel. |
+| `initializes aria-expanded=true and sets openClass when initialOpen=true` | Verifies initialOpen:true is honoured on the initial sync. |
+| `toggles aria-expanded and openClass on click` | Verifies click activation flips both the trigger aria state and the panel class. |
+| `supports a custom openClass (e.g. faq-open)` | Verifies callers can override the default 'open' class. |
+| `supports hiddenClass (inverse) for u-hidden-style panels` | Verifies inverse-class toggling for panels that hide via a `u-hidden`-style class. |
+| `does NOT touch panel classes when panel is null (caller owns visibility)` | Verifies the helper stays out of class mutation when panel is null (rail sections case). |
+| `emits onToggle only on user transitions, not on initial sync` | Verifies onToggle is suppressed during the initial sync to avoid side effects on bind. |
+| `passes { trigger, panel } to onToggle` | Verifies onToggle receives the trigger and panel references. |
+| `returned handle exposes isOpen/open/close/toggle` | Verifies the imperative API surface on the returned handle. |
+| `open() is a no-op when already open (no onToggle fire)` | Verifies idempotency of the imperative open() call. |
+| `close() is a no-op when already closed (no onToggle fire)` | Verifies idempotency of the imperative close() call. |
+| `imperative open()/close()/toggle() DO emit onToggle when state changes` | Verifies the API methods fire onToggle on real transitions. |
+| `is idempotent — second bindDisclosure on the same trigger is a no-op` | Verifies the data-disclosure-bound guard prevents duplicate bindings. |
+| `stopPropagation:true stops click bubbling to document` | Verifies the stopPropagation opt-in for outside-click-close disclosures. |
+| `stopPropagation:false (default) lets click bubble to document` | Verifies default propagation is preserved. |
+| `returns null when trigger is falsy` | Verifies guard against missing trigger. |
+| `returns null when opts is falsy` | Verifies guard against missing options. |
+| `returns null when bindPressable is not on the global` | Verifies the helper fails closed without its pressable dependency. |
+| `does not refocus the composer by default (disclosures keep focus on trigger)` | Verifies the disclosure default opts out of composer refocus. |
+| `refocusComposer:true is forwarded to bindPressable` | Verifies callers can opt disclosures back into composer refocus. |
+| `clearPressStyle:true is forwarded to bindPressable (data-attr lifecycle)` | Verifies clearPressStyle is delegated to the underlying pressable. |
+| `Enter/Space activates disclosure on role="button" divs (inherits from pressable)` | Verifies keyboard activation works through the bindPressable composition. |
+| `sets data-disclosure-bound marker on the trigger` | Verifies the idempotency marker is set. |
 
 #### `utils.test.js`
 

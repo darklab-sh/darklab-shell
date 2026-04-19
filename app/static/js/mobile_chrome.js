@@ -168,16 +168,23 @@
     const name = (document.body && document.body.dataset && document.body.dataset.theme) || '';
     menuThemeHint.textContent = name;
   }
+  // Bind the timestamps sub-menu as a disclosure so aria-expanded and the
+  // submenu's u-hidden class stay coordinated. The handle is also used by
+  // openMenuSheet() to reset the sub-menu to collapsed each time the sheet
+  // opens (so the user never returns to a previously-expanded surface).
+  const tsToggleBtn = menuSheet?.querySelector('[data-menu-action="ts-toggle"]');
+  const tsSubmenuEl = document.getElementById('mobile-menu-ts-submenu');
+  const tsDisclosure = tsToggleBtn ? bindDisclosure(tsToggleBtn, {
+    panel: tsSubmenuEl,
+    openClass: null,
+    hiddenClass: 'u-hidden',
+  }) : null;
+
   function openMenuSheet() {
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
-    // Reset the timestamps sub-menu to collapsed each time the sheet opens so
-    // the user doesn't return to a previously-expanded surface state.
-    const tsToggle = menuSheet?.querySelector('[data-menu-action="ts-toggle"]');
-    const tsSubmenu = document.getElementById('mobile-menu-ts-submenu');
-    tsToggle?.setAttribute('aria-expanded', 'false');
-    tsSubmenu?.classList.add('u-hidden');
+    tsDisclosure?.close();
     show(menuSheetScrim);
     show(menuSheet);
   }
@@ -570,14 +577,21 @@
     _renderRecentsChips();
   }
 
-  recentsFiltersToggle?.addEventListener('click', () => {
-    const open = recentsFiltersToggle.getAttribute('aria-expanded') === 'true';
-    const next = !open;
-    recentsFiltersToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-    if (recentsFiltersExpanded) recentsFiltersExpanded.classList.toggle('u-hidden', !next);
-    if (!next) _closeRecentsDropdowns();
-    _recentsSyncFilterUI();
-  });
+  if (recentsFiltersToggle) {
+    bindDisclosure(recentsFiltersToggle, {
+      panel: recentsFiltersExpanded,
+      openClass: null,
+      hiddenClass: 'u-hidden',
+      onToggle: (open) => {
+        if (!open) _closeRecentsDropdowns();
+        // _recentsSyncFilterUI() rewrites the toggle label ("filters" vs
+        // "hide filters") using the just-synced aria-expanded value, so it
+        // must run after the helper's sync(), which is already the order
+        // onToggle fires in.
+        _recentsSyncFilterUI();
+      },
+    });
+  }
 
   let _recentsRootTimer = null;
   recentsFilterRoot?.addEventListener('input', (e) => {

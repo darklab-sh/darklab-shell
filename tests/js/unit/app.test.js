@@ -731,27 +731,19 @@ describe('app helpers', () => {
     expect(cmdInput.focus).toHaveBeenCalled()
   })
 
-  it('ts-toggle expands the inline sub-menu without closing the sheet', async () => {
+  it('ts-toggle does not close the mobile sheet (disclosure in mobile_chrome.js owns the submenu toggle)', async () => {
     await loadAppFns()
     const sheet = document.getElementById('mobile-menu-sheet')
     const toggle = sheet.querySelector('[data-menu-action="ts-toggle"]')
-    const submenu = document.getElementById('mobile-menu-ts-submenu')
 
     sheet.classList.remove('u-hidden')
-    expect(submenu.classList.contains('u-hidden')).toBe(true)
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
-
-    // Direct dispatch so the document-level outside-click listener (which
-    // dismisses the sheet for any click outside the menu in jsdom tests) can't
-    // interfere. The element-level binding is what we're verifying.
+    // Controller dispatcher is a no-op for ts-toggle and skips hideMobileMenu
+    // in the button click path; the inline submenu's aria-expanded / u-hidden
+    // lifecycle moved to bindDisclosure in mobile_chrome.js (covered in
+    // ui_disclosure.test.js). What this test still guarantees is that the
+    // ts-toggle click does not cascade into closing the parent sheet.
     window.dispatchMobileMenuAction('ts-toggle', toggle)
     expect(sheet.classList.contains('u-hidden')).toBe(false)
-    expect(submenu.classList.contains('u-hidden')).toBe(false)
-    expect(toggle.getAttribute('aria-expanded')).toBe('true')
-
-    window.dispatchMobileMenuAction('ts-toggle', toggle)
-    expect(submenu.classList.contains('u-hidden')).toBe(true)
-    expect(toggle.getAttribute('aria-expanded')).toBe('false')
   })
 
   it('ts-set applies the selected mode and closes the sheet', async () => {

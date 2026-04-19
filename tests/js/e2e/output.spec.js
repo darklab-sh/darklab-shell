@@ -213,14 +213,22 @@ test.describe('output follow helper', () => {
     })
     await expect(followBtn).toBeHidden()
 
-    await page.evaluate(() => {
-      const out = getOutput(activeTabId)
-      const tab = getTab(activeTabId)
-      setTabStatus(activeTabId, 'idle')
-      out.scrollTop = 0
-      tab.followOutput = false
-      updateOutputFollowButton(activeTabId)
-    })
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          setTabStatus(activeTabId, 'idle')
+          requestAnimationFrame(() =>
+            requestAnimationFrame(() => {
+              const out = getOutput(activeTabId)
+              const tab = getTab(activeTabId)
+              out.scrollTop = 0
+              tab.followOutput = false
+              updateOutputFollowButton(activeTabId)
+              resolve()
+            }),
+          )
+        }),
+    )
 
     await page.waitForFunction(() => {
       const tab = getTab(activeTabId)

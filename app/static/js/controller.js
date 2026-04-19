@@ -194,12 +194,11 @@ function dispatchMobileMenuAction(action, btn = null) {
     }
   }
   if (action === 'ts-toggle') {
-    // Inline expand so the user can see all three timestamp modes at once
-    // instead of tap-cycling blind through off → elapsed → clock.
-    const submenu = document.getElementById('mobile-menu-ts-submenu');
-    const expanded = btn?.getAttribute('aria-expanded') === 'true';
-    if (btn) btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-    submenu?.classList.toggle('u-hidden', expanded);
+    // The ts-toggle button is wired as a disclosure in mobile_chrome.js —
+    // bindDisclosure owns the aria-expanded / submenu visibility toggle via
+    // the pressable's own click handler. The dispatcher here returns early
+    // so the menu is not closed as a side effect (ts-toggle is the only
+    // menu action that keeps the sheet open).
     return;
   }
   if (action === 'ts-set') {

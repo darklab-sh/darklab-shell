@@ -162,19 +162,24 @@
   });
 
   // ── Section toggles ──────────────────────────────────────────────
-  function toggleRecent() {
-    ui.recentOpen = !ui.recentOpen;
+  // Rail section headers own their open/closed state via bindDisclosure.
+  // `panel: null` + `openClass: null` lets applySectionsState stay the sole
+  // writer of the `.closed` class on the section element (it has to
+  // coordinate both sections plus the splitter and sizing vars, so letting
+  // the helper also toggle classes would produce double-writes). The helper
+  // still owns aria-expanded on the header and the post-activation focus
+  // contract.
+  function onRecentToggle(open) {
+    ui.recentOpen = open;
+    writePref(PREF_RECENT, open ? '1' : '0');
     applySectionsState();
-    writePref(PREF_RECENT, ui.recentOpen ? '1' : '0');
   }
-  function toggleWorkflows() {
-    const wasOpen = ui.workflowsOpen;
-    ui.workflowsOpen = !wasOpen;
-    writePref(PREF_WORKFLOWS, ui.workflowsOpen ? '1' : '0');
-    if (!ui.workflowsOpen) ui.recentHeight = null; // reset auto-size next open
+  function onWorkflowsToggle(open) {
+    ui.workflowsOpen = open;
+    writePref(PREF_WORKFLOWS, open ? '1' : '0');
+    if (!open) ui.recentHeight = null; // reset auto-size next open
     applySectionsState();
-
-    if (ui.workflowsOpen && ui.recentOpen && ui.recentHeight == null) {
+    if (open && ui.recentOpen && ui.recentHeight == null) {
       // Auto-size Recent: measure Workflows natural height and leave Recent ≥120px.
       requestAnimationFrame(() => {
         if (!railSplitArea || !railWorkflowsBody) return;
@@ -190,13 +195,21 @@
     }
   }
 
-  // Rail section headers are disclosure triggers — leave focus on the header
-  // (or naturally move on) rather than yanking it back to the composer.
   if (railRecentHeader) {
-    bindPressable(railRecentHeader, { refocusComposer: false, onActivate: toggleRecent });
+    bindDisclosure(railRecentHeader, {
+      panel: null,
+      openClass: null,
+      initialOpen: ui.recentOpen,
+      onToggle: onRecentToggle,
+    });
   }
   if (railWorkflowsHeader) {
-    bindPressable(railWorkflowsHeader, { refocusComposer: false, onActivate: toggleWorkflows });
+    bindDisclosure(railWorkflowsHeader, {
+      panel: null,
+      openClass: null,
+      initialOpen: ui.workflowsOpen,
+      onToggle: onWorkflowsToggle,
+    });
   }
 
   // ── Recent list rendering ───────────────────────────────────────
