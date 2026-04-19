@@ -40,31 +40,60 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 
 ## Shell Prompt
 
-The shell maintains a terminal-style prompt flow throughout each session:
+**Purpose:** terminal-style prompt flow that mirrors real shell transcript semantics for command echo, blank-Enter, and Ctrl+C handling.
 
-- Submitted commands are echoed inline above their output so the transcript reads like a real terminal session
-- Pressing **Enter** on a blank prompt adds a fresh prompt line without calling `/run`
-- **Ctrl+C** is context-aware: while a command is running it opens a kill confirmation dialog; while the tab is idle it drops a new prompt line
-- After highlighting transcript text on desktop, **ArrowUp**, **ArrowDown**, **Enter**, and **Ctrl+R** return control to the prompt without clearing the selection
+**Behavior:**
 
-While a command is running the live input prompt hides so output has full focus. Once the command completes the prompt reappears immediately.
+- Submitted commands are echoed inline above their output so the transcript reads like a real terminal session.
+- Pressing **Enter** on a blank prompt adds a fresh prompt line without calling `/run`.
+- **Ctrl+C** is context-aware: while a command is running it opens a kill confirmation dialog; while the tab is idle it drops a new prompt line.
+- After highlighting transcript text on desktop, **ArrowUp**, **ArrowDown**, **Enter**, and **Ctrl+R** return control to the prompt without clearing the selection.
+- While a command is running the live input prompt hides so output has full focus; once the command completes the prompt reappears immediately.
+
+**Limits:** prompt flow is per-tab; selection-preserving key routing applies to desktop only (mobile uses native touch selection).
+
+**Configuration:** none — prompt semantics are not user-tunable.
+
+**Related files:** `app/static/js/controller.js` (composer + keypress dispatch), `app/static/js/runner.js` (echo on submit + prompt hide/show around `/run`).
 
 ---
 
 ## Recent Commands
 
-Recent commands are surfaced in two places: the desktop rail's Recent section (clickable chips that load a command into the prompt), and on mobile a persistent "Recent" peek row between the transcript and the composer that shows a count plus a one-line preview and opens a full pull-up recents sheet on tap. The sheet lists recent runs as tappable rows with per-row copy / permalink / restore actions, search, filter chips (root / exit / date / starred), and a clear-all control. Both surfaces show the most recent distinct commands up to the `recent_commands_limit` configured in `config.yaml` (default 8), are hidden until there is at least one command in history, and update live as commands are run.
+**Purpose:** quick access to the most recent commands from the current session without opening the full history drawer.
+
+**Behavior:**
+
+- Desktop rail's `Recent` section renders clickable chips that load a command into the prompt when tapped.
+- Mobile surfaces a persistent `Recent` peek row between the transcript and the composer showing a count plus a one-line preview; tapping opens a full pull-up recents sheet.
+- The mobile recents sheet lists recent runs as tappable rows with per-row copy / permalink / restore actions, search, filter chips (root / exit / date / starred), and a clear-all control.
+- Both surfaces update live as commands are run.
+
+**Limits:** the most recent distinct commands only; hidden entirely until there is at least one command in history; entry count capped at `recent_commands_limit`.
+
+**Configuration:** `recent_commands_limit` in `config.yaml` (default 8).
+
+**Related files:** `app/static/js/shell_chrome.js` (desktop rail), `app/static/js/mobile_chrome.js` (mobile peek + sheet), `app/conf/config.yaml`.
 
 ---
 
 ## Autocomplete
 
-Autocomplete suggestions are loaded from `conf/autocomplete.yaml` at page load and matched against what you type. Suggestions are rendered as a terminal-style vertical list aligned with the command text (after the prompt prefix), and the matched portion is highlighted in green.
+**Purpose:** shell-like completion that expands to the longest shared prefix, cycles matches, and surfaces context-aware flag and value hints per tool.
 
-Placement rules:
-- The list opens below the prompt when there is room
-- If space below is tight, it flips above the prompt
-- When shown above, suggestions keep their normal top-to-bottom order so keyboard navigation stays consistent with the below-prompt view
+**Behavior:**
+
+- Suggestions load from `conf/autocomplete.yaml` at page load and match what the user types; the matched portion is highlighted in green.
+- The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
+- `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
+- After a known command root, the dropdown switches to contextual flag/value hints for that tool; after `|`, it switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
+- Already-used singleton-style flags are suppressed from contextual suggestions.
+
+**Limits:** completions come only from the static YAML file(s); there is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
+
+**Configuration:** `conf/autocomplete.yaml` (plus optional `conf/autocomplete.local.yaml`). Reloaded by the browser at page load — no server restart needed.
+
+**Related files:** `app/static/js/autocomplete.js`, `app/conf/autocomplete.yaml`.
 
 **Keyboard controls:**
 
@@ -75,17 +104,6 @@ Placement rules:
 | **Shift+Tab** | Cycle suggestions backward |
 | **Enter** | Accept highlighted suggestion, or run the command if none selected |
 | **Escape** | Dismiss the dropdown |
-
-Completion behavior is intentionally shell-like rather than picker-like:
-
-- if there is only one match, `Tab` accepts it immediately
-- if multiple matches share a longer common prefix than what you typed, the first `Tab` expands to that shared prefix
-- once no longer shared prefix remains, repeated `Tab` presses move the highlight through the current matches
-- `Enter` accepts the currently highlighted match
-- once a known command root is in place, the dropdown can switch to contextual flag/value hints for that tool and only replaces the current token instead of the whole command
-- at `command `, contextual mode can show positional hints alongside flags so required arguments stay visible before you type them
-- after `command |`, contextual mode can switch into the supported built-in pipe stage and suggest `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, then narrow to stage-specific flags and count hints
-- already-used singleton-style flags are suppressed from contextual suggestions so the dropdown stays focused on the next useful options
 
 **Structured context format**
 
@@ -242,21 +260,40 @@ To update suggestions, edit `conf/autocomplete.yaml` and/or `conf/autocomplete.l
 
 ## Reverse-History Search
 
-`Ctrl+R` opens an interactive history search mode inline at the prompt:
+**Purpose:** bash-style `Ctrl+R` search across the full session history — not just the in-memory recent-commands cache.
 
-- The dropdown does not appear until the first character is typed
-- Typing filters commands from the full session history in real time — the search queries the same server-side history the history drawer uses, so commands from earlier in the session or previous days are always reachable
-- Results are capped at 10; narrowing the query further surfaces deeper matches
-- **Enter** accepts the highlighted command and runs it immediately
-- **Tab** accepts the highlighted command without running it, leaving it editable in the prompt
-- **Ctrl+R** again cycles forward through the current matches
-- **Escape** dismisses the search and restores whatever draft was in the prompt before `Ctrl+R` was pressed
+**Behavior:**
+
+- `Ctrl+R` opens an interactive history search mode inline at the prompt; the dropdown does not appear until the first character is typed.
+- Typing filters commands from the full session history in real time — the search queries the same server-side history the history drawer uses, so commands from earlier in the session or previous days are always reachable.
+- **Enter** accepts the highlighted command and runs it immediately.
+- **Tab** accepts the highlighted command without running it, leaving it editable in the prompt.
+- **Ctrl+R** again cycles forward through the current matches.
+- **Escape** dismisses the search and restores whatever draft was in the prompt before `Ctrl+R` was pressed.
+
+**Limits:** results are capped at 10 entries — narrowing the query further surfaces deeper matches.
+
+**Configuration:** none — behavior is not user-tunable.
+
+**Related files:** `app/static/js/controller.js` (Ctrl+R keybinding + dropdown), `app/blueprints/history.py` (server-side history query).
 
 ---
 
 ## Keyboard Shortcuts
 
-On macOS, `Option` is the key used for the app-safe `Alt` shortcuts. The `Ctrl+...` bindings are intentional shell-style controls and are separate from browser `Command` shortcuts.
+**Purpose:** app-safe chords for tab lifecycle, active-tab actions, and readline-style prompt editing, surfaced through both the `?` overlay and the `shortcuts` built-in.
+
+**Behavior:**
+
+- Tab chords use `Option`/`Alt` to avoid fighting browser `Ctrl`/`Cmd` bindings; terminal chords use `Ctrl` in the readline tradition.
+- The `?` overlay opens from anywhere on the page (including the empty prompt); `shortcuts` prints the same reference as a text dump.
+- Both surfaces read from a single canonical list via `GET /shortcuts`, so they cannot drift.
+
+**Limits:** browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are optional fallbacks only — browser interception is inconsistent across environments, especially on macOS.
+
+**Configuration:** none — the chord list is defined in `app/fake_commands.py` and not user-tunable.
+
+**Related files:** `app/static/js/app.js` (`handleTabShortcut` / `handleChromeShortcut` / `handleActionShortcut`), `app/static/js/controller.js` (document keydown cascade), `app/fake_commands.py` (`_CURRENT_SHORTCUTS`), `app/blueprints/content.py` (`GET /shortcuts`).
 
 Shipped app-safe shortcuts:
 
@@ -293,43 +330,62 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ## Output Streaming and Display
 
-**Real-time streaming**
+**Purpose:** low-latency SSE streaming with a live tail, per-line prefix toggles (timestamps and line numbers), and an explicit stall notice when the connection silently drops.
 
-Command output arrives line by line over SSE. Fast commands batch flushes to avoid overwhelming the browser; slow or long-running scans stream each line as it arrives. The output view follows the live tail automatically until you scroll away.
+**Behavior:**
 
-When the SSE connection silently drops mid-run, the shell detects the stall and shows an inline notice so you know to investigate rather than waiting indefinitely.
+- Command output arrives line-by-line over SSE; fast commands batch flushes, slow scans stream each line as it arrives.
+- The output view follows the live tail automatically; scrolling away surfaces a tab-scoped jump-to-live / jump-to-bottom helper that disappears once the tail is rejoined.
+- A live elapsed run-timer sits next to the status pill while a command runs; the final elapsed time is recorded in the exit line.
+- Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu); both are rendered from shared per-line prefix metadata so toggling updates existing output in place without re-fetching.
+- When the SSE connection silently drops mid-run, the shell detects the stall and shows an inline notice instead of waiting indefinitely.
 
-**Run timer**
+**Limits:** stall detection fires after 45 seconds of silence per tab; each tab has its own stall timeout so concurrent runs don't interfere.
 
-A live elapsed timer sits next to the status pill while a command runs. The final elapsed time is recorded in the exit line so you can see how long a completed scan took.
+**Configuration:** timestamp and line-number preferences persist in `localStorage`; both are off by default.
 
-**Timestamps and line numbers**
-
-Both are off by default and can be toggled independently from the tabbar's inline controls (and from the mobile menu):
-
-- **Elapsed timestamps** — show time-since-start for each line
-- **Clock timestamps** — show wall-clock time for each line
-- **Line numbers** — sequential line count from the start of output
-
-Both modes are rendered from shared per-line prefix metadata, so toggling them updates existing output in place without re-fetching anything. Preferences are saved in `localStorage` and persist across sessions.
-
-**Live tail helper**
-
-When you scroll away from the bottom of a streaming tab, a jump-to-live / jump-to-bottom button appears. It is scoped to the active tab and disappears once you return to the tail.
+**Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run.py` (server-side SSE generator).
 
 ---
 
 ## Kill Running Processes
 
-Each tab shows a **■ Kill** button while a command is running. Clicking it opens a confirmation dialog before sending `SIGTERM` to the full process group, so accidental clicks don't interrupt a long scan.
+**Purpose:** operator-initiated termination of a running command via `SIGTERM` to the full process group, with a confirmation step to guard against accidental interrupts.
 
-`Enter` confirms and `Escape` cancels the dialog, matching the button labels. The same confirmation flow applies whether you use the button or `Ctrl+C`.
+**Behavior:**
+
+- Each tab shows a **■ Kill** button while a command is running; clicking it opens a confirmation dialog before sending `SIGTERM` to the full process group.
+- `Enter` confirms and `Escape` cancels the dialog, matching the button labels.
+- `Ctrl+C` routes through the same confirmation flow while a command is running.
+
+**Limits:** kill dispatches from any Gunicorn worker — PID lookup goes through Redis so the request doesn't have to hit the worker that started the process. See [DECISIONS.md](DECISIONS.md) `Multi-worker Process Killing via Redis`.
+
+**Configuration:** none — the kill path is not user-tunable.
+
+**Related files:** `app/static/js/runner.js` (client-side kill + confirmation dialog), `app/blueprints/run.py` (`POST /kill`), `app/process.py` (`pid_register` / `pid_pop`).
 
 ---
 
 ## Status HUD
 
-The persistent bottom bar on desktop surfaces eleven live pills that describe the current run, transport, and environment state. The left cluster covers run state, connection, and identity; the right cluster carries the output actions (share, copy, save, clear, kill). Pills start with a muted `—` placeholder at page load and transition to live values on the first poll.
+**Purpose:** a persistent desktop status surface that consolidates run state, connection health, session identity, and environment telemetry into one scanable row without displacing the terminal.
+
+**Behavior:**
+
+- The bottom bar renders eleven live pills on desktop: the left cluster covers run state, connection, and identity; the right cluster carries the output actions (share, copy, save, clear, kill).
+- Pills start with a muted `—` placeholder at page load and transition to live values on the first poll.
+- Server state is polled via `GET /status` every 15 seconds; uptime is interpolated locally between polls so the pill never looks frozen; the UTC clock ticks once per second in the browser.
+- Latency is measured client-side with `performance.now()` around the fetch call.
+- On narrow desktop widths the pill row falls back to horizontal overflow scrolling so the right-side HUD actions never get pushed off-screen.
+- Mobile hides the HUD entirely; per-tab status and exit codes remain visible inline next to the prompt echo, and the run-notifications toggle in the Options modal covers the background-watch use case.
+
+**Limits:** `/status` always returns 200 even when a component is degraded (reports `"down"` for that component) so HUD polling never flaps the UI or triggers SSE reconnect logic; `/health` remains the load-balancer contract and still returns 503 on degradation.
+
+**Configuration:** none — the HUD is not user-tunable. Run notifications (a related cross-tab feature) are configured from the Options modal.
+
+**Related files:** `app/static/js/shell_chrome.js` (HUD build + polling), `app/blueprints/assets.py` (`GET /status`).
+
+**Pill reference:**
 
 | Pill | Source | Notes |
 |------|--------|-------|
@@ -345,15 +401,25 @@ The persistent bottom bar on desktop surfaces eleven live pills that describe th
 | **DB** | SQLite connection state | `ONLINE` green, `OFFLINE` red |
 | **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
 
-The backing endpoint is a lightweight `GET /status` that returns `{uptime, db, redis, server_time}` as always-200 JSON so a degraded component never flaps the HUD or triggers reconnect logic — it reports `"down"` for that component while the rest of the UI continues to work. `/status` is polled every 15 seconds; latency is measured client-side with `performance.now()` around the fetch call.
-
-On narrow desktop widths the pill row falls back to horizontal overflow scrolling so the right-side HUD actions never get pushed off-screen. Mobile hides the HUD entirely; per-tab status and exit codes remain visible inline next to the prompt echo, and the run notifications toggle in the Options modal covers the background-watch use case.
-
 ---
 
 ## Built-In Pipe Support
 
-The shell supports a narrow built-in pipe model without enabling general shell piping:
+**Purpose:** a narrow app-native pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`) that keeps common post-filter use cases available without enabling general shell piping or redirection.
+
+**Behavior:**
+
+- One supported pipe stage per command; the filtered view is what appears in the terminal, history, permalinks, and exports for that run.
+- Autocomplete understands the narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` after `command |`.
+- Arbitrary pipes, chaining, and redirection remain blocked at the command-validation layer.
+
+**Limits:** only the six stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) but stages cannot be chained.
+
+**Configuration:** none — the supported stage set is hard-coded in `app/commands.py`.
+
+**Related files:** `app/commands.py` (pipe-stage parser + validator), `app/blueprints/run.py` (applies the pipe filter to streamed output).
+
+**Supported pipe forms:**
 
 - `command | grep pattern`
 - `command | grep -i pattern`
@@ -372,81 +438,94 @@ The shell supports a narrow built-in pipe model without enabling general shell p
 - `command | uniq`
 - `command | uniq -c`
 
-Behavior:
-
-- use one supported pipe stage per command
-- the filtered view is what appears in the terminal, history, permalinks, and exports for that run
-- autocomplete understands this narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` after `command |`
-- arbitrary pipes, chaining, and redirection remain blocked
-
 ---
 
 ## Output Search
 
-Click **⌕ search** in the tabbar (on the right, alongside the timestamp and line-number toggles) to open the search bar above the output. Matches are highlighted in amber; the current match is highlighted brighter. Use **↑↓** buttons or **Enter** / **Shift+Enter** to navigate between matches. Press **Escape** to close.
+**Purpose:** in-transcript text search over the current tab output with case and regex toggles and keyboard navigation between matches.
 
-Two toggle buttons sit between the input and the match counter:
+**Behavior:**
+
+- Click **⌕ search** in the tabbar (on the right, alongside the timestamp and line-number toggles) — or press `Alt+S` — to open the search bar above the output.
+- Matches are highlighted in amber; the current match is highlighted brighter.
+- Use **↑ / ↓** buttons or **Enter** / **Shift+Enter** to navigate between matches; **Escape** closes the search bar.
+- Case-sensitivity (**Aa**) and regex mode (**.\***) toggles sit between the input and the match counter; both re-run the search immediately when clicked.
+
+**Limits:** search scope is the active tab's rendered transcript only — not history from other tabs, not the full server-side run history. Invalid regex patterns render `invalid regex` instead of throwing.
+
+**Configuration:** none — toggle state is not persisted across page reloads.
+
+**Related files:** `app/static/js/search.js`, `app/static/js/shell_chrome.js` (tabbar search toggle).
+
+**Toggle reference:**
 
 | Button | Default | Behavior |
 |--------|---------|-----------|
 | **Aa** | off | Case-sensitive matching — when off, search is case-insensitive |
 | **.\*** | off | Regular expression mode — when on, the search term is treated as a JavaScript regex; an invalid pattern shows `invalid regex` instead of throwing |
 
-Both toggles re-run the search immediately when clicked.
-
 ---
 
 ## Copy, Save, and Export
 
-Four actions are available from the desktop HUD bar at the bottom of the shell (and from the mobile menu sheet):
+**Purpose:** surface consistent copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) across the desktop HUD, the mobile menu, and the permalink page.
 
-- **Copy** — copies the full plain-text output to the clipboard
-- **save ▾** — a dropdown with three export formats:
-  - **txt** — plain-text file with a timestamped filename
-  - **html** — themed HTML file with ANSI colors preserved, renders correctly in a browser without the shell; fonts and theme colors are inlined so the file is fully self-contained
-  - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output
+**Behavior:**
 
-The same `save ▾` dropdown is available on the desktop HUD bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
+- **Copy** copies the full plain-text output to the clipboard.
+- **save ▾** is a dropdown with three export formats:
+  - **txt** — plain-text file with a timestamped filename.
+  - **html** — themed HTML file with ANSI colors preserved, renders correctly in a browser without the shell; fonts and theme colors are inlined so the file is fully self-contained.
+  - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output.
+- The same `save ▾` dropdown is available on the desktop HUD bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
 
-All local exports (txt, html, pdf) produce unredacted output — they show the true command output as it appeared in the terminal. Redaction is scoped exclusively to the permalink share flow.
+**Limits:** local exports (txt, html, pdf) produce unredacted output — they show the true command output as it appeared in the terminal. Redaction is scoped exclusively to the permalink share flow.
+
+**Configuration:** none — export formats and filename shape are not user-tunable.
+
+**Related files:** `app/static/js/tabs.js` (per-tab save menu), `app/static/js/shell_chrome.js` (HUD save menu), `app/static/js/export_html.js` (shared HTML renderer), `app/static/js/export_pdf.js` (jsPDF renderer), `app/templates/permalink.html` (permalink save menu).
 
 ---
 
 ## Tabs & Run History
 
-Each command runs in the currently active tab. You can open additional tabs with the **+** button to run commands side by side and keep results from different sessions visible simultaneously. Each tab shows a colored status dot (amber = running, green = success, red = failed or killed) and is labelled with the last command that was run in it. Double-click a tab label to rename it inline. Draft input is preserved per tab — switching away and back restores whatever you had typed without losing it. The **+** button is disabled once the tab limit is reached; the limit is configurable via `max_tabs` in `config.yaml` (default 8, set to 0 for unlimited). When more tabs are open than fit the window width, use the tab-scroll arrows or drag tabs to reorder.
+**Purpose:** multi-tab workspace with per-session run history, full-text search over commands and output, starring, and reload-safe reconnection to in-flight runs.
 
-The **⧖ history** button opens a slide-out drawer showing the last 50 completed runs with timestamps and exit codes. Click any entry to load its output into a new tab — the command is shown at the top of the output as a normal styled prompt line followed by the results. Each entry has a toggleable **star** to the left of the command plus three actions: **copy** (copies the command text to the clipboard), **permalink** (copies the canonical `/history/<run_id>` link for that saved run), and **delete**. Starred entries and chips show a **★** indicator and are always listed before unstarred ones regardless of age. Star state is stored in `localStorage` by command text and persists across sessions. Large history restores show an in-drawer loading overlay so slower machines do not look hung while the preview is fetched and rendered.
+**Behavior:**
 
-When full-output persistence is enabled, the history drawer **permalink** action automatically points at the complete saved output of that run. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot of the current tab view and can optionally redact it before saving. Loading a history entry into a normal tab still uses the capped preview (`/history/<run_id>?json&preview=1`) so the browser is not forced to render very large scans. If the preview was truncated, the tab includes a notice pointing to the permalink for the full output.
+- Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and label themselves from the last command run. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
+- The **⧖ history** button opens a slide-out drawer listing the last 50 completed runs with timestamps and exit codes. Click an entry to load its output into a new tab with the command shown as a styled prompt line. Each row has a toggleable **star** plus **copy** / **permalink** / **delete** actions. Starred runs list before unstarred ones regardless of age. Star state persists across sessions in `localStorage` keyed by command text.
+- When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
+- The **delete all** button (history drawer + mobile recents sheet) prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
+- If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available, polls for completion, and swaps into the saved run output when it lands in history. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
 
-The **delete all** button at the top of the history drawer (also present in the mobile recents sheet) prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt. The button was renamed from "clear all" to make it clear it is a destructive database deletion rather than a display-only clear.
+**Limits:** tab count capped by `max_tabs`; history drawer shows the last 50 completed runs only (older runs remain searchable via FTS); live output cannot be replayed after the SSE stream has ended (only persisted run output reappears after reload).
 
-The history drawer also supports full-text search across both command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only results. Typing a term like a port number, CVE identifier, IP address, or any other string from a previous scan's output will surface matching runs. The search field placeholder reads "search commands and output" to reflect this. Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on the `command` and `output_search_text` columns. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so even early lines of long runs are reachable; otherwise it falls back to the capped preview window. On mobile, the advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete suggestions instead of the browser's native picker, and the common row actions keep the drawer open so you can work through multiple history entries without repeated reopen churn.
+**Configuration:** `max_tabs` in `config.yaml` (default 8; `0` for unlimited).
 
-If the page reloads while a command is still running, the shell restores a running placeholder tab for that session instead of dropping the command on the floor. Live output cannot be replayed after the SSE stream is gone, but the restored tab keeps the kill action available, shows the submitted command with the normal prompt styling, polls for completion, and swaps into the saved run output automatically when the run lands in history.
+**Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/database.py` (SQLite schema + FTS5 trigger wiring).
 
-Non-running tabs are restored separately from browser `sessionStorage`. That restore path brings back tab labels, transcript previews, statuses, and saved draft input for the current browser session, and restored completed tabs remount a usable live prompt immediately so you can continue working without tab-switching to wake the prompt back up.
+**Full-text search:** the history drawer supports full-text search across command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only. The search field placeholder reads "search commands and output". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete, and row actions keep the drawer open so you can work through multiple entries without repeated reopen churn.
 
-On mobile, the **☰** menu in the top-right corner of the header opens a bottom-sheet menu that groups session-scoped actions (search, line numbers, timestamps) and overlays (history, workflows, options, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
+On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, line numbers, timestamps) and overlays (history, workflows, options, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
 ---
 
 ## Guided Workflows
 
-Guided workflows are built-in diagnostic sequences that load individual command steps directly into the active prompt. Each step can be clicked to pre-fill the prompt, letting you run checks one at a time without re-typing commands.
+**Purpose:** curated multi-step diagnostic sequences (DNS, TLS, HTTP, reachability, email) that load one command at a time into the prompt so the operator can run and inspect each step in turn.
 
-Built-in workflows:
+**Behavior:**
 
-- **DNS Troubleshooting** — diagnose why a domain isn't resolving or returns unexpected results (`dig` A/NS/MX, public resolver comparison, delegation trace)
-- **TLS / HTTPS Check** — verify a domain's certificate, chain, and TLS configuration (`curl`, `openssl s_client`, `testssl`)
-- **HTTP Triage** — investigate what a web server is returning (redirect-following curl, verbose curl, wget spider)
-- **Quick Reachability Check** — confirm a host is up and which ports are open (`ping`, `nc`, fast `nmap`)
-- **Email Server Check** — verify mail delivery configuration (MX/TXT record checks, SMTP port probes)
+- Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; opening one reveals its individual command steps.
+- Clicking a step pre-fills the prompt with its `cmd` — nothing runs automatically, so the operator inspects and edits each step before pressing Run.
+- Each step can show a short `note` explaining what the command checks.
+- Built-in workflows cover DNS (`dig` A/NS/MX, public resolver comparison, delegation trace), TLS/HTTPS (`curl`, `openssl s_client`, `testssl`), HTTP triage (redirect-following curl, verbose curl, wget spider), quick reachability (`ping`, `nc`, fast `nmap`), and email server checks (MX/TXT record checks, SMTP port probes).
+- Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
 
-Custom workflows can be added to `conf/workflows.yaml`. The file is re-read on every request — no restart needed.
+**Limits:** step commands still run through the allowlist — a workflow step is only usable if its `cmd` is permitted by `allowed_commands.txt`.
 
-**Format:**
+**Configuration:** `conf/workflows.yaml` — list of entries with the following fields:
 
 ```yaml
 - title: "My Custom Check"
@@ -458,90 +537,128 @@ Custom workflows can be added to `conf/workflows.yaml`. The file is re-read on e
       note: "What ports are open?"
 ```
 
-Fields:
+- `title` — required; workflow heading.
+- `description` — optional; shown below the title.
+- `steps` — required list; each step needs at least a `cmd`.
+- `cmd` — required; loaded into the prompt when the step is clicked.
+- `note` — optional; helper text shown alongside the command.
 
-- `title` — required; shown as the workflow heading
-- `description` — optional; shown below the title
-- `steps` — required list; each step needs at least a `cmd`
-- `cmd` — required; the command loaded into the prompt when the step is clicked
-- `note` — optional; helper text shown alongside the command
+**Related files:** `app/conf/workflows.yaml` (workflow definitions), `app/static/js/shell_chrome.js` (Workflows panel rendering), `app/blueprints/content.py` (workflows API endpoint).
 
 ---
 
 ## Permalinks
 
-There are two types of permalink:
+**Purpose:** stable, shareable URLs for individual runs and full-tab snapshots, persisted in SQLite under the `./data` volume and subject to `permalink_retention_days`.
 
-**Tab snapshot** (`/share/<id>`) — clicking **share snapshot** on any tab captures the current tab output and, when a full saved artifact exists, shares that full output as a snapshot in SQLite. The resulting URL opens a styled HTML page with ANSI color rendering, a `save ▾` dropdown (txt, html, pdf), a **copy** button (full text to clipboard), a **view json** option, and a link back to the shell. It also honors the browser's saved line-number and timestamp preferences on load. On browsers that support the Web Share API, the share action invokes the native OS share sheet; otherwise it copies the URL to the clipboard. This is the recommended way to share results.
+**Behavior:**
 
-**Single run** (`/history/<run_id>`) — the permalink button in the run history drawer links to an individual run result. If a persisted full-output artifact exists, this permalink serves the full saved output; otherwise it serves the capped preview stored in SQLite. It also honors the browser's saved line-number and timestamp preferences on load.
+- **Tab snapshot** (`/share/<id>`) — **share snapshot** on any tab captures the current output and, when a full saved artifact exists, shares that full output as a snapshot. The resulting URL opens a styled HTML page with ANSI color rendering, a `save ▾` dropdown (txt, html, pdf), a **copy** button, a **view json** option, and a link back to the shell. Honors the browser's saved line-number and timestamp preferences on load. Uses the Web Share API where supported; otherwise copies the URL to the clipboard. Recommended sharing path.
+- **Single run** (`/history/<run_id>`) — the permalink button in the history drawer links to an individual run. Serves the full saved artifact when persistence is enabled; otherwise the capped preview stored in SQLite. Honors saved line-number and timestamp preferences on load.
+- **Full output alias** (`/history/<run_id>/full`) — backward-compatible alias to the same run permalink, kept so older links and tests continue to resolve.
+- Both permalink types persist across container restarts via the `./data` SQLite volume.
 
-**Full output alias** (`/history/<run_id>/full`) — backward-compatible alias to the same run permalink. This exists so older links and tests continue to resolve cleanly.
+**Limits:** retained for `permalink_retention_days` only; the `./data` directory is the only writable path in an otherwise read-only container (created automatically on first run).
 
-Both types persist across container restarts via the `./data` SQLite volume. The `./data` directory is the only writable path in an otherwise read-only container and is created automatically on first run.
+**Configuration:** `permalink_retention_days` in `config.yaml` (default 30).
+
+**Related files:** `app/blueprints/history.py` (share + permalink routes), `app/permalinks.py` (ID generation + storage), `app/run_output_store.py` (full-output artifact lookup), `app/templates/permalink.html` (rendered share/permalink page).
 
 ---
 
 ## Share Redaction
 
-When creating a share snapshot, the shell can prompt whether to share raw or redacted output. A built-in redaction baseline masks common secrets and infrastructure details; operators can append custom regex rules on top.
+**Purpose:** optional masking of common secrets and infrastructure details (bearer tokens, emails, IPs, hostnames) on snapshot permalinks, with a persistent raw-vs-redacted default controlled by the Options modal.
 
-Once you choose raw or redacted, that preference can be saved as a persistent default in the [Options modal](#options-modal) so subsequent share actions skip the prompt and reuse the same choice. The default applies consistently whether sharing is triggered from the prompt flow or directly from the Options modal.
+**Behavior:**
 
-Redaction applies only to the snapshot — the stored run history is never modified.
+- When creating a share snapshot, the shell can prompt whether to share raw or redacted output.
+- A built-in redaction baseline masks common secrets and infrastructure details; operators can append custom regex rules on top.
+- Once a raw/redacted choice is saved as the persistent default in the [Options modal](#options-modal), subsequent share actions skip the prompt and reuse that choice — whether sharing is triggered from the prompt flow or directly from the Options modal.
+- Redaction applies only to the snapshot payload; the stored run history is never modified.
+
+**Limits:** local exports (txt, html, pdf) from a tab are not redacted — redaction is scoped exclusively to the share-permalink flow.
+
+**Configuration:** baseline rules are built in; custom regex rules extend them. The raw-vs-redacted default is stored in the Options modal.
+
+**Related files:** `app/redaction.py` (baseline + custom rule engine), `app/blueprints/history.py` (snapshot redaction entry point), `app/static/js/tabs.js` (share snapshot prompt + default handling).
 
 ---
 
 ## Mobile Shell
 
-On touch-sized screens the app switches to a dedicated mobile layout:
+**Purpose:** a dedicated touch layout with its own composer, keyboard helper row, pull-up recents sheet, and bottom-sheet menu, so the shell remains usable on phones without inheriting desktop chrome patterns that don't translate.
 
-- **Mobile composer dock** — a visible composer with its own Run button replaces the desktop inline input
-- **Keyboard helper row** — a row of touch targets above the keyboard provides `Home`, `End`, single-character left/right moves, word-left / word-right jumps, delete-word, and delete-line without requiring a hardware keyboard
-- **Recent peek + pull-up sheet** — an idle peek row between the transcript and the composer shows the recent-run count plus a one-line preview; tapping it opens a full-height recents sheet with search, filter chips (root / exit / date / starred), per-row copy/permalink/restore actions, and a clear-all control
-- **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible
-- **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions
-- **Shared state** — desktop and mobile Run buttons are kept in sync: both disable together for blank prompts and running tabs
+**Behavior:**
 
-On mobile, the **☰** menu in the top-right corner of the header opens a bottom-sheet menu with two grouped sections: a session group (search, line numbers toggle, timestamps picker) that affects the current terminal in place, and an overlays group (history, workflows, options, theme, FAQ, and the diagnostics page for IPs in `diagnostics_allowed_cidrs`) that opens full-screen surfaces. `line numbers` is a single on/off row; `timestamps` expands inline to a three-mode picker (off / elapsed / clock) so the active mode is always visible. The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+- **Mobile composer dock** — a visible composer with its own Run button replaces the desktop inline input.
+- **Keyboard helper row** — touch targets above the keyboard provide `Home`, `End`, single-character left/right moves, word-left / word-right jumps, delete-word, and delete-line without needing a hardware keyboard.
+- **Recent peek + pull-up sheet** — an idle peek row between transcript and composer shows the recent-run count plus a one-line preview; tapping it opens a full-height recents sheet with search, filter chips (root / exit / date / starred), per-row copy/permalink/restore actions, and a clear-all control.
+- **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible.
+- **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions.
+- **Shared state** — desktop and mobile Run buttons stay in sync: both disable together for blank prompts and running tabs.
+- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (history, workflows, options, theme, FAQ, diag) that opens full-screen surfaces. `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+
+**Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
+
+**Configuration:** no mobile-specific config keys beyond `diagnostics_allowed_cidrs`; layout activates automatically on touch viewports.
+
+**Related files:** `app/static/js/mobile_chrome.js` (mobile shell bootstrap + composer + menu), `app/static/css/mobile-shell.css` (mobile layout + composer + bottom-sheet styles), `app/templates/index.html` (mobile-shell mount points).
 
 ---
 
 ## Built-In Commands
 
-The shell provides several categories of native commands that run without dispatching to external binaries.
+**Purpose:** native shell helpers that provide session introspection, guidance, and guarded responses without dispatching to external binaries.
+
+**Behavior:**
+
+- The shell ships several categories of built-ins, each rendered as terminal-native output rather than modal UI.
+- Built-ins run entirely inside the app layer, so they remain available even when the corresponding external tool does not exist in the container.
 
 **Utility commands**
 
-`help`, `history`, `last`, `limits`, `retention`, `status`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session. `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a "no running processes" notice when idle.
+- `help`, `history`, `last`, `limits`, `retention`, `status`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session.
+- `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
 **Shell identity commands**
 
-`env`, `pwd`, `uname`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, `uptime`, `ip a`, `route`, `df -h`, and `free -h` return stable shell-style information without exposing host internals.
+- `env`, `pwd`, `uname`, `uname -a`, `id`, `groups`, `hostname`, `date`, `tty`, `who`, `uptime`, `ip a`, `route`, `df -h`, and `free -h` return stable shell-style information without exposing host internals.
 
 **Guardrail commands**
 
-`sudo`, `reboot`, `poweroff`, `halt`, `shutdown now`, `su`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit shell responses instead of pretending to run or silently failing.
+- `sudo`, `reboot`, `poweroff`, `halt`, `shutdown now`, `su`, and the exact `rm -fr /` / `rm -rf /` patterns return explicit shell responses instead of pretending to run or silently failing.
 
 **`man` support**
 
-`man <allowed-command>` renders the real man page when tooling exists. `man <built-in-command>` shows the built-in command summary instead.
+- `man <allowed-command>` renders the real man page when tooling exists.
+- `man <built-in-command>` shows the built-in command summary instead.
+
+**Limits:** built-ins intentionally cover only app-owned helpers and a narrow set of shell-identity responses. They are not a general shell-emulation layer.
+
+**Configuration:** none. The built-in command surface is defined in application code, not in operator config.
+
+**Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch + man routing), `app/conf/autocomplete.yaml` (built-in autocomplete coverage), `app/static/js/controller.js` (client-side interception for app-owned command flows like `session-token`).
 
 ---
 
 ## Command Allowlist
 
-Allowed commands are controlled by `conf/allowed_commands.txt`. The file is re-read on every request, so changes take effect immediately without restarting the server.
+**Purpose:** operator-controlled set of permitted command prefixes (with deny overrides) that gates every `/run` request before dispatch.
 
-**Format:**
-- One command prefix per line
-- Lines starting with `#` are comments and are ignored
-- Lines starting with `##` define a category group shown in the FAQ command list (e.g. `## Network Diagnostics`)
-- Lines starting with `!` are **deny prefixes** — they take priority over allow prefixes, letting you block specific flags on an otherwise-allowed command (see below)
-- Matching is prefix-based: a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc.
-- Be as specific or broad as you like — `nmap -sT` permits only TCP connect scans, while `nmap` permits any nmap invocation
+**Behavior:**
 
-**Example:**
+- Every `/run` request is checked against `conf/allowed_commands.txt` before dispatch.
+- Allow entries match by prefix — a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc. Be as specific or broad as you like: `nmap -sT` permits only TCP connect scans while `nmap` permits any nmap invocation.
+- Deny entries (`!`-prefixed) take priority over allow entries and match anywhere in the command as space-separated tokens (not as a prefix).
+- Category headings (`##`) group the FAQ command chips; comments (`#`) are ignored; deny entries are not surfaced to users.
+- The file is re-read on every request, so edits take effect without a restart. Deleting or emptying the file disables restrictions entirely.
+- Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
+- `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
+
+**Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands).
+
+**Configuration:** `conf/allowed_commands.txt`, re-read per request.
 
 ```text
 ## Network Diagnostics
@@ -555,25 +672,20 @@ nmap
 !nmap --script
 ```
 
-Commands in the FAQ are displayed grouped by their `##` category, with each chip clickable to load the command into the input bar. Commands before any `##` header are shown in an unnamed group. Deny prefixes (`!` lines) are not shown to users.
+- One command prefix per line.
+- `#` — comment (ignored).
+- `##` — category group shown in the FAQ command list.
+- `!` — deny prefix (takes priority over allow entries).
 
-To **disable restrictions entirely**, delete `conf/allowed_commands.txt` or leave it empty — all commands will be permitted.
+**Related files:** `app/conf/allowed_commands.txt` (allowlist file), `app/command_policy.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/run` entry point).
 
 ### Deny Prefixes
 
-Lines starting with `!` are deny prefixes and take priority over allow prefixes. They let you block specific flags or subcommands on an otherwise-allowed tool:
+Deny matching has a few extra rules worth calling out:
 
-```text
-nmap
-!nmap -sU
-!nmap --script
-```
-
-This allows all `nmap` invocations except those containing `-sU` or `--script` as a flag. Unlike allow entries, deny matching is not purely prefix-based — the flag is matched anywhere in the command as a space-separated token, so `nmap -sT -sU 10.0.0.1` is caught as well as `nmap -sU 10.0.0.1`. The tool prefix must still match (`!nmap -sU` only applies to `nmap` commands).
-
-Tool names and subcommand prefixes are matched **case-insensitively**. Flag names are matched **with exact case**, so `!curl -K` blocks `curl -K` (insecure TLS) without also blocking `curl -k` (insecure, lowercase). Use the exact flag casing you want to deny.
-
-**`/dev/null` exception:** denied output flags are permitted when their argument is `/dev/null`. This allows common patterns like discarding the response body while capturing metadata:
+- Denies match a flag anywhere in the command, not just immediately after the tool (`nmap -sT -sU 10.0.0.1` is still caught by `!nmap -sU`).
+- Flag names are case-sensitive so you can deny `-K` without also denying `-k`.
+- The `/dev/null` exception applies to common metadata-capture patterns:
 
 ```bash
 curl -o /dev/null -s -w "%{http_code}" https://example.com
@@ -584,7 +696,21 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Wordlists
 
-The full [SecLists](https://github.com/danielmiessler/SecLists) collection is installed at `/usr/share/wordlists/seclists/` and available to any tool that accepts a `-w` flag (gobuster, ffuf, dnsenum, fierce, etc.).
+**Purpose:** pre-installed SecLists corpus available to any allowlisted tool that accepts a `-w` flag, so common discovery and fuzzing tasks run without a separate setup step.
+
+**Behavior:**
+
+- The full [SecLists](https://github.com/danielmiessler/SecLists) collection is installed inside the container at `/usr/share/wordlists/seclists/`.
+- Any allowlisted tool that accepts a `-w` flag (gobuster, ffuf, dnsenum, fierce, etc.) can reference files under this path directly.
+- The list is installed at container build time; no runtime fetch is required.
+
+**Limits:** wordlists are read-only inside the container. The corpus is not updated between builds — rebuild the image to pick up a new SecLists release.
+
+**Configuration:** no operator-facing config; the install path (`/usr/share/wordlists/seclists/`) is fixed.
+
+**Related files:** `Dockerfile` (SecLists install step), `app/conf/allowed_commands.txt` (tools that accept `-w`).
+
+**Layout reference:**
 
 ```text
 /usr/share/wordlists/seclists/
@@ -613,20 +739,24 @@ The full [SecLists](https://github.com/danielmiessler/SecLists) collection is in
 
 ## Welcome Animation
 
-When the page first loads, the terminal can render a staged welcome sequence:
+**Purpose:** operator-configurable first-load sequence (ASCII banner, status block, sampled commands, rotating hints) that introduces the shell without turning into permanent chrome.
 
-- ASCII banner text loaded from `app/conf/ascii.txt`
-- a startup-status block using labels from `welcome_status_labels`
-- curated sampled commands and their sample output from `app/conf/welcome.yaml`
-- rotating footer hints loaded from `app/conf/app_hints.txt`
+**Behavior:**
 
-On touch-sized screens the welcome flow uses `app/conf/ascii_mobile.txt` and `app/conf/app_hints_mobile.txt` instead of the wide desktop banner and desktop hint file, while keeping the same status and hint timing and skipping the sampled command blocks.
+- On first page load the terminal renders a staged sequence: ASCII banner → status block → sampled commands → rotating footer hints.
+- Banner text is loaded from `app/conf/ascii.txt`; status labels come from `welcome_status_labels` in `config.yaml`; sampled commands and their sample output come from `app/conf/welcome.yaml`; rotating footer hints come from `app/conf/app_hints.txt`.
+- On touch-sized screens the flow uses `app/conf/ascii_mobile.txt` and `app/conf/app_hints_mobile.txt` instead of the wide desktop banner/hints, keeping status and hint timing but skipping sampled commands entirely.
+- Sampled welcome commands are clickable and load into the prompt without running; the `TRY THIS FIRST` badge is clickable with the same behavior as the featured command text.
+- App hints rotate until interrupted unless `welcome_hint_rotations` is set to `1`.
+- If the user runs a command before the welcome sequence completes, the animation stops immediately and clears the partial output in that same tab only.
+- An optional message of the day (`motd`) in `config.yaml` is displayed below the welcome sequence and supports `**bold**`, `` `inline code` ``, `[link](url)`, and newlines.
 
-If `welcome.yaml` is absent or empty, the sampled-command portion is skipped. If `ascii.txt`, `app_hints.txt`, `ascii_mobile.txt`, or `app_hints_mobile.txt` are absent, those parts are skipped as well.
+**Limits:** welcome files are fetched once on page load — edits require a reload (no restart needed). Missing files are gracefully skipped: no `welcome.yaml` means no sampled commands; no banner/hints files means no banner/hints; the sequence still runs with whatever parts are present.
 
-An optional message of the day (`motd`) can also be configured in `config.yaml` to display below the welcome sequence. It supports `**bold**`, `` `inline code` ``, `[link](url)`, and newlines.
+**Configuration:**
 
-**Format:**
+- `config.yaml` — `welcome_status_labels`, `welcome_hint_rotations`, `motd`.
+- `app/conf/welcome.yaml` — sampled commands:
 
 ```yaml
 - cmd: "ping -c 3 google.com"
@@ -640,30 +770,33 @@ An optional message of the day (`motd`) can also be configured in `config.yaml` 
 - cmd: "# Just a comment with no output"
 ```
 
-Fields:
+- `cmd` — required command text shown after `$`.
+- `out` — optional sample output shown below the command; leading whitespace preserved, trailing stripped.
+- `group` — optional sampling bucket used to keep the welcome set varied across categories.
+- `featured` — optional boolean; featured commands are preferred for the first sample and get the `TRY THIS FIRST` badge.
+- `app/conf/ascii.txt` / `ascii_mobile.txt` — desktop/mobile banner text.
+- `app/conf/app_hints.txt` / `app_hints_mobile.txt` — rotating footer hint lines.
 
-- `cmd` — required command text shown after `$`
-- `out` — optional sample output shown below that command
-- `group` — optional sampling bucket used to keep the welcome set varied across categories
-- `featured` — optional boolean; featured commands are preferred for the first sample and get the `TRY THIS FIRST` badge
-
-Notes:
-
-- Leading whitespace in `out` is preserved; trailing whitespace is stripped
-- Sampled welcome commands are clickable and load directly into the prompt without running
-- The `TRY THIS FIRST` badge is clickable and has the same behavior as clicking the featured command text
-- App hints rotate until interrupted unless `welcome_hint_rotations` is set to `1`
-- If the user runs a command before the welcome sequence completes, it stops immediately and clears the partial output in that same tab only
-
-The welcome files are fetched once on page load. Edit `conf/welcome.yaml`, `conf/ascii.txt`, `conf/ascii_mobile.txt`, `conf/app_hints.txt`, or `conf/app_hints_mobile.txt` and reload the page to see changes without restarting the server.
+**Related files:** `app/blueprints/content.py` (welcome/banner/hint endpoints), `app/static/js/shell_chrome.js` + `app/static/js/mobile_chrome.js` (sequence rendering), `app/conf/welcome.yaml`, `app/conf/ascii.txt`, `app/conf/ascii_mobile.txt`, `app/conf/app_hints.txt`, `app/conf/app_hints_mobile.txt`.
 
 ---
 
 ## Custom FAQ
 
-Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are appended after the built-in FAQ items returned by `/faq` and are re-read on every request — no restart needed.
+**Purpose:** operator-supplied FAQ entries appended to the built-in FAQ, with a safe markup subset for links, formatting, and clickable command chips.
 
-**Format:**
+**Behavior:**
+
+- Entries in `app/conf/faq.yaml` are appended to the built-in FAQ returned by `/faq` and re-read on every request (no restart required).
+- Each entry has a required `question` and one of `answer` (safe markup subset) or `answer_html` (exact HTML).
+- The safe markup subset in `answer` supports `**bold**`, `*italic*`, `__underline__`, `` `inline code` ``, `- list items`, and command chips like `[[cmd:shortcuts]]` or `[[cmd:ping -c 1 127.0.0.1|custom label]]`.
+- Chips behave like the built-in allowlist chips — clicking one loads the command into the prompt without running it.
+- The file is optional — a missing or empty file shows only the built-in FAQ items.
+- Built-in entries can use richer modal formatting while still rendering plain-text answers in the `faq` command.
+
+**Limits:** the safe markup subset is deliberately narrow; anything outside it is shown literally. For arbitrary HTML (images, tables, custom classes) use `answer_html`.
+
+**Configuration:** `app/conf/faq.yaml`:
 
 ```yaml
 - question: "Where is this server located?"
@@ -673,48 +806,75 @@ Instance-specific FAQ entries can be added to `app/conf/faq.yaml`. Entries are a
   answer: "Outbound traffic is limited to 1 Gbps sustained."
 ```
 
-The file is optional — if it doesn't exist or contains no valid entries, the FAQ modal shows only the built-in items. Custom entries can use a small safe markup subset in `answer` for bold, italics, underline, inline code, bullet lists, and clickable command chips. Chips behave like the built-in allowlist chips and load the command into the prompt when clicked:
-
-- `**bold**`
-- `*italic*`
-- `__underline__`
-- `` `inline code` ``
-- `- list items`
-- `[[cmd:shortcuts]]` or `[[cmd:ping -c 1 127.0.0.1|custom label]]`
-
-Use `answer_html` if you need exact HTML. Built-in entries can still use richer modal formatting while showing plain-text answers in the `faq` command.
+**Related files:** `app/conf/faq.yaml` (custom entries), `app/blueprints/content.py` (`/faq` endpoint + markup rendering), `app/static/js/shell_chrome.js` (FAQ modal + chip click wiring).
 
 ---
 
 ## Theme Selector
 
-Click **◑ theme** in the desktop rail (or the **☰** menu on mobile) to open the dedicated theme selector modal. Pick any registered theme variant and the choice is saved in `localStorage` and persists across sessions. The theme applies to the live shell, permalink pages, and HTML exports. For theme authoring details, see [THEME.md](THEME.md).
+**Purpose:** live theme picker backed by the named variants under `app/conf/themes/`, with the choice persisted in `localStorage` and applied to the shell, permalink pages, and HTML exports.
+
+**Behavior:**
+
+- Click **◑ theme** in the desktop rail (or the **☰** menu on mobile) to open the theme selector modal.
+- Picking a variant applies it immediately and saves the choice in `localStorage` so it persists across sessions on the same browser.
+- The selected theme applies to the live shell, permalink pages, and HTML exports — so shared links render in the author's theme context when opened fresh.
+
+**Limits:** theme selection is per-browser (not per-user on the server); clearing browser storage reverts to the default theme.
+
+**Configuration:** theme variants live under `app/conf/themes/`; see [THEME.md](THEME.md) for authoring details (variable names, fallbacks, and how a new variant is registered).
+
+**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/theme.js` (selector modal + `localStorage` persistence), `app/static/css/theme-core.css` (variable surface), `THEME.md` (authoring guide).
 
 ---
 
 ## Options Modal
 
-Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the Options modal. It exposes per-browser display and sharing preferences that are saved in cookies and applied on every page load:
+**Purpose:** per-browser display and sharing preferences (timestamps, line numbers, welcome intro, redaction default, run notifications), persisted via cookies and applied on every page load.
+
+**Behavior:**
+
+- Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
+- Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
+- The welcome-intro setting controls whether the welcome animation plays on first tab: full animated sequence, instant settle, or no welcome tab at all.
+- The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
+- Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast.
+- Preferences are stored in browser cookies and applied on every page load; they persist across sessions on the same device.
+
+**Limits:** preferences are per-browser (not synced across devices); clearing cookies reverts to defaults. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
+
+**Configuration:**
 
 | Setting | Choices | Description |
 |---------|---------|-------------|
-| **Timestamps** | Off / Elapsed / Clock | Controls the timestamp mode for output lines. Equivalent to the quick toggle in the tabbar |
-| **Line Numbers** | on / off | Shows or hides sequential line numbers beside output and the live prompt. Equivalent to the tabbar toggle |
-| **Welcome Intro** | Animated / Disable Animation / Remove Completely | Controls whether the welcome animation plays on the first tab: full animated sequence, instant settle, or no welcome tab at all |
-| **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Sets the default redaction choice for snapshot sharing so the prompt is skipped once a preference is saved |
-| **Run Notifications** | on / off | When enabled, a browser desktop notification fires each time a run exits or is killed. The notification title shows only the command root (e.g. `$ curl`) to avoid exposing arguments or token values; the body shows exit code and elapsed time. Enabling triggers the native browser permission prompt if needed; if the browser has already blocked notifications, the toggle reverts and a toast is shown |
+| **Timestamps** | Off / Elapsed / Clock | Timestamp mode for output lines. Equivalent to the tabbar quick toggle |
+| **Line Numbers** | on / off | Sequential line numbers beside output and the live prompt. Equivalent to the tabbar toggle |
+| **Welcome Intro** | Animated / Disable Animation / Remove Completely | Welcome animation behavior on first tab |
+| **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Default redaction choice for snapshot sharing |
+| **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time |
 
-All preferences are stored in browser cookies and persist across sessions on the same device.
+**Related files:** `app/static/js/shell_chrome.js` (Options modal rendering + tabbar sync), `app/static/js/mobile_chrome.js` (mobile menu wiring), `app/static/js/notifications.js` (permission + notification dispatch).
 
 ---
 
 ## Persistence & Retention
 
-Run history, preview metadata, full-output artifact metadata, and tab snapshots live under `./data`. SQLite uses `./data/history.db`, while persisted full-output artifacts are written as compressed files under `./data/run-output/`. The writable `./data` directory is created automatically on first run and persists across container restarts and recreations.
+**Purpose:** durable storage layout for run history, preview metadata, full-output artifacts, and tab snapshots, with time-based retention pruning on startup.
 
-Retention is controlled by `permalink_retention_days` in `config.yaml`. On startup, runs, run-output artifact metadata, artifact files, and snapshots older than the configured number of days are pruned together. The built-in default is `365` days; `0` means unlimited retention.
+**Behavior:**
 
-Useful direct checks:
+- Run history, preview metadata, full-output artifact metadata, and tab snapshots all live under `./data`.
+- SQLite uses `./data/history.db`; persisted full-output artifacts are written as compressed files under `./data/run-output/`.
+- The `./data` directory is created automatically on first run and persists across container restarts and recreations.
+- On startup, runs, run-output artifact metadata, artifact files, and snapshots older than `permalink_retention_days` are pruned together.
+
+**Limits:** `./data` is the only writable path in an otherwise read-only container. Setting `permalink_retention_days: 0` disables pruning entirely (unlimited retention). Never write to `./data/history.db` from the host — host/container SQLite version mismatches can corrupt the FTS5 btree.
+
+**Configuration:** `permalink_retention_days` in `config.yaml` (default 365; `0` disables pruning).
+
+**Related files:** `app/database.py` (schema + migrations + FTS5 wiring), `app/run_output_store.py` (compressed artifact writer + reader), `app/retention.py` (startup pruning), `app/blueprints/history.py` (reads + writes through the persistence layer). See [ARCHITECTURE.md](ARCHITECTURE.md) for full schema.
+
+**Useful direct checks:**
 
 ```bash
 # Row counts
@@ -727,103 +887,101 @@ sqlite3 data/history.db "DELETE FROM runs WHERE started < datetime('now', '-90 d
 sqlite3 data/history.db "DELETE FROM snapshots;"
 ```
 
-For the schema and persistence-layer details, use [ARCHITECTURE.md](ARCHITECTURE.md).
-
 ---
 
 ## Session Tokens
 
-By default the shell assigns each browser an anonymous UUID stored in `localStorage` under `session_id`. Session tokens let you replace that anonymous identity with a persistent named token so your run history, snapshots, and shell identity follow you across browsers and workstations — without a login screen.
+**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, and starred commands follow an operator across browsers and workstations without introducing a login layer.
 
-**Terminal commands**
+**Behavior:**
 
-Run `session-token` (no subcommand) to see the current status: active token in masked form or "anonymous session" if none is set.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`. A session token replaces that identity with a persistent `tok_<32 hex>` so run history, snapshots, and starred commands follow the operator across browsers and workstations.
+- Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
+- The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
+- The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
+- Changing the token in one tab propagates to all open tabs via the `storage` event — recent chips, starred state, history drawer, and the options-panel masked display all refresh without a reload.
+- All `session-token` subcommands are intercepted client-side and never reach the server, so token values are not written to the command log.
 
-- **`session-token generate`** — requests a new `tok_<32 hex>` token from the server and offers to migrate the current session’s runs, snapshots, and starred commands. The token becomes active only after the optional migration step completes successfully; if you decline migration it activates immediately as a fresh named session, and if migration fails the old session stays active.
+**Terminal commands:**
 
-- **`session-token set <token>`** — adopts an existing token, for example one generated on another device. The value is validated before being applied: UUIDs are always allowed, while `tok_...` values must already exist on this server. If the current session has run history, the same migration prompt is offered; verification failures fail closed rather than silently switching to an empty session.
+- `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, and starred commands. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history; verification failures fail closed rather than silently switching to an empty session.
+- `session-token clear` — removes `session_token` from `localStorage` and reverts to the anonymous UUID session. Server-side history remains and can be reclaimed with `session-token set`.
+- `session-token rotate` — generates a new token, migrates all runs/snapshots to it, then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
+- `session-token revoke <token>` — permanently deletes the given token via `POST /session/token/revoke`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, and starred rows for the revoked token are not deleted but become unreachable.
 
-- **`session-token clear`** — removes `session_token` from `localStorage` and reverts to the original anonymous UUID session. The token's run history remains in the server database and can be reclaimed with `session-token set` at any time.
-
-- **`session-token rotate`** — generates a new token and migrates all run history and snapshots from the old identity to the new one before switching. The switch is **atomic**: if the migration call fails, the rotation is aborted and the old token stays active. The old token is retired after a successful rotate.
-
-- **`session-token list`** — calls `GET /session/token/info` and displays the active token in masked form along with its creation date. Shows "anonymous session" if no token is set.
-
-- **`session-token revoke <token>`** — permanently deletes the given token from the server via `POST /session/token/revoke`. If the revoked token is the currently active one, the client also clears `localStorage` and falls back to the anonymous UUID session. Possession of the token string is the only authorization check, matching the existing session model. Revocation invalidates the token at the API layer immediately; the old runs, snapshots, and starred-command rows are not deleted, but the revoked token can no longer read or write them.
-
-All subcommands (`generate`, `set`, `clear`, `rotate`, `list`, `revoke`) are intercepted client-side and never reach the server, so token values are not written to the command log.
-
-**Options panel**
-
-The options panel (⚙) shows the active session token in masked form (e.g. `tok_abcd••••••••`) when one is set, or "No session token — anonymous session" otherwise. Four shortcut buttons cover the common inline token actions — their visibility is conditional on whether a token is currently active. `list` and `revoke` remain terminal-only commands:
+**Options panel buttons:**
 
 | Button | Shown when | Action |
 |---|---|---|
-| **Generate** | No token active | Generates a new session token directly; copies the new token to the clipboard with a toast notification |
-| **Set** | No token active | Opens a dedicated input modal to paste an existing token from another device |
-| **Rotate** | Token active | Generates a new token and migrates all history to it; copies the new token to the clipboard with a toast notification |
-| **Clear** | Token active | Removes the active session token and reverts to the anonymous UUID session |
+| **Generate** | No token active | Generates a new token; copies it to the clipboard with a toast |
+| **Set** | No token active | Opens a modal to paste an existing token from another device |
+| **Rotate** | Token active | Generates a new token, migrates history, copies the new token |
+| **Clear** | Token active | Removes the active token and reverts to the anonymous session |
 
-If a session has run history, a history migration confirmation modal is shown before completing Generate, Set, or Rotate — the same migration prompt that appears when using the terminal commands. After any operation, the masked token display updates immediately without a page reload, and the recent command chips and starred commands also refresh to reflect the new session.
+If a session has run history, a migration confirmation modal is shown before Generate/Set/Rotate (same prompt as the terminal commands). `list` and `revoke` remain terminal-only.
 
-**Cross-tab sync**
+**Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-When you change your session token in one tab, all other open tabs adopt the new identity automatically via the browser `storage` event. Passive tabs also refresh recent-command chips, starred-command state, the history drawer, and the options-panel token display, so the visible UI stays aligned with the new `X-Session-ID` without a reload.
+**Configuration:** no config keys — token issuance is always enabled. Token scope currently covers runs, snapshots, and starred commands.
 
-**Token format and storage**
-
-Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random). The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback. Issued tokens are recorded in the `session_tokens` table `(token TEXT PRIMARY KEY, created TEXT)`.
-
-**History migration**
-
-`POST /session/migrate` reassigns all `runs` and `snapshots` rows from one `session_id` to another in a single transaction. The `from_session_id` in the request body must match the caller's `X-Session-ID` header — any mismatch returns 403 — so users can only migrate their own session data.
-
-**Current scope**
-
-Run history, snapshots, and starred commands all migrate across sessions. Starred commands are backed by the `starred_commands` server table and `/session/starred` endpoints, so they follow a session token to any browser or workstation. On first token activation, commands already starred in `localStorage` are seeded to the server automatically.
+**Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*` and `/session/migrate` routes), `app/database.py` (`session_tokens` and `starred_commands` tables).
 
 ---
 
 ## Security and Process Isolation
 
-darklab shell uses layered controls rather than trusting the browser alone.
+**Purpose:** defence in depth against shell-injection, loopback callbacks, and worker impersonation, relying on allowlist validation plus OS-level user separation rather than browser trust.
 
-**Shell injection protection**
+**Behavior:**
 
-The app blocks metacharacters that enable command chaining and redirection: `&&`, `||`, `;`, backticks, `$()`, and redirection operators. Within the supported pipe model, `|` is allowed only in the constrained form described in [Built-In Pipe Support](#built-in-pipe-support). Direct filesystem references to `/data` and `/tmp` are also blocked as command arguments (using a negative lookbehind so URLs containing those strings as path segments are still permitted).
+- **Shell injection protection.** The app blocks metacharacters that enable command chaining and redirection — `&&`, `||`, `;`, backticks, `$()`, and redirection operators. `|` is allowed only within the constrained pipe model described in [Built-In Pipe Support](#built-in-pipe-support). Direct filesystem references to `/data` and `/tmp` are blocked as command arguments (using a negative lookbehind so URLs containing those strings as path segments are still permitted). Loopback targets (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) are blocked at the validation layer.
+- **Process isolation.** Gunicorn runs as unprivileged `appuser`; user-submitted commands run as separate unprivileged `scanner` processes. The container filesystem is read-only (`read_only: true`); `/data` is the only writable path and is accessible only to `appuser` (`chmod 700`). Container startup installs an OS-level guard so `scanner` cannot connect back to the app port.
+- **Rate limiting + process tracking.** Redis-backed rate limiting prevents burst abuse across multiple Gunicorn workers. PID tracking in Redis keeps kill behavior correct when a kill request lands on a different worker than the one that started the process.
+- **Session tracking.** Browsers send a stable `X-Session-ID` so history entries, rate-limit state, and test isolation remain scoped per client without requiring authentication.
 
-Loopback targets (`localhost`, `127.0.0.1`, `0.0.0.0`, `[::1]`) are blocked at the validation layer.
+**Limits:** there is no authentication layer — controls are defence in depth, not a user boundary. The allowlist plus OS-level isolation are the trust boundary; browser state is not trusted. Loopback blocking applies only to literal loopback addresses and not to private-range addresses that happen to be locally reachable.
 
-**Process isolation**
+**Configuration:**
 
-Gunicorn runs as unprivileged `appuser`. User-submitted commands run as separate unprivileged `scanner` processes. The container filesystem is read-only (`read_only: true`); `/data` is the only writable path and is accessible only to `appuser` (`chmod 700`). Container startup adds an OS-level guard so `scanner` cannot connect back to the app port.
+- `allowed_commands.txt` — dispatch gate (see [Command Allowlist](#command-allowlist)).
+- `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
+- `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`.
+- `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.
 
-**Rate limiting and process tracking**
-
-Redis-backed rate limiting prevents burst abuse across multiple Gunicorn workers. PID tracking in Redis keeps kill-path behavior correct when a kill request lands on a different worker than the one that started the process.
-
-**Session tracking**
-
-Browsers send a stable `X-Session-ID` header so history entries, rate limit state, and test isolation remain scoped per client without requiring authentication.
-
-For developer-facing details on cross-user signalling, Redis-backed multi-worker kill, and the `nmap` capability model, use [ARCHITECTURE.md](ARCHITECTURE.md).
+**Related files:** `app/command_policy.py` (metacharacter + loopback validation), `app/runner.py` (subprocess spawn as `scanner`), `app/kill.py` (Redis PID tracking), `docker-compose.yml` (filesystem + user isolation). See [ARCHITECTURE.md](ARCHITECTURE.md) for cross-worker signalling, the Redis-backed multi-worker kill path, and the `nmap` capability model.
 
 ---
 
 ## Structured Logging
 
-The backend emits structured log events at four levels (`DEBUG`, `INFO`, `WARNING`, `ERROR`). Two output formats are supported:
+**Purpose:** backend-emitted structured events (text or GELF JSON) with stable event names and context fields, so operators can observe the shell through a log aggregator without regex-parsing free-form strings.
 
-- `text` — human-readable `key=value` pairs for local development
-- `gelf` — JSON structured format compatible with log aggregators
+**Behavior:**
 
-The active format and level are set in `config.yaml`. Each log event carries structured context fields (session ID, command root, run ID, status) rather than interpolated strings, so log lines are machine-parseable without regex.
+- The backend emits structured log events at four levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
+- Two output formats are supported: `text` (human-readable `key=value` pairs for local development) and `gelf` (JSON compatible with log aggregators).
+- Each event carries structured context fields — session ID, command root, run ID, status — rather than interpolated strings, so log lines are machine-parseable without regex.
+- Event names are stable (e.g. `RUN_START`, `RUN_END`, `KILL`, `DIAG_VIEWED`, `UNTRUSTED_PROXY`), letting aggregators filter by name without string matching.
+
+**Limits:** field names and level semantics are stable, but specific numeric codes and free-form `message` strings are not part of the contract. Downstream consumers should key off event names and structured fields, not prose.
+
+**Configuration:** `log_format` and `log_level` in `config.yaml` (`text` / `gelf`, default `text`; `DEBUG` / `INFO` / `WARNING` / `ERROR`, default `INFO`).
+
+**Related files:** `app/logging_config.py` (format + level wiring, event emission helpers), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (snapshot + diag events).
 
 ---
 
 ## Operator Diagnostics
 
-The `/diag` endpoint provides a live operator view of the running instance without requiring a shell session. It is disabled by default and restricted to specific IP ranges so it is never exposed to end users.
+**Purpose:** a restricted operator-only status page for inspecting runtime health, storage state, config, and tool availability without opening a shell session.
+
+**Behavior:**
+
+- `/diag` provides a live operator view of the running instance and is disabled by default.
+- When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop rail and the mobile menu alongside the other toolbar buttons. It stays hidden for all other visitors.
 
 ### Enabling access
 
@@ -835,9 +993,10 @@ diagnostics_allowed_cidrs:
   - "172.16.0.0/12"   # Docker bridge networks
 ```
 
-Access is checked against the resolved client IP, using the same trusted-proxy path as logging and rate limiting. `X-Forwarded-For` is only honored when the direct peer IP is inside `trusted_proxy_cidrs`; otherwise the app falls back to the direct peer IP and logs `UNTRUSTED_PROXY` when a forwarded header was supplied. The page returns 404 for all other requests. Denied access is logged as `DIAG_DENIED` with the resolved client IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
-
-When the visiting IP is in the allowed range, a `⊕ diag` button appears in the desktop rail and the mobile menu alongside the other toolbar buttons. It is hidden for all other visitors.
+- Access is checked against the resolved client IP, using the same trusted-proxy path as logging and rate limiting.
+- `X-Forwarded-For` is honored only when the direct peer IP is inside `trusted_proxy_cidrs`; otherwise the app falls back to the direct peer IP and logs `UNTRUSTED_PROXY` when a forwarded header was supplied.
+- The page returns 404 for all other requests.
+- Denied access is logged as `DIAG_DENIED` with the resolved client IP and configured CIDRs; allowed access is logged as `DIAG_VIEWED`.
 
 ### What the page shows
 
@@ -859,6 +1018,12 @@ Append `?format=json` to get the same data as a JSON object, suitable for script
 ```bash
 curl http://localhost:8888/diag?format=json
 ```
+
+**Limits:** `/diag` is gated entirely by IP/CIDR allowlists, not by an authentication layer. Empty `diagnostics_allowed_cidrs` disables it completely.
+
+**Configuration:** `diagnostics_allowed_cidrs` in `config.yaml`; access resolution also depends on `trusted_proxy_cidrs` when the app is behind a proxy.
+
+**Related files:** `app/blueprints/history.py` (`/diag` HTML + JSON responses), `app/static/css/diag.css` (page styling + mobile breakpoint behavior), `app/templates/diag.html` (diagnostics page markup), `README.md` (operator-facing config reference), `ARCHITECTURE.md` (diagnostics and logging runtime details).
 
 ---
 

@@ -118,25 +118,38 @@ The built-in `theme` button is a shortcut to the selector. The preview grid is t
 
 ## Editing Rules
 
-- The example template files (`app/conf/theme_dark.yaml.example`, `app/conf/theme_light.yaml.example`) are generated from `_THEME_DEFAULTS` in `app/config.py`. Regenerate them with `./.venv/bin/python scripts/generate_theme_examples.py` whenever you change the built-in defaults. A regression test (`TestThemeRegistry.test_theme_example_files_match_generated_defaults` in `tests/py/test_backend_modules.py`) detects drift and will fail with the message `theme_dark.yaml.example is out of sync` if you forget — run the script to fix it. See [Keeping example files in sync](#keeping-example-files-in-sync) for the full workflow. Then copy one into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up. If you want a private overlay for an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges that overlay after the checked-in base file.
-- Unknown keys are ignored by `app/config.py`; only keys that exist in `_THEME_DEFAULTS` are accepted.
-- Values may be any valid CSS color, length, gradient, or shadow string, depending on the key. You can also reference other resolved theme variables with CSS `var(--name)` syntax; the browser resolves those references after the vars are injected.
-- If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing the app. That means a bad edit will not take down the runtime selector, but the file should still be fixed before it is considered usable.
+### Authoring a theme
+
+- Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
+- For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges the overlay after the checked-in base file.
+- Unknown keys are ignored — only keys present in `_THEME_DEFAULTS` (`app/config.py`) are accepted.
+- Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
+- To derive one value from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; the browser resolves them after injection.
+
+For regenerating the `.yaml.example` reference files, see [Keeping example files in sync](#keeping-example-files-in-sync).
+
+### Operational behavior
+
+- If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing. The runtime selector keeps working; fix the file before treating it as usable.
 - Restart the container after changing any loaded theme file under `app/conf/themes/` or after changing `config.yaml`. No rebuild is required.
-- Example variants under `app/conf/themes/` and the ad-hoc light-theme files in `app/conf/` can live beside the canonical files as inspiration or starting points. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
-- Theme YAMLs may include four optional metadata fields that control how the theme appears in the selector:
 
-  | Field | Effect | Fallback when absent |
-  |-------|--------|----------------------|
-  | `label` | Visible card name in the theme selector | Humanized filename stem |
-  | `group` | Section header in the theme modal | `Other` |
-  | `sort` | Ordering between cards and sections | Entry sorted after all explicitly sorted themes |
-  | `color_scheme` | Set to `dark` or `light` to control which built-in fallback family supplies missing keys (see [Baked-In Fallback Palette](#baked-in-fallback-palette)) | Dark default family |
+### Metadata fields
 
-  There is no filename-based or palette-based group inference — `group` must be set explicitly if you want the theme to appear under a specific section.
-- If you want one theme value to inherit or derive from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; they are interpreted by the browser, not by YAML parsing.
-- The base palette keys are exposed as normal CSS variables such as `--bg`, `--surface`, `--text`, `--green`, and `--blue`.
-- The component chrome keys are exposed as `--theme-*` variables, for example `--theme-panel-bg`, `--theme-tab-active-text`, and `--theme-toast-border`.
+Theme YAMLs may include four optional metadata fields that control how the theme appears in the selector:
+
+| Field | Effect | Fallback when absent |
+|-------|--------|----------------------|
+| `label` | Visible card name in the theme selector | Humanized filename stem |
+| `group` | Section header in the theme modal | `Other` |
+| `sort` | Ordering between cards and sections | Entry sorted after all explicitly sorted themes |
+| `color_scheme` | Set to `dark` or `light` to control which built-in fallback family supplies missing keys (see [Baked-In Fallback Palette](#baked-in-fallback-palette)) | Dark default family |
+
+There is no filename-based or palette-based group inference — `group` must be set explicitly if you want the theme to appear under a specific section.
+
+### CSS variable exposure
+
+- Base palette keys are exposed as plain CSS variables: `--bg`, `--surface`, `--text`, `--green`, `--blue`, and so on.
+- Component chrome keys are exposed as `--theme-*` variables, for example `--theme-panel-bg`, `--theme-tab-active-text`, `--theme-toast-border`.
 
 ---
 

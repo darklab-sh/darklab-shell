@@ -2,7 +2,7 @@
 
 This document is for developers and contributors working on darklab shell locally: development setup, test workflow, lint and security checks, and the expected Git/GitLab merge request flow.
 
-For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md).
+For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For documentation structure and canonical writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
 
 ---
 

@@ -153,6 +153,8 @@ Header sync alone is not sufficient, though. Passive tabs also need to refresh s
 
 ### Deny Flag Matching (anywhere in command)
 
+**Deny entries match denied flags anywhere in the command, not just as a command prefix.**
+
 Allow-listed tools can have specific flags blocked via `!`-prefixed deny entries in `conf/allowed_commands.txt`. Early implementations only matched the deny entry as a prefix of the command — `!curl -o` would catch `curl -o /tmp/out` but not `curl -s -o /tmp/out` where other flags precede the denied one.
 
 `_is_denied()` tokenizes both the incoming command and the deny entry using the shared `split_command_argv` helper. Tool names and subcommand prefixes are compared case-insensitively; flags are compared with exact case, so `!curl -K` (disable TLS verification, uppercase) does not fire on `curl -k` (lowercase). For short combined flags (`-sU`), `_flag_matches_token` checks whether the denied flag letter appears within the token, so `!nmap -sU` catches `-sU`, `-UsT`, and other combinations. The tool prefix must still match first, so `!gobuster dir -o` only fires for `gobuster dir` subcommand invocations, not `gobuster dns`.
@@ -242,6 +244,8 @@ The concrete event inventory and the operator-facing description of the `text` a
 
 ### Shared Frontend State Layer
 
+**A single `state.js` module owns shared browser state, with legacy globals rewired to it via `Object.defineProperty` accessors.**
+
 The browser scripts share a single state layer in `app/static/js/state.js`. That module loads immediately after `session.js` and installs `Object.defineProperty` accessors on `globalThis`, so the legacy global-style code can keep reading and writing plain names while the actual storage lives in one central object. DOM-centric helpers were split into `app/static/js/ui_helpers.js`, which keeps the state boundary smaller without forcing an ES-module migration.
 
 That choice keeps the codebase free of a larger ES-module migration while still making the shared state explicit. It also keeps the unit-test harness simple: the jsdom loader can seed `state.tabs` and `state.activeTabId` before evaluating the browser scripts, then prepend `ui_helpers.js` before DOM-bound modules so the extracted scripts see the same helper globals as production without rewriting the production call sites.
@@ -278,6 +282,8 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 
 ### Run Notification Title Uses Command Root Only
 
+**Desktop notifications show only the command root (first word), not the full command string.**
+
 Desktop notifications on run completion (`_maybeNotify()` in `runner.js`) use only the command root — the first word — as the notification title (e.g. `$ curl`) rather than the full command string.
 
 **Why not the full command:** The full command can contain bearer tokens (`curl -H "Authorization: Bearer sk-..."`), API keys in query strings, auth headers, internal hostnames, or the literal token value from `session-token revoke <token>`. Browser notifications are visible in the OS notification center and can persist after the browser window is closed. Logging the full command in the notification title would expose secrets in a surface that users may not associate with sensitive data. The command root communicates which tool ran without leaking any arguments.
@@ -285,6 +291,8 @@ Desktop notifications on run completion (`_maybeNotify()` in `runner.js`) use on
 **Why not suppress the title entirely:** A blank or generic title ("run complete") gives operators no context about which of several concurrent long-running scans just finished. The command root is a reasonable middle ground — enough signal to identify the tool, no risk of credential exposure.
 
 ### Dedicated Mobile Shell
+
+**Mobile uses a dedicated `#mobile-shell` surface with explicit chrome/transcript/composer/overlays mounts, but stays in normal document flow rather than pinning with fixed-shell viewport math.**
 
 The mobile UI still uses a dedicated shell rooted at `#mobile-shell` with explicit `chrome`, `transcript`, `composer`, and `overlays` mounts. The difference now is that the shell was deliberately simplified back to a normal-flow layout after a focused repro proved the Firefox mobile bug was coming from the app's integration layer, not from the browser itself.
 

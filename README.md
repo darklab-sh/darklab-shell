@@ -154,7 +154,12 @@ For system design, contributor workflow, and detailed test references, use the s
 
 ## Configuration
 
-All application settings live in `app/conf/config.yaml`. The file is read at startup, and changes take effect after `docker compose restart` with no rebuild needed. The values below are the built-in server defaults from `app/config.py`. The checked-in `config.yaml` now acts as an override file: settings that match the built-in defaults are commented out with a note showing the fallback value, and only the deployment-specific differences stay active. If you want an untracked deployment override layer, add `app/conf/config.local.yaml`; it is loaded after `config.yaml` and can override any subset of keys without affecting the checked-in file. The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
+All application settings live in `app/conf/config.yaml`. The values below are the built-in server defaults from `app/config.py`.
+
+- `config.yaml` is read at startup; changes take effect after `docker compose restart` with no rebuild needed.
+- The checked-in `config.yaml` acts as an override file: settings that match built-in defaults stay commented out, while deployment-specific differences remain active.
+- For an untracked local override layer, add `app/conf/config.local.yaml`. It loads after `config.yaml` and can override any subset of keys.
+- The same sibling `*.local.*` overlay pattern is also supported for the other operator-controlled config files under `app/conf/` and `app/conf/themes/`.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -441,6 +446,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and deployment notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
+- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - Documentation structure, canonical templates, and review rules for future doc updates
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
@@ -467,6 +473,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── CONTRIBUTING.md            # Contributor setup, local workflow, and merge request guidance
 ├── CONTRIBUTORS.md            # Project contributors
 ├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
+├── DOCS_STANDARDS.md          # Documentation structure, canonical templates, and review rules for future doc updates
 ├── Dockerfile
 ├── FEATURES.md                # User-facing feature catalog with screenshots and highlights
 ├── README.md                  # This file — top-level overview and project structure map

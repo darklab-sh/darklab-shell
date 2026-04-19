@@ -47,6 +47,9 @@ This document is organized in two parts:
   - [Vitest](#vitest)
   - [Playwright](#playwright)
   - [Demo Recording Specs](#demo-recording-specs)
+  - [UI Screenshot Capture Specs](#ui-screenshot-capture-specs)
+  - [Container Smoke Test Reference](#container-smoke-test-reference)
+  - [History Seeding Reference](#history-seeding-reference)
 - [Related Docs](#related-docs)
 
 ---
@@ -163,31 +166,19 @@ The browser layer now uses a split config model:
 
 ### Demo Recording
 
-`tests/js/e2e/demo.spec.js` and `tests/js/e2e/demo.mobile.spec.js` are standalone recording scripts for producing the README demo videos. They are **not part of the normal test suite** — they are excluded from `config/playwright.config.js` and `config/playwright.parallel.config.js` and can only be triggered through their dedicated configs:
-
-- `config/playwright.demo.config.js` — desktop (1600×900, `deviceScaleFactor: 2`)
-- `config/playwright.demo.mobile.config.js` — mobile (430×932 iPhone 15-class profile)
-
-Both specs are also guarded by `test.skip(!process.env.RUN_DEMO, ...)` so they cannot run accidentally in a normal `npx playwright test` invocation.
-
-**Run via the wrapper scripts, not directly:**
+Standalone Playwright specs that record the README demo videos (`tests/js/e2e/demo.spec.js` desktop, `tests/js/e2e/demo.mobile.spec.js` mobile). **Not part of the normal test suite** — excluded from both Playwright configs, guarded by `test.skip(!process.env.RUN_DEMO, ...)`, and run only through wrapper scripts:
 
 ```bash
-scripts/record_demo.sh                              # desktop
-scripts/record_demo_mobile.sh                       # mobile
-scripts/record_demo.sh --base-url http://localhost:9000   # custom port
+scripts/record_demo.sh                              # desktop (1600×900 @2x)
+scripts/record_demo_mobile.sh                       # mobile (430×932 iPhone 15-class)
+scripts/record_demo.sh --base-url http://localhost:9000
 ```
 
-The wrapper scripts health-check the container, set `RUN_DEMO=1`, run the spec, and stitch the captured frames into a video with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The output files are `assets/darklab_shell_demo.mp4` and `assets/darklab_shell_mobile_demo.mp4`.
+Wrappers health-check the container, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See the appendix [Demo Recording Specs](#demo-recording-specs) for per-spec details and [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
 ### UI Screenshot Capture
 
-`tests/js/e2e/ui-capture.desktop.capture.js` and `tests/js/e2e/ui-capture.mobile.capture.js` generate a curated screenshot pack of desktop and mobile states for design review, theming, and visual QA. They are run only through their dedicated configs:
-
-- `config/playwright.capture.desktop.config.js`
-- `config/playwright.capture.mobile.config.js`
-
-Use the wrapper instead of calling Playwright directly:
+Standalone Playwright specs that generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). Guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only via the wrapper:
 
 ```bash
 scripts/capture_ui_screenshots.sh
@@ -196,105 +187,19 @@ scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
 scripts/capture_ui_screenshots.sh --theme all
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/` by default.
-
-Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look closer to a production instance. Mobile capture also includes a first-frame settled welcome screen.
-
-**How the videos are embedded in README.md:**
-
-GitLab renders repo-hosted videos from markdown image tags — `![alt](path.mp4)` is automatically converted to an inline video player for `.mp4`, `.m4v`, `.mov`, `.webm`, and `.ogv` files. Standard `<video>` HTML tags with external `src` URLs are stripped by GitLab's sanitizer, and its asset proxy rejects files over ~10MB, which rules out hosting GIFs externally. The image-tag syntax with a relative repo path is the only approach that works reliably on GitLab.
-
-**Why `page.screenshot()` instead of Playwright's built-in video recorder:**
-
-Playwright's built-in `video: { mode: 'on' }` recorder ignores `deviceScaleFactor` and always captures at CSS pixel dimensions. `page.screenshot()` respects the factor and returns images at full physical resolution (e.g. 3200×1800 for a 1600×900 viewport at `deviceScaleFactor: 2`). The specs run a concurrent background loop that calls `page.screenshot()` at ~15 fps, writes numbered PNG frames to `test-results/demo-frames/` (or `demo-mobile-frames/`), and the wrapper stitches them with ffmpeg at 15 fps.
-
-**Why the mobile spec injects a fake keyboard image instead of focusing the input:**
-
-Focusing any input in Chromium's headless mobile emulation triggers a gray keyboard-simulation overlay that is painted above all page content regardless of z-index. This overlay cannot be hidden with CSS or JS and also shrinks the visual viewport, making the demo look nothing like a real device. The mobile spec avoids this by typing through the native `HTMLInputElement.prototype.value` setter + `InputEvent` dispatch, never calling `.focus()`. The fake keyboard image (`tests/js/e2e/fixtures/ios-keyboard-dark.png`) is injected as a fixed `div` at the bottom of the page, and `#mobile-shell` gets a matching `padding-bottom` to push the composer above it.
-
-See [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the full rationale.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details.
 
 ### Container Smoke Test
 
-The container smoke test exists to verify that every user-facing example command in `app/conf/autocomplete.yaml` actually works as advertised. Those examples are what the shell suggests to users — if a tool drifts (renamed flag, changed output format, broken install) without the examples being updated, users get a bad experience. The smoke test catches that drift before it ships.
-
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every example command defined in `app/conf/autocomplete.yaml` (`context.<root>.examples[].value`) through the live app, and compares each command's output against the stored expectations in `tests/py/fixtures/container_smoke_test-expectations.json`. A failure means an example command is broken, producing unexpected output, or the tool is missing from the image entirely. It is not part of the default fast loop and should be run after Dockerfile, packaged-tool, base-image, or `autocomplete.yaml` example changes.
-
-The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. All test cases run to completion and failures are reported together at the end.
-
-Run the smoke test directly:
+`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing example command from `app/conf/autocomplete.yaml` through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. It catches drift between the shell's suggested examples and actual tool behavior — renamed flags, changed output, or missing tools. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, or `autocomplete.yaml` example changes.
 
 ```bash
-./scripts/container_smoke_test.sh
+./scripts/container_smoke_test.sh                           # full run
+./scripts/container_smoke_test.sh -k nmap                   # filter by pattern
+./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-Pass `-k <pattern>` or `--cmd` to run a focused subset:
-
-```bash
-./scripts/container_smoke_test.sh -k nmap
-./scripts/container_smoke_test.sh --cmd "nmap -h" --cmd "nmap -sV -p 80,443 ip.darklab.sh"
-```
-
-**`scripts/container_smoke_test.sh` flags:**
-
-| Flag | Description |
-| --- | --- |
-| `--cmd <command>` | Run only the named command(s). Repeatable. |
-| `-k <pattern>` | Passed through to pytest to filter by test ID pattern. |
-| Any other flag | Passed through to pytest directly. |
-
-#### Updating expectations
-
-When example commands are added to `autocomplete.yaml` or a tool's output changes intentionally, run the capture script to record a fresh baseline:
-
-```bash
-./scripts/capture_container_smoke_test_outputs.sh
-```
-
-This launches a browser session against the running container (`http://localhost:8888` by default), runs every example command from `app/conf/autocomplete.yaml`, and writes the raw output files to `/tmp/darklab-shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
-
-The capture script does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`. Use the captured output files as a reference to write or update the expected text snippets in that file manually, then re-run the smoke test to confirm.
-
-To capture only a specific subset (e.g. newly added examples or commands that drifted), write the commands to a plain-text file and pass it with `--commands-file`:
-
-```bash
-./scripts/capture_container_smoke_test_outputs.sh --commands-file /tmp/missing.txt
-```
-
-**`scripts/capture_container_smoke_test_outputs.sh` flags:**
-
-| Flag | Description |
-| --- | --- |
-| `--commands-file <path>` | Plain-text file of commands to capture (one per line, `#` comments ignored). Default: all examples from `autocomplete.yaml`. |
-| `--base-url <url>` | App URL to connect to. Default: `http://localhost:8888`. |
-| `--out-dir <dir>` | Directory to write captured `.txt` files. Default: `/tmp/darklab-shell-container-smoke-test-corpus`. |
-| `--start-from-command <cmd>` | Skip all commands before the first exact match, to resume an interrupted run. |
-| `--pause-ms <ms>` | Pause between commands to avoid rate limits. Default: `500`. |
-| `--settle-ms <ms>` | Minimum wait after a command finishes before saving output. Default: `2500` (longer for heavy tools like `nmap`). |
-| `--stable-ms <ms>` | How long the output line count must be stable before saving. Default: `1000`. |
-| `--command-timeout-ms <ms>` | Maximum time to wait for a command to finish. Default: `300000` (5 min); extended automatically for `nmap`, `masscan`, `nuclei`, etc. |
-| `--save-timeout-ms <ms>` | Timeout for the browser download after clicking save. Default: `10000`. |
-| `--toast-timeout-ms <ms>` | Timeout when waiting for a no-output toast. Default: `2000`. |
-| `--headed` | Launch a visible browser window instead of headless. |
-| `--no-clear-between` | Leave output in the tab between commands instead of clearing. |
-| `--keep-browser-open` | Leave the browser open after capture finishes. |
-
-#### Keeping expectations in sync with autocomplete.yaml
-
-The expectations file only covers commands that appear in `autocomplete.yaml` examples. To check which examples are missing expectations:
-
-```python
-python3 -c "
-import yaml, json
-examples = [ex['value'] for spec in yaml.safe_load(open('app/conf/autocomplete.yaml'))['context'].values() if isinstance(spec, dict) for ex in (spec.get('examples') or [])]
-recorded = {r['command'] for r in json.load(open('tests/py/fixtures/container_smoke_test-expectations.json'))['records']}
-[print(c) for c in examples if c not in recorded]
-"
-```
-
-Any entry in `container_smoke_test-expectations.json` whose command does not appear in `autocomplete.yaml` examples is stale and should be removed.
-
-GitLab CI mirrors the smoke test in the `container-smoke-test` job, which is exposed as a manual run when you want to verify a fresh image before merging dependency or Dockerfile changes.
+GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. See the appendix [Container Smoke Test Reference](#container-smoke-test-reference) for flags, the capture workflow for updating expectations, and the `autocomplete.yaml` sync helper.
 
 ---
 
@@ -302,38 +207,13 @@ GitLab CI mirrors the smoke test in the `container-smoke-test` job, which is exp
 
 `scripts/seed_history.py` populates the history database with realistic runs for a specific session (UUID or `tok_` token). It's a manual-QA helper, not a test — use it when you want to exercise user-facing flows that only reveal themselves against a populated history: the history drawer, fuzzy history search, reverse-i-search, date/exit/star filters, and token-migration workflows.
 
-The script must run **inside the container** so the same SQLite version that owns the DB does the writes. Running it on the host against the project's `data/history.db` while the container is up — or with the container stopped if the host's SQLite differs from the container's — can corrupt the FTS5 internal pages. The script refuses to write from the host by default.
-
-`scripts/` is not mounted into the container (only `./app:/app:ro` and `./data:/data` are), so the script is piped in over stdin. `-T` disables TTY allocation so the redirect works; `python -` reads the program from stdin and forwards the trailing argv to it.
+The script must run **inside the container** so the same SQLite version that owns the DB does the writes; it refuses to write from the host by default.
 
 ```bash
-# Generate a new tok_ session and seed 70 runs across the last 7 days:
 docker compose exec -T shell python - --new-token < scripts/seed_history.py
-
-# Seed an existing token's session:
-docker compose exec -T shell python - --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
-
-# Seed an anonymous UUID session:
-docker compose exec -T shell python - --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
-
-# Custom count and star some seeded commands:
-docker compose exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
 ```
 
-**Flags:**
-
-| Flag | Description |
-| --- | --- |
-| `--new-token` | Generate a new `tok_`-prefixed token and seed its session. The generated token is printed on stdout so you can paste it into the UI. |
-| `--token <tok_…>` | Seed an existing server-issued `tok_` token (32 hex chars). |
-| `--uuid <uuid>` | Seed an anonymous UUID session. |
-| `--count N` | Number of runs to insert (default 70). |
-| `--days N` | Spread the inserted runs across the last N days (default 7). |
-| `--star N` | Star this many distinct seeded commands (default 4, 0 to skip). |
-| `--seed N` | Fix the RNG seed for reproducible runs. |
-| `--allow-host-write` | Bypass the host-write refusal. Only use if you understand the FTS5 cross-version corruption risk and the container is not running. |
-
-After seeding a `--new-token` session, paste the printed token into the browser via `session-token set <token>` (or the Options panel) to activate it.
+See the appendix [History Seeding Reference](#history-seeding-reference) for all invocation forms, the full flag list, and the rationale behind the host-write refusal.
 
 ---
 
@@ -2183,6 +2063,108 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 | Test | Description |
 | --- | --- |
 | `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states, sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
+
+### Container Smoke Test Reference
+
+Detailed runtime behaviour, flag reference, and capture/sync workflow for the opt-in Container Smoke Test. See the [Container Smoke Test](#container-smoke-test) overview above for motivation and the common run commands.
+
+The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. All test cases run to completion and failures are reported together at the end.
+
+**`scripts/container_smoke_test.sh` flags:**
+
+| Flag | Description |
+| --- | --- |
+| `--cmd <command>` | Run only the named command(s). Repeatable. |
+| `-k <pattern>` | Passed through to pytest to filter by test ID pattern. |
+| Any other flag | Passed through to pytest directly. |
+
+#### Updating expectations
+
+When example commands are added to `autocomplete.yaml` or a tool's output changes intentionally, run the capture script to record a fresh baseline:
+
+```bash
+./scripts/capture_container_smoke_test_outputs.sh
+```
+
+This launches a browser session against the running container (`http://localhost:8888` by default), runs every example command from `app/conf/autocomplete.yaml`, and writes the raw output files to `/tmp/darklab-shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
+
+The capture script does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`. Use the captured output files as a reference to write or update the expected text snippets in that file manually, then re-run the smoke test to confirm.
+
+To capture only a specific subset (e.g. newly added examples or commands that drifted), write the commands to a plain-text file and pass it with `--commands-file`:
+
+```bash
+./scripts/capture_container_smoke_test_outputs.sh --commands-file /tmp/missing.txt
+```
+
+**`scripts/capture_container_smoke_test_outputs.sh` flags:**
+
+| Flag | Description |
+| --- | --- |
+| `--commands-file <path>` | Plain-text file of commands to capture (one per line, `#` comments ignored). Default: all examples from `autocomplete.yaml`. |
+| `--base-url <url>` | App URL to connect to. Default: `http://localhost:8888`. |
+| `--out-dir <dir>` | Directory to write captured `.txt` files. Default: `/tmp/darklab-shell-container-smoke-test-corpus`. |
+| `--start-from-command <cmd>` | Skip all commands before the first exact match, to resume an interrupted run. |
+| `--pause-ms <ms>` | Pause between commands to avoid rate limits. Default: `500`. |
+| `--settle-ms <ms>` | Minimum wait after a command finishes before saving output. Default: `2500` (longer for heavy tools like `nmap`). |
+| `--stable-ms <ms>` | How long the output line count must be stable before saving. Default: `1000`. |
+| `--command-timeout-ms <ms>` | Maximum time to wait for a command to finish. Default: `300000` (5 min); extended automatically for `nmap`, `masscan`, `nuclei`, etc. |
+| `--save-timeout-ms <ms>` | Timeout for the browser download after clicking save. Default: `10000`. |
+| `--toast-timeout-ms <ms>` | Timeout when waiting for a no-output toast. Default: `2000`. |
+| `--headed` | Launch a visible browser window instead of headless. |
+| `--no-clear-between` | Leave output in the tab between commands instead of clearing. |
+| `--keep-browser-open` | Leave the browser open after capture finishes. |
+
+#### Keeping expectations in sync with autocomplete.yaml
+
+The expectations file only covers commands that appear in `autocomplete.yaml` examples. To check which examples are missing expectations:
+
+```python
+python3 -c "
+import yaml, json
+examples = [ex['value'] for spec in yaml.safe_load(open('app/conf/autocomplete.yaml'))['context'].values() if isinstance(spec, dict) for ex in (spec.get('examples') or [])]
+recorded = {r['command'] for r in json.load(open('tests/py/fixtures/container_smoke_test-expectations.json'))['records']}
+[print(c) for c in examples if c not in recorded]
+"
+```
+
+Any entry in `container_smoke_test-expectations.json` whose command does not appear in `autocomplete.yaml` examples is stale and should be removed.
+
+### History Seeding Reference
+
+Full invocation forms and flag reference for `scripts/seed_history.py`. See the [History Seeding](#history-seeding) overview above for when to use the script.
+
+**Why it must run inside the container:** running it on the host against the project's `data/history.db` while the container is up — or with the container stopped if the host's SQLite differs from the container's — can corrupt the FTS5 internal pages. The script refuses to write from the host by default (`--allow-host-write` bypasses the refusal but is rarely the right call).
+
+**Why the stdin pipe:** `scripts/` is not mounted into the container (only `./app:/app:ro` and `./data:/data` are), so the script is piped in over stdin. `-T` disables TTY allocation so the redirect works; `python -` reads the program from stdin and forwards the trailing argv to it.
+
+```bash
+# Generate a new tok_ session and seed 70 runs across the last 7 days:
+docker compose exec -T shell python - --new-token < scripts/seed_history.py
+
+# Seed an existing token's session:
+docker compose exec -T shell python - --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
+
+# Seed an anonymous UUID session:
+docker compose exec -T shell python - --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
+
+# Custom count and star some seeded commands:
+docker compose exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
+```
+
+**Flags:**
+
+| Flag | Description |
+| --- | --- |
+| `--new-token` | Generate a new `tok_`-prefixed token and seed its session. The generated token is printed on stdout so you can paste it into the UI. |
+| `--token <tok_…>` | Seed an existing server-issued `tok_` token (32 hex chars). |
+| `--uuid <uuid>` | Seed an anonymous UUID session. |
+| `--count N` | Number of runs to insert (default 70). |
+| `--days N` | Spread the inserted runs across the last N days (default 7). |
+| `--star N` | Star this many distinct seeded commands (default 4, 0 to skip). |
+| `--seed N` | Fix the RNG seed for reproducible runs. |
+| `--allow-host-write` | Bypass the host-write refusal. Only use if you understand the FTS5 cross-version corruption risk and the container is not running. |
+
+After seeding a `--new-token` session, paste the printed token into the browser via `session-token set <token>` (or the Options panel) to activate it.
 
 ---
 
