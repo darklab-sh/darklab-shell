@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 566
+- `vitest`: 575
 - `playwright`: 171
-- total: 1,573
+- total: 1,582
 
 This document is organized in two parts:
 
@@ -1768,6 +1768,20 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `only fires when clicks land inside the scope` | Verifies scope override scopes the listener to a subtree. |
 | `dispose() removes the listener so further clicks do not close` | Verifies dispose detaches the handler. |
 | `dispose() on a scope-override handle removes the listener from that scope` | Verifies dispose on a scoped handle removes the listener from its scope. |
+
+#### `ui_focus_helpers.test.js`
+
+| Test | Description |
+| --- | --- |
+| `returns false when el is null` | Verifies focusElement null-guard. |
+| `returns false when el has no focus method` | Verifies focusElement guards against non-focusable targets. |
+| `focuses a real DOM element and returns true` | Verifies focusElement focuses a live input. |
+| `passes { preventScroll: true } when requested` | Verifies preventScroll is forwarded to focus(). |
+| `calls focus without options when preventScroll is omitted` | Verifies the default path calls focus() with no args. |
+| `falls back to bare focus() when preventScroll throws` | Verifies the preventScroll fallback covers engines that reject the options arg. |
+| `returns false when activeElement is null` | Verifies blurActiveElement guards against null activeElement. |
+| `returns false when the active element has no blur method` | Verifies blurActiveElement guards against non-blurrable targets. |
+| `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
 
 #### `utils.test.js`
 

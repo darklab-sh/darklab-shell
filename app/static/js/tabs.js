@@ -34,10 +34,6 @@ function _getTabOutputEl(id) {
   return _getTabPanelEl(id)?.querySelector('.output') || null;
 }
 
-function _blurActiveElement() {
-  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
-  if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
-}
 
 function _clearTabDropIndicators() {
   if (!tabsBar) return;
@@ -560,7 +556,7 @@ function createTab(label) {
     if (Date.now() < _tabDragSuppressClickUntil) return;
     if (e.target.classList.contains('tab-close')) {
       closeTab(id);
-      _blurActiveElement();
+      blurActiveElement();
       return;
     }
     activateTab(id);
@@ -752,7 +748,7 @@ function closeTab(id) {
       && typeof blurVisibleComposerInputIfMobile === 'function') {
       setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
     }
-    _blurActiveElement();
+    blurActiveElement();
     if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
     return;
   }
@@ -1082,7 +1078,7 @@ function startTabRename(id, labelEl) {
   input.value = original;
   labelEl.textContent = '';
   labelEl.appendChild(input);
-  input.focus();
+  focusElement(input);
   input.select();
 
   let done = false;

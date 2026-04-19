@@ -257,7 +257,7 @@ function dispatchMobileMenuAction(action, btn = null) {
       clearSearch();
     } else {
       showSearchBar();
-      searchInput.focus();
+      focusElement(searchInput);
       runSearch();
     }
   }
@@ -500,7 +500,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   const input   = document.getElementById('session-token-set-input');
   const errEl   = document.getElementById('session-token-set-error');
   if (overlay) overlay.style.display = 'flex';
-  if (input)   { input.value = ''; input.focus(); }
+  if (input)   { input.value = ''; focusElement(input); }
   if (errEl)   errEl.style.display = 'none';
 });
 
@@ -745,7 +745,7 @@ searchToggleBtn.addEventListener('click', () => {
     clearSearch();
   } else {
     showSearchBar();
-    searchInput.focus();
+    focusElement(searchInput);
     runSearch();
   }
 });

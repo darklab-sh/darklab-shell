@@ -100,16 +100,26 @@
       input.scrollLeft = Math.max(0, Math.round(caretX - viewport + gutter));
     }
   }
-  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
-    const target = input || global.getVisibleComposerInput();
-    if (!target || typeof target.focus !== 'function') return false;
+  global.focusElement = (el, { preventScroll = false } = {}) => {
+    if (!el || typeof el.focus !== 'function') return false;
     try {
-      if (preventScroll) target.focus({ preventScroll: true });
-      else target.focus();
+      if (preventScroll) el.focus({ preventScroll: true });
+      else el.focus();
     } catch (_) {
-      target.focus();
+      el.focus();
     }
     return true;
+  };
+  global.blurActiveElement = () => {
+    if (typeof document === 'undefined') return false;
+    const active = document.activeElement;
+    if (!active || typeof active.blur !== 'function') return false;
+    active.blur();
+    return true;
+  };
+  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
+    const target = input || global.getVisibleComposerInput();
+    return global.focusElement(target, { preventScroll });
   };
   global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
     if (isMobileTerminalViewportActive()) return false;

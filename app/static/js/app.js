@@ -64,19 +64,6 @@ function focusCommandInputFromGesture({ preventScroll = true } = {}) {
     if (mobileInput && typeof focusComposerInput === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
       focusComposerInput(mobileInput, { preventScroll });
-      return;
-    }
-    if (mobileInput && typeof mobileInput.focus === 'function') {
-      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      if (preventScroll) {
-        try {
-          mobileInput.focus({ preventScroll: true });
-        } catch (_) {
-          mobileInput.focus();
-        }
-      } else {
-        mobileInput.focus();
-      }
     }
     return;
   }
@@ -545,21 +532,8 @@ function openThemeSelector() {
   setTimeout(() => {
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
-    if (target && typeof target.focus === 'function') {
-      try {
-        target.focus({ preventScroll: true });
-      } catch (_) {
-        target.focus();
-      }
-      return;
-    }
-    if (themeSelect && typeof themeSelect.focus === 'function') {
-      try {
-        themeSelect.focus({ preventScroll: true });
-      } catch (_) {
-        themeSelect.focus();
-      }
-    }
+    if (focusElement(target, { preventScroll: true })) return;
+    focusElement(themeSelect, { preventScroll: true });
   }, 0);
 }
 

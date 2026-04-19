@@ -145,8 +145,8 @@ function _acceptHistoryRootSuggestion(root) {
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = root;
   _hideHistoryRootDropdown();
   _setHistoryFilter('commandRoot', root);
-  if (typeof historyRootInput !== 'undefined' && historyRootInput && typeof historyRootInput.focus === 'function') {
-    setTimeout(() => historyRootInput.focus({ preventScroll: true }), 0);
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) {
+    setTimeout(() => focusElement(historyRootInput, { preventScroll: true }), 0);
   }
 }
 
@@ -475,7 +475,7 @@ function renderHistory() {
 
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
-      chip.blur();
+      blurActiveElement();
       setComposerValue(cmd, cmd.length, cmd.length);
       if (refocusComposerAfterAction({ preventScroll: true })) return;
       resetCmdHistoryNav();

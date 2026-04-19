@@ -626,9 +626,9 @@ The test stack is intentionally split into three layers:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 566
+- `vitest`: 575
 - `playwright`: 171
-- total: 1,573
+- total: 1,582
 
 ### Testing Architecture
 
