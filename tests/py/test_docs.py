@@ -13,6 +13,13 @@ Part 2 — documented totals:
   - pytest   total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
   - vitest   total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
   - playwright total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
+
+Part 3 — README.md project structure tree drift:
+  The "## Project Structure" tree in README.md must list every git-tracked
+  file, with two narrow forms of allowed omission: explicit per-file
+  exclusions (self-referential README, empty boilerplate) and opaque
+  directories whose individual contents are summarised by a parent entry
+  (theme files, vendored fonts, binary test fixtures).
 """
 
 import re
@@ -28,6 +35,7 @@ _TESTS_README = _HERE.parent / "README.md"
 _REPO_ROOT = _HERE.parent.parent
 _CONTRIBUTING = _REPO_ROOT / "CONTRIBUTING.md"
 _ARCHITECTURE = _REPO_ROOT / "ARCHITECTURE.md"
+_README = _REPO_ROOT / "README.md"
 
 # This file lives in tests/py/ but has no appendix section of its own;
 # it is explicitly excluded from the "missing appendix" check below.
@@ -101,19 +109,10 @@ def _run_vitest_list() -> tuple[int, dict[str, set]]:
     return total, by_file
 
 
-def _run_playwright_list() -> tuple[int, dict[str, set]]:
-    """Return (total_count, {filename: set_of_unique_test_names}).
-
-    Runs `npx playwright test --config config/playwright.parallel.config.js
-    --list`. Output rows look like:
-      "  [chromium-wN] › <file>.spec.js:L:C › describe › test name"
-    Playwright repeats each test once per project; we collapse to unique
-    names per file. The summary line "Total: N tests in M files" gives the
-    raw project-multiplied total.
-    """
+def _run_playwright_list_for_config(config_path: str) -> tuple[int, dict[str, set]]:
+    """Return (total_count, {filename: set_of_unique_test_names}) for one config."""
     result = subprocess.run(
-        ["npx", "playwright", "test",
-         "--config", "config/playwright.parallel.config.js", "--list"],
+        ["npx", "playwright", "test", "--config", config_path, "--list"],
         capture_output=True,
         text=True,
         cwd=str(_REPO_ROOT),
@@ -122,7 +121,7 @@ def _run_playwright_list() -> tuple[int, dict[str, set]]:
     total = 0
     for line in result.stdout.splitlines():
         m = re.match(
-            r"^\s*\[[^\]]+\]\s+›\s+([^:]+\.spec\.js):\d+:\d+\s+›\s+(.+)$",
+            r"^\s*\[[^\]]+\]\s+›\s+([^:]+\.(?:spec|capture)\.js):\d+:\d+\s+›\s+(.+)$",
             line,
         )
         if m:
@@ -133,6 +132,34 @@ def _run_playwright_list() -> tuple[int, dict[str, set]]:
         if m:
             total = int(m.group(1))
     return total, by_file
+
+
+def _run_playwright_parallel_list() -> tuple[int, dict[str, set]]:
+    """Return the normal Playwright suite listing used for documented totals."""
+    return _run_playwright_list_for_config("config/playwright.parallel.config.js")
+
+
+def _run_playwright_appendix_list() -> tuple[int, dict[str, set]]:
+    """Return the combined listing used for appendix drift checks.
+
+    This includes the normal Playwright suite plus the standalone demo and
+    screenshot-capture configs that do not run in normal test passes.
+    """
+    configs = (
+        "config/playwright.parallel.config.js",
+        "config/playwright.demo.config.js",
+        "config/playwright.demo.mobile.config.js",
+        "config/playwright.capture.desktop.config.js",
+        "config/playwright.capture.mobile.config.js",
+    )
+    combined_total = 0
+    combined_by_file: dict[str, set] = {}
+    for config_path in configs:
+        total, by_file = _run_playwright_list_for_config(config_path)
+        combined_total += total
+        for filename, names in by_file.items():
+            combined_by_file.setdefault(filename, set()).update(names)
+    return combined_total, combined_by_file
 
 
 def _parse_appendix(suffixes: tuple[str, ...]) -> dict[str, int]:
@@ -201,10 +228,17 @@ def vitest_collected() -> tuple[int, dict[str, set]]:
 
 
 @pytest.fixture(scope="module")
-def playwright_collected() -> tuple[int, dict[str, set]]:
+def playwright_parallel_collected() -> tuple[int, dict[str, set]]:
     if shutil.which("npx") is None:
         pytest.skip("npx is not available")
-    return _run_playwright_list()
+    return _run_playwright_parallel_list()
+
+
+@pytest.fixture(scope="module")
+def playwright_appendix_collected() -> tuple[int, dict[str, set]]:
+    if shutil.which("npx") is None:
+        pytest.skip("npx is not available")
+    return _run_playwright_appendix_list()
 
 
 # ── Part 1: per-file appendix drift ──────────────────────────────────────────
@@ -277,9 +311,9 @@ class TestVitestAppendixDrift:
 
 class TestPlaywrightAppendixDrift:
 
-    def test_documented_files_match_actual(self, playwright_collected):
-        _, actual_by_file = playwright_collected
-        appendix = _parse_appendix((".spec.js",))
+    def test_documented_files_match_actual(self, playwright_appendix_collected):
+        _, actual_by_file = playwright_appendix_collected
+        appendix = _parse_appendix((".spec.js", ".capture.js"))
         issues = []
         for filename, doc_count in appendix.items():
             actual_set = actual_by_file.get(filename, set())
@@ -294,9 +328,9 @@ class TestPlaywrightAppendixDrift:
             + "\n".join(issues)
         )
 
-    def test_all_test_files_have_appendix_sections(self, playwright_collected):
-        _, actual_by_file = playwright_collected
-        appendix = _parse_appendix((".spec.js",))
+    def test_all_test_files_have_appendix_sections(self, playwright_appendix_collected):
+        _, actual_by_file = playwright_appendix_collected
+        appendix = _parse_appendix((".spec.js", ".capture.js"))
         missing = [
             f"  {f}: {len(actual_by_file[f])} unique test functions, no appendix section"
             for f in sorted(actual_by_file)
@@ -372,8 +406,8 @@ class TestDocumentedVitestTotals:
 
 class TestDocumentedPlaywrightTotals:
 
-    def test_tests_readme(self, playwright_collected):
-        total, _ = playwright_collected
+    def test_tests_readme(self, playwright_parallel_collected):
+        total, _ = playwright_parallel_collected
         documented = _extract_playwright_total(_TESTS_README.read_text())
         assert documented is not None, "Could not parse playwright total from tests/README.md"
         assert documented == total, (
@@ -381,8 +415,8 @@ class TestDocumentedPlaywrightTotals:
             f"playwright --list found {total}"
         )
 
-    def test_contributing(self, playwright_collected):
-        total, _ = playwright_collected
+    def test_contributing(self, playwright_parallel_collected):
+        total, _ = playwright_parallel_collected
         documented = _extract_playwright_total(_CONTRIBUTING.read_text())
         assert documented is not None, "Could not parse playwright total from CONTRIBUTING.md"
         assert documented == total, (
@@ -390,11 +424,172 @@ class TestDocumentedPlaywrightTotals:
             f"playwright --list found {total}"
         )
 
-    def test_architecture(self, playwright_collected):
-        total, _ = playwright_collected
+    def test_architecture(self, playwright_parallel_collected):
+        total, _ = playwright_parallel_collected
         documented = _extract_playwright_total(_ARCHITECTURE.read_text())
         assert documented is not None, "Could not parse playwright total from ARCHITECTURE.md"
         assert documented == total, (
             f"ARCHITECTURE.md records {documented} playwright tests; "
             f"playwright --list found {total}"
+        )
+
+
+# ── Part 3: README.md project structure tree coverage ────────────────────────
+
+# Files that intentionally do not appear in the project structure tree.
+# Anything else tracked in git must be listed (or fall under an opaque
+# parent directory below).
+_PROJECT_STRUCTURE_EXCLUSIONS = frozenset({
+    "app/blueprints/__init__.py",     # empty package marker
+})
+
+# Directories whose individual files are intentionally collapsed into a
+# single parent entry in the tree (with a summarising description). The
+# parent directory itself must still appear in the tree; we only suppress
+# the per-file leaf check for everything beneath it.
+_PROJECT_STRUCTURE_OPAQUE_DIRS = frozenset({
+    "app/conf/themes",                # 16 theme YAMLs — covered by themes/ entry
+    "app/static/fonts",               # vendored binary font files
+    "assets",                         # README demo videos
+    "tests/js/e2e/fixtures",          # binary screenshot fixtures
+})
+
+
+def _git_tracked_files() -> list[str]:
+    """Return files tracked by git (committed to the index)."""
+    result = subprocess.run(
+        ["git", "ls-files", "--cached"],
+        capture_output=True, text=True, cwd=str(_REPO_ROOT), check=True,
+    )
+    return [line for line in result.stdout.splitlines() if line]
+
+
+def _all_ancestor_dirs(paths) -> set[str]:
+    """Return every intermediate directory path implied by the file list.
+
+    For ``a/b/c.py`` this yields ``a`` and ``a/b``. Used by the
+    listed-paths-exist check so the README can reference a parent
+    directory like ``.gitlab`` even though git only tracks files.
+    """
+    out: set[str] = set()
+    for p in paths:
+        parts = Path(p).parts
+        for i in range(1, len(parts)):
+            out.add("/".join(parts[:i]))
+    return out
+
+
+def _parse_project_structure_tree(text: str) -> set[str]:
+    """Return the set of full paths (files and directories) listed in the
+    README.md ``## Project Structure`` tree.
+
+    The tree is a fenced ``text`` code block where each entry is prefixed
+    with tree-drawing characters (``├── ``, ``└── ``, ``│   ``, four-space
+    indents). Each indent level is exactly four columns regardless of
+    whether it uses ``│   `` or ``    `` (the latter follows a parent
+    rendered with ``└──``), so the depth of any entry is ``column // 4``.
+    Directory entries end with ``/`` and seed the parent stack for their
+    children; file entries are leaves.
+    """
+    in_block = False
+    parent_stack: list[str] = ["."]
+    paths: set[str] = set()
+
+    entry_re = re.compile(r"[├└]── ")
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not in_block:
+            if stripped == "```text":
+                in_block = True
+            continue
+        if stripped == "```":
+            break
+
+        m = entry_re.search(line)
+        if not m:
+            continue
+        level = m.start() // 4
+        rest = line[m.end():]
+        name_match = re.match(r"(\S+)", rest)
+        if not name_match:
+            continue
+        raw_name = name_match.group(1)
+        is_dir = raw_name.endswith("/")
+        clean = raw_name.rstrip("/")
+
+        # Truncate the parent stack so the current entry's parent is at
+        # index ``level``. Levels deeper than the truncated length should
+        # never happen in a well-formed tree.
+        parent_stack = parent_stack[: level + 1]
+        parent = parent_stack[level]
+        full_path = clean if parent == "." else f"{parent}/{clean}"
+        paths.add(full_path)
+        if is_dir:
+            parent_stack.append(full_path)
+
+    return paths
+
+
+def _is_under_opaque_dir(path: str) -> bool:
+    return any(path == d or path.startswith(d + "/") for d in _PROJECT_STRUCTURE_OPAQUE_DIRS)
+
+
+class TestProjectStructureCoverage:
+    """The README's project-structure tree must list every git-tracked file
+    so contributors land on a complete navigation map."""
+
+    def test_no_files_missing_from_structure(self):
+        listed = _parse_project_structure_tree(_README.read_text())
+        tracked = _git_tracked_files()
+        missing = sorted(
+            path for path in tracked
+            if path not in listed
+            and path not in _PROJECT_STRUCTURE_EXCLUSIONS
+            and not _is_under_opaque_dir(path)
+        )
+        assert not missing, (
+            "Files missing from README.md '## Project Structure' tree:\n"
+            + "\n".join(f"  {p}" for p in missing)
+            + "\n\nIf the omission is intentional, add the path to "
+            "_PROJECT_STRUCTURE_EXCLUSIONS or, for whole subtrees, "
+            "_PROJECT_STRUCTURE_OPAQUE_DIRS in tests/py/test_docs.py."
+        )
+
+    def test_opaque_dirs_appear_in_structure(self):
+        listed = _parse_project_structure_tree(_README.read_text())
+        not_listed = sorted(d for d in _PROJECT_STRUCTURE_OPAQUE_DIRS if d not in listed)
+        assert not not_listed, (
+            "Opaque directories declared in _PROJECT_STRUCTURE_OPAQUE_DIRS "
+            "must still appear as a parent entry in the README tree:\n"
+            + "\n".join(f"  {d}/" for d in not_listed)
+        )
+
+    def test_listed_paths_exist_in_git(self):
+        """Catch typos and stale entries: every leaf path written into the
+        README tree must correspond to a real git-tracked file or directory.
+        Subtree-internal paths beneath an opaque dir are exempt because the
+        README intentionally only names the parent."""
+        listed = _parse_project_structure_tree(_README.read_text())
+        tracked = set(_git_tracked_files())
+        # Allow any directory that contains tracked files, including every
+        # intermediate ancestor (so '.gitlab' resolves via
+        # '.gitlab/merge_request_templates/Default.md').
+        valid = tracked | _all_ancestor_dirs(tracked) | {"."}
+        unknown = sorted(
+            p for p in listed
+            if p not in valid
+            and not _is_under_opaque_dir(p)
+            # Some entries describe files that don't ship in git but are
+            # created at runtime (data/history.db) or as user-created
+            # local overrides (app/conf/config.local.yaml). Allow paths
+            # that sit under a directory the README explicitly marks as
+            # writable/optional via its own listed entry.
+            and not p.startswith("data/")
+            and p != "data"
+            and p != "app/conf/config.local.yaml"
+        )
+        assert not unknown, (
+            "README.md '## Project Structure' lists paths that aren't "
+            "tracked in git (typo or stale entry?):\n"
+            + "\n".join(f"  {p}" for p in unknown)
         )

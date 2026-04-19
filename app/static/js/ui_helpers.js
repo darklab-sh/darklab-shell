@@ -452,14 +452,10 @@
   global.isHistoryRowVisible = () => !!(histRow && histRow.style && histRow.style.display !== 'none');
   global.showRunTimer = () => {
     if (runTimer && runTimer.style) runTimer.style.display = 'inline';
-    const cell = document.getElementById('hud-runtime-cell');
-    if (cell) cell.classList.remove('u-hidden');
   };
   global.hideRunTimer = () => {
     if (runTimer && runTimer.style) runTimer.style.display = 'none';
     if (runTimer) runTimer.textContent = '';
-    const cell = document.getElementById('hud-runtime-cell');
-    if (cell) cell.classList.add('u-hidden');
   };
   global.isRunTimerVisible = () => !!(runTimer && runTimer.style && runTimer.style.display !== 'none');
   global.setRunButtonDisabled = (disabled) => {

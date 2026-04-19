@@ -20,7 +20,22 @@
   100% { transform: translateX(100%); }
 }
 
+/* Prevent the browser's native pull-to-refresh / overscroll bounce while in
+   mobile terminal mode. A terminal has no refresh semantics — reloading
+   destroys session state — and without this, a finger that lands above a
+   bottom sheet's grab handle can start a page reload gesture instead of a
+   sheet-close drag. iOS Safari and Firefox only honor `overscroll-behavior`
+   on the actual scroll-root element, which is `html` (not `body`) for this
+   document, so the rule has to be hung off `html` via :has() rather than
+   nested inside the body scope below. */
+html:has(body.mobile-terminal-mode) {
+  overscroll-behavior-y: contain;
+}
+
 body.mobile-terminal-mode {
+  /* Defense-in-depth duplicate of the html rule above for engines that treat
+     body as the scroll root. */
+  overscroll-behavior-y: contain;
 
   /* u-hidden escape hatch: the scoped rules below set display:flex / :block on
      the sheets and helper rows and win on specificity against the base
@@ -64,6 +79,38 @@ body.mobile-terminal-mode {
       transparent 80%
     );
     animation: shell-m-progress-slide 1.4s ease-in-out infinite;
+  }
+
+  /* Single source of truth for every mobile bottom-sheet drag handle.
+     Behavior is wired in app/static/js/mobile_sheet.js::bindMobileSheet —
+     visual + cursor + touch-action + brighten on press all live here so the
+     menu, recents, history panel, workflows, FAQ, options, kill, hist-del,
+     and share-redaction sheets cannot drift. Outside mobile-terminal-mode the
+     scope above keeps the bar invisible on desktop modals. */
+  .sheet-grab {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* Generous vertical padding around the visible bar so thumb-near-misses
+       in either direction still register as a sheet drag rather than a
+       browser overscroll gesture or a tap on the row beneath the handle. */
+    padding: 20px 0;
+    cursor: grab;
+    touch-action: none;
+    flex-shrink: 0;
+  }
+  .sheet-grab:active { cursor: grabbing; }
+  .sheet-grab::before {
+    content: '';
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-bright);
+    transition: background 120ms ease;
+  }
+  .sheet-grab:hover::before,
+  .sheet-grab:active::before {
+    background: var(--text);
   }
 
   /* Recent peek row sits between transcript and composer while idle. */
@@ -152,27 +199,6 @@ body.mobile-terminal-mode {
     box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
     animation: shell-m-sheet-in 240ms ease;
   }
-  .recents-sheet .sheet-grab {
-    display: flex;
-    justify-content: center;
-    align-items: center;
-    padding: 12px 0 10px;
-    cursor: grab;
-    touch-action: none;
-  }
-  .recents-sheet .sheet-grab:active { cursor: grabbing; }
-  .recents-sheet .sheet-grab::before {
-    content: '';
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--border-bright);
-    transition: background 120ms ease;
-  }
-  .recents-sheet .sheet-grab:hover::before,
-  .recents-sheet .sheet-grab:active::before {
-    background: var(--text);
-  }
   .recents-sheet .sheet-title {
     display: flex;
     align-items: center;
@@ -188,6 +214,8 @@ body.mobile-terminal-mode {
   }
   .recents-sheet .sheet-title-spacer { flex: 1; }
   .recents-sheet .sheet-clear-btn {
+    appearance: none;
+    -webkit-appearance: none;
     background: transparent;
     border: 1px solid var(--border-bright);
     border-radius: 6px;
@@ -197,6 +225,7 @@ body.mobile-terminal-mode {
     padding: 6px 12px;
     letter-spacing: 0.4px;
     cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
   }
   .recents-sheet .sheet-clear-btn:hover,
   .recents-sheet .sheet-clear-btn:active {
@@ -204,15 +233,21 @@ body.mobile-terminal-mode {
     border-color: color-mix(in srgb, var(--red, #ff6b6b) 55%, transparent);
     color: var(--red, #ff6b6b);
   }
-  .recents-sheet .sheet-close {
+  .sheet-close {
+    appearance: none;
+    -webkit-appearance: none;
+    margin-left: auto;
     background: transparent;
     border: none;
     color: var(--muted);
     font-size: 18px;
-    opacity: 0.8;
+    line-height: 1;
     padding: 6px 10px;
     cursor: pointer;
+    transition: color 0.15s;
   }
+  .sheet-close:hover,
+  .sheet-close:active { color: var(--text); }
 
   .recents-sheet .sheet-filters {
     padding: 0 14px 10px;
@@ -222,6 +257,8 @@ body.mobile-terminal-mode {
     border-bottom: 1px solid var(--border);
   }
   .recents-sheet .sheet-filter-row {
+    appearance: none;
+    -webkit-appearance: none;
     background: var(--bg);
     border: 1px solid var(--border-bright);
     border-radius: 6px;
@@ -231,6 +268,7 @@ body.mobile-terminal-mode {
     display: flex;
     align-items: center;
     gap: 8px;
+    -webkit-tap-highlight-color: transparent;
   }
   /* iOS Safari auto-zooms any input with font-size < 16px on focus. */
   .recents-sheet #mobile-recents-search,
@@ -482,6 +520,14 @@ body.mobile-terminal-mode {
     display: inline-flex;
     align-items: center;
     justify-content: center;
+    /* Reset native <button> chrome — without this the default user-agent
+       button fill leaks through and the row actions render as light-gray
+       boxes on real devices and on the Chromium demo recorder. */
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
   }
 
   /* Bottom-sheet menu (hamburger target). Workflows is a normal row that
@@ -503,18 +549,6 @@ body.mobile-terminal-mode {
     box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
     animation: shell-m-sheet-in 240ms ease;
   }
-  .menu-sheet .sheet-grab {
-    display: flex;
-    justify-content: center;
-    padding: 8px 0 6px;
-  }
-  .menu-sheet .sheet-grab::before {
-    content: '';
-    width: 40px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--border-bright);
-  }
   .menu-sheet .menu-title {
     display: flex;
     align-items: center;
@@ -535,18 +569,18 @@ body.mobile-terminal-mode {
   }
   .menu-sheet .menu-group-divider {
     /* Clear section break without fragmenting the sheet: a --surface band
-       with padded air above/below and a 2px bar in --border-bright centered
-       inside it. Earlier iterations (hairline, tonal band) were rejected. */
-    padding: 16px 0;
+       with padded air above/below and a quiet hairline centered inside it,
+       so the divider reads as separation rather than competing with the
+       per-item borders. */
+    padding: 22px 0;
     background: var(--surface);
   }
   .menu-sheet .menu-group-divider::before {
     content: '';
     display: block;
-    height: 2px;
+    height: 1px;
     margin: 0 16px;
-    background: var(--border-bright);
-    border-radius: 1px;
+    background: var(--border);
   }
   .menu-sheet .menu-item {
     display: flex;
@@ -568,7 +602,10 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-group:first-of-type .menu-item:first-child {
     border-top: 1px solid var(--border);
   }
-  .menu-sheet .menu-group .menu-item:last-child {
+  /* Use :last-of-type (button) so the suppression also catches the timestamps
+     row, which is the last <button> in the first group even though a sibling
+     <div class="menu-submenu"> follows it as the actual :last-child. */
+  .menu-sheet .menu-group .menu-item:last-of-type {
     border-bottom: none;
   }
   .menu-sheet .menu-item.muted { color: var(--muted); }
@@ -757,6 +794,14 @@ body.mobile-terminal-mode {
     user-select: none;
     transition: background 100ms ease, color 100ms ease;
     cursor: pointer;
+    /* Without these, the browser user-agent <button> appearance bleeds through
+       and renders .kb-key with a light gray/white fill — visible on a real
+       device and on Chromium-based demo recordings. */
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 0;
+    -webkit-tap-highlight-color: transparent;
   }
   .kb-key.kb-key-text {
     flex: 1 1 auto;

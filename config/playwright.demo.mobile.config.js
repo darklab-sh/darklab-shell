@@ -11,16 +11,16 @@ export default defineConfig({
   retries: 0,
   reporter: [['list']],
   use: {
-    // isMobile: false with an explicit 393×852 viewport gives full-height page
+    // isMobile: false with an explicit 430×932 viewport gives full-height page
     // content — no Chromium mobile browser chrome reservation and no gray bar
     // at the bottom of the recording. The iPhone 15 UA makes the server serve
     // the mobile template; hasTouch enables touch events; deviceScaleFactor: 3
     // matches real iPhone 15 pixel density. With isMobile: false, svh == vh ==
-    // 852px (no simulated browser chrome), so 88svh renders correctly tall —
+    // 932px (no simulated browser chrome), so 88svh renders correctly tall —
     // matching the real-device history panel height without any CSS overrides.
     isMobile: false,
     browserName: 'chromium',
-    viewport: { width: 393, height: 852 },
+    viewport: { width: 430, height: 932 },
     deviceScaleFactor: 3,
     userAgent:
       'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
@@ -28,9 +28,9 @@ export default defineConfig({
     baseURL: BASE_URL,
     slowMo: 60,
     // Video recording disabled — the spec captures frames via page.screenshot()
-    // (which respects deviceScaleFactor, giving 1179×2556 images) and stitches
+    // (which respects deviceScaleFactor, giving 1290×2796 images) and stitches
     // them into a video with ffmpeg. Built-in video recording ignores
-    // deviceScaleFactor and always captures at CSS pixel dimensions (393×852).
+    // deviceScaleFactor and always captures at CSS pixel dimensions (430×932).
     video: { mode: 'off' },
   },
   projects: [{ name: 'demo-mobile' }],

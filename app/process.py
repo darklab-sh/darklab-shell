@@ -10,6 +10,7 @@ import os
 import threading
 import logging
 import json
+import time
 from typing import Any, cast
 
 from config import CFG
@@ -21,9 +22,109 @@ log = logging.getLogger("shell")
 # in-process mode (memory rate limiting, threading.Lock pid map) which is
 # only appropriate for local dev or single-worker deployments.
 REDIS_URL = os.environ.get("REDIS_URL") or CFG.get("redis_url", "")
+_FAKE_REDIS_ENABLED = os.environ.get("APP_FAKE_REDIS") == "1"
+
+
+class _FakeRedisClient:
+    """Small in-memory Redis subset for capture/demo environments."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._values: dict[str, Any] = {}
+        self._sets: dict[str, set[str]] = {}
+        self._expires_at: dict[str, float] = {}
+
+    def _purge_key(self, key: str) -> None:
+        expires_at = self._expires_at.get(key)
+        if expires_at is None or expires_at > time.time():
+            return
+        self._values.pop(key, None)
+        self._sets.pop(key, None)
+        self._expires_at.pop(key, None)
+
+    def ping(self) -> bool:
+        return True
+
+    def set(self, key: str, value: Any, ex: int | None = None) -> bool:
+        with self._lock:
+            self._values[key] = value
+            self._sets.pop(key, None)
+            if ex:
+                self._expires_at[key] = time.time() + float(ex)
+            else:
+                self._expires_at.pop(key, None)
+        return True
+
+    def get(self, key: str) -> Any:
+        with self._lock:
+            self._purge_key(key)
+            return self._values.get(key)
+
+    def getdel(self, key: str) -> Any:
+        with self._lock:
+            self._purge_key(key)
+            self._expires_at.pop(key, None)
+            self._sets.pop(key, None)
+            return self._values.pop(key, None)
+
+    def sadd(self, key: str, *values: Any) -> int:
+        members = {str(value) for value in values if value is not None}
+        with self._lock:
+            self._purge_key(key)
+            bucket = self._sets.setdefault(key, set())
+            before = len(bucket)
+            bucket.update(members)
+            self._values.pop(key, None)
+            return len(bucket) - before
+
+    def smembers(self, key: str) -> set[str]:
+        with self._lock:
+            self._purge_key(key)
+            return set(self._sets.get(key, set()))
+
+    def expire(self, key: str, ttl: int) -> bool:
+        with self._lock:
+            self._purge_key(key)
+            if key not in self._values and key not in self._sets:
+                return False
+            self._expires_at[key] = time.time() + float(ttl)
+            return True
+
+    def srem(self, key: str, *values: Any) -> int:
+        members = {str(value) for value in values if value is not None}
+        with self._lock:
+            self._purge_key(key)
+            bucket = self._sets.get(key)
+            if not bucket:
+                return 0
+            removed = 0
+            for member in members:
+                if member in bucket:
+                    bucket.remove(member)
+                    removed += 1
+            if not bucket:
+                self._sets.pop(key, None)
+                self._expires_at.pop(key, None)
+            return removed
+
+    def delete(self, *keys: str) -> int:
+        removed = 0
+        with self._lock:
+            for key in keys:
+                self._purge_key(key)
+                existed = key in self._values or key in self._sets
+                self._values.pop(key, None)
+                self._sets.pop(key, None)
+                self._expires_at.pop(key, None)
+                removed += int(existed)
+        return removed
 
 redis_client = None
-if REDIS_URL:
+if _FAKE_REDIS_ENABLED:
+    REDIS_URL = REDIS_URL or "memory://"
+    redis_client = _FakeRedisClient()
+    log.info("Redis faked in-memory for capture mode")
+elif REDIS_URL:
     try:
         import redis as redis_lib
         redis_client = redis_lib.from_url(REDIS_URL, decode_responses=True)

@@ -337,6 +337,54 @@ class TestSessionMigrate:
         assert data["migrated_stars"] == 2
 
 
+# ── /session/run-count ────────────────────────────────────────────────────────
+
+class TestSessionRunCount:
+    def _seed_runs(self, session_id, count):
+        import uuid
+        from datetime import datetime, timezone
+
+        now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+        with sqlite3.connect(DB_PATH) as conn:
+            for _ in range(count):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, 'echo hi', ?)",
+                    (str(uuid.uuid4()), session_id, now),
+                )
+            conn.commit()
+
+    def test_returns_zero_for_empty_session(self):
+        client = get_client()
+        session_id = "run-count-empty-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
+        assert resp.status_code == 200
+        assert json.loads(resp.data)["count"] == 0
+
+    def test_returns_true_count(self):
+        client = get_client()
+        session_id = "run-count-seeded-" + __import__("uuid").uuid4().hex[:8]
+        self._seed_runs(session_id, count=7)
+        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
+        assert json.loads(resp.data)["count"] == 7
+
+    def test_is_uncapped_beyond_history_panel_limit(self):
+        """The count must not be capped by history_panel_limit (default 50)."""
+        client = get_client()
+        session_id = "run-count-uncapped-" + __import__("uuid").uuid4().hex[:8]
+        self._seed_runs(session_id, count=75)
+        resp = client.get("/session/run-count", headers={"X-Session-ID": session_id})
+        assert json.loads(resp.data)["count"] == 75
+
+    def test_is_scoped_to_session(self):
+        client = get_client()
+        session_a = "run-count-scope-a-" + __import__("uuid").uuid4().hex[:8]
+        session_b = "run-count-scope-b-" + __import__("uuid").uuid4().hex[:8]
+        self._seed_runs(session_a, count=3)
+        self._seed_runs(session_b, count=5)
+        resp = client.get("/session/run-count", headers={"X-Session-ID": session_a})
+        assert json.loads(resp.data)["count"] == 3
+
+
 # ── /session/starred ──────────────────────────────────────────────────────────
 
 class TestSessionStarred:

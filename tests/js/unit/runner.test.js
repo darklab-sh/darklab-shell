@@ -1097,7 +1097,7 @@ function loadSeedFns({
 }
 
 describe('_seedLocalStorageStarsToServer', () => {
-  it('does nothing when localStorage has no starred key', async () => {
+  it('skips the seed and clears the key when localStorage has no starred entry', async () => {
     const { _seedLocalStorageStarsToServer, apiFetch, loadStarredFromServer, _storage } =
       loadSeedFns()
 
@@ -1108,12 +1108,15 @@ describe('_seedLocalStorageStarsToServer', () => {
     expect(_storage.getItem('starred')).toBeNull()
   })
 
-  it('does nothing when the starred array is empty', async () => {
-    const { _seedLocalStorageStarsToServer, apiFetch } = loadSeedFns({ localStarred: [] })
+  it('skips the seed and clears the stale empty array', async () => {
+    // Empty arrays are the typical legacy leftover from before stars went
+    // server-side; they must be removed so they do not linger in localStorage.
+    const { _seedLocalStorageStarsToServer, apiFetch, _storage } = loadSeedFns({ localStarred: [] })
 
     await _seedLocalStorageStarsToServer()
 
     expect(apiFetch).not.toHaveBeenCalled()
+    expect(_storage.getItem('starred')).toBeNull()
   })
 
   it('POSTs each starred command to /session/starred', async () => {
@@ -1156,7 +1159,7 @@ describe('_seedLocalStorageStarsToServer', () => {
     expect(loadStarredFromServer).toHaveBeenCalledTimes(1)
   })
 
-  it('handles invalid localStorage JSON as empty and returns early', async () => {
+  it('handles invalid localStorage JSON as empty and clears the key', async () => {
     const storage = new MemoryStorage()
     storage.setItem('starred', 'not-json{{{')
     const apiFetch = vi.fn()
@@ -1169,6 +1172,7 @@ describe('_seedLocalStorageStarsToServer', () => {
     await fns._seedLocalStorageStarsToServer()
 
     expect(apiFetch).not.toHaveBeenCalled()
+    expect(storage.getItem('starred')).toBeNull()
   })
 
   it('retains failed commands in localStorage and removes only successful ones', async () => {

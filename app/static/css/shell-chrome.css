@@ -343,7 +343,6 @@
     border-top: 1px dashed var(--border);
     color: var(--muted);
     font-size: 10.5px;
-    font-style: italic;
     letter-spacing: 0.3px;
     text-decoration: none;
     display: flex;
@@ -411,7 +410,7 @@
   }
 
   .terminal-bar.tabbar .tabs-bar {
-    padding: 0;
+    padding: 5px 0 0;
     flex: 1 1 auto;
     background: transparent;
   }
@@ -563,7 +562,14 @@
     50% { opacity: 0.6; }
   }
 
-  /* Runtime pill inside HUD */
+  /* Runtime counter rides alongside STATUS inside the same HUD cell: the
+     wrapper keeps them on one line and the ::before injects " - " only when
+     the timer has text (running state). */
+  .hud-status-value-row {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0;
+  }
   .hud-cell .run-timer {
     font-size: 11.5px;
     letter-spacing: 0.5px;
@@ -573,7 +579,11 @@
     border: none;
     padding: 0;
   }
-  .hud-cell.hud-runtime.u-hidden { display: none; }
+  .hud-cell .run-timer:not(:empty)::before {
+    content: " - ";
+    white-space: pre;
+    color: var(--amber);
+  }
 
   .hud-spacer { flex: 1 1 auto; }
 

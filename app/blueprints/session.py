@@ -202,6 +202,24 @@ def session_migrate():
     })
 
 
+@session_bp.route("/session/run-count")
+def session_run_count():
+    """Return the total run count for the current session, uncapped.
+
+    The pre-migration confirmation prompt needs the true row count so the user
+    is not shown the `history_panel_limit` cap that `/history` applies to its
+    page of runs. The actual migration UPDATE on `/session/migrate` is already
+    uncapped; this endpoint just keeps the confirmation honest.
+    """
+    session_id = get_session_id()
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT COUNT(*) AS n FROM runs WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    return jsonify({"count": int(row["n"] if row else 0)})
+
+
 @session_bp.route("/session/starred")
 def session_starred_list():
     """Return the starred command list for the current session."""

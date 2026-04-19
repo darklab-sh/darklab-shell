@@ -18,45 +18,34 @@ function loadStarHelpers(mockApiFetch = _noopFetch) {
 }
 
 // ── _getStarred ───────────────────────────────────────────────────────────────
-// When the in-memory cache (_starredCache) is null, falls back to localStorage.
-// When the cache has been populated (via _saveStarred or loadStarredFromServer),
-// localStorage is ignored.
+// Returns the in-memory cache when populated, else an empty Set. Never reads
+// localStorage — a stale `starred` key from before stars moved server-side
+// would otherwise mask the user's server-side stars during the brief window
+// before loadStarredFromServer() resolves.
 
 describe('_getStarred', () => {
-  it('returns an empty Set when cache is null and no localStorage entry', () => {
+  it('returns an empty Set when cache is null', () => {
     const { _getStarred } = loadStarHelpers()
     expect(_getStarred()).toEqual(new Set())
   })
 
-  it('returns localStorage values when cache is null', () => {
-    const { _getStarred, _storage } = loadStarHelpers()
-    _storage.setItem('starred', JSON.stringify(['foo', 'bar']))
-    expect(_getStarred()).toEqual(new Set(['foo', 'bar']))
+  it('returns cache when cache is populated', () => {
+    const { _getStarred, _saveStarred } = loadStarHelpers()
+    _saveStarred(new Set(['alpha', 'beta']))
+    expect(_getStarred()).toEqual(new Set(['alpha', 'beta']))
   })
 
-  it('returns cache when cache is populated, ignoring localStorage', () => {
+  it('ignores localStorage even when the starred key is set', () => {
+    const { _getStarred, _storage } = loadStarHelpers()
+    _storage.setItem('starred', JSON.stringify(['from-storage']))
+    expect(_getStarred()).toEqual(new Set())
+  })
+
+  it('ignores localStorage even after the cache has been populated', () => {
     const { _getStarred, _saveStarred, _storage } = loadStarHelpers()
     _storage.setItem('starred', JSON.stringify(['from-storage']))
     _saveStarred(new Set(['from-cache']))
     expect(_getStarred()).toEqual(new Set(['from-cache']))
-  })
-
-  it('returns an empty Set when localStorage has invalid JSON and cache is null', () => {
-    const { _getStarred, _storage } = loadStarHelpers()
-    _storage.setItem('starred', 'not-json{{{')
-    expect(_getStarred()).toEqual(new Set())
-  })
-
-  it('returns an empty Set when localStorage has an empty array and cache is null', () => {
-    const { _getStarred, _storage } = loadStarHelpers()
-    _storage.setItem('starred', '[]')
-    expect(_getStarred()).toEqual(new Set())
-  })
-
-  it('returns an empty Set when localStorage has a non-array JSON value and cache is null', () => {
-    const { _getStarred, _storage } = loadStarHelpers()
-    _storage.setItem('starred', JSON.stringify({ command: 'ls -la' }))
-    expect(_getStarred()).toEqual(new Set())
   })
 })
 
@@ -177,7 +166,7 @@ describe('loadStarredFromServer', () => {
     await expect(loadStarredFromServer()).resolves.toBeUndefined()
   })
 
-  it('after load, _getStarred returns server data instead of localStorage fallback', async () => {
+  it('after load, _getStarred returns server data and localStorage is ignored', async () => {
     const mock = () => Promise.resolve({
       ok: true,
       json: () => Promise.resolve({ commands: ['server-cmd'] }),
@@ -1845,5 +1834,125 @@ describe('Ctrl+R reverse-history search', () => {
     expect(isHistSearchMode()).toBe(true)
     resetCmdHistoryNav()
     expect(isHistSearchMode()).toBe(false)
+  })
+
+  it('dropdown keeps cmdHistory matches when server fetch returns empty', async () => {
+    // Regression: typing a character showed cmdHistory matches briefly, then
+    // the server response (empty — e.g. stale route, rate limit, slow DB)
+    // overwrote `_histSearchRuns = []` and the dropdown cleared to "(no matches)".
+    // Client-side matches must not be dropped by an empty server response.
+    document.body.innerHTML = `
+      <div id="history-row"><span class="history-label">Recent:</span></div>
+      <input id="cmd" />
+      <div id="history-panel"></div>
+      <div id="hist-search-dropdown"></div>
+    `
+    const cmdInput = document.getElementById('cmd')
+    const dropdown = document.getElementById('hist-search-dropdown')
+    let resolveFetch
+    const fetchPromise = new Promise((resolve) => { resolveFetch = resolve })
+    const apiFetch = vi.fn(() => fetchPromise)
+
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput } = fromDomScripts(
+      ['app/static/js/history.js'],
+      {
+        document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 20 },
+        histRow: document.getElementById('history-row'),
+        cmdInput,
+        historyPanel: document.getElementById('history-panel'),
+        histSearchDropdown: dropdown,
+        shellPromptWrap: document.createElement('div'),
+        acHide: vi.fn(),
+        apiFetch,
+        refreshHistoryPanel: vi.fn(),
+        useMobileTerminalViewportMode: () => false,
+        setComposerValue: (val) => { cmdInput.value = String(val ?? '') },
+        getComposerValue: () => cmdInput.value,
+        submitComposerCommand: vi.fn(),
+      },
+      `{ hydrateCmdHistory, enterHistSearch, handleHistSearchInput }`,
+    )
+
+    hydrateCmdHistory([
+      { command: 'ping -c 4 darklab.sh' },
+      { command: 'dig darklab.sh A' },
+      { command: 'dnsenum --dnsserver 8.8.8.8 darklab.sh' },
+    ])
+    enterHistSearch()
+    cmdInput.value = 'd'
+    handleHistSearchInput('d')
+    // Resolve the debounced fetch with an empty server response.
+    vi.useFakeTimers()
+    try {
+      // Re-trigger after installing fake timers — the debounce ran on real timers.
+      handleHistSearchInput('d')
+      await vi.advanceTimersByTimeAsync(150)
+    } finally {
+      vi.useRealTimers()
+    }
+    resolveFetch({ json: () => Promise.resolve({ runs: [] }) })
+    await fetchPromise
+    await Promise.resolve()
+
+    const items = dropdown.querySelectorAll('.hist-search-item')
+    expect(items.length).toBeGreaterThanOrEqual(3)
+    expect(dropdown.querySelector('.hist-search-empty')).toBeNull()
+  })
+
+  it('dropdown merges cmdHistory matches with unique server-only matches', async () => {
+    // Server may surface older runs beyond the in-memory recents cap.
+    // These should extend the cmdHistory list, deduped, not replace it.
+    document.body.innerHTML = `
+      <div id="history-row"><span class="history-label">Recent:</span></div>
+      <input id="cmd" />
+      <div id="history-panel"></div>
+      <div id="hist-search-dropdown"></div>
+    `
+    const cmdInput = document.getElementById('cmd')
+    const dropdown = document.getElementById('hist-search-dropdown')
+    const apiFetch = vi.fn(() => Promise.resolve({
+      json: () => Promise.resolve({
+        runs: [
+          { command: 'dig darklab.sh A' },                  // dedup with cmdHistory
+          { command: 'dnsenum darklab.sh' },                // server-only
+        ],
+      }),
+    }))
+
+    const { hydrateCmdHistory, enterHistSearch, handleHistSearchInput } = fromDomScripts(
+      ['app/static/js/history.js'],
+      {
+        document,
+        localStorage: new MemoryStorage(),
+        APP_CONFIG: { recent_commands_limit: 20 },
+        histRow: document.getElementById('history-row'),
+        cmdInput,
+        historyPanel: document.getElementById('history-panel'),
+        histSearchDropdown: dropdown,
+        shellPromptWrap: document.createElement('div'),
+        acHide: vi.fn(),
+        apiFetch,
+        refreshHistoryPanel: vi.fn(),
+        useMobileTerminalViewportMode: () => false,
+        setComposerValue: (val) => { cmdInput.value = String(val ?? '') },
+        getComposerValue: () => cmdInput.value,
+        submitComposerCommand: vi.fn(),
+      },
+      `{ hydrateCmdHistory, enterHistSearch, handleHistSearchInput }`,
+    )
+
+    hydrateCmdHistory([{ command: 'dig darklab.sh A' }])
+    enterHistSearch()
+    cmdInput.value = 'd'
+    handleHistSearchInput('d')
+    await new Promise((r) => setTimeout(r, 160))
+
+    const items = [...dropdown.querySelectorAll('.hist-search-item')].map((el) => el.textContent)
+    expect(items).toContain('dig darklab.sh A')
+    expect(items).toContain('dnsenum darklab.sh')
+    // Dedup — no duplicate dig entry.
+    expect(items.filter((t) => t === 'dig darklab.sh A').length).toBe(1)
   })
 })

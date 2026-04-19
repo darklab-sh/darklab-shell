@@ -53,6 +53,12 @@ def _build_fts_query(raw):
     terms = [t for t in terms if t]
     if not terms:
         return None
+    # The trigram tokenizer indexes 3-char windows, so any term shorter than
+    # 3 chars produces zero trigrams and would silently match nothing. Signal
+    # the caller to use the LIKE fallback instead — that path handles
+    # substring matching on the command column.
+    if any(len(t) < 3 for t in terms):
+        return None
     return ' '.join(f'"{t}"' for t in terms)
 
 
@@ -153,8 +159,12 @@ def get_history():
     command_root = _normalize_history_filter_text(request.args.get("command_root")).lower()
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
+    # scope=command suppresses FTS so the search only considers the command
+    # column. Reverse-i-search uses this to behave like bash i-search — matching
+    # on typed command text, not on output text that FTS would otherwise pull in.
+    scope = _normalize_history_filter_text(request.args.get("scope")).lower()
 
-    fts_q = _build_fts_query(query) if query else None
+    fts_q = _build_fts_query(query) if query and scope != "command" else None
 
     if fts_q:
         sql = (

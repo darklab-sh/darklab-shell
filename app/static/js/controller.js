@@ -44,108 +44,25 @@ function closeFaq() {
   refocusTerminalInput();
 }
 
-function ensureMobileSheetHandle(sheet) {
-  if (!sheet) return null;
-  let handle = sheet.querySelector(':scope > .mobile-sheet-handle');
-  if (handle) return handle;
-  handle = document.createElement('div');
-  handle.className = 'mobile-sheet-handle';
-  handle.setAttribute('aria-hidden', 'true');
-  sheet.insertBefore(handle, sheet.firstChild || null);
-  return handle;
-}
-
-function bindMobileSheetDragClose(sheet, onClose, { threshold = 72 } = {}) {
-  // Bottom sheets should only drag from the visible handle area; otherwise
-  // normal scrolling and button interaction inside the sheet would feel broken.
-  if (!sheet || typeof onClose !== 'function' || sheet.dataset.mobileSheetDragBound === '1') return;
-  sheet.dataset.mobileSheetDragBound = '1';
-  const handle = ensureMobileSheetHandle(sheet);
-  if (!handle) return;
-
-  let drag = null;
-
-  const clearSheetDragStyles = () => {
-    sheet.style.removeProperty('transform');
-    sheet.style.removeProperty('transition');
-    sheet.style.removeProperty('will-change');
-    sheet.style.removeProperty('opacity');
-  };
-
-  const finishDrag = (pointerId, shouldClose) => {
-    if (!drag || drag.pointerId !== pointerId) return;
-    const dy = drag.dy;
-    drag = null;
-    try {
-      sheet.releasePointerCapture(pointerId);
-    } catch (_) {}
-
-    if (!shouldClose) {
-      sheet.style.transition = 'transform 160ms ease';
-      sheet.style.transform = 'translateY(0)';
-      setTimeout(clearSheetDragStyles, 180);
-      return;
-    }
-
-    sheet.style.transition = 'transform 180ms ease, opacity 180ms ease';
-    sheet.style.transform = `translateY(${Math.max(sheet.getBoundingClientRect().height, dy)}px)`;
-    sheet.style.opacity = '0.98';
-    setTimeout(() => {
-      clearSheetDragStyles();
-      onClose();
-    }, 180);
-  };
-
-  handle.addEventListener('pointerdown', e => {
-    if (typeof useMobileTerminalViewportMode === 'function' && !useMobileTerminalViewportMode()) return;
-    if (typeof e.button === 'number' && e.button !== 0) return;
-    drag = { pointerId: e.pointerId, startY: e.clientY, dy: 0 };
-    sheet.style.willChange = 'transform';
-    sheet.style.transition = 'none';
-    try {
-      sheet.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  });
-
-  sheet.addEventListener('pointermove', e => {
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    const dy = Math.max(0, e.clientY - drag.startY);
-    drag.dy = dy;
-    if (dy <= 0) return;
-    e.preventDefault();
-    sheet.style.transform = `translateY(${dy}px)`;
-  });
-
-  sheet.addEventListener('pointerup', e => {
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    finishDrag(e.pointerId, drag.dy >= threshold);
-  });
-
-  sheet.addEventListener('pointercancel', e => {
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    finishDrag(e.pointerId, false);
-  });
-}
-
 function setupMobileSheetDragClose() {
+  // All sheet drag/tap/keyboard close behavior lives in mobile_sheet.js so the
+  // wiring per sheet stays a one-liner and behavior cannot drift between them.
+  if (typeof bindMobileSheet !== 'function') return;
   const faqModal = document.getElementById('faq-modal');
   const optionsModal = document.getElementById('options-modal');
   const killModal = document.getElementById('kill-modal');
   const histDelModal = document.getElementById('hist-del-modal');
   const shareRedactionModal = document.getElementById('share-redaction-modal');
-
-  bindMobileSheetDragClose(mobileMenu, () => hideMobileMenu());
-  bindMobileSheetDragClose(historyPanel, () => hideHistoryPanel());
   const workflowsModal = document.getElementById('workflows-modal');
-  bindMobileSheetDragClose(workflowsModal, () => closeWorkflows());
-  bindMobileSheetDragClose(faqModal, () => closeFaq());
-  bindMobileSheetDragClose(optionsModal, () => closeOptions());
-  bindMobileSheetDragClose(killModal, () => closeKillOverlay());
-  bindMobileSheetDragClose(histDelModal, () => {
-    hideHistoryDeleteOverlay();
-    pendingHistAction = null;
-  });
-  bindMobileSheetDragClose(shareRedactionModal, () => cancelShareRedactionChoice());
+
+  bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
+  bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
+  bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
+  bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
+  bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
+  bindMobileSheet(killModal,          { onClose: () => closeKillOverlay() });
+  bindMobileSheet(histDelModal,       { onClose: () => { hideHistoryDeleteOverlay(); pendingHistAction = null; } });
+  bindMobileSheet(shareRedactionModal, { onClose: () => cancelShareRedactionChoice() });
 }
 
 function setupMobileComposer() {
@@ -388,8 +305,8 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     // Count runs on OLD session before switching identity.
     let runCount = 0;
     try {
-      const histResp = await apiFetch('/history');
-      if (histResp.ok) runCount = ((await histResp.json()).runs || []).length;
+      const countResp = await apiFetch('/session/run-count');
+      if (countResp.ok) runCount = (await countResp.json()).count || 0;
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
@@ -498,8 +415,8 @@ document.getElementById('session-token-set-confirm')?.addEventListener('click', 
   try {
     let runCount = 0;
     try {
-      const histResp = await apiFetch('/history');
-      if (histResp.ok) runCount = ((await histResp.json()).runs || []).length;
+      const countResp = await apiFetch('/session/run-count');
+      if (countResp.ok) runCount = (await countResp.json()).count || 0;
     } catch (_) {}
 
     // Migrate BEFORE switching identity so a failed /session/migrate does not
@@ -610,6 +527,14 @@ apiFetch('/workflows').then(r => r.json()).then(data => {
 loadStarredFromServer().catch(err => {
   logClientError('failed to load /session/starred', err);
 });
+
+// Migrate any pre-Phase-2 stars from localStorage to the server, and clean up
+// the stale key for users who never trigger a session change.
+if (typeof _seedLocalStorageStarsToServer === 'function') {
+  _seedLocalStorageStarsToServer().catch(err => {
+    logClientError('failed to seed localStorage stars', err);
+  });
+}
 
 // ── Tabs ──
 setupTabScrollControls();
@@ -1071,8 +996,10 @@ cmdInput.addEventListener('input', () => {
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchInput === 'function') {
-      const value = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
-      handleHistSearchInput(value);
+      // Read the DOM value directly — the hist-search path intentionally
+      // short-circuits handleComposerInputChange, so the shared composer
+      // state is one keystroke stale (reads showed the pre-backspace query).
+      handleHistSearchInput(cmdInput.value);
     }
     const _hsTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
     if (_hsTab) _hsTab.followOutput = true;

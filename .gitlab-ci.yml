@@ -2,7 +2,7 @@ default:
   tags:
     - self-hosted
 
-image: python:3.12-slim
+image: python:3.14-slim
 
 workflow:
   rules:
@@ -36,6 +36,9 @@ test-py-pytest:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
     - pytest tests/py/ -v
 
@@ -58,7 +61,7 @@ test-js-unit:
 
 test-js-e2e:
   stage: test
-  image: python:3.12
+  image: python:3.14
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"

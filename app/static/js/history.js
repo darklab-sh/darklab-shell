@@ -1,21 +1,17 @@
 // ── Shared history/permalink logic ──
 // Stars are server-backed via /session/starred. A local in-memory cache
-// (_starredCache) avoids blocking the UI on every render. Falls back to
-// localStorage while the cache is loading (first page load before the fetch
-// completes, or if the server is unreachable).
+// (_starredCache) avoids blocking the UI on every render. Until the cache
+// loads, render code sees an empty Set rather than reading localStorage —
+// a stale localStorage value from before stars moved server-side would
+// silently mask the user's server-side stars.
 
 let _starredCache = null; // null = not yet loaded from server
 
 function _getStarred() {
-  if (_starredCache !== null) return _starredCache;
-  // localStorage fallback while cache is loading
-  try { return new Set(JSON.parse(localStorage.getItem('starred') || '[]')); }
-  catch { return new Set(); }
+  return _starredCache !== null ? _starredCache : new Set();
 }
 
 function _saveStarred(set) {
-  // Updates in-memory cache only. Server sync is handled by _toggleStar and
-  // executeHistAction; localStorage is no longer the source of truth.
   _starredCache = new Set(set);
 }
 
@@ -900,20 +896,39 @@ function isHistSearchMode() { return _histSearchMode; }
 
 function _histSearchMatches() {
   if (!_histSearchQuery) return [];
-  if (_histSearchRuns !== null) {
-    // Server already applied the query filter — just slice.
-    return _histSearchRuns.slice(0, 10);
-  }
-  // Fetch in-flight or not yet started — filter cmdHistory client-side as fallback.
+  // Always include client-side matches from the in-memory recents so the
+  // dropdown can't "clear" on the user when a server fetch returns fewer
+  // items (or is stale from a prior keystroke). This mirrors bash reverse-
+  // i-search, which searches in-memory history. Server results extend this
+  // list with older runs beyond the recents cap; both lists are re-filtered
+  // against the current query to guard against race conditions.
   const q = _histSearchQuery.toLowerCase();
-  return cmdHistory.filter(c => c.toLowerCase().includes(q)).slice(0, 10);
+  const fromClient = cmdHistory.filter(c => c.toLowerCase().includes(q));
+  const seen = new Set();
+  const merged = [];
+  for (const cmd of fromClient) {
+    if (!seen.has(cmd)) { merged.push(cmd); seen.add(cmd); }
+  }
+  if (_histSearchRuns !== null) {
+    for (const cmd of _histSearchRuns) {
+      if (!seen.has(cmd) && cmd.toLowerCase().includes(q)) {
+        merged.push(cmd);
+        seen.add(cmd);
+      }
+    }
+  }
+  return merged.slice(0, 10);
 }
 
 // Fetch /history?q=<query> from the server (same endpoint as the drawer).
 // The query filter is applied server-side before LIMIT, so searches match
 // the full history — not just the most-recent-N unfiltered runs.
+// scope=command keeps this bash-like: match typed command text only, not
+// output text (which FTS would otherwise mix in and surface unrelated runs).
 function _histSearchFetch(q) {
-  const url = q ? `/history?q=${encodeURIComponent(q)}` : '/history';
+  const url = q
+    ? `/history?q=${encodeURIComponent(q)}&scope=command`
+    : '/history?scope=command';
   apiFetch(url).then(r => r.json()).then(data => {
     if (!_histSearchMode) return;
     _histSearchRuns = Array.isArray(data.runs)
@@ -983,15 +998,31 @@ function _renderHistSearch() {
     });
   }
 
-  // Position above the prompt line, like the ac-dropdown does
+  // Flip above/below based on available space, mirroring the ac-dropdown so
+  // the list stays on-screen when the prompt is near the top of the viewport.
   histSearchDropdown.classList.remove('u-hidden');
   if (shellPromptWrap) {
     const rect = shellPromptWrap.getBoundingClientRect();
     histSearchDropdown.style.position = 'fixed';
     histSearchDropdown.style.left = rect.left + 'px';
     histSearchDropdown.style.width = rect.width + 'px';
-    const dropH = histSearchDropdown.offsetHeight;
-    histSearchDropdown.style.top = (rect.top - dropH - 4) + 'px';
+    histSearchDropdown.style.bottom = 'auto';
+    histSearchDropdown.style.maxHeight = '';
+    const desired = histSearchDropdown.offsetHeight;
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 8);
+    const spaceAbove = Math.max(0, rect.top - 8);
+    const safetyPad = 20;
+    const canFitBelow = spaceBelow >= (desired + safetyPad);
+    const canFitAbove = spaceAbove >= (desired + safetyPad);
+    const showAbove = canFitAbove && (!canFitBelow || spaceAbove >= spaceBelow);
+    const available = showAbove ? spaceAbove : spaceBelow;
+    const edgeBuffer = showAbove ? 20 : 30;
+    const maxHeight = Math.max(0, available > edgeBuffer ? available - edgeBuffer : available);
+    const visibleHeight = Math.max(0, Math.min(desired, maxHeight || desired));
+    histSearchDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    histSearchDropdown.style.top = showAbove
+      ? `${Math.max(8, Math.round(rect.top - visibleHeight - 4))}px`
+      : `${Math.max(8, Math.round(rect.bottom + 4))}px`;
   }
 }
 

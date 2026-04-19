@@ -272,6 +272,77 @@ describe('autocomplete helpers', () => {
     const items = getAutocompleteMatches('nmap ', 5)
     expect(items.map((item) => item.value)).toEqual(['-sV', '-Pn', '<target>'])
     expect(items[2].description).toBe('Hostname, IP, or CIDR')
+    // <target> is a display-only placeholder — it has no real insertValue and
+    // is flagged hintOnly so Tab cannot drop the literal "<target>" into the
+    // prompt.
+    expect(items[2].hintOnly).toBe(true)
+    expect(items[2].insertValue).toBe('')
+  })
+
+  it('marks <placeholder> arg_hints as hintOnly and preserves insertValue whitespace', () => {
+    const { getAutocompleteMatches, acAccept } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => document.getElementById('cmd').value,
+        setComposerValue: (v, s, e) => {
+          const i = document.getElementById('cmd')
+          i.value = v
+          i.selectionStart = s
+          i.selectionEnd = e == null ? s : e
+        },
+        acSuggestions: [],
+        acContextRegistry: {
+          'session-token': {
+            expects_value: ['set'],
+            arg_hints: {
+              set: [{ value: '<token>', description: 'Paste a token' }],
+              __positional__: [
+                { value: 'generate' },
+                { value: 'set <token>', insertValue: 'set ' },
+                { value: 'clear' },
+              ],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+      acAccept,
+    }`,
+    )
+
+    // After "session-token se", the single positional match has
+    // insertValue: "set " — the trailing space must survive insertion so the
+    // cursor lands after the space, ready for the token argument.
+    const seMatches = getAutocompleteMatches('session-token se', 16)
+    expect(seMatches).toHaveLength(1)
+    expect(seMatches[0].value).toBe('set <token>')
+    expect(seMatches[0].insertValue).toBe('set ')
+    expect(seMatches[0].hintOnly).toBe(false)
+
+    // After "session-token set ", the <token> arg_hint is shown as a display-only
+    // hint — hintOnly:true, insertValue:'' — so Tab cannot insert the literal
+    // "<token>" text.
+    const afterSet = getAutocompleteMatches('session-token set ', 18)
+    expect(afterSet).toHaveLength(1)
+    expect(afterSet[0].value).toBe('<token>')
+    expect(afterSet[0].hintOnly).toBe(true)
+    expect(afterSet[0].insertValue).toBe('')
+
+    // acAccept on a hintOnly item must leave the input unchanged.
+    const cmd = document.getElementById('cmd')
+    cmd.value = 'session-token set '
+    cmd.selectionStart = cmd.selectionEnd = 18
+    acAccept(afterSet[0])
+    expect(cmd.value).toBe('session-token set ')
   })
 
   it('returns value hints after a value-taking flag and trailing space', () => {

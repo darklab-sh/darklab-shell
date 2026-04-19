@@ -6,7 +6,7 @@
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  padding: 0 14px;
+  padding: 6px 8px 0;
   background: var(--theme-terminal-bar-bg);
   overflow-x: scroll;
   overflow-y: hidden;
@@ -56,15 +56,16 @@
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 7px;
+  padding: 9px 12px;
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--theme-tab-text);
-  border: 1px solid var(--theme-tab-border);
-  border-bottom-color: var(--border);
-  border-radius: 8px 8px 0 0;
-  background: var(--theme-tab-bg);
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid var(--border-bright);
+  border-bottom: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
   cursor: grab;
   white-space: nowrap;
   transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
@@ -94,12 +95,6 @@
   text-shadow: var(--theme-tab-touch-drag-text-shadow);
   box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-tab-drop-shadow) 55%, transparent);
   z-index: 2;
-}
-.tab.tab-pointer-dragging:not(.active),
-.tab.tab-touch-dragging:not(.active) {
-  border-style: dashed;
-  border-color: color-mix(in srgb, var(--theme-tab-active-border) 82%, var(--green));
-  background: color-mix(in srgb, var(--theme-tab-active-bg) 32%, var(--theme-tab-bg));
 }
 .tab.tab-touch-dragging .tab-status {
   box-shadow: 0 0 10px currentColor;
@@ -146,11 +141,15 @@
 .tab.tab-drop-after::after { right: -5px; }
 .tab:hover { color: var(--theme-tab-hover-text); opacity: 0.96; }
 .tab.active {
-  color: var(--theme-tab-active-text);
-  border-color: var(--theme-tab-active-border);
-  border-bottom-color: var(--border);
-  background: var(--theme-tab-active-bg);
-  box-shadow: var(--theme-tab-active-shadow), inset 0 2px 0 color-mix(in srgb, var(--theme-tab-active-text) 42%, transparent);
+  color: var(--green);
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--surface);
+  box-shadow: none;
+}
+.tab.active:has(.tab-status.running) {
+  border-top-color: color-mix(in srgb, var(--amber) 60%, transparent);
 }
 body .tab:not(.active) { opacity: 0.82; }
 body .hist-chip {
@@ -256,7 +255,7 @@ body .star-btn.starred:hover {
   color: var(--theme-chip-hover-text);
 }
 .tab .tab-close {
-  opacity: 0.55;
+  opacity: 0;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -280,12 +279,38 @@ body .star-btn.starred:hover {
   box-shadow: none;
   background: var(--theme-tab-close-bg);
   color: inherit;
-  opacity: 0.55;
+  opacity: 0;
 }
-.tab:hover .tab-close { opacity: 0.8; }
+.tab:hover .tab-close { opacity: 1; }
+.tab.active .tab-close { opacity: 1; }
 .tab .tab-close:hover { opacity: 1; background: var(--theme-tab-close-hover-bg); border-color: var(--theme-tab-close-hover-border); color: var(--theme-tab-close-hover-text); }
-.tab .tab-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.tab .tab-status.running { background: var(--amber); animation: pulse 1s infinite; }
+.tab .tab-grip {
+  display: inline-block;
+  width: 2px;
+  height: 2px;
+  margin: 0 4px 0 -2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.3;
+  box-shadow:
+    3px 0 0 currentColor,
+    0 3px 0 currentColor,
+    3px 3px 0 currentColor,
+    0 6px 0 currentColor,
+    3px 6px 0 currentColor;
+  flex: 0 0 auto;
+  align-self: center;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease;
+}
+.tab:hover .tab-grip { opacity: 0.6; }
+.tab.active .tab-grip { opacity: 0.55; }
+.tab .tab-status { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tab .tab-status.running {
+  background: var(--amber);
+  animation: pulse 1s infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 55%, transparent);
+}
 .tab .tab-status.ok     { background: var(--theme-tab-status-ok-bg); }
 .tab .tab-status.fail   { background: var(--red); }
 .tab .tab-status.killed { background: var(--red); }
@@ -305,17 +330,12 @@ body .star-btn.starred:hover {
   align-items: center;
   justify-content: center;
   align-self: flex-end;
-  min-height: 34px;
-  min-width: 38px;
-  padding: 0 12px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--text) 2%, transparent),
-    color-mix(in srgb, var(--text) 0.5%, transparent)
-  );
-  border: 1px dashed color-mix(in srgb, var(--theme-tab-border) 82%, transparent);
-  border-bottom-color: var(--border);
-  border-radius: 8px 8px 0 0;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
   color: var(--theme-tab-text);
   font-size: 18px;
   cursor: pointer;
@@ -323,11 +343,12 @@ body .star-btn.starred:hover {
   flex-shrink: 0;
   line-height: 1;
   margin-bottom: -1px;
+  box-shadow: none;
 }
 #new-tab-btn:hover {
   color: var(--theme-tab-hover-text);
-  border-color: color-mix(in srgb, var(--green-dim) 65%, var(--theme-tab-border));
-  background: color-mix(in srgb, var(--theme-tab-active-bg) 60%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 #new-tab-btn:active:not(:disabled) {
   transform: translateY(1px);
@@ -991,23 +1012,6 @@ body #diag-btn:hover {
   #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
 }
 
-body.mobile-terminal-mode .mobile-sheet-handle {
-  display: block;
-  width: 40px;
-  height: 32px;
-  margin: 4px auto 6px;
-  position: relative;
-  flex-shrink: 0;
-  touch-action: none;
-}
-body.mobile-terminal-mode .mobile-sheet-handle::before {
-  content: '';
-  position: absolute;
-  left: 50%;
-  top: 14px;
-  width: 40px;
-  height: 4px;
-  background: var(--border-bright);
-  border-radius: 2px;
-  transform: translateX(-50%);
-}
+/* .mobile-sheet-handle was retired in favour of a single .sheet-grab class
+   shared by every mobile bottom-sheet — see mobile-chrome.css and
+   app/static/js/mobile_sheet.js::bindMobileSheet. */

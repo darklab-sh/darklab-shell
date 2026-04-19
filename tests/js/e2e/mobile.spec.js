@@ -161,6 +161,12 @@ test.describe('mobile menu', () => {
   })
 
   test('reloading on mobile restores the active output pane at the bottom', async ({ page }) => {
+    // Wait for the welcome boot path to settle before running `help`. Without
+    // this, under heavy parallel test load the welcome animation can still be
+    // actively appending lines to the output pane when the test polls
+    // scrollHeight — and the poll window expires before the help output fully
+    // renders, leaving scrollHeight ≤ clientHeight + 40 for the full 5s.
+    await ensurePromptReady(page)
     await runCommandMobile(page, 'help')
 
     const output = page.locator('.tab-panel.active .output')

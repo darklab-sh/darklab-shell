@@ -846,7 +846,20 @@ def _normalize_context_suggestion(item):
     if not value:
         return None
     description = str(item.get("description", "")).strip()
-    return {"value": value, "description": description}
+    result: dict[str, object] = {"value": value, "description": description}
+    # insertValue is whitespace-significant (e.g. "set " to leave the caret
+    # past a trailing space), so only strip when the key is absent.
+    raw_insert = item.get("insertValue")
+    if raw_insert is not None:
+        result["insertValue"] = str(raw_insert)
+    raw_label = item.get("label")
+    if raw_label is not None:
+        label = str(raw_label).strip()
+        if label:
+            result["label"] = label
+    if "hintOnly" in item:
+        result["hintOnly"] = bool(item.get("hintOnly"))
+    return result
 
 
 def _normalize_autocomplete_context(data):
@@ -863,7 +876,7 @@ def _normalize_autocomplete_context(data):
             flag = _normalize_context_suggestion(raw_flag)
             if not flag:
                 continue
-            key = flag["value"].lower()
+            key = str(flag["value"]).lower()
             if key in seen_flags:
                 continue
             seen_flags.add(key)
@@ -894,7 +907,7 @@ def _normalize_autocomplete_context(data):
                     hint = _normalize_context_suggestion(raw_item)
                     if not hint:
                         continue
-                    key = hint["value"].lower()
+                    key = str(hint["value"]).lower()
                     if key in seen_hints:
                         continue
                     seen_hints.add(key)
@@ -912,7 +925,7 @@ def _normalize_autocomplete_context(data):
             ex = _normalize_context_suggestion(raw_ex)
             if not ex:
                 continue
-            key = ex["value"].lower()
+            key = str(ex["value"]).lower()
             if key in seen_examples:
                 continue
             seen_examples.add(key)
@@ -960,7 +973,7 @@ def _merge_autocomplete_context(base, overlay):
 
         seen_flags = {item["value"].lower() for item in current.get("flags", []) if isinstance(item, dict)}
         for flag in spec.get("flags", []) or []:
-            key = flag["value"].lower()
+            key = str(flag["value"]).lower()
             if key in seen_flags:
                 continue
             seen_flags.add(key)
@@ -986,7 +999,7 @@ def _merge_autocomplete_context(base, overlay):
 
         seen_examples = {item["value"].lower() for item in current.get("examples", []) if isinstance(item, dict)}
         for ex in spec.get("examples", []) or []:
-            key = ex["value"].lower()
+            key = str(ex["value"]).lower()
             if key in seen_examples:
                 continue
             seen_examples.add(key)

@@ -1060,6 +1060,44 @@ class TestAutocompleteContextLoading:
         assert result["wc"]["pipe_label"] == "wc -l"
         assert result["wc"]["pipe_description"] == "Count lines"
 
+    def test_arg_hints_preserve_insert_value_with_trailing_whitespace(self):
+        # YAML authors use `insertValue: "set "` to leave the caret past a
+        # trailing space so the next argument can be typed. The normalizer
+        # must not strip the space or drop the key.
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              session-token:
+                expects_value:
+                  - set
+                arg_hints:
+                  "set":
+                    - value: "<token>"
+                      description: Paste a tok_ token
+                  "__positional__":
+                    - value: "set <token>"
+                      insertValue: "set "
+                      description: Activate an existing session token
+                    - value: "clear"
+                      description: Remove the session token
+            """))
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
+        finally:
+            os.unlink(path)
+        positional = result["session-token"]["arg_hints"]["__positional__"]
+        set_entry = next(p for p in positional if p["value"] == "set <token>")
+        assert set_entry["insertValue"] == "set "  # preserves trailing space
+        clear_entry = next(p for p in positional if p["value"] == "clear")
+        assert "insertValue" not in clear_entry  # not set → key absent
+        # arg_hints value without insertValue is an intentional placeholder;
+        # the frontend detects <placeholder> and flags it hintOnly.
+        set_hint = result["session-token"]["arg_hints"]["set"][0]
+        assert set_hint["value"] == "<token>"
+        assert "insertValue" not in set_hint
+
     def test_local_overlay_merges_unique_context_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = os.path.join(tmp, "autocomplete_context.yaml")

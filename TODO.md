@@ -21,6 +21,18 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
+- **Tooltips across all chrome buttons** — add `title` (and matching `aria-label` where missing) attributes to every interactive control in the rail, tabbar, HUD, and mobile menu so the purpose of each is discoverable without trial and error. Standardise the wording so the same action reads identically across desktop and mobile surfaces.
+
+- **Keyboard shortcut for opening/closing the desktop rail** — the rail currently collapses only via its `«` toggle. Pick a chord that does not collide with the existing shortcut set (see `shortcuts` built-in), wire it through the same handler, and surface it in the shortcuts panel.
+
+- **Keyboard shortcut for the shortcuts overlay itself** — the keyboard shortcuts reference panel can only be opened by mouse today. Add a discoverable shortcut (`?` / `Ctrl+/` are common conventions) and have the overlay list the shortcut for opening it so the binding is self-documenting.
+
+- **HUD clock UTC / local-time toggle** — the HUD `CLOCK` pill always renders UTC. Add an Options preference that toggles between UTC and the browser's local timezone, persist the choice in the existing options cookie set, and make the pill label or tooltip reflect which mode is active.
+
+- **Surface starred state in the desktop rail's Recent section** — research item. The rail's Recent list lost the starred-first ordering and the star indicator that the older chip strip carried. At minimum, mark starred commands visually in the rail and pin them above unstarred entries so the existing star feature stays discoverable on desktop. Verify the same change does not regress the mobile recents sheet (which already shows star state per row).
+
+- **CI Docker images covered by the version-check script** — `scripts/check_versions.sh` (or the equivalent vendor / dependency check) should also pin and verify the CI base images so the runner environments do not drift silently from the production image. Add the CI images to the same source-of-truth list and fail the check when they fall behind.
+
 ---
 
 ## Known Issues

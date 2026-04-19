@@ -60,7 +60,7 @@ DEMO_BASE_URL="$BASE_URL" RUN_DEMO=1 npx playwright test \
 # ── Stitch frames into video ──────────────────────────────────────────────────
 # The spec writes PNG frames to test-results/demo-frames/ via
 # page.screenshot(), which returns images at deviceScaleFactor resolution
-# (2560×1920 for a 1280×960 viewport at deviceScaleFactor: 2).
+# (3200×1800 for a 1600×900 viewport at deviceScaleFactor: 2).
 FRAMES_DIR="$ROOT_DIR/test-results/demo-frames"
 FRAME_COUNT=$(find "$FRAMES_DIR" -name 'frame_*.png' 2>/dev/null | wc -l | tr -d ' ')
 

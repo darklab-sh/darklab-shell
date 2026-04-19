@@ -393,7 +393,7 @@ Both toggles re-run the search immediately when clicked.
 
 ## Copy, Save, and Export
 
-Four actions are available from the desktop HUD bar at the bottom of the shell (and from the per-tab footer on mobile):
+Four actions are available from the desktop HUD bar at the bottom of the shell (and from the mobile menu sheet):
 
 - **Copy** — copies the full plain-text output to the clipboard
 - **save ▾** — a dropdown with three export formats:
@@ -415,7 +415,7 @@ The **⧖ history** button opens a slide-out drawer showing the last 50 complete
 
 When full-output persistence is enabled, the history drawer **permalink** action automatically points at the complete saved output of that run. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot of the current tab view and can optionally redact it before saving. Loading a history entry into a normal tab still uses the capped preview (`/history/<run_id>?json&preview=1`) so the browser is not forced to render very large scans. If the preview was truncated, the tab includes a notice pointing to the permalink for the full output.
 
-The **clear all** button at the top of the history drawer prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt.
+The **delete all** button at the top of the history drawer (also present in the mobile recents sheet) prompts with three options: **Delete all** removes the entire history, **Delete Non-Favorites** removes only unstarred runs while keeping starred ones, and **Cancel** dismisses the prompt. The button was renamed from "clear all" to make it clear it is a destructive database deletion rather than a display-only clear.
 
 The history drawer also supports full-text search across both command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only results. Typing a term like a port number, CVE identifier, IP address, or any other string from a previous scan's output will surface matching runs. The search field placeholder reads "search commands and output" to reflect this. Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on the `command` and `output_search_text` columns. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so even early lines of long runs are reachable; otherwise it falls back to the capped preview window. On mobile, the advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete suggestions instead of the browser's native picker, and the common row actions keep the drawer open so you can work through multiple history entries without repeated reopen churn.
 

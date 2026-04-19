@@ -14,6 +14,25 @@ function _acItemInsertValue(item) {
   return String(item || '').trim();
 }
 
+// Like _acItemInsertValue but preserves the exact whitespace authors chose in
+// the YAML, so an insertValue of "set " leaves the cursor after the space —
+// the signal "ready to type an argument next". Only used at the insertion site.
+function _acItemInsertText(item) {
+  if (item && typeof item === 'object') {
+    if (item.hintOnly) return '';
+    const raw = item.insertValue != null ? item.insertValue : (item.value != null ? item.value : item.label);
+    return String(raw || '');
+  }
+  return String(item || '');
+}
+
+// Arg-hints often use a placeholder like "<token>" to show what the next
+// positional argument should be. Without this check, Tab on a single-item
+// dropdown for that placeholder inserts the literal "<token>" string.
+function _isPlaceholderValue(value) {
+  return typeof value === 'string' && /^<[^<>\s][^<>]*>$/.test(value.trim());
+}
+
 function _acItemDescription(item) {
   if (!item || typeof item !== 'object') return '';
   return String(item.description || '').trim();
@@ -80,14 +99,18 @@ function _autocompletePipeContext(value, cursorPos) {
   };
 }
 
-function _buildAutocompleteItem({ value, description = '', replaceStart, replaceEnd, insertValue = null, label = null }) {
+function _buildAutocompleteItem({ value, description = '', replaceStart, replaceEnd, insertValue = null, label = null, hintOnly = null }) {
+  // If the caller didn't give us an insertValue and the value is a <placeholder>,
+  // flag it as display-only so Tab doesn't insert the literal placeholder text.
+  const resolvedHintOnly = hintOnly != null ? !!hintOnly : (insertValue == null && _isPlaceholderValue(value));
   return {
     value,
     label: label || value,
     description,
     replaceStart,
     replaceEnd,
-    insertValue: insertValue || value,
+    insertValue: resolvedHintOnly ? '' : (insertValue != null ? insertValue : value),
+    hintOnly: resolvedHintOnly,
   };
 }
 
@@ -197,7 +220,7 @@ function _buildContextAutocomplete(ctx) {
         description: item.description || '',
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
-        insertValue: item.insertValue || item.value,
+        insertValue: item.insertValue != null ? item.insertValue : null,
       }));
       return filteredFlags.concat(positionalItems);
     }
@@ -212,7 +235,7 @@ function _buildContextAutocomplete(ctx) {
         description: item.description || '',
         replaceStart: ctx.tokenStart,
         replaceEnd: ctx.tokenEnd,
-        insertValue: item.insertValue || item.value,
+        insertValue: item.insertValue != null ? item.insertValue : null,
       })),
       ctx.currentToken,
     );
@@ -265,7 +288,12 @@ function getAutocompleteMatches(value, cursorPos) {
     return items;
   }
 
-  if (items.length === 1 && _acItemInsertValue(items[0]).toLowerCase() === ctx.currentToken.toLowerCase()) {
+  // Hide the dropdown once the current token already equals the only suggestion —
+  // but keep hint-only placeholders visible so the user still sees what argument
+  // the command expects next.
+  if (items.length === 1
+      && !items[0].hintOnly
+      && _acItemInsertValue(items[0]).toLowerCase() === ctx.currentToken.toLowerCase()) {
     return [];
   }
   return items;
@@ -480,10 +508,17 @@ function acExpandSharedPrefix(items) {
 
 function acAccept(s) {
   if (s && typeof s === 'object') {
+    // Placeholder-only hints (e.g. "<token>") are display-only: Tab should hide
+    // the dropdown, not insert the literal placeholder text into the prompt.
+    if (s.hintOnly) {
+      acHide();
+      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+      return;
+    }
     const currentValue = (typeof getComposerValue === 'function')
       ? getComposerValue()
       : (cmdInput ? cmdInput.value || '' : '');
-    const insertValue = _acItemInsertValue(s);
+    const insertValue = _acItemInsertText(s);
     const replaceStart = Number(s.replaceStart);
     const replaceEnd = Number(s.replaceEnd);
     if (Number.isFinite(replaceStart) && Number.isFinite(replaceEnd)) {

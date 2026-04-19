@@ -134,6 +134,57 @@ class TestOutputSearch:
         # We just verify no crash — trigram availability is environment-dependent
         assert isinstance(ids, list)
 
+    def test_short_query_under_trigram_threshold_matches_via_like(self):
+        # Reverse-i-search needs to find 2-char commands like `ps` and `ls`.
+        # The trigram tokenizer can't index <3-char terms, so the endpoint must
+        # fall back to LIKE on r.command for short queries.
+        run_ps = _insert_run(SESSION_A, "ps aux", ["PID TTY STAT"])
+        run_ls = _insert_run(SESSION_A, "ls -la", ["total 0"])
+        _insert_run(SESSION_A, "nmap 10.0.0.1", ["443/tcp open"])
+        client = get_client(SESSION_A)
+        resp = client.get("/history?q=ps&scope=command")
+        ids = [r["id"] for r in resp.get_json()["runs"]]
+        assert run_ps in ids
+        assert run_ls not in ids
+
+    def test_partial_typing_narrows_progressively(self):
+        # Reverse-i-search expectation: every keystroke runs a search and the
+        # result set narrows. `p` -> matches both ping/ps; `pi` -> ping only;
+        # `pin` and `ping` -> ping only. None of the intermediate steps may
+        # silently return zero matches.
+        run_ping = _insert_run(SESSION_A, "ping 10.0.0.1", ["64 bytes from 10.0.0.1"])
+        run_ps = _insert_run(SESSION_A, "ps aux", ["PID TTY"])
+        client = get_client(SESSION_A)
+
+        ids_p = [r["id"] for r in client.get("/history?q=p&scope=command").get_json()["runs"]]
+        assert run_ping in ids_p
+        assert run_ps in ids_p
+
+        ids_pi = [r["id"] for r in client.get("/history?q=pi&scope=command").get_json()["runs"]]
+        assert run_ping in ids_pi
+        assert run_ps not in ids_pi
+
+        for q in ("pin", "ping"):
+            ids = [r["id"] for r in client.get(f"/history?q={q}&scope=command").get_json()["runs"]]
+            assert run_ping in ids, f"query {q!r} must match the ping run"
+            assert run_ps not in ids
+
+    def test_scope_command_ignores_output_matches(self):
+        # Reverse-i-search must only match typed command text, not output text.
+        # Before this, a command like `ps aux` whose OUTPUT contained the
+        # search term (e.g. the hostname "darklab") would be surfaced as a
+        # "match" even though the command itself didn't contain the term.
+        run_cmd_match = _insert_run(SESSION_A, "ping darklab.sh", ["64 bytes from darklab.sh"])
+        run_output_only = _insert_run(SESSION_A, "ps aux", ["root 1 0.0 darklab"])
+        client = get_client(SESSION_A)
+        # Default scope: drawer-style FTS — both runs are returned.
+        ids_default = [r["id"] for r in client.get("/history?q=darklab").get_json()["runs"]]
+        assert run_cmd_match in ids_default
+        # scope=command: only commands containing the term.
+        ids_scoped = [r["id"] for r in client.get("/history?q=darklab&scope=command").get_json()["runs"]]
+        assert run_cmd_match in ids_scoped
+        assert run_output_only not in ids_scoped
+
     def test_full_output_text_beyond_preview_window_is_searchable(self, monkeypatch, tmp_path):
         """output_search_text must reflect full artifact content, not just preview.
 

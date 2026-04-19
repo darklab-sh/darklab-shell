@@ -120,6 +120,16 @@ test.describe('output actions with no exportable output', () => {
     })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    // Cancel the welcome boot path before asserting the "no output" state.
+    // The sibling describe block's beforeEach reaches this state via
+    // runCommand(...) which internally calls ensurePromptReady, but this block
+    // intentionally runs no command, so without an explicit settle the
+    // welcome animation can still be mid-stream when the test clicks copy/save
+    // — under parallel load the click has been observed to fire before the
+    // HUD action handlers resolve the active tab, leaving the toast in its
+    // initial markup state ("Link copied to clipboard", class="") instead of
+    // updating to "No output to copy yet".
+    await ensurePromptReady(page, { cancelWelcome: true })
   })
 
   test('copy button shows a toast when there is no output to copy', async ({ page }) => {

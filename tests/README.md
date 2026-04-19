@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 817
-- `vitest`: 474
+- `pytest`: 828
+- `vitest`: 475
 - `playwright`: 158
-- total: 1,449
+- total: 1,461
 
 This document is organized in two parts:
 
@@ -38,6 +38,7 @@ This document is organized in two parts:
 - [Running the Suites](#running-the-suites)
 - [Recommended Workflow](#recommended-workflow)
 - [Suite Summaries](#suite-summaries)
+- [History Seeding](#history-seeding)
 - [Choosing the Right Test Layer](#choosing-the-right-test-layer)
 - [Test Artifacts](#test-artifacts)
 - [Testing Conventions](#testing-conventions)
@@ -164,8 +165,8 @@ The browser layer now uses a split config model:
 
 `tests/js/e2e/demo.spec.js` and `tests/js/e2e/demo.mobile.spec.js` are standalone recording scripts for producing the README demo videos. They are **not part of the normal test suite** — they are excluded from `config/playwright.config.js` and `config/playwright.parallel.config.js` and can only be triggered through their dedicated configs:
 
-- `config/playwright.demo.config.js` — desktop (1280×960, `deviceScaleFactor: 2`)
-- `config/playwright.demo.mobile.config.js` — mobile (393×852 iPhone 14 Pro profile)
+- `config/playwright.demo.config.js` — desktop (1600×900, `deviceScaleFactor: 2`)
+- `config/playwright.demo.mobile.config.js` — mobile (430×932 iPhone 15-class profile)
 
 Both specs are also guarded by `test.skip(!process.env.RUN_DEMO, ...)` so they cannot run accidentally in a normal `npx playwright test` invocation.
 
@@ -179,13 +180,33 @@ scripts/record_demo.sh --base-url http://localhost:9000   # custom port
 
 The wrapper scripts health-check the container, set `RUN_DEMO=1`, run the spec, and stitch the captured frames into a video with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). The output files are `assets/darklab_shell_demo.mp4` and `assets/darklab_shell_mobile_demo.mp4`.
 
+### UI Screenshot Capture
+
+`tests/js/e2e/ui-capture.desktop.capture.js` and `tests/js/e2e/ui-capture.mobile.capture.js` generate a curated screenshot pack of desktop and mobile states for design review, theming, and visual QA. They are run only through their dedicated configs:
+
+- `config/playwright.capture.desktop.config.js`
+- `config/playwright.capture.mobile.config.js`
+
+Use the wrapper instead of calling Playwright directly:
+
+```bash
+scripts/capture_ui_screenshots.sh
+scripts/capture_ui_screenshots.sh --ui desktop
+scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
+scripts/capture_ui_screenshots.sh --theme all
+```
+
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/` by default.
+
+Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look closer to a production instance. Mobile capture also includes a first-frame settled welcome screen.
+
 **How the videos are embedded in README.md:**
 
 GitLab renders repo-hosted videos from markdown image tags — `![alt](path.mp4)` is automatically converted to an inline video player for `.mp4`, `.m4v`, `.mov`, `.webm`, and `.ogv` files. Standard `<video>` HTML tags with external `src` URLs are stripped by GitLab's sanitizer, and its asset proxy rejects files over ~10MB, which rules out hosting GIFs externally. The image-tag syntax with a relative repo path is the only approach that works reliably on GitLab.
 
 **Why `page.screenshot()` instead of Playwright's built-in video recorder:**
 
-Playwright's built-in `video: { mode: 'on' }` recorder ignores `deviceScaleFactor` and always captures at CSS pixel dimensions. `page.screenshot()` respects the factor and returns images at full physical resolution (e.g. 2560×1920 for a 1280×960 viewport at `deviceScaleFactor: 2`). The specs run a concurrent background loop that calls `page.screenshot()` at ~15 fps, writes numbered PNG frames to `test-results/demo-frames/` (or `demo-mobile-frames/`), and the wrapper stitches them with ffmpeg at 15 fps.
+Playwright's built-in `video: { mode: 'on' }` recorder ignores `deviceScaleFactor` and always captures at CSS pixel dimensions. `page.screenshot()` respects the factor and returns images at full physical resolution (e.g. 3200×1800 for a 1600×900 viewport at `deviceScaleFactor: 2`). The specs run a concurrent background loop that calls `page.screenshot()` at ~15 fps, writes numbered PNG frames to `test-results/demo-frames/` (or `demo-mobile-frames/`), and the wrapper stitches them with ffmpeg at 15 fps.
 
 **Why the mobile spec injects a fake keyboard image instead of focusing the input:**
 
@@ -274,6 +295,45 @@ recorded = {r['command'] for r in json.load(open('tests/py/fixtures/container_sm
 Any entry in `container_smoke_test-expectations.json` whose command does not appear in `autocomplete.yaml` examples is stale and should be removed.
 
 GitLab CI mirrors the smoke test in the `container-smoke-test` job, which is exposed as a manual run when you want to verify a fresh image before merging dependency or Dockerfile changes.
+
+---
+
+## History Seeding
+
+`scripts/seed_history.py` populates the history database with realistic runs for a specific session (UUID or `tok_` token). It's a manual-QA helper, not a test — use it when you want to exercise user-facing flows that only reveal themselves against a populated history: the history drawer, fuzzy history search, reverse-i-search, date/exit/star filters, and token-migration workflows.
+
+The script must run **inside the container** so the same SQLite version that owns the DB does the writes. Running it on the host against the project's `data/history.db` while the container is up — or with the container stopped if the host's SQLite differs from the container's — can corrupt the FTS5 internal pages. The script refuses to write from the host by default.
+
+`scripts/` is not mounted into the container (only `./app:/app:ro` and `./data:/data` are), so the script is piped in over stdin. `-T` disables TTY allocation so the redirect works; `python -` reads the program from stdin and forwards the trailing argv to it.
+
+```bash
+# Generate a new tok_ session and seed 70 runs across the last 7 days:
+docker compose exec -T shell python - --new-token < scripts/seed_history.py
+
+# Seed an existing token's session:
+docker compose exec -T shell python - --token tok_abcdef0123456789abcdef0123456789 < scripts/seed_history.py
+
+# Seed an anonymous UUID session:
+docker compose exec -T shell python - --uuid 11111111-2222-3333-4444-555555555555 < scripts/seed_history.py
+
+# Custom count and star some seeded commands:
+docker compose exec -T shell python - --new-token --count 40 --star 5 < scripts/seed_history.py
+```
+
+**Flags:**
+
+| Flag | Description |
+| --- | --- |
+| `--new-token` | Generate a new `tok_`-prefixed token and seed its session. The generated token is printed on stdout so you can paste it into the UI. |
+| `--token <tok_…>` | Seed an existing server-issued `tok_` token (32 hex chars). |
+| `--uuid <uuid>` | Seed an anonymous UUID session. |
+| `--count N` | Number of runs to insert (default 70). |
+| `--days N` | Spread the inserted runs across the last N days (default 7). |
+| `--star N` | Star this many distinct seeded commands (default 4, 0 to skip). |
+| `--seed N` | Fix the RNG seed for reproducible runs. |
+| `--allow-host-write` | Bypass the host-write refusal. Only use if you understand the FTS5 cross-version corruption risk and the container is not running. |
+
+After seeding a `--new-token` session, paste the printed token into the browser via `session-token set <token>` (or the Options panel) to activate it.
 
 ---
 
@@ -465,6 +525,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAutocompleteLoading.test_comment_lines_filtered` | Checks comment lines filtered handling. |
 | `TestAutocompleteLoading.test_blank_lines_filtered` | Checks blank lines filtered handling. |
 | `TestAutocompleteLoading.test_local_overlay_appends_unique_entries` | Checks that local overlay appends unique entries. |
+| `TestAutocompleteContextLoading.test_arg_hints_preserve_insert_value_with_trailing_whitespace` | Verifies that the Python normalizer preserves an author-supplied `insertValue` including trailing whitespace (so `"set "` stays intact), retains `<placeholder>` arg_hint values verbatim with no synthetic `insertValue`, and omits the key entirely when YAML does not set it. |
 | `TestAllowedCommandsGroupingBasics.test_missing_file_returns_none` | Checks that missing file returns none. |
 | `TestAllowedCommandsGroupingBasics.test_commands_grouped_by_header` | Checks that commands grouped by header. |
 | `TestAllowedCommandsGroupingBasics.test_commands_without_header_get_empty_name` | Checks that commands without header get empty name. |
@@ -942,6 +1003,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionMigrate.test_migrate_returns_migrated_stars_count` | Checks that the response includes a `migrated_stars` count. |
 | `TestSessionMigrate.test_migrate_stars_no_duplicates_in_destination` | Checks that stars already present in the destination are not duplicated after migration. |
 | `TestSessionMigrate.test_migrate_returns_only_newly_inserted_star_count` | Checks that `migrated_stars` reflects INSERT rowcount (newly written rows) rather than DELETE rowcount — so overlapping stars in the destination do not inflate the reported count. |
+| `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` returns `{"count": 0}` for a session with no runs. |
+| `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
+| `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
+| `TestSessionRunCount.test_is_scoped_to_session` | Checks that the count only includes runs belonging to the requesting `X-Session-ID`. |
 | `TestSessionStarred.test_get_returns_empty_list_for_new_session` | Checks that `GET /session/starred` returns an empty list for a new session. |
 | `TestSessionStarred.test_get_returns_starred_commands` | Checks that starred commands are included in the GET response. |
 | `TestSessionStarred.test_get_is_scoped_to_session` | Checks that GET only returns stars belonging to the requesting session. |
@@ -984,6 +1049,9 @@ SQLite FTS output search via `GET /history?q=...`. Covers both the FTS5 code pat
 | `TestOutputSearch.test_partial_substring_match_via_trigram` | Verifies that compound tokens like `443/tcp` do not crash the search endpoint regardless of whether the trigram tokenizer is available. |
 | `TestOutputSearch.test_full_output_text_beyond_preview_window_is_searchable` | Verifies that `output_search_text` can index content from beyond the capped preview window — simulates a truncated run whose full artifact text contains terms absent from `output_preview`, and asserts they are found. |
 | `TestOutputSearch.test_fts_failure_falls_back_to_command_like` | Verifies graceful degradation when the `runs_fts` table does not exist: command-text queries succeed via `LIKE` fallback and return HTTP 200; output-only queries return an empty list rather than a 500 error. |
+| `TestOutputSearch.test_short_query_under_trigram_threshold_matches_via_like` | Regression: a 2-char command-scoped query (e.g. `ps`) must still match the `ps aux` run even though the trigram tokenizer can't index <3-char terms; `_build_fts_query` returns None for short terms and the endpoint falls back to LIKE on `r.command`. |
+| `TestOutputSearch.test_partial_typing_narrows_progressively` | Regression for reverse-i-search: every keystroke from 1 character upward (`p`, `pi`, `pin`, `ping`) narrows the result set via LIKE/FTS without a silent empty intermediate; matches bash i-search expectations. |
+| `TestOutputSearch.test_scope_command_ignores_output_matches` | Reverse-i-search must only match typed command text, not output text. Verifies `scope=command` suppresses the FTS path so a term that appears only in `output_search_text` is not surfaced, while the default scope still returns it for the drawer's full-text search. |
 
 #### `test_docs.py`
 
@@ -995,8 +1063,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestPytestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `test_*.py` file collected by pytest has a corresponding appendix section in tests/README.md. |
 | `TestVitestAppendixDrift.test_documented_files_match_actual` | Checks that each Vitest `*.test.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx vitest list`. |
 | `TestVitestAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.test.js` file listed by Vitest has a corresponding appendix section in tests/README.md. |
-| `TestPlaywrightAppendixDrift.test_documented_files_match_actual` | Checks that each Playwright `*.spec.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by `npx playwright test --list`. |
-| `TestPlaywrightAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every `*.spec.js` file listed by Playwright has a corresponding appendix section in tests/README.md. |
+| `TestPlaywrightAppendixDrift.test_documented_files_match_actual` | Checks that each Playwright `*.spec.js` and standalone `*.capture.js` file's row count in the tests/README.md appendix matches the number of unique test names returned by the normal suite plus the dedicated demo/capture `--list` configs. |
+| `TestPlaywrightAppendixDrift.test_all_test_files_have_appendix_sections` | Checks that every Playwright `*.spec.js` and standalone `*.capture.js` file listed by the normal suite or the dedicated demo/capture configs has a corresponding appendix section in tests/README.md. |
 | `TestDocumentedPytestTotals.test_tests_readme` | Checks that the `pytest` total recorded in tests/README.md matches the actual collected test count (all parameterised variants included). |
 | `TestDocumentedPytestTotals.test_contributing` | Checks that the `pytest` total recorded in CONTRIBUTING.md matches the actual collected test count. |
 | `TestDocumentedPytestTotals.test_architecture` | Checks that the `pytest` total recorded in ARCHITECTURE.md matches the actual collected test count. |
@@ -1006,6 +1074,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestDocumentedPlaywrightTotals.test_tests_readme` | Checks that the `playwright` total recorded in tests/README.md matches the raw Playwright total reported by `npx playwright test --list`. |
 | `TestDocumentedPlaywrightTotals.test_contributing` | Checks that the `Playwright` total recorded in CONTRIBUTING.md matches the raw Playwright total. |
 | `TestDocumentedPlaywrightTotals.test_architecture` | Checks that the `playwright` total recorded in ARCHITECTURE.md matches the raw Playwright total. |
+| `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file (or untracked-but-not-gitignored file) is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
+| `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
+| `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
 
 #### `test_validation.py`
 
@@ -1248,7 +1319,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `expands through the shared trailing space when suggestions only diverge after the command root` | Verifies that expands through the shared trailing space when suggestions only diverge after the command root. |
 | `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
-| `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space. |
+| `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space, and that `<placeholder>` entries are flagged `hintOnly` with an empty `insertValue`. |
+| `marks <placeholder> arg_hints as hintOnly and preserves insertValue whitespace` | Verifies that `session-token se` + Tab inserts `set ` with the trailing space preserved (not trimmed), that `session-token set ` surfaces `<token>` as a display-only `hintOnly` item with `insertValue: ''`, and that calling `acAccept` on a `hintOnly` item is a no-op. |
 | `returns value hints after a value-taking flag and trailing space` | Verifies that value hints appear after accepting or typing a value-taking flag such as `curl -o `. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
@@ -1271,12 +1343,10 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 
 | Test | Description |
 | --- | --- |
-| `returns an empty Set when cache is null and no localStorage entry` | Verifies that _getStarred returns empty Set when cache is unloaded and localStorage is empty. |
-| `returns localStorage values when cache is null` | Verifies that _getStarred falls back to localStorage while the server cache is unloaded. |
-| `returns cache when cache is populated, ignoring localStorage` | Verifies that _getStarred prefers the in-memory cache over localStorage once loaded. |
-| `returns an empty Set when localStorage has invalid JSON and cache is null` | Verifies that _getStarred handles corrupt localStorage gracefully. |
-| `returns an empty Set when localStorage has an empty array and cache is null` | Verifies that _getStarred handles an empty stored array. |
-| `returns an empty Set when localStorage has a non-array JSON value and cache is null` | Verifies that _getStarred ignores non-array JSON in localStorage. |
+| `returns an empty Set when cache is null` | Verifies that _getStarred returns an empty Set when the server cache has not yet loaded. |
+| `returns cache when cache is populated` | Verifies that _getStarred returns the in-memory cache once loaded. |
+| `ignores localStorage even when the starred key is set` | Verifies that _getStarred no longer reads localStorage as a fallback — a stale `starred` key cannot mask the server-side stars. |
+| `ignores localStorage even after the cache has been populated` | Verifies that the in-memory cache wins over any leftover localStorage value after loadStarredFromServer resolves. |
 | `updates the in-memory cache` | Verifies that _saveStarred populates the in-memory cache. |
 | `setting an empty Set makes _getStarred return an empty Set` | Verifies that clearing the cache via `_saveStarred` is reflected by `_getStarred`. |
 | `round-trips correctly through _getStarred` | Verifies that `_saveStarred` and `_getStarred` round-trip correctly through the cache. |
@@ -1291,7 +1361,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `populates cache with an empty Set when server returns empty list` | Verifies that loadStarredFromServer handles an empty server response. |
 | `leaves cache unchanged when server returns a non-ok response` | Verifies that loadStarredFromServer does not overwrite the cache on a server error. |
 | `does not throw when the fetch rejects` | Verifies that loadStarredFromServer swallows network errors silently. |
-| `after load, _getStarred returns server data instead of localStorage fallback` | Verifies that the server cache supersedes localStorage after loadStarredFromServer resolves. |
+| `after load, _getStarred returns server data and localStorage is ignored` | Verifies that loadStarredFromServer populates the cache and that any leftover localStorage value is not surfaced. |
 | `hydrates unique recent commands from server history and enables navigation` | Verifies that hydrates unique recent commands from server history and enables navigation. |
 | `restores the typed draft after navigating through hydrated history` | Verifies that restores the typed draft after navigating through hydrated history. |
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
@@ -1341,6 +1411,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `handleHistSearchKey Tab with no matches exits keeping the typed query in input` | Verifies that handleHistSearchKey Tab with no matches exits keeping the typed query in input. |
 | `handleHistSearchKey Enter after ArrowDown runs the navigated-to match` | Verifies that handleHistSearchKey Enter after ArrowDown runs the navigated-to match. |
 | `resetCmdHistoryNav exits hist search mode if active` | Verifies that resetCmdHistoryNav exits hist search mode if active. |
+| `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
+| `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
 
 #### `output.test.js`
 
@@ -1456,12 +1528,12 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `submitVisibleComposerCommand can submit an explicit raw command` | Verifies that submitVisibleComposerCommand can submit an explicit raw command. |
 | `interruptPromptLine refocuses the visible mobile composer when present` | Verifies that interruptPromptLine refocuses the visible mobile composer when present. |
 | `returns false when the tab limit is reached` | Verifies that returns false when the tab limit is reached. |
-| `does nothing when localStorage has no starred key` | Verifies that _seedLocalStorageStarsToServer returns early without calling apiFetch when there is no starred entry in localStorage. |
-| `does nothing when the starred array is empty` | Verifies that _seedLocalStorageStarsToServer returns early when the starred localStorage array is empty. |
+| `skips the seed and clears the key when localStorage has no starred entry` | Verifies that _seedLocalStorageStarsToServer skips the seed (no apiFetch) and removes the localStorage entry when there is nothing to seed. |
+| `skips the seed and clears the stale empty array` | Verifies that an empty `starred` array — the typical legacy leftover from before stars went server-side — is removed from localStorage rather than left behind. |
 | `POSTs each starred command to /session/starred` | Verifies that _seedLocalStorageStarsToServer POSTs every command in the localStorage starred array to the /session/starred endpoint. |
 | `removes the starred key from localStorage after seeding` | Verifies that _seedLocalStorageStarsToServer clears the localStorage starred entry after a successful seed. |
 | `calls loadStarredFromServer after seeding` | Verifies that _seedLocalStorageStarsToServer calls loadStarredFromServer to refresh the in-memory cache after seeding. |
-| `handles invalid localStorage JSON as empty and returns early` | Verifies that _seedLocalStorageStarsToServer treats malformed localStorage JSON as empty and does not call apiFetch. |
+| `handles invalid localStorage JSON as empty and clears the key` | Verifies that _seedLocalStorageStarsToServer treats malformed localStorage JSON as empty, does not call apiFetch, and removes the corrupt entry. |
 | `retains failed commands in localStorage and removes only successful ones` | Verifies that _seedLocalStorageStarsToServer writes the failed commands back to localStorage when some POSTs return a non-2xx response. |
 | `retains all commands when every POST fails` | Verifies that _seedLocalStorageStarsToServer keeps the full starred array in localStorage when every POST fails. |
 | `removes the key only when all POSTs succeed` | Verifies that _seedLocalStorageStarsToServer removes the localStorage key only after all POSTs return ok. |
@@ -1910,7 +1982,7 @@ These specs are not part of the normal test suite. They are excluded from both `
 
 #### `demo.spec.js`
 
-Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (2560×1920). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
+Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (3200×1800). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
 
 | Test | Description |
 | --- | --- |
@@ -1918,11 +1990,31 @@ Desktop demo recording spec. Drives a curated interaction sequence — ping tab,
 
 #### `demo.mobile.spec.js`
 
-Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1179×2556) for the 393×852 iPhone 14 Pro viewport. Stitched at 15 fps.
+Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mobile-cmd`, `#mobile-run-btn`, hamburger menu). Injects a fake iOS keyboard image to avoid Chromium's headless keyboard-simulation overlay, which would otherwise paint above all page content regardless of z-index and shrink the visual viewport. Captures frames via `page.screenshot()` at `deviceScaleFactor: 3` physical resolution (1290×2796) for the 430×932 iPhone 15-class viewport. Stitched at 15 fps.
 
 | Test | Description |
 | --- | --- |
 | `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, history drawer, theme switching. |
+
+### UI Screenshot Capture Specs
+
+These specs are also standalone. They are excluded from both `config/playwright.config.js` and `config/playwright.parallel.config.js`, matched only by `config/playwright.capture.desktop.config.js` and `config/playwright.capture.mobile.config.js`, and guarded by `test.skip(!process.env.RUN_CAPTURE, ...)`. Run them via `scripts/capture_ui_screenshots.sh`. See the [UI Screenshot Capture](#ui-screenshot-capture) section above for the full usage guide.
+
+#### `ui-capture.desktop.capture.js`
+
+Desktop UI screenshot capture spec. Walks the desktop shell through a curated pack of settled states for design review and theming QA, then saves labelled PNGs plus a manifest entry per scene. Uses the dedicated desktop capture config and a seeded isolated app instance so history-heavy, workflow, and diagnostics states look production-like.
+
+| Test | Description |
+| --- | --- |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, line numbers/timestamps, snapshot/permalink/diag. |
+
+#### `ui-capture.mobile.capture.js`
+
+Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the mobile shell, including the settled welcome screen, running-tab states, mobile sheets/modals, search, timestamp/line-number views, and standalone snapshot/permalink/diag pages. Uses the dedicated mobile capture config and the same seeded isolated app instance strategy.
+
+| Test | Description |
+| --- | --- |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states, sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
 
 ---
 

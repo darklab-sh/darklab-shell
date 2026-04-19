@@ -690,7 +690,17 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .modal-actions-wrap {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
+}
+
+@media (max-width: 480px) {
+  .modal-actions-wrap {
+    gap: 6px;
+  }
+  .modal-actions-wrap .modal-primary,
+  .modal-actions-wrap .modal-secondary {
+    padding: 6px 10px;
+  }
 }
 
 .modal-primary,

@@ -11,7 +11,7 @@
  * captured frames into assets/demo-mobile.webm via ffmpeg.
  *
  * This spec captures frames via page.screenshot() (which respects
- * deviceScaleFactor, giving 1179×2556 images) rather than Playwright's built-in
+ * deviceScaleFactor, giving 1290×2796 images) rather than Playwright's built-in
  * video recorder (which ignores deviceScaleFactor and captures at CSS pixel
  * resolution). Frames are written to test-results/demo-mobile-frames/ and
  * stitched by the wrapper script.
@@ -213,8 +213,8 @@ test('demo-mobile', async ({ page }) => {
   test.setTimeout(300_000)
 
   // ── Frame capture setup ───────────────────────────────────────────────────
-  // page.screenshot() respects deviceScaleFactor (returns 1179×2556 for a
-  // 393×852 viewport at deviceScaleFactor: 3). Playwright's built-in video
+  // page.screenshot() respects deviceScaleFactor (returns 1290×2796 for a
+  // 430×932 viewport at deviceScaleFactor: 3). Playwright's built-in video
   // recorder does NOT — it always captures at CSS pixel dimensions. We run a
   // background screenshot loop concurrently with the demo and stitch the frames
   // into a video with ffmpeg after the test completes.
@@ -239,8 +239,8 @@ test('demo-mobile', async ({ page }) => {
   // ── Boot ──────────────────────────────────────────────────────────────────
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   // With isMobile: false, Chromium does not simulate the mobile browser chrome
-  // reservation — the full 393×852 CSS viewport is page content with no gray
-  // bar. svh == vh == 852px in this mode, so the history panel's max-height:
+  // reservation — the full 430×932 CSS viewport is page content with no gray
+  // bar. svh == vh == 932px in this mode, so the history panel's max-height:
   // 88svh renders correctly tall without any CSS overrides.
   //
   // typeSlowly() still injects characters via the native value setter +
@@ -248,8 +248,19 @@ test('demo-mobile', async ({ page }) => {
   // (which fires even in non-mobile mode on hasTouch devices). Patching
   // getMobileKeyboardOffset to 0 prevents the visualViewport listener from
   // spuriously triggering keyboard-open state.
+  //
+  // The inline style block raises the mobile header off the viewport's top
+  // edge (body.mobile-terminal-mode has padding: 0) so the captured frame
+  // always shows the full header with breathing room above the title — the
+  // first-frame title was sitting flush against y=0 before this padding.
   await page.evaluate(() => {
     window.getMobileKeyboardOffset = () => 0
+    const style = document.createElement('style')
+    style.id = '__demo-capture-css'
+    style.textContent = `
+      body.mobile-terminal-mode { padding-top: 6px !important; }
+    `
+    document.head.appendChild(style)
   })
 
   // Mock the history API so the drawer shows a realistic full list regardless
@@ -323,6 +334,13 @@ test('demo-mobile', async ({ page }) => {
       }
       const t0 = Date.now()
       try {
+        // Anchor the capture to the top of the document — if anything scrolls
+        // the page during the demo (keyboard layout shift, sheet animation),
+        // the header would scroll out of frame and the captured screenshot
+        // would miss it. scrollTo is cheap and idempotent.
+        await page.evaluate(() => {
+          window.scrollTo(0, 0)
+        })
         const buf = await page.screenshot({ type: 'png' })
         writeFileSync(join(FRAMES_DIR, `frame_${String(capture.idx++).padStart(6, '0')}.png`), buf)
       } catch {
@@ -347,6 +365,9 @@ test('demo-mobile', async ({ page }) => {
   const freezeFrame = async (durationMs) => {
     capture.paused = true
     try {
+      await page.evaluate(() => {
+        window.scrollTo(0, 0)
+      })
       const buf = await page.screenshot({ type: 'png' })
       // Re-create the frames dir defensively — the capture loop swallows ENOENT
       // silently (incrementing capture.idx without writing), so the directory
@@ -405,11 +426,16 @@ test('demo-mobile', async ({ page }) => {
   await page.waitForTimeout(3_000)
 
   // ── History drawer ────────────────────────────────────────────────────────
-  await page.locator('#hamburger-btn').click()
-  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
-  await page.waitForTimeout(500)
+  // Open via the canonical pull-up peek row (#mobile-recent-peek) rather than
+  // hamburger → menu → history. The peek renders once there's at least one
+  // in-session run; ping + nslookup already satisfy that. It is currently
+  // hidden (u-hidden) when cmdHistory is empty, so wait for visibility first.
+  await page
+    .locator('#mobile-recent-peek')
+    .waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(600)
 
-  await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
+  await page.locator('#mobile-recent-peek').click()
   await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
   await page
     .locator('#mobile-recents-list .sheet-item')

@@ -31,7 +31,6 @@
   const recentsSheetClearBtn  = document.getElementById('mobile-recents-clear');
   const recentsSheetSearch    = document.getElementById('mobile-recents-search');
   const recentsSheetList      = document.getElementById('mobile-recents-list');
-  const recentsSheetGrab      = recentsSheet?.querySelector('.sheet-grab') || null;
   const menuSheet             = document.getElementById('mobile-menu-sheet');
   const menuSheetScrim        = document.getElementById('mobile-menu-sheet-scrim');
   const menuSheetCloseBtn     = document.getElementById('mobile-menu-sheet-close');
@@ -470,41 +469,11 @@
     _recentsSearchTimer = setTimeout(_recentsRenderList, 100);
   });
 
-  // Grab handle: tap closes, drag-down (>= 30px) closes. Pointer events cover
-  // mouse + touch in WKWebView without needing a separate touch path.
-  if (recentsSheetGrab) {
-    let dragStartY = null;
-    let maxDy = 0;
-    recentsSheetGrab.addEventListener('pointerdown', (e) => {
-      dragStartY = e.clientY;
-      maxDy = 0;
-      try { recentsSheetGrab.setPointerCapture(e.pointerId); } catch (_) { /* non-critical */ }
-    });
-    recentsSheetGrab.addEventListener('pointermove', (e) => {
-      if (dragStartY === null) return;
-      const dy = e.clientY - dragStartY;
-      if (dy > maxDy) maxDy = dy;
-      if (dy > 30) {
-        dragStartY = null;
-        closeRecentsSheet();
-      }
-    });
-    const endDrag = (e) => {
-      if (dragStartY !== null && maxDy < 10) {
-        // Treat as a tap: close the sheet.
-        closeRecentsSheet();
-      }
-      dragStartY = null;
-      maxDy = 0;
-    };
-    recentsSheetGrab.addEventListener('pointerup', endDrag);
-    recentsSheetGrab.addEventListener('pointercancel', () => { dragStartY = null; maxDy = 0; });
-    recentsSheetGrab.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        closeRecentsSheet();
-      }
-    });
+  // Drag/tap/keyboard close behavior is provided by the shared bindMobileSheet
+  // helper (see app/static/js/mobile_sheet.js) so the recents sheet matches
+  // every other mobile bottom sheet.
+  if (typeof global.bindMobileSheet === 'function') {
+    global.bindMobileSheet(recentsSheet, { onClose: closeRecentsSheet });
   }
 
   const recentsFiltersToggle   = document.getElementById('mobile-recents-filters-toggle');
@@ -749,6 +718,51 @@
     btn.addEventListener('mousedown',   (e) => { e.preventDefault(); });
     btn.addEventListener('click',       (e) => { e.preventDefault(); });
   });
+
+  // ── Pull-to-refresh suppression ───────────────────────────────────
+  // The CSS rule `overscroll-behavior-y: contain` (in mobile-chrome.css) does
+  // not actually disable iOS Safari's or Firefox mobile's native pull-to-
+  // refresh in this layout. Both engines only honour the property when the
+  // element it is set on is itself a non-trivial scroll container — and the
+  // mobile shell deliberately keeps body content within the viewport so the
+  // body never grows tall enough to scroll. The browsers therefore treat the
+  // downward swipe as a navigation-level gesture before any container can
+  // claim it.
+  //
+  // The fix is a delegated touchmove guard: when in mobile-terminal-mode, walk
+  // the touch target's ancestor chain looking for a scrollable element that
+  // can absorb the gesture. If one exists and isn't already at the boundary
+  // for the current direction, let the gesture through. Otherwise call
+  // preventDefault on the touchmove so the browser cannot interpret it as
+  // pull-to-refresh / overscroll bounce. This intentionally does not interfere
+  // with the sheet drag handlers in mobile_sheet.js, which run on Pointer
+  // Events with setPointerCapture and `touch-action: none` on the grab — those
+  // already bypass the browser's default touch handling.
+  let _touchStartY = null;
+  document.addEventListener('touchstart', (e) => {
+    _touchStartY = e.touches.length === 1 ? e.touches[0].clientY : null;
+  }, { passive: true });
+  document.addEventListener('touchmove', (e) => {
+    if (!document.body.classList.contains('mobile-terminal-mode')) return;
+    if (_touchStartY == null || e.touches.length !== 1) return;
+    const dy = e.touches[0].clientY - _touchStartY;
+    if (dy === 0) return;
+    let el = e.target;
+    while (el && el !== document.body && el !== document.documentElement) {
+      if (el.scrollHeight > el.clientHeight) {
+        const oy = getComputedStyle(el).overflowY;
+        if (oy === 'auto' || oy === 'scroll') {
+          // Scrolling down (dy > 0) is only "would-overscroll" at scrollTop 0.
+          // Scrolling up (dy < 0) is only "would-overscroll" at the bottom.
+          if (dy > 0 && el.scrollTop > 0) return;
+          if (dy < 0 && el.scrollTop + el.clientHeight < el.scrollHeight) return;
+          break;
+        }
+      }
+      el = el.parentElement;
+    }
+    if (e.cancelable) e.preventDefault();
+  }, { passive: false });
 
   global._mobileChrome = {
     nodes: {

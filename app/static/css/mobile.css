@@ -240,25 +240,6 @@
     border-bottom-color: var(--surface);
     box-shadow: none;
   }
-  body.mobile-terminal-mode .tab .tab-grip {
-    display: inline-block;
-    width: 2px;
-    height: 2px;
-    margin: 0 4px 0 -2px;
-    border-radius: 1px;
-    background: currentColor;
-    opacity: 0.3;
-    box-shadow:
-      3px 0 0 currentColor,
-      0 3px 0 currentColor,
-      3px 3px 0 currentColor,
-      0 6px 0 currentColor,
-      3px 6px 0 currentColor;
-    flex: 0 0 auto;
-    align-self: center;
-    transform: translateY(-2px);
-  }
-  body.mobile-terminal-mode .tab.active .tab-grip { opacity: 0.55; }
   /* Inactive tabs collapse idle/ok/fail/killed to border-bright so only the
      one active tab carries semantic color. Running stays amber-pulse on every
      tab so a background run remains visible at a glance. */

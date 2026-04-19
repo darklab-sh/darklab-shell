@@ -24,7 +24,6 @@
   const railNav           = document.getElementById('rail-nav');
 
   const hudStatusCell     = document.getElementById('hud-status-cell');
-  const hudRuntimeCell    = document.getElementById('hud-runtime-cell');
   const hudLastExitEl     = document.getElementById('hud-last-exit');
   const hudRunsEl         = document.getElementById('hud-runs');
   const hudLatencyEl      = document.getElementById('hud-latency');

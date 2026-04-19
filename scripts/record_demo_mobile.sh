@@ -10,7 +10,7 @@
 #   scripts/record_demo_mobile.sh
 #   scripts/record_demo_mobile.sh --base-url http://localhost:9000
 #
-# The recorded video is saved to assets/demo-mobile.webm at 1179×2556 (3×
+# The recorded video is saved to assets/demo-mobile.webm at 1290×2796 (3×
 # device pixel density) — genuinely crisp on Retina displays. Playwright's
 # built-in video recorder ignores deviceScaleFactor; instead the spec runs a
 # background page.screenshot() loop which does respect it, and this script
@@ -19,7 +19,7 @@
 # On macOS the output is assets/darklab_shell_mobile_demo.mp4 (Apple VideoToolbox HEVC, ~seconds).
 # On Linux the output is assets/darklab_shell_mobile_demo.webm (VP9 software encode, slower).
 #
-# Convert to GIF manually (scale down to 393px wide for embedding):
+# Convert to GIF manually (scale down to 430px wide for embedding):
 #   ffmpeg -i assets/darklab_shell_mobile_demo.mp4 \
 #     -vf "fps=15,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse" \
 #     assets/darklab_shell_mobile_demo.gif
@@ -66,7 +66,7 @@ DEMO_BASE_URL="$BASE_URL" RUN_DEMO=1 npx playwright test \
 # ── Stitch frames into video ──────────────────────────────────────────────────
 # The spec writes PNG frames to test-results/demo-mobile-frames/ via
 # page.screenshot(), which returns images at deviceScaleFactor resolution
-# (1179×2556 for a 393×852 viewport at deviceScaleFactor: 3).
+# (1290×2796 for a 430×932 viewport at deviceScaleFactor: 3).
 FRAMES_DIR="$ROOT_DIR/test-results/demo-mobile-frames"
 FRAME_COUNT=$(find "$FRAMES_DIR" -name 'frame_*.png' 2>/dev/null | wc -l | tr -d ' ')
 
@@ -105,9 +105,9 @@ echo "Done. Final video: assets/${OUTNAME}"
 echo ""
 echo "Video saved to assets/${OUTNAME}"
 echo ""
-echo "Convert to GIF (scale down to 393px wide for embedding):"
+echo "Convert to GIF (scale down to 430px wide for embedding):"
 echo "  ffmpeg -i assets/${OUTNAME} \\"
-echo "    -vf \"fps=15,scale=393:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \\"
+echo "    -vf \"fps=15,scale=430:-1:flags=lanczos,split[s0][s1];[s0]palettegen[p];[s1][p]paletteuse\" \\"
 echo "    assets/darklab_shell_mobile_demo.gif"
 echo ""
 echo "Trim before converting if needed:"

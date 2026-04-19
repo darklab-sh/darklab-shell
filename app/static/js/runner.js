@@ -540,7 +540,12 @@ async function _seedLocalStorageStarsToServer() {
   let localStars;
   try { localStars = new Set(JSON.parse(localStorage.getItem('starred') || '[]')); }
   catch { localStars = new Set(); }
-  if (!localStars.size) return;
+  if (!localStars.size) {
+    // Clear the leftover key (typically a stale empty array from before stars
+    // moved server-side) so it does not linger in localStorage indefinitely.
+    localStorage.removeItem('starred');
+    return;
+  }
   const cmds = [...localStars];
   const results = await Promise.allSettled(cmds.map(async cmd => {
     const resp = await apiFetch('/session/starred', {
@@ -568,7 +573,6 @@ async function _sessionTokenGenerate(tabId) {
       const data = await resp.json().catch(() => ({}));
       appendLine(`[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
       setStatus('fail');
-      appendPromptNewline(tabId);
       return;
     }
     const data = await resp.json();
@@ -602,13 +606,11 @@ async function _sessionTokenGenerate(tabId) {
       await _seedLocalStorageStarsToServer();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
       setStatus('ok');
-      appendPromptNewline(tabId);
     }
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token generate', err);
     setStatus('fail');
-    appendPromptNewline(tabId);
   }
 }
 
@@ -616,7 +618,6 @@ async function _sessionTokenSet(value, tabId) {
   if (!value) {
     appendLine('usage: session-token set <token>', '', tabId);
     setStatus('fail');
-    appendPromptNewline(tabId);
     return;
   }
   const isTok = value.startsWith('tok_');
@@ -624,7 +625,6 @@ async function _sessionTokenSet(value, tabId) {
   if (!isTok && !isUuid) {
     appendLine(`[error] invalid session token format — expected tok_... or a UUID`, 'exit-fail', tabId);
     setStatus('fail');
-    appendPromptNewline(tabId);
     return;
   }
 
@@ -652,7 +652,6 @@ async function _sessionTokenSet(value, tabId) {
     if (verifyErr !== null) {
       appendLine(`[error] ${verifyErr}`, 'exit-fail', tabId);
       setStatus('fail');
-      appendPromptNewline(tabId);
       return;
     }
   }
@@ -685,7 +684,6 @@ async function _sessionTokenSet(value, tabId) {
     await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
     setStatus('ok');
-    appendPromptNewline(tabId);
   }
 }
 
@@ -693,7 +691,6 @@ function _sessionTokenClear(tabId) {
   if (!localStorage.getItem('session_token')) {
     appendLine('no session token is set — already using an anonymous session', '', tabId);
     setStatus('idle');
-    appendPromptNewline(tabId);
     return;
   }
   localStorage.removeItem('session_token');
@@ -703,7 +700,6 @@ function _sessionTokenClear(tabId) {
   appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
   appendLine('your session token data remains in the server database', '', tabId);
   setStatus('ok');
-  appendPromptNewline(tabId);
 }
 
 async function _sessionTokenRotate(tabId) {
@@ -714,7 +710,6 @@ async function _sessionTokenRotate(tabId) {
       const data = await resp.json().catch(() => ({}));
       appendLine(`[error] Failed to generate session token — ${data.error || resp.status}`, 'exit-fail', tabId);
       setStatus('fail');
-      appendPromptNewline(tabId);
       return;
     }
     const data = await resp.json();
@@ -735,7 +730,6 @@ async function _sessionTokenRotate(tabId) {
       appendLine(`[error] migration failed — session token NOT rotated: ${migrateData.error || migrateResp.status}`, 'exit-fail', tabId);
       appendLine('your previous session token is still active', '', tabId);
       setStatus('fail');
-      appendPromptNewline(tabId);
       return;
     }
 
@@ -750,12 +744,10 @@ async function _sessionTokenRotate(tabId) {
     );
     appendLine('old session token is now inactive — reload other tabs to use the new token', '', tabId);
     setStatus('ok');
-    appendPromptNewline(tabId);
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token rotate', err);
     setStatus('fail');
-    appendPromptNewline(tabId);
   }
 }
 
@@ -764,7 +756,7 @@ async function _sessionTokenList(tabId) {
     const resp = await apiFetch('/session/token/info');
     if (!resp.ok) {
       appendLine('[error] failed to load session token info', 'exit-fail', tabId);
-      setStatus('fail'); appendPromptNewline(tabId);
+      setStatus('fail');
       return;
     }
     const data = await resp.json();
@@ -780,23 +772,23 @@ async function _sessionTokenList(tabId) {
       appendLine(kv('status', 'anonymous (no session token set)'), 'fake-kv', tabId);
       appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'fake-kv', tabId);
     }
-    setStatus('ok'); appendPromptNewline(tabId);
+    setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token list', err);
-    setStatus('fail'); appendPromptNewline(tabId);
+    setStatus('fail');
   }
 }
 
 async function _sessionTokenRevoke(token, tabId) {
   if (!token) {
     appendLine('usage: session-token revoke <token>', '', tabId);
-    setStatus('fail'); appendPromptNewline(tabId);
+    setStatus('fail');
     return;
   }
   if (!token.startsWith('tok_')) {
     appendLine('[error] only tok_ tokens can be revoked', 'exit-fail', tabId);
-    setStatus('fail'); appendPromptNewline(tabId);
+    setStatus('fail');
     return;
   }
   try {
@@ -808,7 +800,7 @@ async function _sessionTokenRevoke(token, tabId) {
     const data = await resp.json().catch(() => ({}));
     if (!resp.ok) {
       appendLine(`[error] ${data.error || resp.status}`, 'exit-fail', tabId);
-      setStatus('fail'); appendPromptNewline(tabId);
+      setStatus('fail');
       return;
     }
     const isCurrentToken = token === SESSION_ID;
@@ -822,11 +814,11 @@ async function _sessionTokenRevoke(token, tabId) {
     } else {
       appendLine('token removed from server — any device using it is now on an empty anonymous session', '', tabId);
     }
-    setStatus('ok'); appendPromptNewline(tabId);
+    setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
     logClientError('session-token revoke', err);
-    setStatus('fail'); appendPromptNewline(tabId);
+    setStatus('fail');
   }
 }
 
@@ -852,7 +844,6 @@ async function _handleSessionTokenCommand(cmd, tabId) {
     appendLine(`session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
     appendLine('usage: session-token [generate | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
     setStatus('fail');
-    appendPromptNewline(tabId);
   }
 }
 
@@ -893,7 +884,6 @@ function submitCommand(rawCmd) {
           if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
         }
         setStatus('idle');
-        appendPromptNewline(activeTabId);
       });
     } else {
       // User declined migration — switch to new token without migrating runs.
@@ -904,7 +894,6 @@ function submitCommand(rawCmd) {
       });
       appendLine('History migration skipped.', '', activeTabId);
       setStatus('idle');
-      appendPromptNewline(activeTabId);
     }
     return true;
   }
