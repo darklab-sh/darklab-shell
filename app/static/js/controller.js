@@ -44,6 +44,50 @@ function closeFaq() {
   refocusTerminalInput();
 }
 
+function openShortcuts() {
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  if (typeof showShortcutsOverlay === 'function') showShortcutsOverlay();
+}
+
+function closeShortcuts() {
+  if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
+  refocusTerminalInput();
+}
+
+function renderShortcuts(data) {
+  const listEl = document.getElementById('shortcuts-list');
+  const noteEl = document.getElementById('shortcuts-note');
+  if (!listEl) return;
+  listEl.textContent = '';
+  const sections = Array.isArray(data && data.sections) ? data.sections : [];
+  for (const section of sections) {
+    const items = Array.isArray(section && section.items) ? section.items : [];
+    if (!items.length) continue;
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'shortcuts-section';
+    const headingEl = document.createElement('div');
+    headingEl.className = 'shortcut-section-title';
+    headingEl.textContent = section.title || '';
+    sectionEl.appendChild(headingEl);
+    const pairsEl = document.createElement('div');
+    pairsEl.className = 'shortcuts-pairs';
+    for (const item of items) {
+      const keyEl = document.createElement('div');
+      keyEl.className = 'shortcut-key';
+      keyEl.textContent = item.key || '';
+      const descEl = document.createElement('div');
+      descEl.className = 'shortcut-desc';
+      descEl.textContent = item.description || '';
+      pairsEl.appendChild(keyEl);
+      pairsEl.appendChild(descEl);
+    }
+    sectionEl.appendChild(pairsEl);
+    listEl.appendChild(sectionEl);
+  }
+  if (noteEl) noteEl.textContent = (data && data.note) || '';
+}
+
 function setupMobileSheetDragClose() {
   // All sheet drag/tap/keyboard close behavior lives in mobile_sheet.js so the
   // wiring per sheet stays a one-liner and behavior cannot drift between them.
@@ -198,6 +242,52 @@ _uiOverlayRefs.faqOverlay.addEventListener('click', e => {
   if (e.target === _uiOverlayRefs.faqOverlay) closeFaq();
 });
 faqCloseBtn.addEventListener('click', closeFaq);
+
+// ── Keyboard shortcuts overlay (`?` trigger) ──
+const _shortcutsOverlayEl = document.getElementById('shortcuts-overlay');
+const _shortcutsCloseBtn  = _shortcutsOverlayEl?.querySelector('.shortcuts-close');
+_shortcutsOverlayEl?.addEventListener('click', e => {
+  if (e.target === _shortcutsOverlayEl) closeShortcuts();
+});
+_shortcutsCloseBtn?.addEventListener('click', closeShortcuts);
+
+// Global `?` handler. Opens the shortcuts overlay from anywhere on the page,
+// including text-input-like surfaces (the composer, search boxes, modal
+// inputs), but only when the field is empty. Once any text is present, `?`
+// types normally so args like `curl "https://example.com/api?foo=bar"` are
+// not interfered with. Skipped while the welcome animation is active; the
+// welcome flow consumes every printable key to settle its own intro state.
+// Registered in capture phase so we can inspect the input value BEFORE the
+// browser inserts the character, and call stopImmediatePropagation() to
+// prevent the `#cmd` keydown handler's press-and-hold manual-insertion
+// path (which preventDefault's the native insert and re-inserts the key
+// itself) from re-adding the `?` after we've routed it to the overlay.
+document.addEventListener('keydown', e => {
+  if (e.key !== '?') return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (typeof _welcomeActive !== 'undefined' && _welcomeActive) return;
+  const ae = document.activeElement;
+  if (ae) {
+    const tag = (ae.tagName || '').toLowerCase();
+    const isEditable = ae.isContentEditable;
+    const isTextInput =
+      tag === 'textarea' ||
+      (tag === 'input' && !/^(checkbox|radio|button|submit|reset|range|color|file)$/i.test(ae.type || '')) ||
+      isEditable;
+    if (tag === 'select') return;
+    if (isTextInput) {
+      const raw = isEditable ? (ae.textContent || '') : (ae.value || '');
+      if (raw.length > 0) return;
+    }
+  }
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
+    closeShortcuts();
+  } else {
+    openShortcuts();
+  }
+}, true);
 _uiOverlayRefs.themeOverlay?.addEventListener('click', e => {
   if (e.target === _uiOverlayRefs.themeOverlay) closeThemeSelector();
 });
@@ -516,6 +606,12 @@ apiFetch('/faq').then(r => r.json()).then(data => {
   logClientError('failed to load /faq', err);
 });
 
+apiFetch('/shortcuts').then(r => r.json()).then(data => {
+  renderShortcuts(data || {});
+}).catch(err => {
+  logClientError('failed to load /shortcuts', err);
+});
+
 apiFetch('/workflows').then(r => r.json()).then(data => {
   const items = data.items || [];
   renderWorkflowItems(items);
@@ -726,6 +822,9 @@ document.addEventListener('keydown', e => {
     }
   }
   if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
+    // Let chrome shortcuts through so the same chord that opened a surface
+    // also closes it (e.g. Alt+H opens history, Alt+H again closes it).
+    if (handleChromeShortcut(e)) return;
     if (e.key !== 'Escape') return;
     closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
     if (isHistoryPanelOpen()) hideHistoryPanel();
@@ -759,6 +858,7 @@ document.addEventListener('keydown', e => {
   }
   if (handleTabShortcut(e)) return;
   if (handleActionShortcut(e)) return;
+  if (handleChromeShortcut(e)) return;
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     if (e.target === cmdInput) return;
     const editable = isEditableTarget(e.target);
@@ -810,6 +910,7 @@ document.addEventListener('keydown', e => {
     closeFaq();
     closeOptions();
     closeThemeSelector();
+    if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) closeShortcuts();
     cancelShareRedactionChoice();
     hideSearchBar();
     clearSearch();

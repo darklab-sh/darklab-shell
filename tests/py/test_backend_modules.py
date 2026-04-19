@@ -572,7 +572,10 @@ class TestThemeRegistry:
         assert "/history/&lt;run_id&gt;" in share_html
         assert "share snapshot" in tabs_html
         assert "run permalink" in tabs_html
-        assert "share snapshot for the active tab" in shortcuts_html
+        # Shortcuts answer is now a pointer to the `?` overlay and the `shortcuts`
+        # built-in command (single source of truth, no duplicated shortcut list).
+        assert "<code>?</code>" in shortcuts_html
+        assert "<code>shortcuts</code>" in shortcuts_html
 
     def test_load_all_faq_describes_built_in_shell_features(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:

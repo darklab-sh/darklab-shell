@@ -335,3 +335,147 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#cmd')).toHaveValue('host')
   })
 })
+
+test.describe('? keyboard-shortcuts overlay', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(73) })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
+  })
+
+  test('? opens the overlay when no input is focused', async ({ page }) => {
+    await page.locator('#cmd').evaluate(el => el.blur())
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+    const rowCount = await page.locator('#shortcuts-list .shortcut-key').count()
+    expect(rowCount).toBeGreaterThan(10)
+    // Self-documenting: the overlay lists its own `?` trigger.
+    await expect(page.locator('#shortcuts-list')).toContainText('?')
+  })
+
+  test('Escape closes the overlay', async ({ page }) => {
+    await page.locator('#cmd').evaluate(el => el.blur())
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('? opens the overlay from the empty command prompt', async ({ page }) => {
+    await page.locator('#cmd').focus()
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+    // The `?` character should NOT have been inserted into the prompt.
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('? types normally when the command prompt already has text', async ({ page }) => {
+    await page.locator('#cmd').focus()
+    await page.locator('#cmd').type('curl ')
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('curl ?')
+  })
+
+  test('overlay and shortcuts built-in share the same source', async ({ page }) => {
+    // Built-in command output
+    await runCommand(page, 'shortcuts')
+    const termText = await page.locator('.tab-panel.active .output').innerText()
+    // Overlay payload (grouped into sections)
+    const overlay = await page.evaluate(async () => {
+      const resp = await fetch('/shortcuts')
+      const data = await resp.json()
+      const keys = []
+      for (const section of data.sections || []) {
+        for (const item of section.items || []) keys.push(item.key)
+      }
+      return { sectionTitles: (data.sections || []).map(s => s.title), keys }
+    })
+    // Section headers appear in both surfaces.
+    for (const title of overlay.sectionTitles) {
+      expect(termText).toContain(`${title}:`)
+    }
+    // Every overlay key appears in the terminal output (both render from the
+    // same source of truth).
+    for (const key of overlay.keys) {
+      expect(termText).toContain(key)
+    }
+  })
+})
+
+test.describe('desktop chrome keyboard shortcuts', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(74) })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
+    // Keep the composer focused — that's the real-world default, and chords
+    // must fire without the Option glyph leaking into the prompt on macOS.
+    await page.locator('#cmd').focus()
+  })
+
+  test('Alt+H toggles the history drawer from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: '˙', code: 'KeyH', altKey: true })
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: '˙', code: 'KeyH', altKey: true })
+    await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('Alt+, opens the options panel from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: '≤', code: 'Comma', altKey: true })
+    await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+Shift+T opens the theme selector from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ˇ', code: 'KeyT', altKey: true, shiftKey: true })
+    await expect(page.locator('#theme-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+G opens the workflows overlay from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: '©', code: 'KeyG', altKey: true })
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+S toggles the transcript search bar from the composer', async ({ page }) => {
+    await expect(page.locator('#search-bar')).not.toBeVisible()
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ß', code: 'KeyS', altKey: true })
+    await expect(page.locator('#search-bar')).toBeVisible()
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ß', code: 'KeyS', altKey: true })
+    await expect(page.locator('#search-bar')).not.toBeVisible()
+  })
+
+  test('Alt+\\ toggles the rail collapsed state from the composer', async ({ page }) => {
+    const rail = page.locator('#rail')
+    const startsCollapsed = await rail.evaluate(el => el.classList.contains('rail-collapsed'))
+    await dispatchMacOptionKey(page, '#cmd', { key: '«', code: 'Backslash', altKey: true })
+    if (startsCollapsed) {
+      await expect(rail).not.toHaveClass(/\brail-collapsed\b/)
+    } else {
+      await expect(rail).toHaveClass(/\brail-collapsed\b/)
+    }
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: '«', code: 'Backslash', altKey: true })
+    if (startsCollapsed) {
+      await expect(rail).toHaveClass(/\brail-collapsed\b/)
+    } else {
+      await expect(rail).not.toHaveClass(/\brail-collapsed\b/)
+    }
+  })
+
+  test('Alt+/ toggles the FAQ overlay from the composer', async ({ page }) => {
+    const faq = page.locator('#faq-overlay')
+    await expect(faq).not.toHaveClass(/\bopen\b/)
+    await dispatchMacOptionKey(page, '#cmd', { key: '÷', code: 'Slash', altKey: true })
+    await expect(faq).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: '÷', code: 'Slash', altKey: true })
+    await expect(faq).not.toHaveClass(/\bopen\b/)
+  })
+})

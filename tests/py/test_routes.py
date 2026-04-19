@@ -698,6 +698,49 @@ class TestFaqRoute:
         assert "What commands are allowed?" in questions
 
 
+# ── /shortcuts ────────────────────────────────────────────────────────────────
+
+class TestShortcutsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/shortcuts")
+        assert resp.status_code == 200
+
+    def test_payload_shape(self):
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        assert isinstance(data.get("sections"), list)
+        assert data["sections"], "shortcuts payload should not be empty"
+        for section in data["sections"]:
+            assert isinstance(section, dict)
+            assert isinstance(section.get("title"), str) and section["title"]
+            assert isinstance(section.get("items"), list) and section["items"]
+            for item in section["items"]:
+                assert isinstance(item, dict)
+                assert "key" in item and "description" in item
+        assert isinstance(data.get("note", ""), str)
+
+    def test_sections_cover_terminal_tabs_and_ui(self):
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        titles = [section.get("title") for section in data["sections"]]
+        assert titles == ["Terminal", "Tabs", "UI"]
+
+    def test_includes_question_mark_self_reference(self):
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        keys = [item.get("key") for section in data["sections"] for item in section["items"]]
+        assert "?" in keys, "shortcuts overlay trigger should be self-documenting"
+
+    def test_matches_shortcuts_builtin_source(self):
+        from fake_commands import get_current_shortcuts
+        direct = get_current_shortcuts()
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        assert data["sections"] == direct["sections"]
+        assert data["note"] == direct["note"]
+
+
 # ── /welcome/ascii ───────────────────────────────────────────────────────────
 
 class TestWelcomeAsciiRoute:

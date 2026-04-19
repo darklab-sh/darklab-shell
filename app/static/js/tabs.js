@@ -422,6 +422,7 @@ function _createTabHeader(id, label) {
   closeBtn.className = 'tab-close';
   closeBtn.type = 'button';
   closeBtn.setAttribute('aria-label', 'Close tab');
+  closeBtn.title = 'Close tab (Option+W / Alt+W when active)';
   closeBtn.textContent = '✕';
   tab.appendChild(closeBtn);
 

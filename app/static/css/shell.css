@@ -282,17 +282,13 @@ body.ts-clock .output .shell-prompt-wrap::before {
   display: flex;
 }
 
-body.ln-on .output .line-content,
-body.ts-elapsed .output .line-content,
-body.ts-clock .output .line-content,
-body.ln-on .output .shell-prompt-wrap > .prompt-prefix,
-body.ts-elapsed .output .shell-prompt-wrap > .prompt-prefix,
-body.ts-clock .output .shell-prompt-wrap > .prompt-prefix,
-body.ln-on .output .shell-prompt-line,
-body.ts-elapsed .output .shell-prompt-line,
-body.ts-clock .output .shell-prompt-line {
-  transform: translateX(calc(var(--output-prefix-width, 0ch) + 1ch));
-  transform-origin: left top;
+body.ln-on .output .line,
+body.ts-elapsed .output .line,
+body.ts-clock .output .line,
+body.ln-on .output .shell-prompt-wrap,
+body.ts-elapsed .output .shell-prompt-wrap,
+body.ts-clock .output .shell-prompt-wrap {
+  padding-left: calc(var(--output-prefix-width, 0ch) + 1ch);
 }
 
 .output .line[class*="welcome-"]::before,
@@ -1463,6 +1459,90 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 #faq-modal .faq-body .faq-item.faq-open .faq-a {
   display: block;
 }
+
+/* ── Keyboard shortcuts overlay (`?` trigger) ─────────────────────── */
+#shortcuts-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: color-mix(in srgb, var(--bg, #000) 55%, transparent);
+  z-index: 330;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(2px);
+}
+#shortcuts-overlay.open { display: flex; }
+#shortcuts-modal {
+  background: color-mix(in srgb, var(--theme-panel-bg) 82%, transparent);
+  border: 1px solid var(--theme-panel-border);
+  border-radius: 6px;
+  width: min(1150px, 92vw);
+  max-height: 82vh;
+  display: flex;
+  flex-direction: column;
+  box-shadow: 0 24px 60px var(--theme-panel-shadow);
+}
+#shortcuts-modal .faq-header {
+  cursor: default;
+}
+.shortcuts-body {
+  overflow-y: auto;
+  padding: 10px 16px 14px;
+}
+.shortcuts-list {
+  column-count: 2;
+  column-gap: 28px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.shortcuts-list .shortcuts-section {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+.shortcuts-list .shortcuts-section:last-child {
+  margin-bottom: 0;
+}
+.shortcuts-list .shortcut-section-title {
+  color: var(--blue);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.shortcuts-list .shortcuts-pairs {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 6px 16px;
+}
+.shortcuts-list .shortcut-key {
+  color: var(--green);
+  white-space: nowrap;
+}
+.shortcuts-list .shortcut-desc {
+  color: var(--text);
+}
+@media (max-width: 720px) {
+  .shortcuts-list {
+    column-count: 1;
+  }
+}
+.shortcuts-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.shortcuts-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.shortcuts-close:hover { color: var(--green); }
 
 /* ── Workflows overlay & modal ────────────────────────────────────── */
 #workflows-overlay {

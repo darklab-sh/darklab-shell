@@ -472,7 +472,9 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
-        assert "Current shortcuts:\\n" in body
+        assert "Terminal:\\n" in body
+        assert "Tabs:\\n" in body
+        assert "UI:\\n" in body
         assert "Alt+T" in body
         assert "Option+Shift+C" in body
         assert "Ctrl+U" in body

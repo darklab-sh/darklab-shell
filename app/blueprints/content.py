@@ -19,7 +19,7 @@ from commands import (
     load_welcome,
     load_welcome_hints,
 )
-from fake_commands import get_special_command_keys
+from fake_commands import get_current_shortcuts, get_special_command_keys
 from helpers import get_client_ip, get_session_id, ip_is_in_cidrs, resolve_theme
 
 log = logging.getLogger("shell")
@@ -156,6 +156,17 @@ def workflows():
     items = load_all_workflows()
     _log_content_view("/workflows", count=len(items))
     return jsonify({"items": items})
+
+
+@content_bp.route("/shortcuts")
+def shortcuts():
+    """Return the keyboard shortcut reference used by the `shortcuts` built-in
+    command and the browser-side shortcuts overlay (`?` key).
+    """
+    payload = get_current_shortcuts()
+    total = sum(len(section["items"]) for section in payload["sections"])
+    _log_content_view("/shortcuts", count=total)
+    return jsonify(payload)
 
 
 @content_bp.route("/autocomplete")

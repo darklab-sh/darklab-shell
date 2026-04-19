@@ -29,15 +29,15 @@
 <header>
   <h1><span id="header-title">{{ app_name }}</span></h1>
   <div class="header-btns" id="header-btns">
-    <button id="hist-btn" title="Run history">⧖ history</button>
-    <button id="options-btn" title="Display and preference options">≡ options</button>
-    <button id="theme-btn" title="Theme selector">◑ theme</button>
-    <button id="workflows-btn" title="Guided workflows">⊡ workflows</button>
-    <button id="faq-btn">? FAQ</button>
+    <button id="hist-btn" title="Run history (Alt+H)">⧖ history</button>
+    <button id="options-btn" title="Display and preference options (Alt+,)">≡ options</button>
+    <button id="theme-btn" title="Theme selector (Alt+Shift+T)">◑ theme</button>
+    <button id="workflows-btn" title="Guided workflows (Alt+G)">⊡ workflows</button>
+    <button id="faq-btn" title="Frequently asked questions (Alt+/)">? FAQ</button>
     <a id="diag-btn" href="/diag" title="Operator diagnostics" class="u-hidden" target="_blank" rel="noopener noreferrer">⊕ diag</a>
   </div>
   <div id="mobile-header-actions">
-    <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
+    <button id="hamburger-btn" title="Open menu" aria-label="Menu">☰</button>
   </div>
 </header>
 
@@ -85,8 +85,8 @@
                  autocomplete="off" autocapitalize="none" autocorrect="off"
                  spellcheck="false" inputmode="text" enterkeyhint="go"
                  placeholder="Type a command" aria-label="Command">
-          <button id="mobile-run-btn" type="button">Run</button>
-          <button id="mobile-kill-btn" type="button" aria-label="Kill current run">■ Kill</button>
+          <button id="mobile-run-btn" type="button" title="Run command">Run</button>
+          <button id="mobile-kill-btn" type="button" title="Kill current run" aria-label="Kill current run">■ Kill</button>
         </div>
       </div>
     </div>
@@ -241,12 +241,12 @@
         <div class="rail-wordmark-title">{{ app_name }}</div>
         <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
       </div>
-      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar">«</button>
+      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar (Alt+\)">«</button>
     </div>
 
     <div class="rail-split-area" id="rail-split-area">
       <div class="rail-section rail-section-recent" id="rail-section-recent">
-        <button class="rail-section-header" id="rail-recent-header" type="button" aria-label="Toggle Recent">
+        <button class="rail-section-header" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
           <span class="rail-section-header-left">
             <span class="rail-section-chev">▸</span>
             <span class="rail-section-label">Recent</span>
@@ -261,7 +261,7 @@
       <div class="rail-spacer" id="rail-spacer"></div>
 
       <div class="rail-section rail-section-workflows closed" id="rail-section-workflows">
-        <button class="rail-section-header" id="rail-workflows-header" type="button" aria-label="Toggle Workflows">
+        <button class="rail-section-header" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
           <span class="rail-section-header-left">
             <span class="rail-section-chev">▸</span>
             <span class="rail-section-label">Workflows</span>
@@ -272,10 +272,10 @@
     </div>
 
     <nav class="rail-nav" id="rail-nav">
-      <button class="rail-nav-item" data-action="history" type="button" title="Run history"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
-      <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
-      <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
-      <button class="rail-nav-item" data-action="faq" type="button" title="FAQ"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
+      <button class="rail-nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+      <button class="rail-nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
       <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
       <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
@@ -294,12 +294,12 @@
         <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
         <div class="tabs-bar" id="tabs-bar">
           <!-- tabs injected here -->
-          <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+          <button id="new-tab-btn" title="New tab (Option+T / Alt+T)" aria-label="New tab">+</button>
         </div>
         <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
       </div>
       <div class="tabbar-chrome">
-        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Ctrl+F)">⌕ search</button>
+        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Alt+S)">⌕ search</button>
         <button id="ln-btn" class="chrome-btn" title="Toggle line numbers">ln: off</button>
         <button id="ts-btn" class="chrome-btn" title="Toggle timestamp display">ts: off</button>
       </div>
@@ -548,6 +548,20 @@
       <button class="faq-close" aria-label="Close FAQ">✕</button>
     </div>
     <div class="faq-body"></div>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts Overlay (triggered by `?`) -->
+<div id="shortcuts-overlay" aria-hidden="true">
+  <div id="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+    <div class="faq-header">
+      <span class="faq-title" id="shortcuts-title">KEYBOARD SHORTCUTS</span>
+      <button class="shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
+    </div>
+    <div class="faq-body shortcuts-body">
+      <div id="shortcuts-list" class="shortcuts-list" aria-live="polite"></div>
+      <div id="shortcuts-note" class="shortcuts-note"></div>
+    </div>
   </div>
 </div>
 

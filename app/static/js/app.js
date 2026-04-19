@@ -523,6 +523,9 @@ function _closeMajorOverlays() {
   if (isFaqOverlayOpen()) hideFaqOverlay();
   if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
+  if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
+    if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
+  }
 }
 
 function openOptions() {
@@ -868,12 +871,14 @@ function eventMatchesDigit(e, digit) {
 function handleTabShortcut(e) {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
-  if (eventMatchesLetter(e, 't')) {
+  // Letter chords (T, W) require no Shift — Alt+Shift+T is the theme-selector
+  // chrome shortcut and must fall through to handleChromeShortcut.
+  if (!e.shiftKey && eventMatchesLetter(e, 't')) {
     createShortcutTab();
     e.preventDefault();
     return true;
   }
-  if (eventMatchesLetter(e, 'w')) {
+  if (!e.shiftKey && eventMatchesLetter(e, 'w')) {
     closeActiveShortcutTab();
     e.preventDefault();
     return true;
@@ -917,6 +922,74 @@ function handleActionShortcut(e) {
   }
   if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'l' || e.key === 'L')) {
     clearActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+// Desktop chrome shortcuts (rail, search, history, options, theme, workflows).
+// The composer is allowed to pass through so prompt-focused users can still
+// trigger chrome toggles — each branch calls preventDefault so Option-glyphs
+// (`«`, `˙`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS. Other
+// editable targets (modal inputs, search field, options textarea) remain
+// gated so typing isn't hijacked.
+//
+// Search is bound to Alt+S (not Alt+F) because the composer owns Alt+F as
+// readline word-forward; binding search to Alt+F would either hijack that
+// or require a context-dependent chord that's a net UX loss. Alt+S has no
+// readline conflict and works identically from everywhere.
+//
+// Each chord toggles its surface directly rather than delegating to the
+// corresponding header button's click handler. The header buttons share a
+// pre-existing quirk where they call _closeMajorOverlays() before toggling,
+// which cancels out the close half of the toggle.
+function handleChromeShortcut(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+  if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
+  // Alt+Shift+T → theme; guard first so it doesn't match Alt+Shift letter = T as tab-new.
+  if (e.shiftKey && eventMatchesLetter(e, 't')) {
+    if (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen()) closeThemeSelector();
+    else openThemeSelector();
+    e.preventDefault();
+    return true;
+  }
+  // All remaining chrome chords are shift-free.
+  if (e.shiftKey) return false;
+  if (eventMatchesLetter(e, 'h')) {
+    if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) {
+      hideHistoryPanel();
+    } else {
+      document.getElementById('hist-btn')?.click();
+    }
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 'g')) {
+    if (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen()) closeWorkflows();
+    else openWorkflows();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 's')) {
+    document.getElementById('search-toggle-btn')?.click();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesCode(e, 'Comma') || e.key === ',') {
+    if (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen()) closeOptions();
+    else openOptions();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesCode(e, 'Backslash') || e.key === '\\') {
+    if (typeof toggleRailCollapsed === 'function') toggleRailCollapsed();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesCode(e, 'Slash') || e.key === '/' || e.key === '÷') {
+    if (typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) closeFaq();
+    else openFaq();
     e.preventDefault();
     return true;
   }

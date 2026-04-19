@@ -31,30 +31,37 @@ from process import active_runs_for_session
 
 _STARTED_AT = datetime.now(timezone.utc)
 _CURRENT_SHORTCUTS = [
-    ("Welcome:", "type / Enter / Escape to settle the welcome animation immediately"),
-    ("Kill dialog:", "Enter to confirm / Escape to cancel"),
-    ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
-    ("Enter on blank prompt", "append a new empty prompt line"),
-    ("Up / Down on blank prompt", "cycle recent command history"),
-    ("Autocomplete: Up / Down", "move through suggestions (wraps around)"),
-    ("Autocomplete: Tab", "accept the highlighted suggestion"),
-    ("Autocomplete: Enter", "accept highlighted suggestion or run command"),
-    ("Autocomplete: Escape", "dismiss suggestions"),
-    ("Ctrl+R", "reverse-i-search history; Up/Down/Ctrl+R cycle; Enter runs; Tab accepts; Escape restores draft"),
-    ("Option+T / Alt+T", "open a new tab"),
-    ("Option+W / Alt+W", "close the current tab"),
-    ("Option+Left/Right", "switch to previous / next tab"),
-    ("Option+Tab / Alt+Tab", "cycle to next tab (add Shift to reverse)"),
-    ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
-    ("Option+P / Alt+P", "create a permalink for the active tab"),
-    ("Option+Shift+C", "copy active-tab output"),
-    ("Ctrl+L", "clear the active tab"),
-    ("Ctrl+W", "delete one word to the left"),
-    ("Ctrl+U", "delete to the beginning of the line"),
-    ("Ctrl+A", "move to the beginning of the line"),
-    ("Ctrl+K", "delete to the end of the line"),
-    ("Ctrl+E", "move to the end of the line"),
-    ("Option+B/F or Alt+B/F", "move backward / forward by word"),
+    ("Terminal", [
+        ("?", "open the keyboard shortcuts overlay (works from the prompt when empty)"),
+        ("Ctrl+C", "running => open kill confirm; idle => fresh prompt line"),
+        ("Up / Down on blank prompt", "cycle recent command history"),
+        ("Ctrl+R", "reverse-i-search history; Up/Down/Ctrl+R cycle; Enter runs; Tab accepts; Escape restores draft"),
+        ("Ctrl+W", "delete one word to the left"),
+        ("Ctrl+U", "delete to the beginning of the line"),
+        ("Ctrl+A", "move to the beginning of the line"),
+        ("Ctrl+K", "delete to the end of the line"),
+        ("Ctrl+E", "move to the end of the line"),
+        ("Option+B/F or Alt+B/F", "move backward / forward by word"),
+        ("Ctrl+L", "clear the active tab"),
+    ]),
+    ("Tabs", [
+        ("Option+T / Alt+T", "open a new tab"),
+        ("Option+W / Alt+W", "close the current tab"),
+        ("Option+Left/Right", "switch to previous / next tab"),
+        ("Option+Tab / Alt+Tab", "cycle to next tab (add Shift to reverse)"),
+        ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
+        ("Option+P / Alt+P", "create a permalink for the active tab"),
+        ("Option+Shift+C", "copy active-tab output"),
+    ]),
+    ("UI", [
+        ("Alt+\\", "toggle the desktop sidebar (rail) open / collapsed"),
+        ("Alt+S", "toggle the transcript search bar"),
+        ("Alt+H", "toggle the history drawer"),
+        ("Alt+,", "open the options panel"),
+        ("Alt+Shift+T", "open the theme selector"),
+        ("Alt+G", "open the guided workflows panel"),
+        ("Alt+/", "open the FAQ overlay"),
+    ]),
 ]
 _SNARKY_SUDO_RESPONSES = [
     "sudo: i asked the kernel. the kernel said no.",
@@ -424,16 +431,41 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     ]
 
 
+_SHORTCUTS_NOTE = (
+    "Note: on macOS, use Option for app-safe tab shortcuts; browser Command "
+    "shortcuts remain environment-dependent."
+)
+
+
+def get_current_shortcuts() -> dict:
+    """Return the shortcut reference as a JSON-serialisable payload.
+
+    Single source of truth consumed by the `shortcuts` built-in command and by
+    the browser-side shortcuts overlay (press `?` from the terminal).
+    """
+    return {
+        "sections": [
+            {
+                "title": title,
+                "items": [{"key": name, "description": description} for name, description in items],
+            }
+            for title, items in _CURRENT_SHORTCUTS
+        ],
+        "note": _SHORTCUTS_NOTE,
+    }
+
+
 def _run_fake_shortcuts() -> list[dict[str, str]]:
-    width = max(len(name) for name, _ in _CURRENT_SHORTCUTS)
-    lines = [_output_line("Current shortcuts:", "fake-section")]
-    for name, description in _CURRENT_SHORTCUTS:
-        lines.append(_output_line(_format_native_record(name, description, width), "fake-shortcut"))
+    width = max(len(name) for _, items in _CURRENT_SHORTCUTS for name, _ in items)
+    lines: list[dict[str, str]] = []
+    for index, (title, items) in enumerate(_CURRENT_SHORTCUTS):
+        if index > 0:
+            lines.append(_output_line("", "fake-spacer"))
+        lines.append(_output_line(f"{title}:", "fake-section"))
+        for name, description in items:
+            lines.append(_output_line(_format_native_record(name, description, width), "fake-shortcut"))
     lines.append(_output_line("", "fake-spacer"))
-    lines.append(_output_line(
-        "Note: on macOS, use Option for app-safe tab shortcuts; browser Command shortcuts remain environment-dependent.",
-        "fake-note",
-    ))
+    lines.append(_output_line(_SHORTCUTS_NOTE, "fake-note"))
     return lines
 
 

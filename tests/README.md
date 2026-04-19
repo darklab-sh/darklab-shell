@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 828
+- `pytest`: 833
 - `vitest`: 475
-- `playwright`: 158
-- total: 1,461
+- `playwright`: 171
+- total: 1,479
 
 This document is organized in two parts:
 
@@ -820,6 +820,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestFaqRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestFaqRoute.test_items_key_present` | Checks items key present handling. |
 | `TestFaqRoute.test_includes_builtin_faq_entries` | Includes builtin FAQ entries. |
+| `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
+| `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
+| `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
+| `TestShortcutsRoute.test_includes_question_mark_self_reference` | Confirms the `?` overlay trigger is listed in its own reference. |
+| `TestShortcutsRoute.test_matches_shortcuts_builtin_source` | Confirms the overlay payload matches the `shortcuts` built-in source. |
 | `TestWelcomeAsciiRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestWelcomeAsciiRoute.test_contains_banner_art` | Checks contains banner art handling. |
 | `TestWelcomeAsciiMobileRoute.test_returns_200` | Checks returns 200 handling. |
@@ -1819,6 +1824,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
 | `mobile edit bar moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |
+| `mobile output wraps inside the transcript when timestamps and line numbers are on` | Regression for mobile output overflow: injects a long prefixed line with `body.ln-on` and `body.ts-clock` active and asserts `.line-content`'s right edge stays within `.output`'s right edge at mobile viewport width. |
 | `mobile long commands keep the composer usable` | Verifies that mobile long commands keep the composer usable. |
 
 #### `output.spec.js`
@@ -1898,6 +1904,18 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `ArrowDown in hist-search navigates to the next match and fills the input` | ArrowDown in hist-search navigates to the next match and fills the input. |
 | `Escape in hist-search closes the dropdown and restores the pre-search draft` | Escape in hist-search closes the dropdown and restores the pre-search draft. |
 | `Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input` | Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input. |
+| `? opens the overlay when no input is focused` | Pressing `?` outside any input opens the transparent keyboard-shortcuts overlay. |
+| `Escape closes the overlay` | Escape closes an open shortcuts overlay. |
+| `? opens the overlay from the empty command prompt` | Pressing `?` while the command prompt has focus but is empty opens the overlay and does not insert `?` into the input. |
+| `? types normally when the command prompt already has text` | Once the prompt has any text, `?` types normally and does not open the overlay. |
+| `overlay and shortcuts built-in share the same source` | Verifies the `shortcuts` command output and the overlay payload list the same keys. |
+| `Alt+H toggles the history drawer from the composer` | Pressing Alt+H with the composer focused opens the history drawer and pressing it again closes it — without leaking `˙` into the prompt. |
+| `Alt+, opens the options panel from the composer` | Pressing Alt+, with the composer focused opens the options modal without leaking `≤`. |
+| `Alt+Shift+T opens the theme selector from the composer` | Pressing Alt+Shift+T with the composer focused opens the theme selector without leaking `ˇ`. |
+| `Alt+G opens the workflows overlay from the composer` | Pressing Alt+G with the composer focused opens the guided workflows overlay without leaking `©`. |
+| `Alt+S toggles the transcript search bar from the composer` | Alt+S is the canonical search chord — works from the prompt because `S` has no readline conflict (unlike `F`, which the composer owns as word-forward). |
+| `Alt+\ toggles the rail collapsed state from the composer` | Pressing Alt+\ with the composer focused toggles the desktop left rail between collapsed and expanded without leaking `«`. |
+| `Alt+/ toggles the FAQ overlay from the composer` | Alt+/ opens the FAQ overlay from the prompt and closes it on a second press without leaking `÷`. |
 
 #### `tabs.spec.js`
 

@@ -282,7 +282,12 @@ Shipped app-safe shortcuts:
 
 Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally treated as optional fallbacks rather than the primary contract because browser interception is inconsistent across environments, especially on macOS browsers.
 
-The same shortcut reference is also available in-terminal via `shortcuts`.
+The same shortcut reference is surfaced in two places in the shell:
+
+- press `?` from anywhere on the page to open a dedicated transparent keyboard-shortcuts overlay — including from the command prompt itself when it is empty. Once any text is present in the prompt (or any other input), `?` types normally so args like `curl "…?foo=bar"` are not interfered with. The handler also skips modifier chords (`Ctrl` / `Meta` / `Alt`) and the welcome-animation active state
+- run `shortcuts` in the shell to print the same reference as a text dump inside the current tab
+
+Both surfaces read from the same canonical list in the backend (exposed to the browser via `GET /shortcuts`), so they cannot drift. The overlay lists the `?` binding itself as the first entry so the shortcut is self-documenting.
 
 ---
 

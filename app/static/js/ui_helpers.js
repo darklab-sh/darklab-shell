@@ -399,6 +399,20 @@
   global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
   global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
   global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
+  global.showShortcutsOverlay = () => {
+    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+    if (el) el.setAttribute('aria-hidden', 'false');
+    showPanelOverlay(el);
+  };
+  global.hideShortcutsOverlay = () => {
+    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+    if (el) el.setAttribute('aria-hidden', 'true');
+    hidePanelOverlay(el);
+  };
+  global.isShortcutsOverlayOpen = () => {
+    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+    return isPanelOverlayOpen(el);
+  };
   global.showThemeOverlay = () => showPanelOverlay(themeOverlay || null);
   global.hideThemeOverlay = () => hidePanelOverlay(themeOverlay || null);
   global.isThemeOverlayOpen = () => isPanelOverlayOpen(themeOverlay || null);

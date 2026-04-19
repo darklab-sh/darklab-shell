@@ -712,6 +712,42 @@ test.describe('mobile menu', () => {
       .toBe(0)
   })
 
+  test('mobile output wraps inside the transcript when timestamps and line numbers are on', async ({ page }) => {
+    await ensurePromptReady(page)
+
+    await page.evaluate(() => {
+      document.body.classList.add('ln-on', 'ts-clock')
+      const out = document.querySelector('.tab-panel.active .output')
+      if (!out) return
+      out.style.setProperty('--output-prefix-width', '14ch')
+      const line = document.createElement('span')
+      line.id = 'overflow-probe'
+      line.className = 'line stdout'
+      line.dataset.prefix = '00:00:00 999'
+      line.dataset.tsC = '00:00:00'
+      const content = document.createElement('span')
+      content.className = 'line-content'
+      content.textContent =
+        'starting scan at target.example.com 1.2.3.4 port 443 with many ' +
+        'flags and a long trailing argument that should wrap instead of ' +
+        'scrolling horizontally off the mobile viewport edge'
+      line.appendChild(content)
+      out.insertBefore(line, out.firstChild)
+    })
+
+    // Scoped to the injected probe line: the regression is that translateX
+    // shifted paint without reducing the content's layout width, so the line's
+    // content box would exceed the output viewport's right edge. With the fix
+    // (padding-left on the parent), the content wraps within the content box.
+    const fits = await page.locator('.tab-panel.active .output').evaluate((el) => {
+      const outRight = el.getBoundingClientRect().right
+      const content = el.querySelector('#overflow-probe .line-content')
+      const box = content.getBoundingClientRect()
+      return { outRight, contentRight: box.right, contentWidth: box.width }
+    })
+    expect(fits.contentRight).toBeLessThanOrEqual(fits.outRight + 1)
+  })
+
   test('mobile long commands keep the composer usable', async ({ page }) => {
     // Simulate keyboard open by setting the CSS variable and class directly
     await page.evaluate(() => {

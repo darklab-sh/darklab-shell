@@ -88,6 +88,7 @@ const histDelOverlay = document.getElementById('hist-del-overlay');
 const shareRedactionOverlay = document.getElementById('share-redaction-overlay');
 const workflowsOverlay = document.getElementById('workflows-overlay');
 const faqOverlay = document.getElementById('faq-overlay');
+const shortcutsOverlay = document.getElementById('shortcuts-overlay');
 const themeOverlay = document.getElementById('theme-overlay');
 const optionsOverlay = document.getElementById('options-overlay');
 const permalinkToast = document.getElementById('permalink-toast');
