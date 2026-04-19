@@ -168,16 +168,23 @@
     const name = (document.body && document.body.dataset && document.body.dataset.theme) || '';
     menuThemeHint.textContent = name;
   }
+  // Bind the timestamps sub-menu as a disclosure so aria-expanded and the
+  // submenu's u-hidden class stay coordinated. The handle is also used by
+  // openMenuSheet() to reset the sub-menu to collapsed each time the sheet
+  // opens (so the user never returns to a previously-expanded surface).
+  const tsToggleBtn = menuSheet?.querySelector('[data-menu-action="ts-toggle"]');
+  const tsSubmenuEl = document.getElementById('mobile-menu-ts-submenu');
+  const tsDisclosure = tsToggleBtn ? bindDisclosure(tsToggleBtn, {
+    panel: tsSubmenuEl,
+    openClass: null,
+    hiddenClass: 'u-hidden',
+  }) : null;
+
   function openMenuSheet() {
     refreshMenuStateHints();
     refreshThemeHint();
     refreshHistoryCount();
-    // Reset the timestamps sub-menu to collapsed each time the sheet opens so
-    // the user doesn't return to a previously-expanded surface state.
-    const tsToggle = menuSheet?.querySelector('[data-menu-action="ts-toggle"]');
-    const tsSubmenu = document.getElementById('mobile-menu-ts-submenu');
-    tsToggle?.setAttribute('aria-expanded', 'false');
-    tsSubmenu?.classList.add('u-hidden');
+    tsDisclosure?.close();
     show(menuSheetScrim);
     show(menuSheet);
   }
@@ -207,8 +214,18 @@
       }
     }, true);
   });
-  menuSheetScrim?.addEventListener('click', closeMenuSheet);
-  menuSheetCloseBtn?.addEventListener('click', closeMenuSheet);
+  // Scrim click + close button + Escape are owned by bindDismissible
+  // (ui_dismissible.js) so every sheet/panel/modal surface uses the same
+  // registry-driven close cascade instead of hand-rolled wiring.
+  if (typeof global.bindDismissible === 'function') {
+    global.bindDismissible(menuSheet, {
+      level: 'sheet',
+      isOpen: isMenuSheetOpen,
+      onClose: closeMenuSheet,
+      backdropEl: menuSheetScrim,
+      closeButtons: menuSheetCloseBtn,
+    });
+  }
 
   // ── 2D: Recent peek ─────────────────────────────────────────────
   function readCmdHistory() {
@@ -291,9 +308,11 @@
     btn.type = 'button';
     btn.className = 'sheet-item-action';
     btn.textContent = label;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      try { handler(); } catch (_) { /* non-critical */ }
+    bindPressable(btn, {
+      onActivate: (e) => {
+        e.stopPropagation();
+        try { handler(); } catch (_) { /* non-critical */ }
+      },
     });
     return btn;
   }
@@ -328,12 +347,16 @@
       star.setAttribute('role', 'button');
       star.setAttribute('tabindex', '0');
       star.setAttribute('aria-label', isStarred ? 'Unstar' : 'Star');
-      star.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (typeof global._toggleStar === 'function') {
-          try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
-        }
-        _recentsRenderList();
+      bindPressable(star, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: (e) => {
+          e.stopPropagation();
+          if (typeof global._toggleStar === 'function') {
+            try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
+          }
+          _recentsRenderList();
+        },
       });
       const cmdEl = document.createElement('span');
       cmdEl.className = 'sheet-item-cmd';
@@ -437,8 +460,18 @@
     return !!(recentsSheet && recentsSheet.classList && !recentsSheet.classList.contains('u-hidden'));
   }
 
-  recentsSheetScrim?.addEventListener('click', closeRecentsSheet);
-  recentsSheetCloseBtn?.addEventListener('click', closeRecentsSheet);
+  // Scrim click + close button + Escape are owned by bindDismissible so
+  // the sheet participates in the unified modal > sheet > panel Escape
+  // cascade (see ui_dismissible.js).
+  if (typeof global.bindDismissible === 'function') {
+    global.bindDismissible(recentsSheet, {
+      level: 'sheet',
+      isOpen: isRecentsSheetOpen,
+      onClose: closeRecentsSheet,
+      backdropEl: recentsSheetScrim,
+      closeButtons: recentsSheetCloseBtn,
+    });
+  }
   recentsSheetClearBtn?.addEventListener('click', () => {
     if (typeof global.confirmHistAction === 'function') {
       global.confirmHistAction('clear');
@@ -564,14 +597,21 @@
     _renderRecentsChips();
   }
 
-  recentsFiltersToggle?.addEventListener('click', () => {
-    const open = recentsFiltersToggle.getAttribute('aria-expanded') === 'true';
-    const next = !open;
-    recentsFiltersToggle.setAttribute('aria-expanded', next ? 'true' : 'false');
-    if (recentsFiltersExpanded) recentsFiltersExpanded.classList.toggle('u-hidden', !next);
-    if (!next) _closeRecentsDropdowns();
-    _recentsSyncFilterUI();
-  });
+  if (recentsFiltersToggle) {
+    bindDisclosure(recentsFiltersToggle, {
+      panel: recentsFiltersExpanded,
+      openClass: null,
+      hiddenClass: 'u-hidden',
+      onToggle: (open) => {
+        if (!open) _closeRecentsDropdowns();
+        // _recentsSyncFilterUI() rewrites the toggle label ("filters" vs
+        // "hide filters") using the just-synced aria-expanded value, so it
+        // must run after the helper's sync(), which is already the order
+        // onToggle fires in.
+        _recentsSyncFilterUI();
+      },
+    });
+  }
 
   let _recentsRootTimer = null;
   recentsFilterRoot?.addEventListener('input', (e) => {
@@ -586,16 +626,14 @@
   recentsDropdowns.forEach(wrap => {
     const key = wrap.dataset.recentsDropdown;
     const trigger = wrap.querySelector('.sheet-filter-dropdown');
-    trigger?.addEventListener('click', (e) => {
-      e.stopPropagation();
+    trigger?.addEventListener('click', () => {
       const open = wrap.classList.contains('open');
       _closeRecentsDropdowns(open ? null : wrap);
       wrap.classList.toggle('open', !open);
       trigger.setAttribute('aria-expanded', !open ? 'true' : 'false');
     });
     wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
-      opt.addEventListener('click', (e) => {
-        e.stopPropagation();
+      opt.addEventListener('click', () => {
         _recentsFilterState[key] = opt.dataset.dropdownValue;
         wrap.classList.remove('open');
         trigger?.setAttribute('aria-expanded', 'false');
@@ -605,43 +643,62 @@
     });
   });
 
-  // Close dropdowns on outside click within the sheet.
-  recentsSheet?.addEventListener('click', (e) => {
-    if (!e.target.closest?.('[data-recents-dropdown]')) _closeRecentsDropdowns();
-  });
+  // Close dropdowns on ambient click anywhere in the recents sheet that
+  // doesn't land inside a dropdown. bindOutsideClickClose owns the trigger
+  // exemption: clicks on the dropdown triggers / option items bubble up but
+  // are skipped because they're inside [data-recents-dropdown].
+  if (recentsSheet && typeof bindOutsideClickClose === 'function') {
+    bindOutsideClickClose(null, {
+      scope: recentsSheet,
+      isOpen: () => recentsDropdowns.some(w => w.classList.contains('open')),
+      onClose: () => _closeRecentsDropdowns(),
+      exemptSelectors: ['[data-recents-dropdown]'],
+    });
+  }
 
-  recentsFilterStarred?.addEventListener('click', () => {
-    _recentsFilterState.starred = !_recentsFilterState.starred;
-    _recentsSyncFilterUI();
-    _recentsRenderList();
-  });
+  if (recentsFilterStarred) {
+    bindPressable(recentsFilterStarred, {
+      refocusComposer: false,
+      onActivate: () => {
+        _recentsFilterState.starred = !_recentsFilterState.starred;
+        _recentsSyncFilterUI();
+        _recentsRenderList();
+      },
+    });
+  }
 
-  recentsFiltersClear?.addEventListener('click', () => {
-    _recentsFilterState.root = '';
-    _recentsFilterState.exit = 'all';
-    _recentsFilterState.date = 'all';
-    _recentsFilterState.starred = false;
-    _closeRecentsDropdowns();
-    _recentsSyncFilterUI();
-    _recentsRenderList();
-  });
+  if (recentsFiltersClear) {
+    bindPressable(recentsFiltersClear, {
+      refocusComposer: false,
+      onActivate: () => {
+        _recentsFilterState.root = '';
+        _recentsFilterState.exit = 'all';
+        _recentsFilterState.date = 'all';
+        _recentsFilterState.starred = false;
+        _closeRecentsDropdowns();
+        _recentsSyncFilterUI();
+        _recentsRenderList();
+      },
+    });
+  }
 
-  // Escape dismisses whichever sheet is on top.
-  document.addEventListener('keydown', (e) => {
-    if (e.key !== 'Escape') return;
-    if (isRecentsSheetOpen()) { e.preventDefault(); closeRecentsSheet(); return; }
-    if (isMenuSheetOpen()) { e.preventDefault(); closeMenuSheet(); }
-  });
+  // Escape-to-close is owned by bindDismissible's unified dispatcher
+  // (closeTopmostDismissible). The sheets are registered above so they
+  // participate in the same modal > sheet > panel cascade as every
+  // other surface.
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
   function openRecentsFromPeek() { showRecentsSheet(); }
-  recentPeek?.addEventListener('click', openRecentsFromPeek);
-  recentPeek?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      openRecentsFromPeek();
-    }
-  });
+  if (recentPeek) {
+    // role="button" div — Enter/Space handled by bindPressable; opt into
+    // clearPressStyle so the :hover/:active residue on touch doesn't stick
+    // after activation (native blur is a no-op on non-focusable elements).
+    bindPressable(recentPeek, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: openRecentsFromPeek,
+    });
+  }
 
   if (recentPeek) {
     let peekStartY = null;

@@ -110,13 +110,16 @@
     var wrap = document.getElementById('perm-save-wrap');
     var btn = document.getElementById('perm-save-btn');
     if (!wrap || !btn) return;
-    btn.addEventListener('click', function (e) {
-      e.stopPropagation();
+    btn.addEventListener('click', function () {
       wrap.classList.toggle('open');
     });
-    document.addEventListener('click', function () {
-      wrap.classList.remove('open');
-    });
+    if (typeof bindOutsideClickClose === 'function') {
+      bindOutsideClickClose(wrap, {
+        triggers: btn,
+        isOpen: function () { return wrap.classList.contains('open'); },
+        onClose: function () { wrap.classList.remove('open'); },
+      });
+    }
   })();
 
   // ── Filename helper ────────────────────────────────────────────────────────
@@ -210,6 +213,9 @@
     else if (action === 'save-txt') saveTxt();
     else if (action === 'save-html') saveHtml();
     else if (action === 'save-pdf') savePdf();
+    else return;
+    var saveWrap = document.getElementById('perm-save-wrap');
+    if (saveWrap) saveWrap.classList.remove('open');
   });
 
   // ── Initial render ─────────────────────────────────────────────────────────

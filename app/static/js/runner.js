@@ -310,16 +310,12 @@ function _clearDesktopInput() {
   setComposerValue('', 0, 0);
 }
 
-function focusComposerInputAfterRun() {
-  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
-}
-
 function interruptPromptLine(tabId = activeTabId) {
   const t = getTab(tabId);
   if (t && t.st === 'running') return false;
   appendPromptNewline(tabId);
   _clearDesktopInput();
-  focusComposerInputAfterRun();
+  refocusComposerAfterAction();
   if (tabId === activeTabId) setStatus('idle');
   return true;
 }
@@ -1123,12 +1119,12 @@ function submitComposerCommand(rawCmd, { dismissKeyboard = false, focusAfterSubm
   const result = submitCommand(rawCmd);
   if (result === true) {
     _clearDesktopInput();
-    if (focusAfterSubmit) focusComposerInputAfterRun();
+    if (focusAfterSubmit) refocusComposerAfterAction();
     if (dismissKeyboard && typeof dismissMobileKeyboardAfterSubmit === 'function') {
       dismissMobileKeyboardAfterSubmit();
     }
   } else if (result === 'settle') {
-    focusComposerInputAfterRun();
+    refocusComposerAfterAction();
   }
   return result;
 }

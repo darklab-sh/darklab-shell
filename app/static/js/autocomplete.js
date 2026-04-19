@@ -512,7 +512,7 @@ function acAccept(s) {
     // the dropdown, not insert the literal placeholder text into the prompt.
     if (s.hintOnly) {
       acHide();
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+      refocusComposerAfterAction({ preventScroll: true });
       return;
     }
     const currentValue = (typeof getComposerValue === 'function')
@@ -534,5 +534,5 @@ function acAccept(s) {
     acHide();
     setComposerValue(s, s.length, s.length);
   }
-  if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
+  refocusComposerAfterAction({ preventScroll: true });
 }

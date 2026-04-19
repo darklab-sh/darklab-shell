@@ -145,8 +145,8 @@ function _acceptHistoryRootSuggestion(root) {
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = root;
   _hideHistoryRootDropdown();
   _setHistoryFilter('commandRoot', root);
-  if (typeof historyRootInput !== 'undefined' && historyRootInput && typeof historyRootInput.focus === 'function') {
-    setTimeout(() => historyRootInput.focus({ preventScroll: true }), 0);
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) {
+    setTimeout(() => focusElement(historyRootInput, { preventScroll: true }), 0);
   }
 }
 
@@ -475,9 +475,9 @@ function renderHistory() {
 
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
-      chip.blur();
+      blurActiveElement();
       setComposerValue(cmd, cmd.length, cmd.length);
-      if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
+      if (refocusComposerAfterAction({ preventScroll: true })) return;
       resetCmdHistoryNav();
     });
     histRow.appendChild(chip);
@@ -758,41 +758,40 @@ function refreshHistoryPanel() {
           .finally(() => _setHistoryLoadState(false));
       });
 
-      entry.querySelector('[data-action="star"]').addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        const wasStarred = _getStarred().has(run.command);
-        _toggleStar(run.command);
-        // If the command is being starred and isn't in the chips list, add it
-        if (!wasStarred && !cmdHistory.includes(run.command)) {
-          cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
-        }
-        if (!_historyActionKeepsPanelOpen('star')) hideHistoryPanel();
-        refreshHistoryPanel();
-        renderHistory(); // keep chips in sync
+      bindPressable(entry.querySelector('[data-action="star"]'), {
+        onActivate: () => {
+          const wasStarred = _getStarred().has(run.command);
+          _toggleStar(run.command);
+          if (!wasStarred && !cmdHistory.includes(run.command)) {
+            cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
+          }
+          if (!_historyActionKeepsPanelOpen('star')) hideHistoryPanel();
+          refreshHistoryPanel();
+          renderHistory();
+        },
       });
 
-      entry.querySelector('[data-action="copy"]').addEventListener('click', () => {
-        copyTextToClipboard(run.command)
-          .then(() => showToast('Command copied to clipboard'))
-          .catch(() => showToast('Failed to copy command', 'error'));
-        const btn = entry.querySelector('[data-action="copy"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        if (!_historyActionKeepsPanelOpen('copy')) hideHistoryPanel();
+      bindPressable(entry.querySelector('[data-action="copy"]'), {
+        onActivate: () => {
+          copyTextToClipboard(run.command)
+            .then(() => showToast('Command copied to clipboard'))
+            .catch(() => showToast('Failed to copy command', 'error'));
+          if (!_historyActionKeepsPanelOpen('copy')) hideHistoryPanel();
+        },
       });
 
-      entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
-        const url = `${location.origin}/history/${run.id}`;
-        shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
-        const btn = entry.querySelector('[data-action="permalink"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+      bindPressable(entry.querySelector('[data-action="permalink"]'), {
+        onActivate: () => {
+          const url = `${location.origin}/history/${run.id}`;
+          shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
+          if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+        },
       });
-      entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        confirmHistAction('delete', run.id, run.command);
-        hideHistoryPanel();
-        const btn = entry.querySelector('[data-action="delete"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
+      bindPressable(entry.querySelector('[data-action="delete"]'), {
+        onActivate: () => {
+          confirmHistAction('delete', run.id, run.command);
+          hideHistoryPanel();
+        },
       });
 
       historyList.appendChild(entry);

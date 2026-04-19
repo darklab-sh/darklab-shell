@@ -100,16 +100,26 @@
       input.scrollLeft = Math.max(0, Math.round(caretX - viewport + gutter));
     }
   }
-  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
-    const target = input || global.getVisibleComposerInput();
-    if (!target || typeof target.focus !== 'function') return false;
+  global.focusElement = (el, { preventScroll = false } = {}) => {
+    if (!el || typeof el.focus !== 'function') return false;
     try {
-      if (preventScroll) target.focus({ preventScroll: true });
-      else target.focus();
+      if (preventScroll) el.focus({ preventScroll: true });
+      else el.focus();
     } catch (_) {
-      target.focus();
+      el.focus();
     }
     return true;
+  };
+  global.blurActiveElement = () => {
+    if (typeof document === 'undefined') return false;
+    const active = document.activeElement;
+    if (!active || typeof active.blur !== 'function') return false;
+    active.blur();
+    return true;
+  };
+  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
+    const target = input || global.getVisibleComposerInput();
+    return global.focusElement(target, { preventScroll });
   };
   global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
     if (isMobileTerminalViewportActive()) return false;
@@ -351,18 +361,37 @@
   global.hidePanelOverlay = (el) => {
     if (el && el.classList) el.classList.remove('open');
   };
-  global.refocusComposerAfterAction = ({ preventScroll = true } = {}) => {
+  // Canonical post-action refocus path for chrome interactions. Every
+  // "return focus to the terminal after a button/overlay/sheet action" call
+  // site routes through here so mobile-skip, preventScroll, and timing
+  // semantics stay consistent across modules.
+  //
+  // Options:
+  //   preventScroll: avoid scrolling the focused input into view (default true;
+  //     right for all chrome refocus paths — the composer is already visible).
+  //   defer: wrap the refocus in setTimeout(..., 0) so any pending blur events
+  //     from the triggering click finish first before focus returns. Use for
+  //     handlers that close overlays, dispatch into other modules, or run
+  //     inside a pointerdown/click where the current event is still propagating.
+  function _doRefocusComposer(preventScroll) {
     const isMobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+    // Intentional no-op on the mobile terminal viewport: programmatically
+    // refocusing would re-pop the software keyboard, which users don't want
+    // after every chrome action.
+    if (isMobileMode) return false;
     const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-    if (!isMobileMode && target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
+    if (target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
       return true;
     }
     if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll })) return true;
-    if (typeof refocusTerminalInput === 'function') {
-      refocusTerminalInput();
-      return false;
-    }
     return false;
+  }
+  global.refocusComposerAfterAction = ({ preventScroll = true, defer = false } = {}) => {
+    if (defer) {
+      setTimeout(() => { _doRefocusComposer(preventScroll); }, 0);
+      return undefined;
+    }
+    return _doRefocusComposer(preventScroll);
   };
   global.togglePanelOverlay = (el, force = null) => {
     if (!el || !el.classList) return false;
@@ -448,13 +477,7 @@
   };
   global.hideSearchBar = () => {
     if (searchBar && searchBar.style) searchBar.style.display = 'none';
-    const refocused = typeof refocusComposerAfterAction === 'function'
-      ? refocusComposerAfterAction({ preventScroll: true })
-      : false;
-    if (!refocused && !(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
-      && typeof cmdInput !== 'undefined' && cmdInput && typeof cmdInput.focus === 'function') {
-      cmdInput.focus();
-    }
+    refocusComposerAfterAction({ preventScroll: true });
   };
   global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display === 'flex');
   global.showHistoryRow = () => {

@@ -10,12 +10,12 @@ else syncThemeSelectionControls();
 
 tsBtn.addEventListener('click', () => {
   applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 });
 
 lnBtn.addEventListener('click', () => {
   applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 });
 
 themeBtn.addEventListener('click', () => {
@@ -30,7 +30,7 @@ function openWorkflows() {
 
 function closeWorkflows() {
   hideWorkflowsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openFaq() {
@@ -41,7 +41,7 @@ function openFaq() {
 
 function closeFaq() {
   hideFaqOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openShortcuts() {
@@ -52,7 +52,7 @@ function openShortcuts() {
 
 function closeShortcuts() {
   if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function renderShortcuts(data) {
@@ -107,6 +107,83 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(killModal,          { onClose: () => closeKillOverlay() });
   bindMobileSheet(histDelModal,       { onClose: () => { hideHistoryDeleteOverlay(); pendingHistAction = null; } });
   bindMobileSheet(shareRedactionModal, { onClose: () => cancelShareRedactionChoice() });
+}
+
+function setupDismissibleOverlays() {
+  // Each overlay/modal surface is registered with bindDismissible so
+  // backdrop click + explicit close button + Escape are owned by one
+  // helper (app/static/js/ui_dismissible.js). The Escape cascade
+  // dispatcher (closeTopmostDismissible) enforces modal > sheet > panel
+  // priority declaratively instead of the hand-rolled if-chain this
+  // setup replaces.
+  if (typeof bindDismissible !== 'function') return;
+  const shortcutsOverlayEl = document.getElementById('shortcuts-overlay');
+  const shortcutsCloseBtn = shortcutsOverlayEl?.querySelector('.shortcuts-close');
+
+  bindDismissible(_uiOverlayRefs.workflowsOverlay, {
+    level: 'panel',
+    isOpen: isWorkflowsOverlayOpen,
+    onClose: closeWorkflows,
+    closeButtons: workflowsCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.faqOverlay, {
+    level: 'panel',
+    isOpen: isFaqOverlayOpen,
+    onClose: closeFaq,
+    closeButtons: faqCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.themeOverlay, {
+    level: 'panel',
+    isOpen: isThemeOverlayOpen,
+    onClose: closeThemeSelector,
+    closeButtons: themeCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.optionsOverlay, {
+    level: 'panel',
+    isOpen: isOptionsOverlayOpen,
+    onClose: closeOptions,
+    closeButtons: optionsCloseBtn,
+  });
+  bindDismissible(shortcutsOverlayEl, {
+    level: 'panel',
+    isOpen: isShortcutsOverlayOpen,
+    onClose: closeShortcuts,
+    closeButtons: shortcutsCloseBtn,
+  });
+  bindDismissible(historyPanel, {
+    level: 'panel',
+    isOpen: isHistoryPanelOpen,
+    onClose: () => {
+      if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
+      hideHistoryPanel();
+    },
+    closeButtons: historyCloseBtn,
+    // historyPanel is an aside, not a modal backdrop — outside click
+    // dismissal is handled by the ambient-click listener in the global
+    // click handler below, not by backdrop-click here.
+    closeOnBackdrop: false,
+  });
+  bindDismissible(_uiOverlayRefs.killOverlay, {
+    level: 'modal',
+    isOpen: isKillOverlayOpen,
+    onClose: closeKillOverlay,
+    closeButtons: killCancelBtn,
+  });
+  bindDismissible(_uiOverlayRefs.histDelOverlay, {
+    level: 'modal',
+    isOpen: isHistoryDeleteOverlayOpen,
+    onClose: () => {
+      hideHistoryDeleteOverlay();
+      pendingHistAction = null;
+    },
+    closeButtons: histDelCancelBtn,
+  });
+  bindDismissible(_uiOverlayRefs.shareRedactionOverlay, {
+    level: 'modal',
+    isOpen: isShareRedactionOverlayOpen,
+    onClose: cancelShareRedactionChoice,
+    closeButtons: shareRedactionCancelBtn,
+  });
 }
 
 function setupMobileComposer() {
@@ -180,7 +257,7 @@ function dispatchMobileMenuAction(action, btn = null) {
       clearSearch();
     } else {
       showSearchBar();
-      searchInput.focus();
+      focusElement(searchInput);
       runSearch();
     }
   }
@@ -194,21 +271,20 @@ function dispatchMobileMenuAction(action, btn = null) {
     }
   }
   if (action === 'ts-toggle') {
-    // Inline expand so the user can see all three timestamp modes at once
-    // instead of tap-cycling blind through off → elapsed → clock.
-    const submenu = document.getElementById('mobile-menu-ts-submenu');
-    const expanded = btn?.getAttribute('aria-expanded') === 'true';
-    if (btn) btn.setAttribute('aria-expanded', expanded ? 'false' : 'true');
-    submenu?.classList.toggle('u-hidden', expanded);
+    // The ts-toggle button is wired as a disclosure in mobile_chrome.js —
+    // bindDisclosure owns the aria-expanded / submenu visibility toggle via
+    // the pressable's own click handler. The dispatcher here returns early
+    // so the menu is not closed as a side effect (ts-toggle is the only
+    // menu action that keeps the sheet open).
     return;
   }
   if (action === 'ts-set') {
     applyTimestampPreference(btn?.dataset.tsMode || 'off');
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
   if (action === 'ln') {
     applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
   if (action === 'options') openOptions();
   if (action === 'theme') openThemeSelector();
@@ -230,26 +306,14 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(
 });
 
 // ── Workflows ──
+// Backdrop + close button dismissal is registered via bindDismissible in
+// setupDismissibleOverlays(); this section only wires the open trigger.
 workflowsBtn?.addEventListener('click', openWorkflows);
-_uiOverlayRefs.workflowsOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.workflowsOverlay) closeWorkflows();
-});
-workflowsCloseBtn?.addEventListener('click', closeWorkflows);
 
 // ── FAQ ──
 faqBtn.addEventListener('click', openFaq);
-_uiOverlayRefs.faqOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.faqOverlay) closeFaq();
-});
-faqCloseBtn.addEventListener('click', closeFaq);
 
 // ── Keyboard shortcuts overlay (`?` trigger) ──
-const _shortcutsOverlayEl = document.getElementById('shortcuts-overlay');
-const _shortcutsCloseBtn  = _shortcutsOverlayEl?.querySelector('.shortcuts-close');
-_shortcutsOverlayEl?.addEventListener('click', e => {
-  if (e.target === _shortcutsOverlayEl) closeShortcuts();
-});
-_shortcutsCloseBtn?.addEventListener('click', closeShortcuts);
 
 // Global `?` handler. Opens the shortcuts overlay from anywhere on the page,
 // including text-input-like surfaces (the composer, search boxes, modal
@@ -288,15 +352,10 @@ document.addEventListener('keydown', e => {
     openShortcuts();
   }
 }, true);
-_uiOverlayRefs.themeOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.themeOverlay) closeThemeSelector();
-});
-themeCloseBtn?.addEventListener('click', closeThemeSelector);
+// Theme + Options: backdrop + close button dismissal is registered via
+// bindDismissible in setupDismissibleOverlays(); only the open triggers
+// live here.
 optionsBtn?.addEventListener('click', openOptions);
-_uiOverlayRefs.optionsOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.optionsOverlay) closeOptions();
-});
-optionsCloseBtn?.addEventListener('click', closeOptions);
 optionsTsSelect?.addEventListener('change', e => {
   applyTimestampPreference(e.target.value);
 });
@@ -441,7 +500,7 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   const input   = document.getElementById('session-token-set-input');
   const errEl   = document.getElementById('session-token-set-error');
   if (overlay) overlay.style.display = 'flex';
-  if (input)   { input.value = ''; input.focus(); }
+  if (input)   { input.value = ''; focusElement(input); }
   if (errEl)   errEl.style.display = 'none';
 });
 
@@ -668,10 +727,11 @@ setTimeout(() => {
   if (useMobileTerminalViewportMode()) {
     return;
   }
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }, 0);
 syncMobileViewportState();
 setupMobileSheetDragClose();
+setupDismissibleOverlays();
 
 newTabBtn.addEventListener('click', () => {
   createShortcutTab();
@@ -685,7 +745,7 @@ searchToggleBtn.addEventListener('click', () => {
     clearSearch();
   } else {
     showSearchBar();
-    searchInput.focus();
+    focusElement(searchInput);
     runSearch();
   }
 });
@@ -702,7 +762,7 @@ searchInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideSearchBar();
     clearSearch();
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
 });
 
@@ -727,21 +787,17 @@ histBtn.addEventListener('click', () => {
     if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
     refreshHistoryPanel();
   } else {
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
 });
-historyCloseBtn.addEventListener('click', () => {
-  if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
-  hideHistoryPanel();
-});
+// history panel close button + outside-area dismissal are registered via
+// bindDismissible in setupDismissibleOverlays().
 
 // ── History delete modal ──
+// Backdrop + cancel-button dismissal are registered via bindDismissible;
+// only the affirmative action buttons live here.
 histClearAllBtn.addEventListener('click', () => {
   confirmHistAction('clear');
-});
-histDelCancelBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  pendingHistAction = null;
 });
 histDelNonfavBtn.addEventListener('click', () => {
   hideHistoryDeleteOverlay();
@@ -751,33 +807,22 @@ histDelConfirmBtn.addEventListener('click', () => {
   hideHistoryDeleteOverlay();
   executeHistAction();
 });
-histDelOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.histDelOverlay) { hideHistoryDeleteOverlay(); pendingHistAction = null; }
-});
 
 // ── Share redaction modal ──
-shareRedactionCancelBtn?.addEventListener('click', () => {
-  cancelShareRedactionChoice();
-});
+// Backdrop + cancel-button dismissal are registered via bindDismissible;
+// only the affirmative resolvers live here.
 shareRedactionRawBtn?.addEventListener('click', () => {
   resolveShareRedactionChoice('raw');
 });
 shareRedactionConfirmBtn?.addEventListener('click', () => {
   resolveShareRedactionChoice('redacted');
 });
-_uiOverlayRefs.shareRedactionOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.shareRedactionOverlay) cancelShareRedactionChoice();
-});
 
 // ── Kill modal ──
-killCancelBtn.addEventListener('click', () => {
-  closeKillOverlay();
-});
+// Backdrop + cancel-button dismissal are registered via bindDismissible;
+// only the affirmative confirm button lives here.
 killConfirmBtn.addEventListener('click', () => {
   confirmPendingKill();
-});
-_uiOverlayRefs.killOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.killOverlay) closeKillOverlay();
 });
 
 // ── Global keyboard shortcuts ──
@@ -794,41 +839,28 @@ _uiOverlayRefs.killOverlay.addEventListener('click', e => {
 // - Enter / Escape for kill-confirm accept / cancel
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
 document.addEventListener('keydown', e => {
-  if (isKillOverlayOpen()) {
-    if (e.key === 'Enter') {
-      confirmPendingKill();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === 'Escape') {
-      closeKillOverlay();
-      e.preventDefault();
-      return;
-    }
-  }
-  if (isHistoryDeleteOverlayOpen()) {
-    if (e.key === 'Escape') {
-      hideHistoryDeleteOverlay();
-      pendingHistAction = null;
-      e.preventDefault();
-      return;
-    }
-  }
-  if (isShareRedactionOverlayOpen()) {
-    if (e.key === 'Escape') {
-      cancelShareRedactionChoice();
-      e.preventDefault();
-      return;
-    }
-  }
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
-    // Let chrome shortcuts through so the same chord that opened a surface
-    // also closes it (e.g. Alt+H opens history, Alt+H again closes it).
-    if (handleChromeShortcut(e)) return;
-    if (e.key !== 'Escape') return;
-    closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
-    if (isHistoryPanelOpen()) hideHistoryPanel();
+  // Kill confirmation has a modal-specific Enter-to-confirm shortcut that
+  // is not a dismiss action; Escape-to-close is owned by bindDismissible
+  // via the unified Escape dispatch below.
+  if (isKillOverlayOpen() && e.key === 'Enter') {
+    confirmPendingKill();
     e.preventDefault();
+    return;
+  }
+  // Unified Escape dispatch: closes the topmost open dismissible
+  // (modal > sheet > panel) via the registry populated by
+  // setupDismissibleOverlays(). Replaces the per-overlay if-chain that
+  // used to live here.
+  if (e.key === 'Escape' && typeof closeTopmostDismissible === 'function' && closeTopmostDismissible()) {
+    e.preventDefault();
+    return;
+  }
+  // When a major panel is open, swallow non-chrome keys so shortcuts
+  // don't dispatch behind the overlay. Chrome shortcuts (Alt+H, Alt+G,
+  // Alt+, etc.) still fire so the opening chord can also close the
+  // surface.
+  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
+    if (handleChromeShortcut(e)) return;
     return;
   }
   if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
@@ -838,19 +870,19 @@ document.addEventListener('keydown', e => {
     if (isCtrlC) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (e.key === 'Escape' || e.key === 'Enter' || isSpace) {
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (isPrintable) {
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
       e.preventDefault();
       return;
@@ -866,7 +898,7 @@ document.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
@@ -887,7 +919,7 @@ document.addEventListener('keydown', e => {
     && e.key.length === 1
   ) {
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
     e.preventDefault();
     return;
@@ -895,26 +927,22 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
     if ((typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) return;
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
   if (e.key === 'Escape' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
   if (e.key === 'Escape') {
-    closeWorkflows();
-    closeFaq();
-    closeOptions();
-    closeThemeSelector();
-    if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) closeShortcuts();
-    cancelShareRedactionChoice();
+    // Dismissibles are closed by the unified Escape dispatch at the top
+    // of this handler; only the search-bar and search-term clears
+    // remain, since those are not registered surfaces.
     hideSearchBar();
     clearSearch();
-    if (isHistoryPanelOpen()) hideHistoryPanel();
   }
 
   if (_replayPromptShortcutAfterSelection(e)) return;
@@ -932,7 +960,7 @@ document.addEventListener('keydown', e => {
     && !isShareRedactionOverlayOpen()
   ) {
     e.preventDefault();
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+    refocusComposerAfterAction({ preventScroll: true });
     const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
     const { start, end } = getCmdSelection(value);
     replaceCmdRange(value, start, end, e.key);
@@ -954,7 +982,7 @@ function _replayPromptShortcutAfterSelection(e) {
   if (!selectedText) return false;
 
   e.preventDefault();
-  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  refocusComposerAfterAction({ preventScroll: true });
   if (isCtrlR) {
     if (typeof enterHistSearch === 'function') enterHistSearch();
     return true;
@@ -993,20 +1021,31 @@ function _replayPromptShortcutAfterSelection(e) {
   return true;
 }
 
-// ── Global click: dismiss mobile menu and autocomplete ──
-document.addEventListener('click', e => {
-  if (_uiOverlayRefs.mobileMenu && !_uiOverlayRefs.mobileMenu.contains(e.target) && e.target !== _uiOverlayRefs.hamburgerBtn) {
-    hideMobileMenu();
-  }
-  if (historyPanel && isHistoryPanelOpen() && e.target !== histBtn && !historyPanel.contains(e.target)) {
-    if (e.target.closest?.('.hist-chip-overflow') || e.target.closest?.('[data-action="history"]')) {
-      return;
-    }
-    hideHistoryPanel();
-  }
-  if (!(e.target && e.target.closest &&
-        (e.target.closest('.prompt-wrap') || e.target.closest('.ac-dropdown') || e.target.closest('#mobile-composer')))) acHide();
-});
+// ── Global click: dismiss history panel, autocomplete ──
+// bindOutsideClickClose owns ambient click dismissal for the two surfaces
+// that have no scrim of their own (the history side panel and the
+// autocomplete dropdown). The mobile menu sheet's dismissal is owned by
+// its bindDismissible registration in mobile_chrome.js — the scrim covers
+// the viewport so every outside click hits it.
+if (historyPanel && typeof bindOutsideClickClose === 'function') {
+  bindOutsideClickClose(historyPanel, {
+    triggers: histBtn,
+    isOpen: isHistoryPanelOpen,
+    onClose: hideHistoryPanel,
+    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]'],
+  });
+}
+if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
+  // Autocomplete dismissal: the dropdown itself is a transient element, so we
+  // anchor the helper on the prompt wrap (always present) and exempt the
+  // dropdown + mobile composer via selectors. Any click outside all three
+  // zones hides the dropdown, matching the prior global-click behavior.
+  bindOutsideClickClose(shellPromptWrap, {
+    isOpen: () => typeof isAcDropdownOpen === 'function' && isAcDropdownOpen(),
+    onClose: () => { if (typeof acHide === 'function') acHide(); },
+    exemptSelectors: ['.ac-dropdown', '#mobile-composer'],
+  });
+}
 
 if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('pointerdown', e => {
@@ -1121,7 +1160,7 @@ cmdInput.addEventListener('keydown', e => {
   if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isShareRedactionOverlayOpen()) {
     if (e.key === 'Escape') {
       closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector(); cancelShareRedactionChoice();
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
     }
     return;
@@ -1141,7 +1180,7 @@ cmdInput.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       return;
     }
     const activeTab = getActiveTab();
@@ -1240,7 +1279,7 @@ cmdInput.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
       e.preventDefault();
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       return;
     }
     if (acIndex >= 0 && acFiltered[acIndex]) {

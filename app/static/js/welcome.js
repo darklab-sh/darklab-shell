@@ -274,12 +274,12 @@ function cancelWelcome(tabId = null) {
   _resetWelcomePlan();
   if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
+    refocusComposerAfterAction({ defer: true });
     setTimeout(() => {
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
       if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
     }, 0);
   }
-  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+  refocusComposerAfterAction();
   if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   return true;
 }
@@ -417,7 +417,7 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
   function loadCommand() {
     if (!interactive) return;
     if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
     setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
     // Defer so the document click handler has already run before autocomplete updates.
     setTimeout(() => {
@@ -425,12 +425,14 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
     }, 0);
   }
   if (interactive) {
-    cmdText.addEventListener('click', loadCommand);
-    cmdText.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        loadCommand();
-      }
+    // loadCommand already drives its own focus dance (refocus first, then set
+    // composer value). bindPressable gives us click + keyboard activation
+    // with press-highlight cleanup for role="button" spans without
+    // double-refocusing the composer.
+    bindPressable(cmdText, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: loadCommand,
     });
   }
   out.appendChild(line);
@@ -464,18 +466,16 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
     const boundCmdText = line.querySelector('.welcome-command-text');
     function loadCommand() {
       if (_welcomeActive && welcomeOwnsTab(tabId)) settleWelcome(tabId);
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+      refocusComposerAfterAction();
       setComposerValue(cmd, cmd.length, cmd.length, { dispatch: false });
       setTimeout(() => {
         if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
       }, 0);
     }
-    boundCmdText.addEventListener('click', loadCommand);
-    boundCmdText.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        loadCommand();
-      }
+    bindPressable(boundCmdText, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: loadCommand,
     });
   } else {
     cmdText.classList.remove('welcome-command-loadable');
@@ -653,7 +653,7 @@ async function _runWelcomeHintFeed(tabId, hints, intervalMs) {
   await _showWelcomeHint(tabId, current, true);
   if (tabId === activeTabId) {
     mountShellPrompt(tabId, true);
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
     if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) shellPromptWrap.classList.add('shell-prompt-focused');
   }
 
@@ -704,14 +704,12 @@ function _ensureFeaturedWelcomeBadge(line, cmd) {
   badge.setAttribute('role', 'button');
   badge.title = 'Click to load into prompt';
   badge.setAttribute('aria-label', `Load command: ${cmd}`);
-  badge.addEventListener('click', () => {
-    line.querySelector('.welcome-command-text')?.click();
-  });
-  badge.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
+  bindPressable(badge, {
+    refocusComposer: false,
+    clearPressStyle: true,
+    onActivate: () => {
       line.querySelector('.welcome-command-text')?.click();
-    }
+    },
   });
   line.insertBefore(badge, comment || null);
 }

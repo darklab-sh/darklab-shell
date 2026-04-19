@@ -24,6 +24,7 @@ function testScopedIp(testInfo, baseOffset = 0) {
 }
 
 async function runCommandMobile(page, cmd) {
+  await ensurePromptReady(page)
   await page.locator('#mobile-cmd').focus()
   await simulateMobileKeyboard(page)
   await setComposerValueForTest(page, cmd, { mobile: true })

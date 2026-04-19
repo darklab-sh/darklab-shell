@@ -58,32 +58,12 @@ function syncShellPrompt() {
   if (end < len) shellPromptText.appendChild(document.createTextNode(value.slice(end)));
 }
 
-function refocusTerminalInput() {
-  setTimeout(() => {
-    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return;
-    if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
-  }, 0);
-}
-
 function focusCommandInputFromGesture({ preventScroll = true } = {}) {
   if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
     const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
     if (mobileInput && typeof focusComposerInput === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
       focusComposerInput(mobileInput, { preventScroll });
-      return;
-    }
-    if (mobileInput && typeof mobileInput.focus === 'function') {
-      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      if (preventScroll) {
-        try {
-          mobileInput.focus({ preventScroll: true });
-        } catch (_) {
-          mobileInput.focus();
-        }
-      } else {
-        mobileInput.focus();
-      }
     }
     return;
   }
@@ -540,7 +520,7 @@ function openOptions() {
 
 function closeOptions() {
   hideOptionsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openThemeSelector() {
@@ -552,27 +532,14 @@ function openThemeSelector() {
   setTimeout(() => {
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
-    if (target && typeof target.focus === 'function') {
-      try {
-        target.focus({ preventScroll: true });
-      } catch (_) {
-        target.focus();
-      }
-      return;
-    }
-    if (themeSelect && typeof themeSelect.focus === 'function') {
-      try {
-        themeSelect.focus({ preventScroll: true });
-      } catch (_) {
-        themeSelect.focus();
-      }
-    }
+    if (focusElement(target, { preventScroll: true })) return;
+    focusElement(themeSelect, { preventScroll: true });
   }, 0);
 }
 
 function closeThemeSelector() {
   hideThemeOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function isEditableTarget(target) {
@@ -624,7 +591,7 @@ function clearActiveShortcutTab() {
 function closeKillOverlay() {
   hideKillOverlay();
   pendingKillTabId = null;
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function getRememberedShareRedactionChoice() {
@@ -674,7 +641,7 @@ function cancelShareRedactionChoice() {
     _pendingShareRedactionResolver = null;
     resolver(null);
   }
-  if (wasOpen || hadPending) refocusTerminalInput();
+  if (wasOpen || hadPending) refocusComposerAfterAction({ defer: true });
 }
 
 function confirmPermalinkRedactionChoice() {
@@ -850,7 +817,7 @@ function confirmPendingKill() {
     doKill(pendingKillTabId);
     pendingKillTabId = null;
   }
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function eventMatchesCode(e, code) {
@@ -1735,7 +1702,7 @@ function activateFaqCommandChip(cmd) {
   if (!cmd) return;
   setComposerValue(cmd + ' ');
   _closeMajorOverlays();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function wireFaqCommandChips(root = faqBody) {
@@ -1808,6 +1775,7 @@ function renderFaqItems(items) {
   // special UI sections are still wired client-side after the HTML is inserted.
   if (!faqBody) return;
   faqBody.innerHTML = '';
+  const faqHandles = [];
   (items || []).forEach(item => {
     const div = document.createElement('div');
     div.className = 'faq-item';
@@ -1832,26 +1800,22 @@ function renderFaqItems(items) {
 
     q.setAttribute('role', 'button');
     q.setAttribute('tabindex', '0');
-    q.setAttribute('aria-expanded', 'false');
-    q.addEventListener('click', () => {
-      const open = div.classList.toggle('faq-open');
-      q.setAttribute('aria-expanded', String(open));
-    });
-    q.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); q.click(); }
-    });
+    // FAQ question is a disclosure trigger. role="button" divs never receive
+    // DOM focus from click, so the pressable's blur is a no-op — the
+    // disclosure helper inherits clearPressStyle to punch through sticky
+    // :hover highlights.
+    faqHandles.push(bindDisclosure(q, {
+      panel: div,
+      openClass: 'faq-open',
+      clearPressStyle: true,
+    }));
 
     div.appendChild(q);
     div.appendChild(a);
     faqBody.appendChild(div);
   });
 
-  const firstItem = faqBody.querySelector('.faq-item');
-  if (firstItem) {
-    firstItem.classList.add('faq-open');
-    const firstQ = firstItem.querySelector('.faq-q');
-    if (firstQ) firstQ.setAttribute('aria-expanded', 'true');
-  }
+  if (faqHandles[0]) faqHandles[0].open();
 
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);

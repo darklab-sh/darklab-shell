@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 833
-- `vitest`: 475
-- `playwright`: 171
-- total: 1,479
+- `pytest`: 836
+- `vitest`: 584
+- `playwright`: 179
+- total: 1,599
 
 This document is organized in two parts:
 
@@ -1079,6 +1079,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestDocumentedPlaywrightTotals.test_tests_readme` | Checks that the `playwright` total recorded in tests/README.md matches the raw Playwright total reported by `npx playwright test --list`. |
 | `TestDocumentedPlaywrightTotals.test_contributing` | Checks that the `Playwright` total recorded in CONTRIBUTING.md matches the raw Playwright total. |
 | `TestDocumentedPlaywrightTotals.test_architecture` | Checks that the `playwright` total recorded in ARCHITECTURE.md matches the raw Playwright total. |
+| `TestDocumentedCombinedTotals.test_tests_readme` | Checks that the combined total recorded in tests/README.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestDocumentedCombinedTotals.test_contributing` | Checks that the combined total recorded in CONTRIBUTING.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file (or untracked-but-not-gitignored file) is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
 | `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
@@ -1655,6 +1658,140 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `reorders tabs through touch pointer dragging on mobile` | Verifies that reorders tabs through touch pointer dragging on mobile. |
 | `reorders desktop tabs through pointer dragging` | Verifies that reorders desktop tabs through pointer dragging. |
 
+#### `ui_pressable.test.js`
+
+| Test | Description |
+| --- | --- |
+| `invokes onActivate on click for a native <button>` | Verifies that bindPressable wires the click handler for native buttons. |
+| `invokes onActivate on Enter for role="button" div` | Verifies keyboard activation via Enter on non-button elements. |
+| `invokes onActivate on Space for role="button" div` | Verifies keyboard activation via Space on non-button elements. |
+| `ignores other keys` | Verifies that keys other than Enter and Space do not activate. |
+| `does NOT add keydown listener for native <button> (browser handles Enter/Space)` | Verifies no double-fire risk — native buttons rely on browser activation. |
+| `is idempotent — second bind is a no-op` | Verifies the data-pressable-bound guard prevents duplicate bindings. |
+| `blurs the element if it owns focus after activation` | Verifies sticky :focus styling is cleared after click. |
+| `calls refocusComposerAfterAction by default` | Verifies the canonical composer refocus runs automatically. |
+| `skips refocus when refocusComposer: false` | Verifies disclosure surfaces can opt out of composer refocus. |
+| `passes defer through to refocus` | Verifies the defer option is forwarded to refocusComposerAfterAction. |
+| `passes preventScroll: false through to refocus` | Verifies the preventScroll option can be disabled. |
+| `runs refocus even if onActivate throws` | Verifies the try/finally contract keeps refocus deterministic. |
+| `preventFocusTheft blocks pointerdown default (primary button only)` | Verifies focus-theft prevention on primary contact and pass-through on secondary. |
+| `preventFocusTheft: false does not add pointerdown listener` | Verifies opt-in semantics for preventFocusTheft. |
+| `clearPressStyle sets data-pressable-clearing then removes it` | Verifies the CSS-state escape hatch for non-focusable surfaces. |
+| `clearPressStyle opt-out leaves no data attribute` | Verifies clearPressStyle is off by default. |
+| `does nothing when onActivate is missing` | Verifies guard against missing activation callback. |
+| `does nothing when el is null` | Verifies guard against missing element. |
+| `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
+| `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
+| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the post-Phase-2 dispose contract: a successful bind returns `{ dispose }`. |
+| `dispose > returns null on guard-fail paths (missing onActivate, missing el, already bound)` | Verifies guard-fail paths consistently return null instead of undefined. |
+| `dispose > dispose() removes the click listener` | Verifies dispose unwinds the click listener so subsequent clicks are inert. |
+| `dispose > dispose() removes the keydown listener for non-native buttons` | Verifies dispose unwinds the Enter/Space keydown handler installed for role="button" surfaces. |
+| `dispose > dispose() removes the pointerdown listener when preventFocusTheft was on` | Verifies dispose unwinds the focus-theft pointerdown handler so default is no longer prevented. |
+| `dispose > dispose() clears the data-pressable-bound marker so the element can rebind` | Verifies dispose returns the element to a rebindable state. |
+
+#### `ui_disclosure.test.js`
+
+| Test | Description |
+| --- | --- |
+| `initializes aria-expanded=false when closed and does not set openClass on the panel` | Verifies initial sync applies the closed state to trigger and panel. |
+| `initializes aria-expanded=true and sets openClass when initialOpen=true` | Verifies initialOpen:true is honoured on the initial sync. |
+| `toggles aria-expanded and openClass on click` | Verifies click activation flips both the trigger aria state and the panel class. |
+| `supports a custom openClass (e.g. faq-open)` | Verifies callers can override the default 'open' class. |
+| `supports hiddenClass (inverse) for u-hidden-style panels` | Verifies inverse-class toggling for panels that hide via a `u-hidden`-style class. |
+| `does NOT touch panel classes when panel is null (caller owns visibility)` | Verifies the helper stays out of class mutation when panel is null (rail sections case). |
+| `emits onToggle only on user transitions, not on initial sync` | Verifies onToggle is suppressed during the initial sync to avoid side effects on bind. |
+| `passes { trigger, panel } to onToggle` | Verifies onToggle receives the trigger and panel references. |
+| `returned handle exposes isOpen/open/close/toggle` | Verifies the imperative API surface on the returned handle. |
+| `open() is a no-op when already open (no onToggle fire)` | Verifies idempotency of the imperative open() call. |
+| `close() is a no-op when already closed (no onToggle fire)` | Verifies idempotency of the imperative close() call. |
+| `imperative open()/close()/toggle() DO emit onToggle when state changes` | Verifies the API methods fire onToggle on real transitions. |
+| `is idempotent — second bindDisclosure on the same trigger is a no-op` | Verifies the data-disclosure-bound guard prevents duplicate bindings. |
+| `stopPropagation:true stops click bubbling to document` | Verifies the stopPropagation opt-in for outside-click-close disclosures. |
+| `stopPropagation:false (default) lets click bubble to document` | Verifies default propagation is preserved. |
+| `returns null when trigger is falsy` | Verifies guard against missing trigger. |
+| `returns null when opts is falsy` | Verifies guard against missing options. |
+| `returns null when bindPressable is not on the global` | Verifies the helper fails closed without its pressable dependency. |
+| `does not refocus the composer by default (disclosures keep focus on trigger)` | Verifies the disclosure default opts out of composer refocus. |
+| `refocusComposer:true is forwarded to bindPressable` | Verifies callers can opt disclosures back into composer refocus. |
+| `clearPressStyle:true is forwarded to bindPressable (data-attr lifecycle)` | Verifies clearPressStyle is delegated to the underlying pressable. |
+| `Enter/Space activates disclosure on role="button" divs (inherits from pressable)` | Verifies keyboard activation works through the bindPressable composition. |
+| `sets data-disclosure-bound marker on the trigger` | Verifies the idempotency marker is set. |
+
+#### `ui_dismissible.test.js`
+
+| Test | Description |
+| --- | --- |
+| `returns null when el is missing` | Verifies guard against missing overlay element. |
+| `returns null when opts is missing` | Verifies guard against missing options bag. |
+| `returns null for unknown level` | Verifies guard against levels outside modal/sheet/panel. |
+| `returns null when onClose is not a function` | Verifies the helper fails closed without a close callback. |
+| `is idempotent via data-dismissible-bound` | Verifies the idempotency guard prevents duplicate bindings. |
+| `closes when click target is the overlay itself` | Verifies default backdrop click (target === el) closes the surface. |
+| `does not close when click target is a child` | Verifies clicks on inner content do not trigger backdrop dismissal. |
+| `skips backdrop wiring when closeOnBackdrop is false` | Verifies closeOnBackdrop:false disables backdrop dismissal entirely. |
+| `does not call onClose when isOpen returns false` | Verifies the helper respects the runtime isOpen guard. |
+| `uses backdropEl override instead of el` | Verifies sheets can route backdrop dismissal through a separate scrim element. |
+| `backdropEl: null disables backdrop wiring entirely` | Verifies callers can opt out of backdrop dismissal with a null backdrop. |
+| `wires a single close button` | Verifies closeButtons accepts a single element. |
+| `wires an array of close buttons` | Verifies closeButtons accepts an array. |
+| `ignores falsy entries in the closeButtons array` | Verifies the helper tolerates null/undefined entries in the array. |
+| `does not call onClose when surface is closed` | Verifies close-button clicks are gated by isOpen. |
+| `uses bindPressable when available so Enter activates the close button` | Verifies the helper composes on top of bindPressable for close buttons. |
+| `falls back to plain click listener when bindPressable is unavailable` | Verifies graceful degradation when the pressable helper is absent. |
+| `respects a pre-existing pressable binding on the close button` | Verifies the helper does not double-bind an already-bound button. |
+| `isOpen() mirrors the supplied isOpen fn` | Verifies the handle reflects the runtime open state. |
+| `close() calls onClose when open` | Verifies the imperative close path. |
+| `close() is a no-op when closed` | Verifies handle.close() respects the closed state. |
+| `dispose() removes the entry from the registry` | Verifies dispose unregisters so closeTopmostDismissible no longer sees it. |
+| `dispose() clears the bound marker so the element can rebind` | Verifies dispose clears data-dismissible-bound for rebinding. |
+| `dispose() removes the backdrop click listener` | Verifies dispose unwinds the backdrop click handler so subsequent clicks no longer dismiss. |
+| `dispose() removes the close-button click listener (already-pressable branch)` | Verifies dispose unwinds the plain click listener installed when the close button was already pressable-bound. |
+| `dispose() removes the close-button activation listener (pressable-bound branch)` | Verifies dispose unwinds the pressable handle installed for an unbound close button (and clears its data-pressable-bound marker). |
+| `returns false and does nothing when nothing is open` | Verifies closeTopmostDismissible is a no-op when no dismissible is open. |
+| `modal beats sheet beats panel` | Verifies the modal > sheet > panel priority ordering. |
+| `sheet wins over panel when no modal is open` | Verifies sheets outrank panels. |
+| `most recently registered wins within the same level` | Verifies within-level ordering favours the most recent registration. |
+| `skips entries that report closed` | Verifies closed entries are ignored during cascade dispatch. |
+| `closes only one surface per call` | Verifies closeTopmostDismissible closes at most one surface. |
+
+#### `ui_outside_click.test.js`
+
+| Test | Description |
+| --- | --- |
+| `accepts a null panel and exempts purely via triggers/selectors` | Verifies the helper allows callers with no single containing element to use exempt selectors only. |
+| `returns null when opts is missing` | Verifies guard against missing options bag. |
+| `returns null when isOpen is not a function` | Verifies the helper fails closed without an isOpen predicate. |
+| `returns null when onClose is not a function` | Verifies the helper fails closed without a close callback. |
+| `returns a handle with dispose()` | Verifies the caller receives a disposable handle. |
+| `closes when click lands outside the panel` | Verifies ambient dismissal fires when the click target is outside the panel. |
+| `does not close when click lands inside the panel` | Verifies nested clicks inside the panel are skipped. |
+| `does not close when click lands on the panel element itself` | Verifies direct clicks on the panel root are skipped. |
+| `does not close when isOpen() returns false` | Verifies the helper respects the runtime isOpen guard. |
+| `does not close when click lands on a registered trigger` | Verifies the trigger-exemption contract for direct clicks on the trigger. |
+| `does not close when click lands inside a registered trigger` | Verifies the trigger-exemption contract covers nested clicks inside the trigger. |
+| `accepts an array of triggers and exempts each one` | Verifies triggers accepts an array. |
+| `ignores falsy entries in the triggers array` | Verifies the helper tolerates null/undefined entries in the array. |
+| `does not close when the click target matches an exempt selector` | Verifies exempt selectors short-circuit the close. |
+| `does not close when the click target is nested inside an exempt selector` | Verifies exempt selectors match via closest(). |
+| `accepts an array of exempt selectors` | Verifies multiple exempt selectors are supported. |
+| `only fires when clicks land inside the scope` | Verifies scope override scopes the listener to a subtree. |
+| `dispose() removes the listener so further clicks do not close` | Verifies dispose detaches the handler. |
+| `dispose() on a scope-override handle removes the listener from that scope` | Verifies dispose on a scoped handle removes the listener from its scope. |
+
+#### `ui_focus_helpers.test.js`
+
+| Test | Description |
+| --- | --- |
+| `returns false when el is null` | Verifies focusElement null-guard. |
+| `returns false when el has no focus method` | Verifies focusElement guards against non-focusable targets. |
+| `focuses a real DOM element and returns true` | Verifies focusElement focuses a live input. |
+| `passes { preventScroll: true } when requested` | Verifies preventScroll is forwarded to focus(). |
+| `calls focus without options when preventScroll is omitted` | Verifies the default path calls focus() with no args. |
+| `falls back to bare focus() when preventScroll throws` | Verifies the preventScroll fallback covers engines that reject the options arg. |
+| `returns false when activeElement is null` | Verifies blurActiveElement guards against null activeElement. |
+| `returns false when the active element has no blur method` | Verifies blurActiveElement guards against non-blurrable targets. |
+| `blurs the focused element and returns true` | Verifies blurActiveElement blurs the currently-focused element. |
+
 #### `utils.test.js`
 
 | Test | Description |
@@ -1775,6 +1912,19 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `Delete Non-Favorites keeps starred runs and removes the rest` | Delete Non-Favorites keeps starred runs and removes the rest. |
 | `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
+
+#### `interaction-contract.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `FAQ overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Exercises the bindDismissible contract end-to-end: all three close paths dismiss the FAQ overlay and leave `#cmd` focused. |
+| `theme overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the theme selector. |
+| `options overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the options overlay. |
+| `workflows overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the workflows overlay. |
+| `shortcuts overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the keyboard shortcuts overlay. |
+| `FAQ question disclosure keeps aria-expanded in sync with the .faq-open class` | Verifies the bindDisclosure contract on a real FAQ item: aria-expanded and the `.faq-open` class toggle together across a full open/close/open cycle. |
+| `desktop rail section header disclosure keeps aria-expanded in sync with the .closed class (panel: null caller-owns-visibility)` | Verifies the bindDisclosure `panel: null` path where the caller owns class mutation: rail Workflows section header keeps aria-expanded in sync with the section's `.closed` class. |
+| `HUD save-menu: trigger toggles, inside-panel click stays open, outside click closes` | Verifies the bindOutsideClickClose contract on the HUD save-menu: trigger click toggles, inside-panel click stays open (helper treats inside clicks as non-dismissing), outside click at document.body dismisses. |
 
 #### `kill.spec.js`
 

@@ -162,19 +162,24 @@
   });
 
   // ── Section toggles ──────────────────────────────────────────────
-  function toggleRecent() {
-    ui.recentOpen = !ui.recentOpen;
+  // Rail section headers own their open/closed state via bindDisclosure.
+  // `panel: null` + `openClass: null` lets applySectionsState stay the sole
+  // writer of the `.closed` class on the section element (it has to
+  // coordinate both sections plus the splitter and sizing vars, so letting
+  // the helper also toggle classes would produce double-writes). The helper
+  // still owns aria-expanded on the header and the post-activation focus
+  // contract.
+  function onRecentToggle(open) {
+    ui.recentOpen = open;
+    writePref(PREF_RECENT, open ? '1' : '0');
     applySectionsState();
-    writePref(PREF_RECENT, ui.recentOpen ? '1' : '0');
   }
-  function toggleWorkflows() {
-    const wasOpen = ui.workflowsOpen;
-    ui.workflowsOpen = !wasOpen;
-    writePref(PREF_WORKFLOWS, ui.workflowsOpen ? '1' : '0');
-    if (!ui.workflowsOpen) ui.recentHeight = null; // reset auto-size next open
+  function onWorkflowsToggle(open) {
+    ui.workflowsOpen = open;
+    writePref(PREF_WORKFLOWS, open ? '1' : '0');
+    if (!open) ui.recentHeight = null; // reset auto-size next open
     applySectionsState();
-
-    if (ui.workflowsOpen && ui.recentOpen && ui.recentHeight == null) {
+    if (open && ui.recentOpen && ui.recentHeight == null) {
       // Auto-size Recent: measure Workflows natural height and leave Recent ≥120px.
       requestAnimationFrame(() => {
         if (!railSplitArea || !railWorkflowsBody) return;
@@ -190,8 +195,22 @@
     }
   }
 
-  railRecentHeader?.addEventListener('click', toggleRecent);
-  railWorkflowsHeader?.addEventListener('click', toggleWorkflows);
+  if (railRecentHeader) {
+    bindDisclosure(railRecentHeader, {
+      panel: null,
+      openClass: null,
+      initialOpen: ui.recentOpen,
+      onToggle: onRecentToggle,
+    });
+  }
+  if (railWorkflowsHeader) {
+    bindDisclosure(railWorkflowsHeader, {
+      panel: null,
+      openClass: null,
+      initialOpen: ui.workflowsOpen,
+      onToggle: onWorkflowsToggle,
+    });
+  }
 
   // ── Recent list rendering ───────────────────────────────────────
   function renderRailRecent() {
@@ -220,9 +239,7 @@
         if (typeof setComposerValue === 'function') {
           setComposerValue(cmd, cmd.length, cmd.length);
         }
-        if (typeof focusAnyComposerInput === 'function') {
-          focusAnyComposerInput({ preventScroll: true });
-        }
+        refocusComposerAfterAction({ preventScroll: true });
         if (typeof resetCmdHistoryNav === 'function') resetCmdHistoryNav();
       });
       railRecentBody.appendChild(row);
@@ -348,9 +365,16 @@
     btn.textContent = label;
     if (action) btn.dataset.action = action;
     if (title) btn.title = title;
-    btn.addEventListener('click', e => {
-      e.preventDefault();
-      onClick(e, btn);
+    // save-menu is a disclosure trigger: suppress auto-refocus so the dropdown
+    // retains user attention. Every other HUD button returns focus to the
+    // composer after activation.
+    const isDisclosure = action === 'save-menu';
+    bindPressable(btn, {
+      refocusComposer: !isDisclosure,
+      onActivate: e => {
+        e.preventDefault();
+        onClick(e, btn);
+      },
     });
     return btn;
   }
@@ -378,8 +402,7 @@
     // Save menu — shares .save-menu markup so existing CSS applies.
     const saveWrap = document.createElement('div');
     saveWrap.className = 'hud-save-wrap';
-    const saveBtn = _makeHudBtn('save', 'save-menu', e => {
-      e.stopPropagation();
+    const saveBtn = _makeHudBtn('save', 'save-menu', () => {
       saveWrap.classList.toggle('open');
     }, 'hud-action-btn', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');
@@ -393,11 +416,13 @@
       item.type = 'button';
       item.textContent = label;
       item.dataset.action = action;
-      item.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        saveWrap.classList.remove('open');
-        fn();
+      bindPressable(item, {
+        onActivate: e => {
+          e.preventDefault();
+          e.stopPropagation();
+          saveWrap.classList.remove('open');
+          fn();
+        },
       });
       saveMenu.appendChild(item);
     });
@@ -412,8 +437,10 @@
       if (typeof clearTab === 'function') clearTab(id, { preserveRunState: true });
     }, 'hud-action-btn', 'Clear active tab (Ctrl+L)'));
 
-    document.addEventListener('click', e => {
-      if (!e.target.closest?.('.hud-save-wrap')) _closeHudSaveMenu();
+    bindOutsideClickClose(saveWrap, {
+      triggers: saveBtn,
+      isOpen: () => saveWrap.classList.contains('open'),
+      onClose: () => _closeHudSaveMenu(),
     });
   }
 

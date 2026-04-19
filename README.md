@@ -542,6 +542,11 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
 │       │   ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
+│       │   ├── ui_disclosure.test.js # bindDisclosure helper coverage — aria-expanded sync, panel class lifecycle, onToggle emission rules, imperative handle API
+│       │   ├── ui_dismissible.test.js # bindDismissible helper coverage — backdrop-click semantics, close buttons, handle API, closeTopmostDismissible dispatcher priority
+│       │   ├── ui_focus_helpers.test.js # focusElement + blurActiveElement helper coverage — preventScroll fallback, no-op guards, activeElement blur path
+│       │   ├── ui_outside_click.test.js # bindOutsideClickClose helper coverage — guards, outside-click dismissal, trigger exemption, exempt selectors, scope override
+│       │   ├── ui_pressable.test.js # bindPressable helper coverage — activation paths, press-style clearing, focus-theft prevention, idempotency
 │       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
@@ -559,6 +564,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │           ├── search.spec.js  # search/highlight/navigation behavior
 │           ├── share.spec.js   # snapshot permalinks and clipboard behavior
 │           ├── history.spec.js # history drawer flows, restore, starring, and chip cleanup
+│           ├── interaction-contract.spec.js # end-to-end verification of the UI Interaction Helper contract against real chrome surfaces
 │           ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
 │           ├── timestamps.spec.js # timestamp and line-number toggle behavior
 │           ├── theme-audit.spec.js # walks all 17 themes to catch colour leaks and unstyled surfaces
@@ -645,6 +651,10 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
             ├── dom.js          # Shared DOM element references
             ├── state.js        # Shared app-state store/accessors
             ├── ui_helpers.js   # DOM-facing helpers and visibility setters
+            ├── ui_disclosure.js # bindDisclosure helper — aria-expanded + panel class lifecycle for expandable/collapsible controls, composed atop bindPressable
+            ├── ui_dismissible.js # bindDismissible helper — modal/sheet/panel dismissal contract with backdrop-click, close buttons, and shared closeTopmostDismissible Escape dispatcher
+            ├── ui_outside_click.js # bindOutsideClickClose helper — ambient outside-click dismissal with trigger exemption, scope override, and selector-based exemptions
+            ├── ui_pressable.js # bindPressable helper — unified pointer/click/keyboard activation contract for buttons and role="button" surfaces
             ├── tabs.js         # Tab lifecycle management
             ├── output.js       # ANSI rendering and line management
             ├── search.js       # In-output search (with case-sensitive and regex modes)
