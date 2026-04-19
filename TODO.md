@@ -87,21 +87,24 @@ This file tracks open work items, known issues, and product ideas for darklab sh
     - Desktop rail Recent / Workflows section toggles (`shell_chrome.js:193–194`) do not currently call any refocus helper. Adding refocus here is blocked on Phase 2's press-clear path — without it, the rail section headers' `role="button"` divs will keep their press highlight even after focus returns to the composer. Phase 2 will address both simultaneously.
     - FAQ expand/collapse controls (`app.js:1836`) — same as above, blocked on Phase 2.
 
-- **Phase 2: add a reusable pressable helper** (build this before the disclosure helper — a disclosure is a pressable that toggles state, and the concrete "press highlight lingers" bug is a pressable-level problem that occurs whether or not the control also toggles a panel)
-  - Generalise the consistency approach already used by `bindMobileSheet()` so non-sheet UI controls can share one activation model for click / tap / keyboard behavior.
-  - The helper should standardise:
-    - pointer/click/keyboard activation
-    - immediate clearing of transient pressed/highlight state after activation when the control should not keep focus, including the `role="button"` case (e.g. the FAQ `<div role="button">` at `app.js:1833` never receives DOM focus, so `.blur()` is a no-op — the helper needs a non-blur cleanup path for those)
-    - `Enter` / `Space` activation for non-`<button>` elements, replacing the 6 copies of `if (e.key === 'Enter' || e.key === ' ')` across `welcome.js:430, 475, 711`, `mobile_chrome.js:640`, `mobile_sheet.js:120`, `app.js:1841`
-    - optional prevention of focus theft from the composer (several `_bindMobileEditBarInteractions` callers today use `pointerdown` + `preventDefault` just to keep the composer focused — this pattern belongs in the helper)
-  - Escape hatch for CSS-state residue: most press-highlight cases clear when focus/blur is controlled correctly, but a few surfaces (sticky `:hover` on touch devices, manually toggled `.is-pressed`-style classes, custom `:active` retention) will not respond to `.blur()`. The helper should expose a `data-*` attribute toggle so those surfaces can opt in to an explicit post-activation un-style pass without each call site re-inventing it.
-  - Concrete migration targets, in order:
-    - the 4 copies of `setTimeout(() => btn.blur(), 0)` in `history.js:780, 788, 795` and `tabs.js:627–630`
-    - the `_makeHudBtn` factory in `shell_chrome.js:344` and the parallel `_recentsMakeAction` factory in `mobile_chrome.js:289` (both build chrome buttons but neither clears press state or calls the Phase 1 refocus helper)
-    - mobile FAQ items (`app.js:1836`)
-    - desktop rail section headers
-    - mobile menu sheet rows and recents-sheet action rows
-    - welcome card activations (`welcome.js:430, 475, 711`)
+- **Phase 2: add a reusable pressable helper** — ✅ **Done (2026-04-19)**
+  - `bindPressable(el, { onActivate, refocusComposer, preventFocusTheft, preventScroll, defer, clearPressStyle })` added in `app/static/js/ui_pressable.js`. Loaded in `index.html` immediately after `ui_helpers.js`. Shape follows `bindMobileSheet()` prior-art: one function, element + options bag, idempotent via `data-pressable-bound` guard.
+  - Behavior contract: click activates; `Enter`/`Space` activate for non-`<button>` elements only (native buttons receive keyboard activation from the browser — skipping keydown here avoids double-fire); `el.blur()` runs if the element owns focus; `clearPressStyle` opt-in toggles `data-pressable-clearing="1"` for one animation frame so per-surface CSS can un-style `role="button"` residue (`.blur()` is a no-op on non-focusable elements); `preventFocusTheft` binds `pointerdown` → `preventDefault` (primary-button only, multi-touch / right-click pass through); after activation `refocusComposerAfterAction({ preventScroll, defer })` runs unless `refocusComposer: false`.
+  - Migrated (all in this phase):
+    - `history.js` per-row copy/permalink/delete (3 `setTimeout-blur` sites removed)
+    - `tabs.js` per-tab action buttons (kill/clear/copy/permalink/save-menu/save-txt/save-html/save-pdf — the save-menu disclosure opts out of refocus)
+    - `shell_chrome.js` `_makeHudBtn` factory (kill, share, copy, save, clear) and the save-menu items
+    - `mobile_chrome.js` `_recentsMakeAction` factory, the recents-sheet `role="button"` star element, and the `mobile-recent-peek` pull-up tile
+    - `shell_chrome.js` desktop rail section headers (Recent, Workflows)
+    - `app.js` FAQ question toggles (`role="button"` divs with `clearPressStyle`)
+    - `welcome.js` three welcome-command activation sites (`cmdText` live, `boundCmdText` finalized, `badge` try-this-first)
+  - Test coverage: new `tests/js/unit/ui_pressable.test.js` (20 cases) covers idempotency, native-vs-non-button keyboard activation, blur-after-activate, refocus option, defer/preventScroll pass-through, preventFocusTheft primary-vs-secondary button semantics, `clearPressStyle` double-rAF data-attr lifecycle, and guard behavior for missing el / onActivate / global.refocusComposerAfterAction. Test harness (`tests/js/unit/helpers/extract.js`) was extended to concatenate `ui_pressable.js` into every `fromDomScript`/`fromDomScripts` bundle so downstream module tests see `bindPressable` as a global.
+  - Net delta: 495 Vitest (+20), 833 pytest, 171 Playwright — all green.
+  - **Intentionally not migrated** (out of pressable scope):
+    - `mobile-menu-sheet`'s capture-phase re-route listener (`mobile_chrome.js:200`) — not a primary activation handler; intercepts propagation before the main menu dispatcher in `controller.js`. Capturing-phase + `stopImmediatePropagation()` semantics do not map onto `bindPressable`.
+    - `mobile-menu-sheet-scrim` and `mobile-menu-sheet-close` — scrim / close affordances, Phase 4a dismissible-helper territory.
+    - Sheet-item row click delegates (`mobile_chrome.js` recents-sheet `item.addEventListener('click', …)`) — row-level delegation to inner `.sheet-item-action` / `.sheet-item-star` targets, not a pressable surface itself.
+    - `controller.js` tab-scroll buttons and chip-rail items — already Phase 1 migrated with explicit `refocusComposerAfterAction` calls; pressable migration would not net any new behavior.
 
 - **Phase 3: add a reusable disclosure helper**
   - Create a generic disclosure binder for expandable/collapsible controls so `aria-expanded`, open/closed classes, panel visibility, and focus cleanup do not drift. Composes on top of the Phase 2 pressable so aria wiring is automatic for the trigger.

@@ -25,6 +25,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../../../')
 const STATE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/state.js'), 'utf8')
 const UI_HELPERS_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_helpers.js'), 'utf8')
+const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_pressable.js'), 'utf8')
 
 /** Minimal but complete in-memory Storage implementation. */
 export class MemoryStorage {
@@ -75,7 +76,13 @@ export function fromScript(relPath, ...names) {
  */
 export function fromDomScript(relPath, globals, ...names) {
   const src =
-    STATE_SRC + '\n' + UI_HELPERS_SRC + '\n' + readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
+    STATE_SRC +
+    '\n' +
+    UI_HELPERS_SRC +
+    '\n' +
+    UI_PRESSABLE_SRC +
+    '\n' +
+    readFileSync(resolve(REPO_ROOT, relPath), 'utf8')
   const globalNames = Object.keys(globals)
   const globalValues = Object.values(globals)
   const returnExpr = `\nreturn { ${names.join(', ')} };`
@@ -97,6 +104,8 @@ export function fromDomScripts(relPaths, globals, returnExpr, initCode = '') {
     STATE_SRC +
     '\n' +
     UI_HELPERS_SRC +
+    '\n' +
+    UI_PRESSABLE_SRC +
     '\n' +
     initCode +
     '\n' +

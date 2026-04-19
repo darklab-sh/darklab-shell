@@ -425,12 +425,14 @@ function _appendWelcomeCommand(tabId, cmd, commentText = null, { interactive = t
     }, 0);
   }
   if (interactive) {
-    cmdText.addEventListener('click', loadCommand);
-    cmdText.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        loadCommand();
-      }
+    // loadCommand already drives its own focus dance (refocus first, then set
+    // composer value). bindPressable gives us click + keyboard activation
+    // with press-highlight cleanup for role="button" spans without
+    // double-refocusing the composer.
+    bindPressable(cmdText, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: loadCommand,
     });
   }
   out.appendChild(line);
@@ -470,12 +472,10 @@ function _finalizeWelcomeCommandLine(tabId, line, cmd, commentText = null, { int
         if (typeof cmdInput.dispatchEvent === 'function') cmdInput.dispatchEvent(new Event('input'));
       }, 0);
     }
-    boundCmdText.addEventListener('click', loadCommand);
-    boundCmdText.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') {
-        e.preventDefault();
-        loadCommand();
-      }
+    bindPressable(boundCmdText, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: loadCommand,
     });
   } else {
     cmdText.classList.remove('welcome-command-loadable');
@@ -704,14 +704,12 @@ function _ensureFeaturedWelcomeBadge(line, cmd) {
   badge.setAttribute('role', 'button');
   badge.title = 'Click to load into prompt';
   badge.setAttribute('aria-label', `Load command: ${cmd}`);
-  badge.addEventListener('click', () => {
-    line.querySelector('.welcome-command-text')?.click();
-  });
-  badge.addEventListener('keydown', e => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
+  bindPressable(badge, {
+    refocusComposer: false,
+    clearPressStyle: true,
+    onActivate: () => {
       line.querySelector('.welcome-command-text')?.click();
-    }
+    },
   });
   line.insertBefore(badge, comment || null);
 }

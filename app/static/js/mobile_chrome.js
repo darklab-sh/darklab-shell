@@ -291,9 +291,11 @@
     btn.type = 'button';
     btn.className = 'sheet-item-action';
     btn.textContent = label;
-    btn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      try { handler(); } catch (_) { /* non-critical */ }
+    bindPressable(btn, {
+      onActivate: (e) => {
+        e.stopPropagation();
+        try { handler(); } catch (_) { /* non-critical */ }
+      },
     });
     return btn;
   }
@@ -328,12 +330,16 @@
       star.setAttribute('role', 'button');
       star.setAttribute('tabindex', '0');
       star.setAttribute('aria-label', isStarred ? 'Unstar' : 'Star');
-      star.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (typeof global._toggleStar === 'function') {
-          try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
-        }
-        _recentsRenderList();
+      bindPressable(star, {
+        refocusComposer: false,
+        clearPressStyle: true,
+        onActivate: (e) => {
+          e.stopPropagation();
+          if (typeof global._toggleStar === 'function') {
+            try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
+          }
+          _recentsRenderList();
+        },
       });
       const cmdEl = document.createElement('span');
       cmdEl.className = 'sheet-item-cmd';
@@ -635,13 +641,16 @@
 
   // Peek: tap opens the sheet; vertical swipe-up also opens it.
   function openRecentsFromPeek() { showRecentsSheet(); }
-  recentPeek?.addEventListener('click', openRecentsFromPeek);
-  recentPeek?.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter' || e.key === ' ') {
-      e.preventDefault();
-      openRecentsFromPeek();
-    }
-  });
+  if (recentPeek) {
+    // role="button" div — Enter/Space handled by bindPressable; opt into
+    // clearPressStyle so the :hover/:active residue on touch doesn't stick
+    // after activation (native blur is a no-op on non-focusable elements).
+    bindPressable(recentPeek, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: openRecentsFromPeek,
+    });
+  }
 
   if (recentPeek) {
     let peekStartY = null;

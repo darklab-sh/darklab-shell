@@ -1826,12 +1826,17 @@ function renderFaqItems(items) {
     q.setAttribute('role', 'button');
     q.setAttribute('tabindex', '0');
     q.setAttribute('aria-expanded', 'false');
-    q.addEventListener('click', () => {
-      const open = div.classList.toggle('faq-open');
-      q.setAttribute('aria-expanded', String(open));
-    });
-    q.addEventListener('keydown', e => {
-      if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); q.click(); }
+    // FAQ is a disclosure surface. role="button" divs never receive DOM focus
+    // from click, so blur alone won't clear sticky :hover highlights — opt
+    // into clearPressStyle. Keep focus on the question so keyboard users can
+    // continue tabbing through items (no composer refocus).
+    bindPressable(q, {
+      refocusComposer: false,
+      clearPressStyle: true,
+      onActivate: () => {
+        const open = div.classList.toggle('faq-open');
+        q.setAttribute('aria-expanded', String(open));
+      },
     });
 
     div.appendChild(q);

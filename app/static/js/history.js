@@ -772,27 +772,27 @@ function refreshHistoryPanel() {
         renderHistory(); // keep chips in sync
       });
 
-      entry.querySelector('[data-action="copy"]').addEventListener('click', () => {
-        copyTextToClipboard(run.command)
-          .then(() => showToast('Command copied to clipboard'))
-          .catch(() => showToast('Failed to copy command', 'error'));
-        const btn = entry.querySelector('[data-action="copy"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        if (!_historyActionKeepsPanelOpen('copy')) hideHistoryPanel();
+      bindPressable(entry.querySelector('[data-action="copy"]'), {
+        onActivate: () => {
+          copyTextToClipboard(run.command)
+            .then(() => showToast('Command copied to clipboard'))
+            .catch(() => showToast('Failed to copy command', 'error'));
+          if (!_historyActionKeepsPanelOpen('copy')) hideHistoryPanel();
+        },
       });
 
-      entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
-        const url = `${location.origin}/history/${run.id}`;
-        shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
-        const btn = entry.querySelector('[data-action="permalink"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+      bindPressable(entry.querySelector('[data-action="permalink"]'), {
+        onActivate: () => {
+          const url = `${location.origin}/history/${run.id}`;
+          shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
+          if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+        },
       });
-      entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        confirmHistAction('delete', run.id, run.command);
-        hideHistoryPanel();
-        const btn = entry.querySelector('[data-action="delete"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
+      bindPressable(entry.querySelector('[data-action="delete"]'), {
+        onActivate: () => {
+          confirmHistAction('delete', run.id, run.command);
+          hideHistoryPanel();
+        },
       });
 
       historyList.appendChild(entry);

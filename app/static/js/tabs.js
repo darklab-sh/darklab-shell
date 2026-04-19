@@ -600,30 +600,32 @@ function createTab(label) {
     document.querySelectorAll('.save-menu-wrap.open').forEach(w => w.classList.remove('open'));
   });
   panel.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', e => {
-      const action = btn.dataset.action;
-      if (typeof useMobileTerminalViewportMode === 'function'
-        && useMobileTerminalViewportMode()
-        && typeof blurVisibleComposerInputIfMobile === 'function') {
-        blurVisibleComposerInputIfMobile();
-      }
-      if (action === 'kill')      confirmKill(id);
-      if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
-      if (action === 'copy')      copyTab(id);
-      if (action === 'permalink') permalinkTab(id);
-      if (action === 'save-menu') {
-        e.stopPropagation(); // prevent the document close-handler from immediately collapsing the menu
-        btn.closest('.save-menu-wrap').classList.toggle('open');
-        return;
-      }
-      if (action === 'save-txt')  saveTab(id);
-      if (action === 'save-html') exportTabHtml(id);
-      if (action === 'save-pdf')  exportTabPdf(id);
-      if (typeof btn.blur === 'function') {
-        setTimeout(() => {
-          if (typeof btn.blur === 'function') btn.blur();
-        }, 0);
-      }
+    const action = btn.dataset.action;
+    // save-menu is a disclosure trigger: keep the dropdown-open affordance by
+    // suppressing the auto-refocus so the user's attention stays on the menu
+    // they just opened.
+    const isDisclosure = action === 'save-menu';
+    bindPressable(btn, {
+      refocusComposer: !isDisclosure,
+      onActivate: e => {
+        if (typeof useMobileTerminalViewportMode === 'function'
+          && useMobileTerminalViewportMode()
+          && typeof blurVisibleComposerInputIfMobile === 'function') {
+          blurVisibleComposerInputIfMobile();
+        }
+        if (action === 'kill')      confirmKill(id);
+        if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
+        if (action === 'copy')      copyTab(id);
+        if (action === 'permalink') permalinkTab(id);
+        if (action === 'save-menu') {
+          e.stopPropagation(); // prevent the document close-handler from immediately collapsing the menu
+          btn.closest('.save-menu-wrap').classList.toggle('open');
+          return;
+        }
+        if (action === 'save-txt')  saveTab(id);
+        if (action === 'save-html') exportTabHtml(id);
+        if (action === 'save-pdf')  exportTabPdf(id);
+      },
     });
   });
   tabPanels.appendChild(panel);

@@ -190,8 +190,14 @@
     }
   }
 
-  railRecentHeader?.addEventListener('click', toggleRecent);
-  railWorkflowsHeader?.addEventListener('click', toggleWorkflows);
+  // Rail section headers are disclosure triggers — leave focus on the header
+  // (or naturally move on) rather than yanking it back to the composer.
+  if (railRecentHeader) {
+    bindPressable(railRecentHeader, { refocusComposer: false, onActivate: toggleRecent });
+  }
+  if (railWorkflowsHeader) {
+    bindPressable(railWorkflowsHeader, { refocusComposer: false, onActivate: toggleWorkflows });
+  }
 
   // ── Recent list rendering ───────────────────────────────────────
   function renderRailRecent() {
@@ -346,9 +352,16 @@
     btn.textContent = label;
     if (action) btn.dataset.action = action;
     if (title) btn.title = title;
-    btn.addEventListener('click', e => {
-      e.preventDefault();
-      onClick(e, btn);
+    // save-menu is a disclosure trigger: suppress auto-refocus so the dropdown
+    // retains user attention. Every other HUD button returns focus to the
+    // composer after activation.
+    const isDisclosure = action === 'save-menu';
+    bindPressable(btn, {
+      refocusComposer: !isDisclosure,
+      onActivate: e => {
+        e.preventDefault();
+        onClick(e, btn);
+      },
     });
     return btn;
   }
@@ -391,11 +404,13 @@
       item.type = 'button';
       item.textContent = label;
       item.dataset.action = action;
-      item.addEventListener('click', e => {
-        e.preventDefault();
-        e.stopPropagation();
-        saveWrap.classList.remove('open');
-        fn();
+      bindPressable(item, {
+        onActivate: e => {
+          e.preventDefault();
+          e.stopPropagation();
+          saveWrap.classList.remove('open');
+          fn();
+        },
       });
       saveMenu.appendChild(item);
     });

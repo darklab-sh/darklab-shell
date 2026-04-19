@@ -19,7 +19,7 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 833
-- `vitest`: 475
+- `vitest`: 495
 - `playwright`: 171
 - total: 1,479
 
@@ -1654,6 +1654,31 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `refocuses the terminal input after clicking the right tab scroll button` | Verifies that refocuses the terminal input after clicking the right tab scroll button. |
 | `reorders tabs through touch pointer dragging on mobile` | Verifies that reorders tabs through touch pointer dragging on mobile. |
 | `reorders desktop tabs through pointer dragging` | Verifies that reorders desktop tabs through pointer dragging. |
+
+#### `ui_pressable.test.js`
+
+| Test | Description |
+| --- | --- |
+| `invokes onActivate on click for a native <button>` | Verifies that bindPressable wires the click handler for native buttons. |
+| `invokes onActivate on Enter for role="button" div` | Verifies keyboard activation via Enter on non-button elements. |
+| `invokes onActivate on Space for role="button" div` | Verifies keyboard activation via Space on non-button elements. |
+| `ignores other keys` | Verifies that keys other than Enter and Space do not activate. |
+| `does NOT add keydown listener for native <button> (browser handles Enter/Space)` | Verifies no double-fire risk — native buttons rely on browser activation. |
+| `is idempotent — second bind is a no-op` | Verifies the data-pressable-bound guard prevents duplicate bindings. |
+| `blurs the element if it owns focus after activation` | Verifies sticky :focus styling is cleared after click. |
+| `calls refocusComposerAfterAction by default` | Verifies the canonical composer refocus runs automatically. |
+| `skips refocus when refocusComposer: false` | Verifies disclosure surfaces can opt out of composer refocus. |
+| `passes defer through to refocus` | Verifies the defer option is forwarded to refocusComposerAfterAction. |
+| `passes preventScroll: false through to refocus` | Verifies the preventScroll option can be disabled. |
+| `runs refocus even if onActivate throws` | Verifies the try/finally contract keeps refocus deterministic. |
+| `preventFocusTheft blocks pointerdown default (primary button only)` | Verifies focus-theft prevention on primary contact and pass-through on secondary. |
+| `preventFocusTheft: false does not add pointerdown listener` | Verifies opt-in semantics for preventFocusTheft. |
+| `clearPressStyle sets data-pressable-clearing then removes it` | Verifies the CSS-state escape hatch for non-focusable surfaces. |
+| `clearPressStyle opt-out leaves no data attribute` | Verifies clearPressStyle is off by default. |
+| `does nothing when onActivate is missing` | Verifies guard against missing activation callback. |
+| `does nothing when el is null` | Verifies guard against missing element. |
+| `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
+| `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
 
 #### `utils.test.js`
 

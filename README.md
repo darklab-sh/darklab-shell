@@ -542,6 +542,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
 │       │   ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
+│       │   ├── ui_pressable.test.js # bindPressable helper coverage — activation paths, press-style clearing, focus-theft prevention, idempotency
 │       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
@@ -645,6 +646,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
             ├── dom.js          # Shared DOM element references
             ├── state.js        # Shared app-state store/accessors
             ├── ui_helpers.js   # DOM-facing helpers and visibility setters
+            ├── ui_pressable.js # bindPressable helper — unified pointer/click/keyboard activation contract for buttons and role="button" surfaces
             ├── tabs.js         # Tab lifecycle management
             ├── output.js       # ANSI rendering and line management
             ├── search.js       # In-output search (with case-sensitive and regex modes)
