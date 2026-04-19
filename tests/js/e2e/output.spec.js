@@ -178,6 +178,14 @@ test.describe('output follow helper', () => {
         out.scrollHeight > out.clientHeight + 50
       )
     })
+    await page.evaluate(
+      () =>
+        new Promise((resolve) => {
+          setTimeout(() => {
+            requestAnimationFrame(() => resolve())
+          }, 0)
+        }),
+    )
 
     await page.evaluate(() => {
       const out = getOutput(activeTabId)
@@ -203,8 +211,24 @@ test.describe('output follow helper', () => {
       },
       { timeout: 5000 },
     )
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const tab = getTab(activeTabId)
+          const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+          return {
+            followOutput: !!tab && tab.followOutput,
+            hidden: !!btn && btn.hidden,
+            text: btn?.textContent || '',
+          }
+        }),
+      )
+      .toEqual({
+        followOutput: false,
+        hidden: false,
+        text: 'jump to live',
+      })
     await expect(followBtn).toBeVisible()
-    await expect(followBtn).toHaveText('jump to live')
 
     await page.evaluate(() => {
       const btn = document.querySelector('.tab-panel.active .output-follow-btn')

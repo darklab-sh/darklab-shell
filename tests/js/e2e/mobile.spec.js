@@ -24,7 +24,18 @@ function testScopedIp(testInfo, baseOffset = 0) {
 }
 
 async function runCommandMobile(page, cmd) {
-  await ensurePromptReady(page)
+  await page.waitForFunction(
+    () => {
+      const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null
+      const input = document.getElementById('mobile-cmd')
+      if (!activeTab || !(input instanceof HTMLInputElement)) return false
+      const style = window.getComputedStyle(input)
+      const acReady =
+        typeof acContextRegistry !== 'undefined' && Object.keys(acContextRegistry).length > 0
+      return style.display !== 'none' && style.visibility !== 'hidden' && acReady
+    },
+    { timeout: 15_000 },
+  )
   await page.locator('#mobile-cmd').focus()
   await simulateMobileKeyboard(page)
   await setComposerValueForTest(page, cmd, { mobile: true })
