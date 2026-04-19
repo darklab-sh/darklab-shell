@@ -13,6 +13,7 @@ Part 2 — documented totals:
   - pytest   total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
   - vitest   total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
   - playwright total must match tests/README.md, CONTRIBUTING.md, ARCHITECTURE.md
+  - combined total (pytest+vitest+playwright) must match each doc's grand total
 
 Part 3 — README.md project structure tree drift:
   The "## Project Structure" tree in README.md must list every git-tracked
@@ -210,6 +211,14 @@ def _extract_playwright_total(text: str) -> int | None:
         m = re.search(pattern, text)
         if m:
             return int(m.group(1))
+    return None
+
+
+def _extract_combined_total(text: str) -> int | None:
+    for pattern in (r"-\s+total:\s*([\d,]+)", r"=\s*([\d,]+)\s+tests\b"):
+        m = re.search(pattern, text)
+        if m:
+            return int(m.group(1).replace(",", ""))
     return None
 
 
@@ -431,6 +440,54 @@ class TestDocumentedPlaywrightTotals:
         assert documented == total, (
             f"ARCHITECTURE.md records {documented} playwright tests; "
             f"playwright --list found {total}"
+        )
+
+
+class TestDocumentedCombinedTotals:
+
+    def _expected(self, pytest_collected, vitest_collected, playwright_parallel_collected):
+        py_total, _ = pytest_collected
+        vi_total, _ = vitest_collected
+        pw_total, _ = playwright_parallel_collected
+        return py_total + vi_total + pw_total
+
+    def test_tests_readme(
+        self, pytest_collected, vitest_collected, playwright_parallel_collected
+    ):
+        expected = self._expected(
+            pytest_collected, vitest_collected, playwright_parallel_collected
+        )
+        documented = _extract_combined_total(_TESTS_README.read_text())
+        assert documented is not None, "Could not parse combined total from tests/README.md"
+        assert documented == expected, (
+            f"tests/README.md records {documented} combined tests; "
+            f"pytest+vitest+playwright sum to {expected}"
+        )
+
+    def test_contributing(
+        self, pytest_collected, vitest_collected, playwright_parallel_collected
+    ):
+        expected = self._expected(
+            pytest_collected, vitest_collected, playwright_parallel_collected
+        )
+        documented = _extract_combined_total(_CONTRIBUTING.read_text())
+        assert documented is not None, "Could not parse combined total from CONTRIBUTING.md"
+        assert documented == expected, (
+            f"CONTRIBUTING.md records {documented} combined tests; "
+            f"pytest+vitest+playwright sum to {expected}"
+        )
+
+    def test_architecture(
+        self, pytest_collected, vitest_collected, playwright_parallel_collected
+    ):
+        expected = self._expected(
+            pytest_collected, vitest_collected, playwright_parallel_collected
+        )
+        documented = _extract_combined_total(_ARCHITECTURE.read_text())
+        assert documented is not None, "Could not parse combined total from ARCHITECTURE.md"
+        assert documented == expected, (
+            f"ARCHITECTURE.md records {documented} combined tests; "
+            f"pytest+vitest+playwright sum to {expected}"
         )
 
 

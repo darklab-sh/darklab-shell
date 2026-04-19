@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 833
+- `pytest`: 836
 - `vitest`: 495
 - `playwright`: 171
-- total: 1,479
+- total: 1,502
 
 This document is organized in two parts:
 
@@ -1079,6 +1079,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestDocumentedPlaywrightTotals.test_tests_readme` | Checks that the `playwright` total recorded in tests/README.md matches the raw Playwright total reported by `npx playwright test --list`. |
 | `TestDocumentedPlaywrightTotals.test_contributing` | Checks that the `Playwright` total recorded in CONTRIBUTING.md matches the raw Playwright total. |
 | `TestDocumentedPlaywrightTotals.test_architecture` | Checks that the `playwright` total recorded in ARCHITECTURE.md matches the raw Playwright total. |
+| `TestDocumentedCombinedTotals.test_tests_readme` | Checks that the combined total recorded in tests/README.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestDocumentedCombinedTotals.test_contributing` | Checks that the combined total recorded in CONTRIBUTING.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
+| `TestDocumentedCombinedTotals.test_architecture` | Checks that the combined total recorded in ARCHITECTURE.md matches the sum of the pytest, Vitest, and Playwright collected counts. |
 | `TestProjectStructureCoverage.test_no_files_missing_from_structure` | Checks that every git-tracked file (or untracked-but-not-gitignored file) is listed in the README.md `## Project Structure` tree, allowing only the explicit per-file exclusions and opaque-directory subtrees declared in test_docs.py. |
 | `TestProjectStructureCoverage.test_opaque_dirs_appear_in_structure` | Checks that every directory declared opaque in `_PROJECT_STRUCTURE_OPAQUE_DIRS` still appears as a parent entry in the README tree, so contributors are pointed at the directory even when its individual files aren't enumerated. |
 | `TestProjectStructureCoverage.test_listed_paths_exist_in_git` | Checks that every leaf path written into the README project-structure tree corresponds to a real tracked or untracked-but-not-gitignored path on disk, catching typos and stale entries left behind after deletions. |
