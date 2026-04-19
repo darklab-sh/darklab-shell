@@ -64,8 +64,8 @@
   }
 
   function bindPressable(el, opts) {
-    if (!el || !opts || typeof opts.onActivate !== 'function') return;
-    if (el.dataset && el.dataset.pressableBound === '1') return;
+    if (!el || !opts || typeof opts.onActivate !== 'function') return null;
+    if (el.dataset && el.dataset.pressableBound === '1') return null;
     if (el.dataset) el.dataset.pressableBound = '1';
 
     const onActivate = opts.onActivate;
@@ -77,26 +77,42 @@
       clearPressStyle: !!opts.clearPressStyle,
     };
 
+    const teardowns = [];
+
     if (options.preventFocusTheft) {
-      el.addEventListener('pointerdown', e => {
+      const pointerdownHandler = e => {
         // Only the primary button / primary touch contact should block
         // focus movement — right-click / multi-touch pass through.
         if (typeof e.button === 'number' && e.button !== 0) return;
         e.preventDefault();
-      });
+      };
+      el.addEventListener('pointerdown', pointerdownHandler);
+      teardowns.push(() => el.removeEventListener('pointerdown', pointerdownHandler));
     }
 
-    el.addEventListener('click', e => {
+    const clickHandler = e => {
       try { onActivate(e); } finally { _afterActivate(el, options); }
-    });
+    };
+    el.addEventListener('click', clickHandler);
+    teardowns.push(() => el.removeEventListener('click', clickHandler));
 
     if (!_isNativeButton(el)) {
-      el.addEventListener('keydown', e => {
+      const keydownHandler = e => {
         if (e.key !== 'Enter' && e.key !== ' ') return;
         e.preventDefault();
         try { onActivate(e); } finally { _afterActivate(el, options); }
-      });
+      };
+      el.addEventListener('keydown', keydownHandler);
+      teardowns.push(() => el.removeEventListener('keydown', keydownHandler));
     }
+
+    return {
+      dispose: () => {
+        teardowns.forEach((fn) => { try { fn(); } catch (_) { /* swallow */ } });
+        teardowns.length = 0;
+        if (el.dataset) delete el.dataset.pressableBound;
+      },
+    };
   }
 
   global.bindPressable = bindPressable;

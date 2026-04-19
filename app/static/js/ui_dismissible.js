@@ -53,24 +53,33 @@
 
     if (el.dataset) el.dataset.dismissibleBound = '1';
 
+    const teardowns = [];
+
     if (closeOnBackdrop && backdropEl && typeof backdropEl.addEventListener === 'function') {
-      backdropEl.addEventListener('click', (e) => {
+      const backdropHandler = (e) => {
         if (e.target !== backdropEl) return;
         if (!isOpenFn()) return;
         onCloseFn();
-      });
+      };
+      backdropEl.addEventListener('click', backdropHandler);
+      teardowns.push(() => backdropEl.removeEventListener('click', backdropHandler));
     }
 
     closeButtons.forEach((btn) => {
       if (!btn || typeof btn.addEventListener !== 'function') return;
       const alreadyPressable = btn.dataset && btn.dataset.pressableBound === '1';
       if (!alreadyPressable && typeof global.bindPressable === 'function') {
-        global.bindPressable(btn, {
+        const handle = global.bindPressable(btn, {
           refocusComposer: false,
           onActivate: () => { if (isOpenFn()) onCloseFn(); },
         });
+        if (handle && typeof handle.dispose === 'function') {
+          teardowns.push(() => handle.dispose());
+        }
       } else {
-        btn.addEventListener('click', () => { if (isOpenFn()) onCloseFn(); });
+        const clickHandler = () => { if (isOpenFn()) onCloseFn(); };
+        btn.addEventListener('click', clickHandler);
+        teardowns.push(() => btn.removeEventListener('click', clickHandler));
       }
     });
 
@@ -84,6 +93,8 @@
         const idx = _registry.indexOf(entry);
         if (idx >= 0) _registry.splice(idx, 1);
         if (el.dataset) delete el.dataset.dismissibleBound;
+        teardowns.forEach((fn) => { try { fn(); } catch (_) { /* swallow */ } });
+        teardowns.length = 0;
       },
     };
   }

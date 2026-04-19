@@ -332,6 +332,54 @@ describe('bindDismissible', () => {
       })
       expect(rebound).not.toBeNull()
     })
+
+    it('dispose() removes the backdrop click listener', () => {
+      const el = makeOverlay()
+      const onClose = vi.fn()
+      const handle = g.bindDismissible(el, {
+        level: 'modal',
+        isOpen: () => true,
+        onClose,
+      })
+      handle.dispose()
+      dispatchClick(el)
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('dispose() removes the close-button click listener (already-pressable branch)', () => {
+      const el = makeOverlay()
+      const closeBtn = document.createElement('button')
+      closeBtn.dataset.pressableBound = '1' // simulate already-pressable
+      document.body.appendChild(closeBtn)
+      const onClose = vi.fn()
+      const handle = g.bindDismissible(el, {
+        level: 'modal',
+        isOpen: () => true,
+        onClose,
+        closeButtons: closeBtn,
+      })
+      handle.dispose()
+      dispatchClick(closeBtn)
+      expect(onClose).not.toHaveBeenCalled()
+    })
+
+    it('dispose() removes the close-button activation listener (pressable-bound branch)', () => {
+      const el = makeOverlay()
+      const closeBtn = document.createElement('button')
+      document.body.appendChild(closeBtn)
+      const onClose = vi.fn()
+      const handle = g.bindDismissible(el, {
+        level: 'modal',
+        isOpen: () => true,
+        onClose,
+        closeButtons: closeBtn,
+      })
+      handle.dispose()
+      // The pressable handle's dispose should also clear the pressable-bound marker
+      expect(closeBtn.dataset.pressableBound).toBeUndefined()
+      dispatchClick(closeBtn)
+      expect(onClose).not.toHaveBeenCalled()
+    })
   })
 
   describe('closeTopmostDismissible', () => {

@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 575
-- `playwright`: 171
-- total: 1,582
+- `vitest`: 584
+- `playwright`: 179
+- total: 1,599
 
 This document is organized in two parts:
 
@@ -1682,6 +1682,12 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does nothing when el is null` | Verifies guard against missing element. |
 | `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
 | `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
+| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the post-Phase-2 dispose contract: a successful bind returns `{ dispose }`. |
+| `dispose > returns null on guard-fail paths (missing onActivate, missing el, already bound)` | Verifies guard-fail paths consistently return null instead of undefined. |
+| `dispose > dispose() removes the click listener` | Verifies dispose unwinds the click listener so subsequent clicks are inert. |
+| `dispose > dispose() removes the keydown listener for non-native buttons` | Verifies dispose unwinds the Enter/Space keydown handler installed for role="button" surfaces. |
+| `dispose > dispose() removes the pointerdown listener when preventFocusTheft was on` | Verifies dispose unwinds the focus-theft pointerdown handler so default is no longer prevented. |
+| `dispose > dispose() clears the data-pressable-bound marker so the element can rebind` | Verifies dispose returns the element to a rebindable state. |
 
 #### `ui_disclosure.test.js`
 
@@ -1738,6 +1744,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `close() is a no-op when closed` | Verifies handle.close() respects the closed state. |
 | `dispose() removes the entry from the registry` | Verifies dispose unregisters so closeTopmostDismissible no longer sees it. |
 | `dispose() clears the bound marker so the element can rebind` | Verifies dispose clears data-dismissible-bound for rebinding. |
+| `dispose() removes the backdrop click listener` | Verifies dispose unwinds the backdrop click handler so subsequent clicks no longer dismiss. |
+| `dispose() removes the close-button click listener (already-pressable branch)` | Verifies dispose unwinds the plain click listener installed when the close button was already pressable-bound. |
+| `dispose() removes the close-button activation listener (pressable-bound branch)` | Verifies dispose unwinds the pressable handle installed for an unbound close button (and clears its data-pressable-bound marker). |
 | `returns false and does nothing when nothing is open` | Verifies closeTopmostDismissible is a no-op when no dismissible is open. |
 | `modal beats sheet beats panel` | Verifies the modal > sheet > panel priority ordering. |
 | `sheet wins over panel when no modal is open` | Verifies sheets outrank panels. |
@@ -1903,6 +1912,19 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `Delete Non-Favorites keeps starred runs and removes the rest` | Delete Non-Favorites keeps starred runs and removes the rest. |
 | `starred commands are remembered across page reload` | Verifies that starred commands stored server-side are restored to the history panel after a page reload, confirming that loadStarredFromServer is called on boot. |
 | `loading a synthetic tail run from history restores the filtered transcript` | Verifies that a synthetic tail transcript survives the history restore path without reintroducing the trimmed lines. |
+
+#### `interaction-contract.spec.js`
+
+| Test | Description |
+| --- | --- |
+| `FAQ overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Exercises the bindDismissible contract end-to-end: all three close paths dismiss the FAQ overlay and leave `#cmd` focused. |
+| `theme overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the theme selector. |
+| `options overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the options overlay. |
+| `workflows overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the workflows overlay. |
+| `shortcuts overlay closes via button, backdrop, and Escape — each path refocuses the composer` | Same three-path bindDismissible contract applied to the keyboard shortcuts overlay. |
+| `FAQ question disclosure keeps aria-expanded in sync with the .faq-open class` | Verifies the bindDisclosure contract on a real FAQ item: aria-expanded and the `.faq-open` class toggle together across a full open/close/open cycle. |
+| `desktop rail section header disclosure keeps aria-expanded in sync with the .closed class (panel: null caller-owns-visibility)` | Verifies the bindDisclosure `panel: null` path where the caller owns class mutation: rail Workflows section header keeps aria-expanded in sync with the section's `.closed` class. |
+| `HUD save-menu: trigger toggles, inside-panel click stays open, outside click closes` | Verifies the bindOutsideClickClose contract on the HUD save-menu: trigger click toggles, inside-panel click stays open (helper treats inside clicks as non-dismissing), outside click at document.body dismisses. |
 
 #### `kill.spec.js`
 

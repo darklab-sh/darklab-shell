@@ -656,21 +656,31 @@
     });
   }
 
-  recentsFilterStarred?.addEventListener('click', () => {
-    _recentsFilterState.starred = !_recentsFilterState.starred;
-    _recentsSyncFilterUI();
-    _recentsRenderList();
-  });
+  if (recentsFilterStarred) {
+    bindPressable(recentsFilterStarred, {
+      refocusComposer: false,
+      onActivate: () => {
+        _recentsFilterState.starred = !_recentsFilterState.starred;
+        _recentsSyncFilterUI();
+        _recentsRenderList();
+      },
+    });
+  }
 
-  recentsFiltersClear?.addEventListener('click', () => {
-    _recentsFilterState.root = '';
-    _recentsFilterState.exit = 'all';
-    _recentsFilterState.date = 'all';
-    _recentsFilterState.starred = false;
-    _closeRecentsDropdowns();
-    _recentsSyncFilterUI();
-    _recentsRenderList();
-  });
+  if (recentsFiltersClear) {
+    bindPressable(recentsFiltersClear, {
+      refocusComposer: false,
+      onActivate: () => {
+        _recentsFilterState.root = '';
+        _recentsFilterState.exit = 'all';
+        _recentsFilterState.date = 'all';
+        _recentsFilterState.starred = false;
+        _closeRecentsDropdowns();
+        _recentsSyncFilterUI();
+        _recentsRenderList();
+      },
+    });
+  }
 
   // Escape-to-close is owned by bindDismissible's unified dispatcher
   // (closeTopmostDismissible). The sheets are registered above so they

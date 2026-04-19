@@ -227,4 +227,61 @@ describe('bindPressable', () => {
     expect(() => btn.click()).not.toThrow()
     expect(onActivate).toHaveBeenCalledTimes(1)
   })
+
+  describe('dispose', () => {
+    it('returns a handle exposing dispose() on successful bind', () => {
+      const btn = makeEl('button')
+      const handle = g.bindPressable(btn, { onActivate: () => {} })
+      expect(handle).not.toBeNull()
+      expect(typeof handle.dispose).toBe('function')
+    })
+
+    it('returns null on guard-fail paths (missing onActivate, missing el, already bound)', () => {
+      expect(g.bindPressable(null, { onActivate: () => {} })).toBeNull()
+      expect(g.bindPressable(makeEl('button'), {})).toBeNull()
+      const btn = makeEl('button')
+      g.bindPressable(btn, { onActivate: () => {} })
+      expect(g.bindPressable(btn, { onActivate: () => {} })).toBeNull()
+    })
+
+    it('dispose() removes the click listener', () => {
+      const btn = makeEl('button')
+      const onActivate = vi.fn()
+      const handle = g.bindPressable(btn, { onActivate })
+      handle.dispose()
+      btn.click()
+      expect(onActivate).not.toHaveBeenCalled()
+    })
+
+    it('dispose() removes the keydown listener for non-native buttons', () => {
+      const div = makeEl('div', { role: 'button', tabindex: 0 })
+      const onActivate = vi.fn()
+      const handle = g.bindPressable(div, { onActivate })
+      handle.dispose()
+      div.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter' }))
+      expect(onActivate).not.toHaveBeenCalled()
+    })
+
+    it('dispose() removes the pointerdown listener when preventFocusTheft was on', () => {
+      const btn = makeEl('button')
+      const handle = g.bindPressable(btn, { onActivate: () => {}, preventFocusTheft: true })
+      handle.dispose()
+      const ev = new MouseEvent('pointerdown', { button: 0, cancelable: true })
+      btn.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(false)
+    })
+
+    it('dispose() clears the data-pressable-bound marker so the element can rebind', () => {
+      const btn = makeEl('button')
+      const handle = g.bindPressable(btn, { onActivate: () => {} })
+      expect(btn.dataset.pressableBound).toBe('1')
+      handle.dispose()
+      expect(btn.dataset.pressableBound).toBeUndefined()
+      const onActivate = vi.fn()
+      const rebound = g.bindPressable(btn, { onActivate })
+      expect(rebound).not.toBeNull()
+      btn.click()
+      expect(onActivate).toHaveBeenCalledTimes(1)
+    })
+  })
 })
