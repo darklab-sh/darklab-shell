@@ -316,10 +316,12 @@ def diag():
         return jsonify(result)
 
     current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    generated_at = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
     return render_template(
         "diag.html",
         app_name=CFG.get("app_name", ""),
         data=result,
+        generated_at=generated_at,
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],
     )
