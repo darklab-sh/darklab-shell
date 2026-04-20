@@ -146,7 +146,7 @@
   .rail-collapse-btn {
     background: transparent;
     border: none;
-    color: var(--muted);
+    color: var(--text);
     font-family: inherit;
     font-size: 14px;
     width: 24px;
@@ -155,10 +155,9 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    opacity: 0.7;
     border-radius: 4px;
   }
-  .rail-collapse-btn:hover { opacity: 1; }
+  .rail-collapse-btn:hover { color: var(--green); }
 
   /* Split area: Recent on top, optional splitter, optional spacer, Workflows on bottom. */
   .rail-split-area {
@@ -209,10 +208,6 @@
     background: var(--border-bright);
   }
 
-  /* Spacer — pushes Workflows to the bottom when it's collapsed. */
-  .rail-spacer { flex: 1 1 auto; min-height: 0; display: none; }
-  .rail-split-area.workflows-closed .rail-spacer { display: block; }
-
   .rail-section-workflows { flex: 0 0 auto; }
   .rail-split-area.workflows-closed .rail-section-workflows {
     border-top: 1px solid var(--border);
@@ -249,17 +244,23 @@
     align-items: center;
     gap: 6px;
   }
-  .rail-section-chev {
-    display: inline-block;
-    width: 14px;
-    transform: rotate(0deg);
-    transition: transform 140ms ease;
+  /* Rail section headers reuse the shared .disclosure-chev primitive with a
+     tighter size so the rail's information density stays intact. Rotation
+     is driven by the primitive's [aria-expanded="true"] selector, which
+     bindDisclosure writes on the header button. A small translateY pulls
+     the glyph onto the visual centerline of the uppercase label (the ▸
+     codepoint renders in the upper half of its em-box); the expanded-state
+     rule composes the nudge with the primitive's 90° rotation so both
+     states share the same vertical offset. */
+  .rail-section-header .disclosure-chev {
     font-size: 18px;
-    line-height: 1;
+    width: 14px;
     opacity: 0.9;
-    flex: 0 0 auto;
+    transform: translateY(2px);
   }
-  .rail-section:not(.closed) .rail-section-chev { transform: rotate(90deg); }
+  .rail-section-header[aria-expanded="true"] .disclosure-chev {
+    transform: translateY(2px) rotate(90deg);
+  }
   .rail-section-count { font-size: 10.5px; opacity: 0.6; }
 
   .rail-section-body {
@@ -273,7 +274,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 18px;
+    padding: 5px 18px 5px 16px;
     font-size: 12.5px;
     color: var(--text);
     cursor: pointer;
@@ -281,12 +282,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     border: none;
+    border-left: 2px solid transparent;
     background: transparent;
     font-family: inherit;
     width: 100%;
     text-align: left;
   }
-  .rail-item-muted { color: var(--muted); }
+  .rail-item.starred { border-left-color: var(--amber); }
   .rail-item-text {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -295,6 +297,15 @@
   .rail-section-workflows .rail-item {
     align-items: flex-start;
     white-space: normal;
+  }
+  /* The drill-chev primitive is 22px (its own line-box) against 12.5px row
+     text; with align-items:flex-start (kept so the glyph pins to the first
+     line when a long workflow title wraps via .line-clamp-2), the › codepoint
+     renders in the lower half of its em-box, leaving it visually below the
+     first-line centerline. A small translateY pulls the glyph up onto the
+     first-line visual midline without disturbing the wrap behavior. */
+  .rail-section-workflows .rail-item .drill-chev {
+    transform: translateY(-4px);
   }
   .rail-section-empty {
     padding: 5px 18px;
@@ -332,7 +343,7 @@
     text-align: left;
   }
   .rail.rail-collapsed .rail-nav-item {
-    padding: 7px 0;
+    padding: 9px 0;
     justify-content: center;
   }
   .rail-nav-glyph {
@@ -340,6 +351,14 @@
     width: 14px;
     text-align: center;
     flex: 0 0 auto;
+  }
+  .rail.rail-collapsed .rail-nav-item { color: var(--text); }
+  .rail.rail-collapsed .rail-nav-item:hover .rail-nav-glyph { color: var(--green); }
+  .rail.rail-collapsed .rail-nav-glyph {
+    width: 22px;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text);
   }
   .rail.rail-collapsed .rail-nav-label { display: none; }
 
@@ -399,21 +418,9 @@
     align-items: stretch;
     flex: 1 1 0;
     min-width: 0;
+    padding-left: 8px;
     overflow-x: auto;
     overflow-y: hidden;
-  }
-
-  .tabbar-traffic-lights {
-    display: flex;
-    gap: 6px;
-    padding: 10px 12px 8px;
-    align-items: center;
-    flex: 0 0 auto;
-  }
-  .tabbar-traffic-lights .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
   }
 
   .terminal-bar.tabbar .tabs-bar {
@@ -609,15 +616,15 @@
   .hud-save-wrap { position: relative; }
   .hud-save-wrap .save-menu {
     position: absolute;
-    bottom: calc(100% + 4px);
+    bottom: calc(100% - 1px);
     right: 0;
     display: none;
     flex-direction: column;
     background: var(--theme-panel-alt-bg);
     border: 1px solid var(--border-bright);
-    border-radius: 3px;
+    border-radius: 3px 3px 0 0;
     padding: 4px;
-    min-width: 80px;
+    min-width: 160px;
     z-index: 20;
     box-shadow: 0 6px 18px color-mix(in srgb, var(--bg) 60%, transparent);
   }
@@ -646,12 +653,11 @@
 
 @media (max-width: 600px) {
   .shell-root, .main-col, .tabbar-scroll { display: contents; }
-  .rail, .hud, .tabbar-traffic-lights, .tabbar-chrome { display: none !important; }
+  .rail, .hud, .tabbar-chrome { display: none !important; }
 }
 
 body.mobile-terminal-mode .rail,
 body.mobile-terminal-mode .hud,
-body.mobile-terminal-mode .tabbar-traffic-lights,
 body.mobile-terminal-mode .tabbar-chrome { display: none !important; }
 
 body.mobile-terminal-mode .shell-root,

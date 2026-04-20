@@ -11,6 +11,7 @@ const __dirname = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dirname, '../../..')
 const UI_PRESSABLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_pressable.js'), 'utf8')
 const UI_DISMISSIBLE_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_dismissible.js'), 'utf8')
+const UI_FOCUS_TRAP_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_focus_trap.js'), 'utf8')
 const UI_CONFIRM_SRC = readFileSync(resolve(REPO_ROOT, 'app/static/js/ui_confirm.js'), 'utf8')
 
 function mountHost() {
@@ -28,6 +29,7 @@ function mountHost() {
 function loadHelpers() {
   delete window.bindPressable
   delete window.bindDismissible
+  delete window.bindFocusTrap
   delete window.closeTopmostDismissible
   delete window.showConfirm
   delete window.cancelConfirm
@@ -50,6 +52,7 @@ function loadHelpers() {
   window.bindMobileSheet = vi.fn()
   new Function(UI_PRESSABLE_SRC)()
   new Function(UI_DISMISSIBLE_SRC)()
+  new Function(UI_FOCUS_TRAP_SRC)()
   new Function(UI_CONFIRM_SRC)()
   return window
 }
@@ -551,6 +554,43 @@ describe('showConfirm', () => {
         actions: KILL_ACTIONS,
       })
       expect(document.activeElement).toBe(input)
+      g.cancelConfirm()
+      await promise
+    })
+  })
+
+  describe('focus trap', () => {
+    it('wraps Tab from the last action back to the first', async () => {
+      const promise = g.showConfirm({ actions: KILL_ACTIONS })
+      const card = document.querySelector('[data-confirm-card]')
+      const cancelBtn = card.querySelector('[data-confirm-action-id="cancel"]')
+      const confirmBtn = card.querySelector('[data-confirm-action-id="confirm"]')
+      confirmBtn.focus()
+      expect(document.activeElement).toBe(confirmBtn)
+      const ev = new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })
+      card.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(cancelBtn)
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('wraps Shift+Tab from the first action back to the last', async () => {
+      const promise = g.showConfirm({ actions: KILL_ACTIONS })
+      const card = document.querySelector('[data-confirm-card]')
+      const cancelBtn = card.querySelector('[data-confirm-action-id="cancel"]')
+      const confirmBtn = card.querySelector('[data-confirm-action-id="confirm"]')
+      cancelBtn.focus()
+      expect(document.activeElement).toBe(cancelBtn)
+      const ev = new KeyboardEvent('keydown', {
+        key: 'Tab',
+        shiftKey: true,
+        bubbles: true,
+        cancelable: true,
+      })
+      card.dispatchEvent(ev)
+      expect(ev.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(confirmBtn)
       g.cancelConfirm()
       await promise
     })

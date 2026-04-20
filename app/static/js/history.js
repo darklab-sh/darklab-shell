@@ -520,7 +520,11 @@ function _createHistoryEntry(run, isStarred) {
   starBtn.className = 'history-entry-star' + (isStarred ? ' starred' : '');
   starBtn.dataset.action = 'star';
   starBtn.type = 'button';
-  starBtn.setAttribute('aria-label', isStarred ? 'Unstar command' : 'Star command');
+  const starLabel = isStarred
+    ? 'Unstar — stop pinning this command to the top of history'
+    : 'Star — keep this command pinned at the top of history';
+  starBtn.setAttribute('aria-label', starLabel);
+  starBtn.title = starLabel;
   starBtn.textContent = isStarred ? '★' : '☆';
   header.appendChild(starBtn);
 
@@ -789,7 +793,6 @@ function refreshHistoryPanel() {
       bindPressable(entry.querySelector('[data-action="delete"]'), {
         onActivate: () => {
           confirmHistAction('delete', run.id, run.command);
-          hideHistoryPanel();
         },
       });
 

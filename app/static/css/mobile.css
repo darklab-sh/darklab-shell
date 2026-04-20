@@ -593,22 +593,6 @@
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
   }
-  /* Workflow steps: prevent long command chips from overflowing horizontally.
-     flex-wrap: wrap lets the step number + chip share one line and the note
-     wrap to the next; min-width: 0 allows the chip to shrink. */
-  body.mobile-terminal-mode .workflow-step {
-    flex-wrap: wrap;
-  }
-  body.mobile-terminal-mode .workflow-step-cmd {
-    flex-shrink: 1;
-    min-width: 0;
-    max-width: 100%;
-  }
-  body.mobile-terminal-mode .workflow-step-note {
-    flex-basis: 100%;
-    padding-left: 24px;
-  }
-
   body.mobile-terminal-mode #workflows-modal::before,
   body.mobile-terminal-mode #faq-modal::before,
   body.mobile-terminal-mode #theme-modal::before,

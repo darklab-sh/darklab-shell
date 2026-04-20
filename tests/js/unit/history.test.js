@@ -592,7 +592,7 @@ describe('history panel actions', () => {
     document.execCommand = originalExecCommand
   })
 
-  it('closes the history panel when a history action button is clicked', async () => {
+  it('closes the history panel for copy / permalink but keeps it open for delete', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel()
     const historyPanel = document.getElementById('history-panel')
     historyPanel.classList.add('open')
@@ -618,14 +618,17 @@ describe('history panel actions', () => {
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(false)
 
+    // Delete opens a confirm modal over the panel (matching the "clear all"
+    // button at the top of the panel); the panel stays open so the user has
+    // context for what they're deleting and the modal owns focus + Tab trap.
     historyPanel.classList.add('open')
     entry
       .querySelector('[data-action="delete"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(historyPanel.classList.contains('open')).toBe(false)
+    expect(historyPanel.classList.contains('open')).toBe(true)
   })
 
-  it('keeps common history actions open on mobile and only closes for delete', async () => {
+  it('keeps the history panel open on mobile for every row action (confirm modal overlays it)', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel({ mobileMode: true })
     const historyPanel = document.getElementById('history-panel')
     historyPanel.classList.add('open')
@@ -657,7 +660,7 @@ describe('history panel actions', () => {
     entry
       .querySelector('[data-action="delete"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(historyPanel.classList.contains('open')).toBe(false)
+    expect(historyPanel.classList.contains('open')).toBe(true)
   })
 
   it('refreshHistoryPanel labels the history permalink action as permalink', async () => {

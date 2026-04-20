@@ -25,26 +25,25 @@ body.diag-page::before { display: none; }
 }
 
 .diag-header-title {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
+  display: block;
   width: fit-content;
   margin: 0;
-  padding: 0 12px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--green) 2%, transparent), color-mix(in srgb, var(--green) 0.6%, transparent));
-  border: 1px solid color-mix(in srgb, var(--green-dim) 22%, var(--border));
-  border-radius: 4px;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  min-height: 0;
   color: var(--green);
   font-family: var(--font-mono);
   font-size: 22px;
   font-weight: 500;
   letter-spacing: 1.5px;
-  text-shadow: 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 1.5%, transparent);
+  text-shadow: 0 0 20px var(--green-glow);
 }
 
 .diag-header-meta {
-  padding-left: 12px;
+  padding-left: 0;
   color: var(--muted);
   font-size: 11px;
   letter-spacing: 2.4px;
@@ -52,13 +51,67 @@ body.diag-page::before { display: none; }
   opacity: 0.7;
 }
 
+/* ── Topbar wrapper (header + status bar) ─────────────────────────────────── */
+/* Flex-direction swap pattern: row on desktop (status beside header), column on
+   mobile (status stacks below). Keeps the status-bar OUT of `<header>`, avoiding
+   the global `mobile.css:84` sticky-header interaction that caused cards to
+   render over header content on iOS Safari, while still placing status next to
+   the app name on desktop. */
+.diag-topbar {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 32px;
+  border-bottom: 1px solid var(--theme-terminal-bar-border, var(--border));
+  background: var(--theme-terminal-bar-bg, var(--bg));
+}
+/* Defeat `.export-header { border-bottom }` and its background — the divider
+   + background live on `.diag-topbar` so they span the full row (including the
+   status bar on desktop, or the status band on mobile) instead of cutting
+   between the header and the status content. */
+.diag-topbar > .diag-header {
+  flex: 0 0 auto;
+  border-bottom: none;
+  background: transparent;
+}
+
+/* ── Status bar (freshness + auto-refresh) ────────────────────────────────── */
+.diag-status-bar {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 4px;
+  flex: 0 0 auto;
+  font-size: 11px;
+  line-height: 1.25;
+  color: var(--muted);
+  font-family: var(--font-mono);
+}
+.diag-generated-at time {
+  color: var(--text);
+  opacity: 0.85;
+}
+/* Scoped compaction of the shared .form-check primitive for the status strip:
+   tighter gap + inherited 11px/mono so it reads as metadata, not a form row. */
+.diag-status-bar .form-check.diag-refresh-toggle {
+  gap: 6px;
+  font-size: inherit;
+  font-family: inherit;
+  user-select: none;
+}
+.diag-status-bar .form-check.diag-refresh-toggle input[type="checkbox"] {
+  width: 12px;
+  height: 12px;
+}
+
+/* `.diag-header` reverts to its simple pre-ship layout when hosted inside
+   `.diag-topbar`: the status bar lives in the topbar's own flex row, not inside
+   the header's flex row, so the header is back to just its copy block + the
+   mobile-only back button. */
+
 .diag-back-btn {
   display: none;
   flex: 0 0 auto;
-}
-
-.diag-mobile-divider {
-  display: none;
 }
 
 .diag-main {
@@ -66,11 +119,11 @@ body.diag-page::before { display: none; }
   /* 4 equal columns for the top cards; Stats/Config/Tools break out full-width */
   grid-template-columns: repeat(4, 1fr);
   grid-template-areas:
-    "app   db    redis  assets"
-    "cfg   cfg   cfg    cfg"
-    "usage usage usage  usage"
-    "cmds  cmds  cmds   cmds"
-    "tools tools tools  tools";
+    "app     db       redis    assets"
+    "cfg     cfg      cfg      cfg"
+    "usage   usage    outcomes outcomes"
+    "cmds    cmds     cmds     cmds"
+    "tools   tools    tools    tools";
   gap: 16px;
   padding: 24px 24px 40px;
   max-width: 1200px;
@@ -86,14 +139,15 @@ body.diag-page::before { display: none; }
   overflow: hidden;
   min-width: 0;
 }
-.diag-section.s-app    { grid-area: app; }
-.diag-section.s-db     { grid-area: db; }
-.diag-section.s-redis  { grid-area: redis; }
-.diag-section.s-assets { grid-area: assets; }
-.diag-section.s-config { grid-area: cfg; }
-.diag-section.s-usage  { grid-area: usage; }
-.diag-section.s-cmds   { grid-area: cmds; }
-.diag-section.s-tools  { grid-area: tools; }
+.diag-section.s-app      { grid-area: app; }
+.diag-section.s-db       { grid-area: db; }
+.diag-section.s-redis    { grid-area: redis; }
+.diag-section.s-assets   { grid-area: assets; }
+.diag-section.s-config   { grid-area: cfg; }
+.diag-section.s-usage    { grid-area: usage; }
+.diag-section.s-outcomes { grid-area: outcomes; }
+.diag-section.s-cmds     { grid-area: cmds; }
+.diag-section.s-tools    { grid-area: tools; }
 
 .diag-section-title {
   font-size: 10px;
@@ -252,12 +306,12 @@ body.diag-page::before { display: none; }
   .diag-main {
     grid-template-columns: 1fr 1fr;
     grid-template-areas:
-      "app    db"
-      "redis  assets"
-      "cfg    cfg"
-      "usage  usage"
-      "cmds   cmds"
-      "tools  tools";
+      "app      db"
+      "redis    assets"
+      "cfg      cfg"
+      "usage    outcomes"
+      "cmds     cmds"
+      "tools    tools";
   }
   .diag-config-grid { grid-template-columns: 1fr; }
   .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--theme-panel-border); }
@@ -270,15 +324,14 @@ body.diag-page::before { display: none; }
    the header for the touch context. Desktop browsers at the same width keep
    the full header chrome and no back button, matching the shell's behaviour. */
 @media (max-width: 900px) and (pointer: coarse) {
+  body.diag-page .diag-topbar {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 0;
+  }
   body.diag-page .diag-header {
     align-items: start;
-    gap: 12px;
-    border-bottom: none;
     padding: 14px 20px 8px;
-  }
-  body.diag-page .diag-header-copy {
-    min-width: 0;
-    flex: 1 1 auto;
   }
   body.diag-page .diag-header-title {
     font-size: 19px;
@@ -286,7 +339,7 @@ body.diag-page::before { display: none; }
   }
   body.diag-page .diag-header-meta {
     display: block;
-    padding: 0 0 0 2px;
+    padding: 0;
     margin: 0;
     color: var(--muted);
     font-size: 9px;
@@ -301,12 +354,12 @@ body.diag-page::before { display: none; }
     align-self: start;
     flex: 0 0 auto;
   }
-  body.diag-page .diag-mobile-divider {
-    display: none;
-  }
-  body.diag-page .diag-main {
-    border-top: 1px solid color-mix(in srgb, var(--theme-terminal-bar-border) 82%, var(--text) 18%);
-    margin-top: 10px;
-    padding-top: 12px;
+  body.diag-page .diag-status-bar {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    padding: 4px 20px 8px;
+    font-size: 10px;
+    gap: 4px 14px;
   }
 }

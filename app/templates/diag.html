@@ -25,14 +25,22 @@
 </head>
 <body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
 
-<header class="export-header diag-header">
-  <div class="export-header-copy diag-header-copy">
-    <h1 class="diag-header-title">{{ app_name }}</h1>
-    <span class="diag-header-meta">operator diagnostics</span>
+<div class="diag-topbar">
+  <header class="export-header diag-header">
+    <div class="export-header-copy diag-header-copy">
+      <h1 class="diag-header-title">{{ app_name }}</h1>
+      <span class="diag-header-meta">operator diagnostics</span>
+    </div>
+    <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+  </header>
+  <div class="diag-status-bar">
+    <span class="diag-generated-at">Generated at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
+    <label class="form-check diag-refresh-toggle">
+      <input type="checkbox" id="diag-refresh-checkbox">
+      <span>Auto-refresh (10s)</span>
+    </label>
   </div>
-  <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
-</header>
-<div class="diag-mobile-divider" aria-hidden="true"></div>
+</div>
 
 <main class="diag-main">
 
@@ -132,7 +140,7 @@
         {% for key, value in cfg_items[:mid] %}
         <tr>
           <td>{{ key }}</td>
-          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}<span class="diag-ok">true</span>{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
+          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}true{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -140,7 +148,7 @@
         {% for key, value in cfg_items[mid:] %}
         <tr>
           <td>{{ key }}</td>
-          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}<span class="diag-ok">true</span>{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
+          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}true{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -151,28 +159,31 @@
   {% if data.stats.ok %}
   <section class="diag-section s-usage">
     <div class="diag-section-title">Activity</div>
-    <div class="diag-config-grid">
-      <table class="diag-table">
-        {% for item in data.stats.activity %}
-        <tr><td>{{ item.label }}</td><td>{{ item.count }}</td></tr>
-        {% endfor %}
-        <tr><td>all-time</td><td>{{ data.db.runs }}</td></tr>
-      </table>
-      <table class="diag-table">
-        <tr>
-          <td>success</td>
-          <td class="{{ 'diag-ok' if data.stats.outcomes.success else '' }}">{{ data.stats.outcomes.success }}</td>
-        </tr>
-        <tr>
-          <td>failed</td>
-          <td class="{{ 'diag-fail' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
-        </tr>
-        <tr>
-          <td>incomplete</td>
-          <td>{{ data.stats.outcomes.incomplete }}</td>
-        </tr>
-      </table>
-    </div>
+    <table class="diag-table">
+      {% for item in data.stats.activity %}
+      <tr><td>{{ item.label }}</td><td>{{ item.count }}</td></tr>
+      {% endfor %}
+      <tr><td>all-time</td><td>{{ data.db.runs }}</td></tr>
+    </table>
+  </section>
+
+  {# ── Outcomes ──────────────────────────────────────────────────────────── #}
+  <section class="diag-section s-outcomes">
+    <div class="diag-section-title">Outcomes</div>
+    <table class="diag-table">
+      <tr>
+        <td>success</td>
+        <td class="{{ 'diag-ok' if data.stats.outcomes.success else '' }}">{{ data.stats.outcomes.success }}</td>
+      </tr>
+      <tr>
+        <td>failed</td>
+        <td class="{{ 'diag-fail' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
+      </tr>
+      <tr>
+        <td>incomplete</td>
+        <td>{{ data.stats.outcomes.incomplete }}</td>
+      </tr>
+    </table>
   </section>
 
   {# ── Top Commands ──────────────────────────────────────────────────────── #}
@@ -242,5 +253,31 @@
   </section>
 
 </main>
+<script>
+  // Auto-refresh toggle: persists in localStorage and reloads the page every
+  // 10s while enabled. Preserves the tz_offset query redirect.
+  (function () {
+    var KEY = 'darklab:diag:autorefresh';
+    var INTERVAL_MS = 10000;
+    var box = document.getElementById('diag-refresh-checkbox');
+    if (!box) return;
+    var enabled = false;
+    try { enabled = localStorage.getItem(KEY) === '1'; } catch (_) {}
+    box.checked = enabled;
+    var timer = null;
+    function start() {
+      if (timer) return;
+      timer = window.setTimeout(function () { window.location.reload(); }, INTERVAL_MS);
+    }
+    function stop() {
+      if (timer) { window.clearTimeout(timer); timer = null; }
+    }
+    if (enabled) start();
+    box.addEventListener('change', function () {
+      try { localStorage.setItem(KEY, box.checked ? '1' : '0'); } catch (_) {}
+      if (box.checked) { start(); } else { stop(); }
+    });
+  })();
+</script>
 </body>
 </html>

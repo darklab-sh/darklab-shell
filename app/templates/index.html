@@ -247,7 +247,7 @@
       <div class="rail-section rail-section-recent" id="rail-section-recent">
         <button class="rail-section-header" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
           <span class="rail-section-header-left">
-            <span class="rail-section-chev" aria-hidden="true">▸</span>
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
             <span class="rail-section-label">Recent</span>
           </span>
           <span class="rail-section-count" id="rail-recent-count">0</span>
@@ -257,14 +257,13 @@
 
       <div class="rail-splitter" id="rail-splitter" hidden></div>
 
-      <div class="rail-spacer" id="rail-spacer"></div>
-
       <div class="rail-section rail-section-workflows closed" id="rail-section-workflows">
         <button class="rail-section-header" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
           <span class="rail-section-header-left">
-            <span class="rail-section-chev" aria-hidden="true">▸</span>
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
             <span class="rail-section-label">Workflows</span>
           </span>
+          <span class="rail-section-count" id="rail-workflows-count">0</span>
         </button>
         <div class="rail-section-body nice-scroll" id="rail-workflows-list"></div>
       </div>
@@ -285,11 +284,6 @@
   <main class="main-col">
     <div class="terminal-bar tabbar">
       <div class="tabbar-scroll tab-scroll">
-        <div class="tabbar-traffic-lights">
-          <span class="dot dot-r"></span>
-          <span class="dot dot-y"></span>
-          <span class="dot dot-g"></span>
-        </div>
         <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
         <div class="tabs-bar" id="tabs-bar">
           <!-- tabs injected here -->
@@ -313,8 +307,8 @@
         </div>
         <span class="search-count" id="search-count"></span>
         <div class="search-nav">
-          <button id="search-prev">↑</button>
-          <button id="search-next">↓</button>
+          <button id="search-prev" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
+          <button id="search-next" type="button" aria-label="Next match" title="Next match (Enter)">↓</button>
         </div>
         <button id="search-close-btn" class="close-btn search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
       </div>
@@ -350,8 +344,8 @@
           <span id="hud-last-exit" class="hud-value hud-muted">—</span>
         </div>
         <div class="hud-cell">
-          <span class="hud-label">runs</span>
-          <span id="hud-runs" class="hud-value hud-muted">0</span>
+          <span class="hud-label">tabs</span>
+          <span id="hud-tabs" class="hud-value hud-muted">0</span>
         </div>
         <div class="hud-cell">
           <span class="hud-label">transport</span>
@@ -604,6 +598,7 @@
 <script src="/static/js/ui_pressable.js"></script>
 <script src="/static/js/ui_disclosure.js"></script>
 <script src="/static/js/ui_dismissible.js"></script>
+<script src="/static/js/ui_focus_trap.js"></script>
 <script src="/static/js/ui_confirm.js"></script>
 <script src="/static/js/ui_outside_click.js"></script>
 <script src="/static/js/export_pdf.js"></script>

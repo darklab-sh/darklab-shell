@@ -1,0 +1,128 @@
+import { describe, it, beforeEach, expect } from 'vitest'
+import { readFileSync } from 'fs'
+import { resolve, dirname } from 'path'
+import { fileURLToPath } from 'url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const REPO_ROOT = resolve(__dirname, '../../..')
+const UI_FOCUS_TRAP_SRC = readFileSync(
+  resolve(REPO_ROOT, 'app/static/js/ui_focus_trap.js'),
+  'utf8',
+)
+
+function loadFocusTrap() {
+  new Function(UI_FOCUS_TRAP_SRC)()
+  return window
+}
+
+function makeCard({ buttons = 0, include = [] } = {}) {
+  const card = document.createElement('div')
+  for (let i = 0; i < buttons; i += 1) {
+    const btn = document.createElement('button')
+    btn.textContent = `btn-${i}`
+    btn.dataset.idx = String(i)
+    card.appendChild(btn)
+  }
+  include.forEach((el) => card.appendChild(el))
+  document.body.appendChild(card)
+  return card
+}
+
+function tabEvent({ shift = false } = {}) {
+  return new KeyboardEvent('keydown', {
+    key: 'Tab',
+    shiftKey: shift,
+    bubbles: true,
+    cancelable: true,
+  })
+}
+
+describe('bindFocusTrap', () => {
+  let g
+
+  beforeEach(() => {
+    g = loadFocusTrap()
+    document.body.replaceChildren()
+  })
+
+  it('wraps Tab from the last focusable back to the first', () => {
+    const card = makeCard({ buttons: 3 })
+    const [first, , last] = card.querySelectorAll('button')
+    g.bindFocusTrap(card)
+    last.focus()
+    expect(document.activeElement).toBe(last)
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('wraps Shift+Tab from the first focusable back to the last', () => {
+    const card = makeCard({ buttons: 3 })
+    const [first, , last] = card.querySelectorAll('button')
+    g.bindFocusTrap(card)
+    first.focus()
+    expect(document.activeElement).toBe(first)
+    const ev = tabEvent({ shift: true })
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('does not preventDefault when Tab moves between middle focusables', () => {
+    const card = makeCard({ buttons: 3 })
+    const [, middle] = card.querySelectorAll('button')
+    g.bindFocusTrap(card)
+    middle.focus()
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+  })
+
+  it('is a no-op when the container has no focusable children', () => {
+    const card = document.createElement('div')
+    card.innerHTML = '<p>text only</p>'
+    document.body.appendChild(card)
+    g.bindFocusTrap(card)
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+  })
+
+  it('returns null on a re-bind to the same container (idempotent)', () => {
+    const card = makeCard({ buttons: 2 })
+    const first = g.bindFocusTrap(card)
+    const second = g.bindFocusTrap(card)
+    expect(first).not.toBeNull()
+    expect(second).toBeNull()
+  })
+
+  it('dispose removes the keydown handler and clears the bound flag', () => {
+    const card = makeCard({ buttons: 2 })
+    const [firstBtn, lastBtn] = card.querySelectorAll('button')
+    const handle = g.bindFocusTrap(card)
+    expect(card.dataset.focusTrapBound).toBe('1')
+    handle.dispose()
+    expect(card.dataset.focusTrapBound).toBeUndefined()
+    lastBtn.focus()
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+    // sanity: the buttons still exist and are usable for subsequent binds
+    expect(firstBtn.isConnected).toBe(true)
+  })
+
+  it('skips hidden focusables inside the container', () => {
+    const hiddenBtn = document.createElement('button')
+    hiddenBtn.textContent = 'hidden'
+    hiddenBtn.hidden = true
+    const card = makeCard({ buttons: 2, include: [hiddenBtn] })
+    const [first, last] = card.querySelectorAll('button:not([hidden])')
+    g.bindFocusTrap(card)
+    last.focus()
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
+})

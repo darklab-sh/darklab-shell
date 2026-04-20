@@ -462,6 +462,10 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   color: var(--green);
 }
 
+.ac-item.ac-active {
+  background: var(--theme-dropdown-hover-bg, var(--bg3));
+}
+
 .ac-item.ac-active::before {
   content: '> ';
   color: var(--green);
@@ -527,9 +531,11 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 }
 
 .hist-search-match {
-  background: transparent;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
   color: var(--green);
   font-weight: 700;
+  border-radius: 2px;
+  padding: 0 2px;
 }
 
 .hist-search-empty {

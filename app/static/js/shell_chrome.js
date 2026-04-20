@@ -21,11 +21,12 @@
   const railSectionWorkflows = document.getElementById('rail-section-workflows');
   const railWorkflowsBody = document.getElementById('rail-workflows-list');
   const railWorkflowsHeader = document.getElementById('rail-workflows-header');
+  const railWorkflowsCount = document.getElementById('rail-workflows-count');
   const railNav           = document.getElementById('rail-nav');
 
   const hudStatusCell     = document.getElementById('hud-status-cell');
   const hudLastExitEl     = document.getElementById('hud-last-exit');
-  const hudRunsEl         = document.getElementById('hud-runs');
+  const hudTabsEl         = document.getElementById('hud-tabs');
   const hudLatencyEl      = document.getElementById('hud-latency');
   const hudSessionEl      = document.getElementById('hud-session');
   const hudUptimeEl       = document.getElementById('hud-uptime');
@@ -70,7 +71,12 @@
   function applyCollapsed() {
     rail.classList.toggle('rail-collapsed', ui.collapsed);
     rail.style.setProperty('--rail-w', ui.collapsed ? '44px' : `${ui.railW}px`);
-    if (railCollapseBtn) railCollapseBtn.textContent = ui.collapsed ? '»' : '«';
+    if (railCollapseBtn) {
+      railCollapseBtn.textContent = ui.collapsed ? '»' : '«';
+      const label = ui.collapsed ? 'Expand sidebar (Alt+\\)' : 'Collapse sidebar (Alt+\\)';
+      railCollapseBtn.title = label;
+      railCollapseBtn.setAttribute('aria-label', label);
+    }
   }
 
   function applyWidth() {
@@ -226,10 +232,20 @@
       railRecentBody.appendChild(empty);
       return;
     }
-    items.forEach(cmd => {
+    // Partition starred-first while preserving original recency order within
+    // each group. The star toggle lives in the history drawer / mobile sheet
+    // (one source of truth); the rail only reflects the state via ordering
+    // and an amber left-edge stripe.
+    const starred = typeof global._getStarred === 'function' ? global._getStarred() : new Set();
+    const ordered = [
+      ...items.filter(cmd => starred.has(cmd)),
+      ...items.filter(cmd => !starred.has(cmd)),
+    ];
+    ordered.forEach(cmd => {
+      const isStarred = starred.has(cmd);
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'rail-item';
+      row.className = 'rail-item' + (isStarred ? ' starred' : '');
       row.title = cmd;
       const text = document.createElement('span');
       text.className = 'rail-item-text';
@@ -259,6 +275,7 @@
   // ── Workflows list rendering ────────────────────────────────────
   function renderRailWorkflows(items) {
     allWorkflows = Array.isArray(items) ? items.slice() : [];
+    if (railWorkflowsCount) railWorkflowsCount.textContent = String(allWorkflows.length);
     if (!railWorkflowsBody) return;
     railWorkflowsBody.replaceChildren();
     if (!allWorkflows.length) {
@@ -271,7 +288,7 @@
     allWorkflows.forEach((wf, idx) => {
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'rail-item rail-item-muted';
+      row.className = 'rail-item';
       const label = wf.title || wf.name || `workflow ${idx + 1}`;
       row.title = [label, wf.description].filter(Boolean).join('\n');
       const glyph = document.createElement('span');
@@ -410,9 +427,9 @@
     const saveMenu = document.createElement('div');
     saveMenu.className = 'save-menu';
     [
-      ['txt',  'save-txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
-      ['html', 'save-html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
-      ['pdf',  'save-pdf',  () => { const id = _currentTabId(); if (id && typeof exportTabPdf === 'function') exportTabPdf(id); }],
+      ['Plain text (.txt)',   'save-txt',  () => { const id = _currentTabId(); if (id && typeof saveTab === 'function') saveTab(id); }],
+      ['Styled HTML (.html)', 'save-html', () => { const id = _currentTabId(); if (id && typeof exportTabHtml === 'function') exportTabHtml(id); }],
+      ['PDF document (.pdf)', 'save-pdf',  () => { const id = _currentTabId(); if (id && typeof exportTabPdf === 'function') exportTabPdf(id); }],
     ].forEach(([label, action, fn]) => {
       const item = document.createElement('button');
       item.type = 'button';
@@ -510,18 +527,20 @@
   function _renderLastExit() {
     if (!hudLastExitEl) return;
     const v = hudState.lastExit;
+    const list = Array.isArray(global.tabs) ? global.tabs : [];
+    const activeRunning = list.some(t => t && t.id === global.activeTabId && t.st === 'running');
     if (v === null || v === undefined) {
       hudLastExitEl.textContent = '—';
       _setValueColor(hudLastExitEl, 'hud-muted');
     } else if (v === 'killed') {
       hudLastExitEl.textContent = 'KILLED';
-      _setValueColor(hudLastExitEl, 'hud-value-red');
+      _setValueColor(hudLastExitEl, activeRunning ? 'hud-muted' : 'hud-value-red');
     } else if (v === 0) {
       hudLastExitEl.textContent = '0';
-      _setValueColor(hudLastExitEl, 'hud-value-green');
+      _setValueColor(hudLastExitEl, activeRunning ? 'hud-muted' : 'hud-value-green');
     } else {
       hudLastExitEl.textContent = String(v);
-      _setValueColor(hudLastExitEl, 'hud-value-red');
+      _setValueColor(hudLastExitEl, activeRunning ? 'hud-muted' : 'hud-value-red');
     }
   }
 
@@ -539,13 +558,15 @@
     else _setValueColor(hudLatencyEl, 'hud-value-green');
   }
 
-  function _renderRuns() {
-    if (!hudRunsEl) return;
+  function _renderTabs() {
+    if (!hudTabsEl) return;
     const list = Array.isArray(global.tabs) ? global.tabs : [];
     const running = list.reduce((n, t) => n + (t && t.st === 'running' ? 1 : 0), 0);
     const total = list.length;
-    hudRunsEl.textContent = total ? `${running} / ${total}` : '0';
-    _setValueColor(hudRunsEl, running > 0 ? 'hud-value-amber' : 'hud-muted');
+    if (!total) hudTabsEl.textContent = '0';
+    else if (running > 0) hudTabsEl.textContent = `${total} · ${running} active`;
+    else hudTabsEl.textContent = String(total);
+    _setValueColor(hudTabsEl, running > 0 ? 'hud-value-amber' : 'hud-muted');
   }
 
   function _renderSession() {
@@ -656,19 +677,53 @@
     if (e.key === 'session_token') _renderSession();
   });
 
-  // Hook setTabStatus so RUNS re-renders whenever any tab changes state.
+  // Hook setTabStatus so TABS and LAST EXIT re-render whenever any tab changes
+  // state — LAST EXIT dims to muted while the active tab is running (stale
+  // metadata per the Workstream D semantic contract).
   if (typeof global.setTabStatus === 'function') {
     const originalSetTabStatus = global.setTabStatus;
     global.setTabStatus = function wrappedSetTabStatus(...args) {
       const result = originalSetTabStatus.apply(this, args);
-      try { _renderRuns(); } catch (e) { /* non-critical */ }
+      try { _renderTabs(); } catch (e) { /* non-critical */ }
+      try { _renderLastExit(); } catch (e) { /* non-critical */ }
+      return result;
+    };
+  }
+
+  // Hook activateTab so LAST EXIT dim re-evaluates when the user switches to a
+  // different tab — activeTabId changes without a setTabStatus fire.
+  if (typeof global.activateTab === 'function') {
+    const originalActivateTab = global.activateTab;
+    global.activateTab = function wrappedActivateTab(...args) {
+      const result = originalActivateTab.apply(this, args);
+      try { _renderLastExit(); } catch (e) { /* non-critical */ }
+      return result;
+    };
+  }
+
+  // Hook createTab / closeTab so TABS reflects the new count immediately —
+  // setTabStatus doesn't fire on open/close, so without these wrappers the
+  // pill would stay stale until the next command runs in any tab.
+  if (typeof global.createTab === 'function') {
+    const originalCreateTab = global.createTab;
+    global.createTab = function wrappedCreateTab(...args) {
+      const result = originalCreateTab.apply(this, args);
+      try { _renderTabs(); } catch (e) { /* non-critical */ }
+      return result;
+    };
+  }
+  if (typeof global.closeTab === 'function') {
+    const originalCloseTab = global.closeTab;
+    global.closeTab = function wrappedCloseTab(...args) {
+      const result = originalCloseTab.apply(this, args);
+      try { _renderTabs(); } catch (e) { /* non-critical */ }
       return result;
     };
   }
 
   // Initial render and pollers.
   _renderLastExit();
-  _renderRuns();
+  _renderTabs();
   _renderSession();
   _renderClock();
   _renderLatency();

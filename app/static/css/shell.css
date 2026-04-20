@@ -411,16 +411,16 @@ body.mobile-terminal-mode .output-follow-btn {
 .save-menu {
   display: none;
   position: absolute;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% - 1px);
   right: 0;
   background: var(--theme-dropdown-bg);
   border: 1px solid var(--theme-dropdown-border);
-  border-radius: 4px;
+  border-radius: 4px 4px 0 0;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
     0 -6px 18px var(--theme-dropdown-shadow);
   z-index: 200;
-  min-width: 72px;
+  min-width: 160px;
   overflow: hidden;
 }
 
@@ -449,8 +449,13 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 /* Dropdown indicator arrow on the save trigger button (direct child of the
-   wrap — class-agnostic so it survives primitive migrations) */
-.save-menu-wrap > button::after {
+   wrap — class-agnostic so it survives primitive migrations). Base state is
+   an up-pointing triangle (▴) because the default menu opens upward; the
+   `.save-menu-down` variant (permalink) rotates it so the chevron points
+   down (▾) to match its downward-opening menu. Adding `.open` flips each
+   by 180° so the chevron always points away from the currently-visible menu. */
+.save-menu-wrap > button::after,
+.hud-save-wrap > button::after {
   content: '';
   flex: none;
   align-self: center;
@@ -459,18 +464,28 @@ body.mobile-terminal-mode .output-follow-btn {
   height: 0;
   border-left: 2px solid transparent;
   border-right: 2px solid transparent;
-  border-top: 3px solid currentColor;
+  border-bottom: 3px solid currentColor;
   transition: transform 0.15s ease;
 }
 
-.save-menu-wrap.open > button::after {
+.save-menu-wrap.save-menu-down > button::after {
   transform: rotate(180deg);
+}
+
+.save-menu-wrap.open > button::after,
+.hud-save-wrap.open > button::after {
+  transform: rotate(180deg);
+}
+
+.save-menu-wrap.save-menu-down.open > button::after {
+  transform: rotate(0deg);
 }
 
 /* Downward-opening variant — used when the trigger is near the top of the page (e.g. permalink header) */
 .save-menu-wrap.save-menu-down .save-menu {
   bottom: auto;
-  top: calc(100% + 4px);
+  top: calc(100% - 1px);
+  border-radius: 0 0 4px 4px;
 }
 
 .terminal-body {
@@ -628,11 +643,15 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 18px 20px;
 }
 
+.modal-confirm-content:empty {
+  display: none;
+}
+
 .modal-copy {
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text);
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .modal-copy-note {
@@ -667,7 +686,13 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .modal-inline-field {
-  margin-bottom: 18px;
+  margin-bottom: 14px;
+}
+
+@media (max-width: 480px) {
+  .modal-card-compact { padding: 14px 16px; }
+  .modal-copy { margin-bottom: 12px; }
+  .modal-inline-field { margin-bottom: 10px; }
 }
 
 .faq-header {
@@ -1536,9 +1561,10 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 }
 
 .workflow-step {
-  display: flex;
-  align-items: flex-start;
-  gap: 10px;
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
   counter-increment: workflow-step;
 }
 
@@ -1547,18 +1573,38 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
   color: var(--muted);
   font-size: 11px;
   font-family: var(--font-mono);
-  min-width: 14px;
   padding-top: 3px;
-  flex-shrink: 0;
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.workflow-step-main {
+  grid-row: 1;
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
 }
 
 .workflow-step-cmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.workflow-step-run {
   flex-shrink: 0;
+  font-size: 9px;
+  line-height: 1;
 }
 
 .workflow-step-note {
+  grid-row: 2;
+  grid-column: 2;
   color: var(--muted);
   font-size: 12px;
   line-height: 1.6;
-  padding-top: 2px;
 }
