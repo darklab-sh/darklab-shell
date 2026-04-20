@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 642
+- `vitest`: 644
 - `playwright`: 182
-- total: 1,666
+- total: 1,668
 
 This document is organized in two parts:
 
@@ -1470,6 +1470,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `navigateSearch is a no-op when there are no matches` | Verifies that navigateSearch is a no-op when there are no matches. |
 | `clearHighlights is safe when no output has been rendered` | Verifies that clearHighlights is safe when no output has been rendered. |
 | `highlights mixed-content lines without flattening helper markup` | Verifies that highlights mixed-content lines without flattening helper markup. |
+| `merges adjacent text nodes between searches so a fragmented line is not re-split per fragment` | Verifies that merges adjacent text nodes between searches so a fragmented line is not re-split per fragment. |
+| `navigates by logical match across inline-element boundaries` | Verifies that navigates by logical match across inline-element boundaries. |
 
 #### `session.test.js`
 
