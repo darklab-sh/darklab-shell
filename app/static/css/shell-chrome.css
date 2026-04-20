@@ -146,7 +146,7 @@
   .rail-collapse-btn {
     background: transparent;
     border: none;
-    color: var(--muted);
+    color: var(--text);
     font-family: inherit;
     font-size: 14px;
     width: 24px;
@@ -155,10 +155,9 @@
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    opacity: 0.7;
     border-radius: 4px;
   }
-  .rail-collapse-btn:hover { opacity: 1; }
+  .rail-collapse-btn:hover { color: var(--green); }
 
   /* Split area: Recent on top, optional splitter, optional spacer, Workflows on bottom. */
   .rail-split-area {
@@ -275,7 +274,7 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 5px 18px;
+    padding: 5px 18px 5px 16px;
     font-size: 12.5px;
     color: var(--text);
     cursor: pointer;
@@ -283,12 +282,13 @@
     overflow: hidden;
     text-overflow: ellipsis;
     border: none;
+    border-left: 2px solid transparent;
     background: transparent;
     font-family: inherit;
     width: 100%;
     text-align: left;
   }
-  .rail-item-muted { color: var(--muted); }
+  .rail-item.starred { border-left-color: var(--amber); }
   .rail-item-text {
     overflow: hidden;
     text-overflow: ellipsis;
@@ -343,7 +343,7 @@
     text-align: left;
   }
   .rail.rail-collapsed .rail-nav-item {
-    padding: 7px 0;
+    padding: 9px 0;
     justify-content: center;
   }
   .rail-nav-glyph {
@@ -351,6 +351,14 @@
     width: 14px;
     text-align: center;
     flex: 0 0 auto;
+  }
+  .rail.rail-collapsed .rail-nav-item { color: var(--text); }
+  .rail.rail-collapsed .rail-nav-item:hover .rail-nav-glyph { color: var(--green); }
+  .rail.rail-collapsed .rail-nav-glyph {
+    width: 22px;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text);
   }
   .rail.rail-collapsed .rail-nav-label { display: none; }
 
@@ -410,21 +418,9 @@
     align-items: stretch;
     flex: 1 1 0;
     min-width: 0;
+    padding-left: 8px;
     overflow-x: auto;
     overflow-y: hidden;
-  }
-
-  .tabbar-traffic-lights {
-    display: flex;
-    gap: 6px;
-    padding: 10px 12px 8px;
-    align-items: center;
-    flex: 0 0 auto;
-  }
-  .tabbar-traffic-lights .dot {
-    width: 10px;
-    height: 10px;
-    border-radius: 999px;
   }
 
   .terminal-bar.tabbar .tabs-bar {
@@ -657,12 +653,11 @@
 
 @media (max-width: 600px) {
   .shell-root, .main-col, .tabbar-scroll { display: contents; }
-  .rail, .hud, .tabbar-traffic-lights, .tabbar-chrome { display: none !important; }
+  .rail, .hud, .tabbar-chrome { display: none !important; }
 }
 
 body.mobile-terminal-mode .rail,
 body.mobile-terminal-mode .hud,
-body.mobile-terminal-mode .tabbar-traffic-lights,
 body.mobile-terminal-mode .tabbar-chrome { display: none !important; }
 
 body.mobile-terminal-mode .shell-root,

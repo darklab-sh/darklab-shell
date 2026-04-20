@@ -71,7 +71,12 @@
   function applyCollapsed() {
     rail.classList.toggle('rail-collapsed', ui.collapsed);
     rail.style.setProperty('--rail-w', ui.collapsed ? '44px' : `${ui.railW}px`);
-    if (railCollapseBtn) railCollapseBtn.textContent = ui.collapsed ? '»' : '«';
+    if (railCollapseBtn) {
+      railCollapseBtn.textContent = ui.collapsed ? '»' : '«';
+      const label = ui.collapsed ? 'Expand sidebar (Alt+\\)' : 'Collapse sidebar (Alt+\\)';
+      railCollapseBtn.title = label;
+      railCollapseBtn.setAttribute('aria-label', label);
+    }
   }
 
   function applyWidth() {
@@ -227,10 +232,20 @@
       railRecentBody.appendChild(empty);
       return;
     }
-    items.forEach(cmd => {
+    // Partition starred-first while preserving original recency order within
+    // each group. The star toggle lives in the history drawer / mobile sheet
+    // (one source of truth); the rail only reflects the state via ordering
+    // and an amber left-edge stripe.
+    const starred = typeof global._getStarred === 'function' ? global._getStarred() : new Set();
+    const ordered = [
+      ...items.filter(cmd => starred.has(cmd)),
+      ...items.filter(cmd => !starred.has(cmd)),
+    ];
+    ordered.forEach(cmd => {
+      const isStarred = starred.has(cmd);
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'rail-item';
+      row.className = 'rail-item' + (isStarred ? ' starred' : '');
       row.title = cmd;
       const text = document.createElement('span');
       text.className = 'rail-item-text';
@@ -273,7 +288,7 @@
     allWorkflows.forEach((wf, idx) => {
       const row = document.createElement('button');
       row.type = 'button';
-      row.className = 'rail-item rail-item-muted';
+      row.className = 'rail-item';
       const label = wf.title || wf.name || `workflow ${idx + 1}`;
       row.title = [label, wf.description].filter(Boolean).join('\n');
       const glyph = document.createElement('span');

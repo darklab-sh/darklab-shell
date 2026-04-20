@@ -553,7 +553,11 @@
       star.textContent = isStarred ? '★' : '☆';
       star.setAttribute('role', 'button');
       star.setAttribute('tabindex', '0');
-      star.setAttribute('aria-label', isStarred ? 'Unstar' : 'Star');
+      const starLabel = isStarred
+        ? 'Unstar — stop pinning this command to the top'
+        : 'Star — keep this command pinned at the top';
+      star.setAttribute('aria-label', starLabel);
+      star.title = starLabel;
       bindPressable(star, {
         refocusComposer: false,
         clearPressStyle: true,
