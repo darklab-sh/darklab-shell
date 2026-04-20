@@ -231,12 +231,12 @@ export async function createShareSnapshot(page, { choice = 'redacted' } = {}) {
   } else {
     await page.locator('.tab-panel.active [data-action="permalink"]').click()
   }
-  await page.locator('#share-redaction-overlay').waitFor({ state: 'visible' })
+  await page.locator('#confirm-host').waitFor({ state: 'visible' })
 
   if (choice === 'raw') {
-    await page.locator('#share-redaction-raw').click()
+    await page.locator('#confirm-host [data-confirm-action-id="raw"]').click()
   } else {
-    await page.locator('#share-redaction-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="redacted"]').click()
   }
 
   return responsePromise

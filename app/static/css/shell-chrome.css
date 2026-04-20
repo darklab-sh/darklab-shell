@@ -605,34 +605,6 @@
     position: relative;
   }
 
-  .hud-kill-btn {
-    background: color-mix(in srgb, var(--red) 12%, transparent);
-    border: 1px solid color-mix(in srgb, var(--red) 60%, transparent);
-    border-radius: 3px;
-    color: var(--red);
-    font-family: inherit;
-    font-size: 10px;
-    padding: 4px 12px;
-    cursor: pointer;
-    font-weight: 600;
-    letter-spacing: 0.5px;
-  }
-  .hud-kill-btn:hover {
-    background: color-mix(in srgb, var(--red) 18%, transparent);
-  }
-  .hud-kill-btn.u-hidden { display: none; }
-
-  .hud-action-btn {
-    background: transparent;
-    border: 1px solid var(--border);
-    border-radius: 3px;
-    color: var(--muted);
-    font-family: inherit;
-    font-size: 10px;
-    padding: 3px 9px;
-    cursor: pointer;
-  }
-
   /* HUD save menu — drops UP above the bottom bar. */
   .hud-save-wrap { position: relative; }
   .hud-save-wrap .save-menu {

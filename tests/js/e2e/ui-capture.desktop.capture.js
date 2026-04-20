@@ -126,8 +126,8 @@ const scenes = [
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
       await runLongCaptureCommand(page)
-      await page.locator('.hud-kill-btn').click()
-      await expect(page.locator('#kill-modal')).toBeVisible()
+      await page.locator('#hud-actions [data-action="kill"]').click()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
     },
   },
   {
@@ -262,7 +262,7 @@ const scenes = [
       await runCommand(page, 'date')
       await openHistoryWithEntries(page)
       await page.locator('#hist-clear-all-btn').click()
-      await expect(page.locator('#hist-del-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {
@@ -274,7 +274,7 @@ const scenes = [
       await runCommand(page, 'hostname')
       await openHistoryWithEntries(page)
       await page.locator('.history-entry').first().locator('[data-action="delete"]').click()
-      await expect(page.locator('#hist-del-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {

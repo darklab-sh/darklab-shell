@@ -475,8 +475,8 @@
       color-mix(in srgb, var(--amber) 55%, transparent),
       transparent);
   }
-  body.mobile-terminal-mode .term-action-btn:focus,
-  body.mobile-terminal-mode .term-action-btn:focus-visible,
+  body.mobile-terminal-mode .terminal-actions .btn:focus,
+  body.mobile-terminal-mode .terminal-actions .btn:focus-visible,
   body.mobile-terminal-mode .history-action-btn:focus,
   body.mobile-terminal-mode .history-action-btn:focus-visible {
     outline: none;
@@ -485,8 +485,8 @@
     border-color: var(--border-bright);
     background: transparent;
   }
-  body.mobile-terminal-mode .term-action-btn:hover,
-  body.mobile-terminal-mode .term-action-btn:active,
+  body.mobile-terminal-mode .terminal-actions .btn:hover,
+  body.mobile-terminal-mode .terminal-actions .btn:active,
   body.mobile-terminal-mode .history-action-btn:hover,
   body.mobile-terminal-mode .history-action-btn:active {
     color: var(--muted);
@@ -497,7 +497,7 @@
     padding: 5px 10px;
     gap: 4px;
   }
-  body.mobile-terminal-mode .terminal-actions .term-action-btn {
+  body.mobile-terminal-mode .terminal-actions .btn {
     min-height: 26px;
     padding: 3px 8px;
   }
@@ -550,9 +550,7 @@
   body.mobile-terminal-mode #faq-modal,
   body.mobile-terminal-mode #theme-modal,
   body.mobile-terminal-mode #options-modal,
-  body.mobile-terminal-mode #kill-modal,
-  body.mobile-terminal-mode #hist-del-modal,
-  body.mobile-terminal-mode #share-redaction-modal {
+  body.mobile-terminal-mode .modal-card-compact {
     width: 100%;
     max-width: 100%;
     border-radius: 14px 14px 0 0;
@@ -562,9 +560,7 @@
     max-height: 88svh;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
-  body.mobile-terminal-mode #kill-modal,
-  body.mobile-terminal-mode #hist-del-modal,
-  body.mobile-terminal-mode #share-redaction-modal {
+  body.mobile-terminal-mode .modal-card-compact {
     width: calc(100% - 24px);
     max-width: min(520px, calc(100% - 24px));
     border-left: 1px solid;
@@ -617,9 +613,7 @@
   body.mobile-terminal-mode #faq-modal::before,
   body.mobile-terminal-mode #theme-modal::before,
   body.mobile-terminal-mode #options-modal::before,
-  body.mobile-terminal-mode #kill-modal::before,
-  body.mobile-terminal-mode #hist-del-modal::before,
-  body.mobile-terminal-mode #share-redaction-modal::before {
+  body.mobile-terminal-mode .modal-card-compact::before {
     display: none;
   }
   body.mobile-terminal-mode #theme-modal::before {
@@ -719,7 +713,7 @@
     z-index: 2;
     background: var(--surface);
   }
-  body.mobile-terminal-mode .options-choice {
+  body.mobile-terminal-mode .form-check {
     min-height: 44px;
     padding: 8px 0;
   }

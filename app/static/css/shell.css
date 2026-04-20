@@ -402,44 +402,6 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 5px 11px;
 }
 
-.term-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-bright) 88%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.2;
-  text-align: center;
-  letter-spacing: 0.3px;
-  padding: 4px 9px;
-  border-radius: 3px;
-  cursor: pointer;
-  white-space: normal;
-  text-decoration: none;
-  transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s;
-}
-
-.term-action-btn[hidden] {
-  display: none !important;
-}
-.term-action-btn:focus:not(:focus-visible),
-.term-action-btn:focus-visible {
-  outline: none;
-  box-shadow: none;
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  border-color: color-mix(in srgb, var(--border-bright) 88%, transparent);
-}
-.term-action-btn:hover {
-  border-color: color-mix(in srgb, var(--green-dim) 72%, var(--border-bright));
-  color: var(--text);
-  background: color-mix(in srgb, var(--green) 7%, transparent);
-  transform: translateY(-1px);
-}
-
 /* ── Save menu dropdown ── */
 .save-menu-wrap {
   position: relative;
@@ -486,8 +448,9 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--text);
 }
 
-/* Dropdown indicator arrow on the save trigger button */
-.save-menu-wrap .term-action-btn::after {
+/* Dropdown indicator arrow on the save trigger button (direct child of the
+   wrap — class-agnostic so it survives primitive migrations) */
+.save-menu-wrap > button::after {
   content: '';
   flex: none;
   align-self: center;
@@ -500,7 +463,7 @@ body.mobile-terminal-mode .output-follow-btn {
   transition: transform 0.15s ease;
 }
 
-.save-menu-wrap.open .term-action-btn::after {
+.save-menu-wrap.open > button::after {
   transform: rotate(180deg);
 }
 
@@ -660,9 +623,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border-color: var(--theme-panel-border);
 }
 
-#kill-modal,
-#hist-del-modal,
-#share-redaction-modal {
+.modal-card-compact {
   width: min(520px, 92vw);
   padding: 18px 20px;
 }
@@ -693,76 +654,20 @@ body.mobile-terminal-mode .output-follow-btn {
   .modal-actions-wrap {
     gap: 6px;
   }
-  .modal-actions-wrap .modal-primary,
-  .modal-actions-wrap .modal-secondary {
-    padding: 6px 10px;
-  }
 }
 
-.modal-primary,
-.modal-secondary {
-  border-radius: 4px;
-  padding: 6px 18px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
+.modal-actions.modal-actions-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
 }
 
-.modal-primary {
-  border: none;
-}
-
-.modal-primary-danger {
-  background: var(--red);
-  color: var(--theme-modal-danger-btn-text);
-}
-
-.modal-secondary-warning {
-  background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, var(--text));
-  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
-}
-
-.modal-secondary-neutral {
-  background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, var(--text));
-  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
-}
-
-.modal-secondary-neutral:hover {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--theme-panel-border) 100%, transparent);
-  background: color-mix(in srgb, var(--theme-panel-bg) 18%, transparent);
-}
-
-.modal-secondary-warning:hover {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 52%, transparent);
-  background: color-mix(in srgb, var(--amber) 6%, transparent);
-}
-
-.modal-primary-warning {
-  background: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
-  color: var(--theme-modal-warning-btn-text);
-  border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
-}
-
-.modal-primary-accent {
-  background: color-mix(in srgb, var(--green) 88%, var(--theme-panel-bg));
-  color: var(--theme-on-accent-text);
-  border: 1px solid color-mix(in srgb, var(--green) 54%, transparent);
+.modal-actions.modal-actions-stacked .btn {
+  width: 100%;
 }
 
 .modal-inline-field {
   margin-bottom: 18px;
-}
-
-.modal-primary-warning:hover {
-  background: color-mix(in srgb, var(--amber) 92%, var(--theme-panel-bg));
-}
-
-.modal-primary-danger {
-  border: 1px solid color-mix(in srgb, var(--red) 54%, transparent);
 }
 
 .faq-header {
@@ -1032,13 +937,13 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--text);
 }
 
-.options-fieldset {
+.form-fieldset {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.options-choice {
+.form-check {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -1046,22 +951,53 @@ body.mobile-terminal-mode .output-follow-btn {
   cursor: pointer;
 }
 
-.options-choice input {
-  accent-color: var(--green);
+.form-check:hover {
+  color: var(--text);
 }
 
-.options-select {
+.form-check input[type="checkbox"],
+.form-check input[type="radio"] {
+  accent-color: var(--green);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.form-check input[type="checkbox"]:focus-visible,
+.form-check input[type="radio"]:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--green-glow);
+}
+
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
   width: min(240px, 100%);
-  background: var(--surface);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text) 50%),
+    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
   color: var(--text);
   border: 1px solid var(--border-bright);
   border-radius: 4px;
-  padding: 8px 10px;
+  padding: 8px 28px 8px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
+  cursor: pointer;
 }
 
-.options-select:focus-visible {
+.form-select:hover {
+  border-color: var(--green-dim);
+}
+
+.form-select:focus-visible {
   outline: 1px solid var(--green-dim);
   box-shadow: 0 0 0 3px var(--green-glow);
 }
@@ -1084,16 +1020,10 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--green);
 }
 
-/* Session token sub-modals — must sit above the options overlay (z-index 320) */
-#session-token-set-overlay,
-#session-token-migrate-overlay {
+/* Confirmation primitive must sit above the options overlay (z-index 320)
+   so Set / Migrate prompts remain reachable while the options surface is open. */
+#confirm-host {
   z-index: 340;
-}
-
-#session-token-set-modal,
-#session-token-migrate-modal {
-  width: min(480px, 92vw);
-  padding: 18px 20px;
 }
 
 .modal-token-input {
@@ -1185,7 +1115,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border: 1px solid var(--border-bright);
   border-radius: 3px;
   padding: 1px 6px;
-  color: var(--amber);
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -1281,7 +1211,7 @@ body.mobile-terminal-mode .output-follow-btn {
   background: var(--surface);
   border: 1px solid var(--border-bright);
   border-radius: 3px;
-  color: var(--amber);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 2px 8px;
@@ -1398,19 +1328,14 @@ body .welcome-command-badge {
   color: var(--blue);
   border-color: color-mix(in srgb, var(--blue) 40%, transparent);
 }
-body #kill-modal {
-  background: var(--theme-kill-modal-bg) !important;
-  border-color: var(--theme-panel-border) !important;
-  box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
-}
-body #hist-del-modal {
-  background: var(--theme-hist-del-modal-bg) !important;
+body .modal-card-compact {
+  background: var(--theme-confirm-modal-bg) !important;
   border-color: var(--theme-panel-border) !important;
   box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
 }
 body .faq-a code { background: var(--theme-faq-code-bg); }
 body .allowed-chip { background: var(--theme-allowed-chip-bg); }
-body .options-select { background: var(--theme-options-select-bg); }
+body .form-select { background-color: var(--theme-form-control-bg); }
 body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 
 /* ── FAQ accordion ────────────────────────────────────────────────── */

@@ -80,7 +80,7 @@ test.describe('welcome interactions', () => {
     await expect(page.locator('.welcome-status-loaded')).toHaveCount(5)
     await expect(page.locator('.welcome-command').nth(0)).toContainText('echo ready')
     await expect(page.locator('.welcome-command').nth(1)).toContainText('dig darklab.sh A')
-    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await expect(page.locator('#confirm-host')).toBeHidden()
     await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(
       beforePromptEchoCount + 1,
     )

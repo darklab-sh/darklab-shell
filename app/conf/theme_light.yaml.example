@@ -154,8 +154,7 @@ history_load_modal_shadow: "rgba(0,0,0,0.35)"
 # Modals
 faq_modal_bg: "#e8eef6"
 options_modal_bg: "#e8eef6"
-kill_modal_bg: "#d4e0ec"
-hist_del_modal_bg: "#d4e0ec"
+confirm_modal_bg: "#d4e0ec"
 
 # Dropdowns / autocomplete
 dropdown_bg: "#d4e0ec"
@@ -170,7 +169,7 @@ overlay_backdrop_bg: "rgba(34,58,88,0.22)"
 # FAQ / options controls
 faq_code_bg: "#dce6f0"
 allowed_chip_bg: "#dce6f0"
-options_select_bg: "#e0e8f4"
+form_control_bg: "#e0e8f4"
 
 # Status / toasts
 tab_status_ok_bg: "#22a040"

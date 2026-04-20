@@ -49,7 +49,7 @@ test.describe('runner stall handling', () => {
     const output = page.locator('.tab-panel.active .output')
     await expect(output).toContainText('connection stalled', { timeout: 5_000 })
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
-    await expect(page.locator('.hud-kill-btn')).toBeHidden()
+    await expect(page.locator('#hud-actions [data-action="kill"]')).toBeHidden()
     await expect(page.locator('#run-btn')).toBeHidden()
     await expect(page.locator('#run-btn')).toHaveJSProperty('disabled', true)
 

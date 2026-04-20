@@ -413,9 +413,6 @@
     return next;
   };
   global.isModalOverlayOpen = (el, display = 'flex') => !!(el && el.style && el.style.display === display);
-  global.showKillOverlay = () => showModalOverlay(killOverlay, 'flex');
-  global.hideKillOverlay = () => hideModalOverlay(killOverlay);
-  global.isKillOverlayOpen = () => isModalOverlayOpen(killOverlay, 'flex');
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {
     hidePanelOverlay(historyPanel);
@@ -448,9 +445,6 @@
   global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
   global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
   global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
-  global.showHistoryDeleteOverlay = () => showModalOverlay(histDelOverlay, 'flex');
-  global.hideHistoryDeleteOverlay = () => hideModalOverlay(histDelOverlay);
-  global.isHistoryDeleteOverlayOpen = () => isModalOverlayOpen(histDelOverlay, 'flex');
   global.showHistoryLoadOverlay = () => {
     if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.add('open');
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'false');
@@ -460,14 +454,6 @@
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'true');
   };
   global.isHistoryLoadOverlayOpen = () => !!(historyLoadOverlay && historyLoadOverlay.classList && historyLoadOverlay.classList.contains('open'));
-  global.showHistoryDeleteNonfav = () => {
-    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
-    if (btn && btn.style) btn.style.display = 'inline-block';
-  };
-  global.hideHistoryDeleteNonfav = () => {
-    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
-    if (btn && btn.style) btn.style.display = 'none';
-  };
   // Initialise inline display so the inline style takes precedence over the
   // conflicting .search-bar { display: flex } class rule (same specificity,
   // later in the sheet) when .u-hidden is also present on the element.

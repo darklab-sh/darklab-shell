@@ -71,14 +71,14 @@ test.describe('search and highlight', () => {
     await expect(page.locator('#search-count')).toHaveText(/\d+ \/ \d+/)
 
     await page.locator('#search-case-btn').click()
-    await expect(page.locator('#search-case-btn')).toHaveClass(/active/)
+    await expect(page.locator('#search-case-btn')).toHaveAttribute('aria-pressed', 'true')
     await expect(page.locator('#search-count')).toHaveText('no matches')
   })
 
   test('regex mode reports invalid patterns instead of throwing', async ({ page }) => {
     await page.locator('#search-toggle-btn').click()
     await page.locator('#search-regex-btn').click()
-    await expect(page.locator('#search-regex-btn')).toHaveClass(/active/)
+    await expect(page.locator('#search-regex-btn')).toHaveAttribute('aria-pressed', 'true')
 
     await page.locator('#search-input').fill('[')
     await expect(page.locator('#search-count')).toHaveText('invalid regex')

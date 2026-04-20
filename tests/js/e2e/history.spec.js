@@ -69,7 +69,7 @@ test.describe('history drawer', () => {
     await openHistory(page)
     await page.locator('.history-entry').first().locator('[data-action="delete"]').click()
     // Confirm deletion in the modal
-    await page.locator('#hist-del-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="one"]').click()
 
     // The starred chip should be gone
     await expect(page.locator('.hist-chip.starred')).toHaveCount(0)
@@ -107,9 +107,9 @@ test.describe('history drawer', () => {
     await openHistory(page)
     await page.locator('#hist-clear-all-btn').click()
     await page.keyboard.press('Escape')
-    await expect(page.locator('#hist-del-overlay')).toBeHidden()
+    await expect(page.locator('#confirm-host')).toBeHidden()
     await page.locator('#hist-clear-all-btn').click()
-    await page.locator('#hist-del-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="all"]').click()
 
     // All chips should be gone
     await expect(page.locator('.hist-chip')).toHaveCount(0)
@@ -150,8 +150,8 @@ test.describe('history drawer', () => {
 
     await openHistory(page)
     await page.locator('#hist-clear-all-btn').click()
-    await expect(page.locator('#hist-del-nonfav')).toBeVisible()
-    await page.locator('#hist-del-nonfav').click()
+    await expect(page.locator('#confirm-host [data-confirm-action-id="nonfav"]')).toBeVisible()
+    await page.locator('#confirm-host [data-confirm-action-id="nonfav"]').click()
 
     await expect(page.locator('.hist-chip.starred')).toHaveCount(1)
     await expect(page.locator('.hist-chip')).toHaveCount(1)

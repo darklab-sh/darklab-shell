@@ -276,6 +276,7 @@
       row.title = [label, wf.description].filter(Boolean).join('\n');
       const glyph = document.createElement('span');
       glyph.className = 'drill-chev';
+      glyph.setAttribute('aria-hidden', 'true');
       glyph.textContent = '›';
       const text = document.createElement('span');
       text.className = 'rail-item-text line-clamp-2';
@@ -359,7 +360,7 @@
     document.querySelectorAll('.hud-save-wrap.open').forEach(w => w.classList.remove('open'));
   }
 
-  function _makeHudBtn(label, action, onClick, cls = 'hud-action-btn', title = '') {
+  function _makeHudBtn(label, action, onClick, cls = 'btn btn-secondary btn-compact', title = '') {
     const btn = document.createElement('button');
     btn.type = 'button';
     btn.className = cls;
@@ -387,25 +388,25 @@
     hudKillBtn = _makeHudBtn('\u25A0 Kill', 'kill', () => {
       const id = _currentTabId();
       if (id && typeof confirmKill === 'function') confirmKill(id);
-    }, 'hud-kill-btn u-hidden', 'Kill current run');
+    }, 'btn btn-destructive btn-compact u-hidden', 'Kill current run');
     hudActions.appendChild(hudKillBtn);
 
     hudActions.appendChild(_makeHudBtn('share snapshot', 'permalink', () => {
       const id = _currentTabId();
       if (id && typeof permalinkTab === 'function') permalinkTab(id);
-    }, 'hud-action-btn', 'Share tab as permalink (Option+P / Alt+P)'));
+    }, 'btn btn-secondary btn-compact', 'Share tab as permalink (Option+P / Alt+P)'));
 
     hudActions.appendChild(_makeHudBtn('copy', 'copy', () => {
       const id = _currentTabId();
       if (id && typeof copyTab === 'function') copyTab(id);
-    }, 'hud-action-btn', 'Copy tab output (Option+Shift+C)'));
+    }, 'btn btn-secondary btn-compact', 'Copy tab output (Option+Shift+C)'));
 
     // Save menu — shares .save-menu markup so existing CSS applies.
     const saveWrap = document.createElement('div');
     saveWrap.className = 'hud-save-wrap';
     const saveBtn = _makeHudBtn('save', 'save-menu', () => {
       saveWrap.classList.toggle('open');
-    }, 'hud-action-btn', 'Save tab output (txt / html / pdf)');
+    }, 'btn btn-secondary btn-compact', 'Save tab output (txt / html / pdf)');
     const saveMenu = document.createElement('div');
     saveMenu.className = 'save-menu';
     [
@@ -436,7 +437,7 @@
       if (!id) return;
       if (typeof cancelWelcome === 'function') cancelWelcome(id);
       if (typeof clearTab === 'function') clearTab(id, { preserveRunState: true });
-    }, 'hud-action-btn', 'Clear active tab (Ctrl+L)'));
+    }, 'btn btn-secondary btn-compact', 'Clear active tab (Ctrl+L)'));
 
     bindOutsideClickClose(saveWrap, {
       triggers: saveBtn,

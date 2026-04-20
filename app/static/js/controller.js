@@ -94,9 +94,6 @@ function setupMobileSheetDragClose() {
   if (typeof bindMobileSheet !== 'function') return;
   const faqModal = document.getElementById('faq-modal');
   const optionsModal = document.getElementById('options-modal');
-  const killModal = document.getElementById('kill-modal');
-  const histDelModal = document.getElementById('hist-del-modal');
-  const shareRedactionModal = document.getElementById('share-redaction-modal');
   const workflowsModal = document.getElementById('workflows-modal');
 
   bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
@@ -104,9 +101,6 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
-  bindMobileSheet(killModal,          { onClose: () => closeKillOverlay() });
-  bindMobileSheet(histDelModal,       { onClose: () => { hideHistoryDeleteOverlay(); pendingHistAction = null; } });
-  bindMobileSheet(shareRedactionModal, { onClose: () => cancelShareRedactionChoice() });
 }
 
 function setupDismissibleOverlays() {
@@ -163,27 +157,6 @@ function setupDismissibleOverlays() {
     // click handler below, not by backdrop-click here.
     closeOnBackdrop: false,
   });
-  bindDismissible(_uiOverlayRefs.killOverlay, {
-    level: 'modal',
-    isOpen: isKillOverlayOpen,
-    onClose: closeKillOverlay,
-    closeButtons: killCancelBtn,
-  });
-  bindDismissible(_uiOverlayRefs.histDelOverlay, {
-    level: 'modal',
-    isOpen: isHistoryDeleteOverlayOpen,
-    onClose: () => {
-      hideHistoryDeleteOverlay();
-      pendingHistAction = null;
-    },
-    closeButtons: histDelCancelBtn,
-  });
-  bindDismissible(_uiOverlayRefs.shareRedactionOverlay, {
-    level: 'modal',
-    isOpen: isShareRedactionOverlayOpen,
-    onClose: cancelShareRedactionChoice,
-    closeButtons: shareRedactionCancelBtn,
-  });
 }
 
 function setupMobileComposer() {
@@ -198,7 +171,7 @@ function setupMobileComposer() {
   if (mobileShellTranscript) {
     const closeKeyboardFromTranscript = e => {
       const interactiveTarget = e && e.target && e.target.closest
-        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
+        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .hist-chip');
       if (interactiveTarget) return;
       if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
         if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay: 120 });
@@ -409,25 +382,16 @@ function _optionsTokenShowMsg(msg, isError = false) {
   el.classList.toggle('is-error', isError);
 }
 
-function _waitForMigrateChoice(msg) {
-  return new Promise(resolve => {
-    const overlay = document.getElementById('session-token-migrate-overlay');
-    const msgEl   = document.getElementById('session-token-migrate-msg');
-    let yesBtn  = document.getElementById('session-token-migrate-yes');
-    let noBtn   = document.getElementById('session-token-migrate-no');
-    if (!overlay || !yesBtn || !noBtn) { resolve(false); return; }
-    if (msgEl) msgEl.textContent = msg;
-    overlay.style.display = 'flex';
-    // Replace each button with a fresh clone so no listener from a prior open
-    // survives to fire stale callbacks when the modal is re-opened.
-    const freshYes = yesBtn.cloneNode(true);
-    const freshNo  = noBtn.cloneNode(true);
-    yesBtn.parentNode.replaceChild(freshYes, yesBtn);
-    noBtn.parentNode.replaceChild(freshNo,  noBtn);
-    const done = (choice) => { overlay.style.display = 'none'; resolve(choice); };
-    freshYes.addEventListener('click', () => done(true),  { once: true });
-    freshNo.addEventListener('click',  () => done(false), { once: true });
+async function _waitForMigrateChoice(msg) {
+  if (typeof showConfirm !== 'function') return false;
+  const choice = await showConfirm({
+    body: msg,
+    actions: [
+      { id: 'skip', label: 'Skip',         role: 'cancel' },
+      { id: 'yes',  label: 'Yes, migrate', role: 'primary' },
+    ],
   });
+  return choice === 'yes';
 }
 
 document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
@@ -493,70 +457,93 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
   }
 });
 
-// Set token modal
-document.getElementById('options-session-token-set-btn')?.addEventListener('click', () => {
+// Set token modal — showConfirm with input + inline error content slot.
+// Apply is gated by onActivate (format check + /session/token/verify),
+// so validation errors keep the modal open instead of firing the real flow.
+document.getElementById('options-session-token-set-btn')?.addEventListener('click', async () => {
   _optionsTokenShowMsg('');
-  const overlay = document.getElementById('session-token-set-overlay');
-  const input   = document.getElementById('session-token-set-input');
-  const errEl   = document.getElementById('session-token-set-error');
-  if (overlay) overlay.style.display = 'flex';
-  if (input)   { input.value = ''; focusElement(input); }
-  if (errEl)   errEl.style.display = 'none';
-});
+  if (typeof showConfirm !== 'function') return;
 
-document.getElementById('session-token-set-overlay')?.addEventListener('click', e => {
-  if (e.target === e.currentTarget) e.currentTarget.style.display = 'none';
-});
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'session-token-set-input';
+  input.className = 'options-token-input modal-token-input';
+  input.placeholder = 'tok_... or UUID';
+  input.autocomplete = 'off';
+  input.spellcheck = false;
 
-document.getElementById('session-token-set-cancel')?.addEventListener('click', () => {
-  document.getElementById('session-token-set-overlay').style.display = 'none';
-});
+  const errEl = document.createElement('div');
+  errEl.id = 'session-token-set-error';
+  errEl.className = 'options-session-token-msg is-error';
+  errEl.style.display = 'none';
 
-document.getElementById('session-token-set-input')?.addEventListener('keydown', e => {
-  if (e.key === 'Enter')  document.getElementById('session-token-set-confirm')?.click();
-  if (e.key === 'Escape') document.getElementById('session-token-set-cancel')?.click();
-});
+  // Enter in the input triggers Apply. Preventing default stops the enter from
+  // bubbling into a synthetic click on the first button (Cancel).
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    document.querySelector('#confirm-host [data-confirm-action-id="apply"]')?.click();
+  });
 
-document.getElementById('session-token-set-confirm')?.addEventListener('click', async () => {
-  const input = document.getElementById('session-token-set-input');
-  const errEl = document.getElementById('session-token-set-error');
-  const value = (input?.value || '').trim();
-  const isTok  = value.startsWith('tok_');
-  const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
-  if (!value || (!isTok && !isUuid)) {
-    if (errEl) { errEl.textContent = 'Invalid token — expected tok_... or a UUID'; errEl.style.display = ''; }
-    return;
-  }
+  let value = '';
+  const choice = await showConfirm({
+    body: {
+      text: 'Enter a session token to switch to.',
+      note: 'Accepts tok_... format or a UUID from another session.',
+    },
+    content: [input, errEl],
+    defaultFocus: input,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      {
+        id: 'apply',
+        label: 'Apply',
+        role: 'primary',
+        onActivate: async () => {
+          value = (input.value || '').trim();
+          const isTok  = value.startsWith('tok_');
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+          if (!value || (!isTok && !isUuid)) {
+            errEl.textContent = 'Invalid token — expected tok_... or a UUID';
+            errEl.style.display = '';
+            return false;
+          }
+          // For tok_ tokens, verify server-side existence before switching.
+          // A typo would otherwise silently create a brand-new empty session.
+          // Fail closed: any failure (network error, non-OK response, missing
+          // exists flag) blocks the switch rather than allowing an unverified
+          // token through.
+          if (isTok) {
+            let verifyErr = null;
+            try {
+              const vResp = await apiFetch('/session/token/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: value }),
+              });
+              const vData = await vResp.json().catch(() => ({}));
+              if (!vResp.ok) {
+                verifyErr = 'Token verification failed — server returned an error';
+              } else if (vData.exists === false) {
+                verifyErr = 'Token not found — this token was not issued by this server';
+              }
+            } catch (_) {
+              verifyErr = 'Token verification failed — server is unreachable';
+            }
+            if (verifyErr !== null) {
+              errEl.textContent = verifyErr;
+              errEl.style.display = '';
+              return false;
+            }
+          }
+          errEl.style.display = 'none';
+          return true;
+        },
+      },
+    ],
+  });
 
-  // For tok_ tokens, verify server-side existence before switching.
-  // A typo would otherwise silently create a brand-new empty session.
-  // Fail closed: any failure (network error, non-OK response, missing exists flag)
-  // blocks the switch rather than allowing an unverified token through.
-  if (isTok) {
-    let verifyErr = null;
-    try {
-      const vResp = await apiFetch('/session/token/verify', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ token: value }),
-      });
-      const vData = await vResp.json().catch(() => ({}));
-      if (!vResp.ok) {
-        verifyErr = 'Token verification failed — server returned an error';
-      } else if (vData.exists === false) {
-        verifyErr = 'Token not found — this token was not issued by this server';
-      }
-    } catch (_) {
-      verifyErr = 'Token verification failed — server is unreachable';
-    }
-    if (verifyErr !== null) {
-      if (errEl) { errEl.textContent = verifyErr; errEl.style.display = ''; }
-      return;
-    }
-  }
-
-  if (errEl) errEl.style.display = 'none';
-  document.getElementById('session-token-set-overlay').style.display = 'none';
+  if (choice !== 'apply') return;
 
   const oldSessionId = SESSION_ID;
   _optionsTokenSetBusy(true);
@@ -592,7 +579,6 @@ document.getElementById('session-token-set-confirm')?.addEventListener('click', 
     updateSessionId(value);
     if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
     if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
-    if (input) input.value = '';
     _updateOptionsSessionTokenStatus();
     showToast('Session token applied');
   } catch (err) {
@@ -768,13 +754,13 @@ searchInput.addEventListener('keydown', e => {
 
 searchCaseBtn.addEventListener('click', () => {
   searchCaseSensitive = !searchCaseSensitive;
-  searchCaseBtn.classList.toggle('active', searchCaseSensitive);
+  searchCaseBtn.setAttribute('aria-pressed', searchCaseSensitive ? 'true' : 'false');
   runSearch();
 });
 
 searchRegexBtn.addEventListener('click', () => {
   searchRegexMode = !searchRegexMode;
-  searchRegexBtn.classList.toggle('active', searchRegexMode);
+  searchRegexBtn.setAttribute('aria-pressed', searchRegexMode ? 'true' : 'false');
   runSearch();
 });
 
@@ -794,36 +780,13 @@ histBtn.addEventListener('click', () => {
 // bindDismissible in setupDismissibleOverlays().
 
 // ── History delete modal ──
-// Backdrop + cancel-button dismissal are registered via bindDismissible;
-// only the affirmative action buttons live here.
+// The modal itself lives in ui_confirm.js — confirmHistAction() builds
+// the action list and resolves the choice. Only the entry-point button
+// for the bulk clear path lives here.
 histClearAllBtn.addEventListener('click', () => {
   confirmHistAction('clear');
 });
-histDelNonfavBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  executeHistAction('clear-nonfav');
-});
-histDelConfirmBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  executeHistAction();
-});
 
-// ── Share redaction modal ──
-// Backdrop + cancel-button dismissal are registered via bindDismissible;
-// only the affirmative resolvers live here.
-shareRedactionRawBtn?.addEventListener('click', () => {
-  resolveShareRedactionChoice('raw');
-});
-shareRedactionConfirmBtn?.addEventListener('click', () => {
-  resolveShareRedactionChoice('redacted');
-});
-
-// ── Kill modal ──
-// Backdrop + cancel-button dismissal are registered via bindDismissible;
-// only the affirmative confirm button lives here.
-killConfirmBtn.addEventListener('click', () => {
-  confirmPendingKill();
-});
 
 // ── Global keyboard shortcuts ──
 // Current bindings intentionally stay narrow:
@@ -836,17 +799,12 @@ killConfirmBtn.addEventListener('click', () => {
 // - Alt+Tab / Alt+Shift+Tab for tab cycling (forward/backward)
 // - Alt+ArrowLeft / Alt+ArrowRight for tab cycling (same as Tab)
 // - Alt+P for permalink, Alt+Shift+C for copy
-// - Enter / Escape for kill-confirm accept / cancel
+// Confirmation dialogs (kill, history-delete, share-redaction, ...) use
+// default-focus-on-cancel so Enter resolves to the safe action via the
+// browser's native button activation. Escape is routed through the
+// dismissible dispatcher below.
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
 document.addEventListener('keydown', e => {
-  // Kill confirmation has a modal-specific Enter-to-confirm shortcut that
-  // is not a dismiss action; Escape-to-close is owned by bindDismissible
-  // via the unified Escape dispatch below.
-  if (isKillOverlayOpen() && e.key === 'Enter') {
-    confirmPendingKill();
-    e.preventDefault();
-    return;
-  }
   // Unified Escape dispatch: closes the topmost open dismissible
   // (modal > sheet > panel) via the registry populated by
   // setupDismissibleOverlays(). Replaces the per-overlay if-chain that
@@ -956,8 +914,7 @@ document.addEventListener('keydown', e => {
     && !(e.target && e.target.closest && e.target.closest('button, a, select'))
     && cmdInput
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
-    && !isKillOverlayOpen()
-    && !isShareRedactionOverlayOpen()
+    && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
   ) {
     e.preventDefault();
     refocusComposerAfterAction({ preventScroll: true });
@@ -1157,9 +1114,9 @@ cmdInput.addEventListener('input', () => {
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isShareRedactionOverlayOpen()) {
+  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector(); cancelShareRedactionChoice();
+      closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
       refocusComposerAfterAction({ defer: true });
       e.preventDefault();
     }

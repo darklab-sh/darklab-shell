@@ -613,7 +613,7 @@ class TestDiagRoute:
         body = resp.get_data(as_text=True)
         assert "diag test shell" in body
         assert "operator diagnostics" in body
-        assert 'class="term-action-btn diag-back-btn"' in body
+        assert 'class="btn btn-secondary btn-compact diag-back-btn"' in body
         assert 'href="/"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()

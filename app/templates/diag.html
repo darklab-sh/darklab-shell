@@ -30,7 +30,7 @@
     <h1 class="diag-header-title">{{ app_name }}</h1>
     <span class="diag-header-meta">operator diagnostics</span>
   </div>
-  <a href="/" class="term-action-btn diag-back-btn">back to shell</a>
+  <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
 </header>
 <div class="diag-mobile-divider" aria-hidden="true"></div>
 
@@ -132,7 +132,7 @@
         {% for key, value in cfg_items[:mid] %}
         <tr>
           <td>{{ key }}</td>
-          <td>{% if value is none %}<span class="diag-warn">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}<span class="diag-ok">true</span>{% elif value is sameas false %}<span class="diag-warn">false</span>{% else %}{{ value }}{% endif %}</td>
+          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}<span class="diag-ok">true</span>{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -140,7 +140,7 @@
         {% for key, value in cfg_items[mid:] %}
         <tr>
           <td>{{ key }}</td>
-          <td>{% if value is none %}<span class="diag-warn">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}<span class="diag-ok">true</span>{% elif value is sameas false %}<span class="diag-warn">false</span>{% else %}{{ value }}{% endif %}</td>
+          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}<span class="diag-ok">true</span>{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -165,7 +165,7 @@
         </tr>
         <tr>
           <td>failed</td>
-          <td class="{{ 'diag-warn' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
+          <td class="{{ 'diag-fail' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
         </tr>
         <tr>
           <td>incomplete</td>

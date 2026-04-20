@@ -12,9 +12,9 @@ border: rgba(194, 104, 59, 0.22)
 border_bright: rgba(194, 104, 59, 0.36)
 text: '#eee5dc'
 muted: '#a9988d'
-green: '#ff9b4a'
-green_dim: '#b96a2e'
-green_glow: rgba(255, 155, 74, 0.12)
+green: '#6bb36a'
+green_dim: '#4a7c4a'
+green_glow: rgba(107, 179, 106, 0.12)
 amber: '#ffc46e'
 red: '#ff725f'
 blue: '#7ea9ff'
@@ -82,8 +82,7 @@ history_load_modal_border: rgba(194, 104, 59, 0.22)
 history_load_modal_shadow: rgba(0,0,0,0.35)
 faq_modal_bg: '#141414'
 options_modal_bg: '#141414'
-kill_modal_bg: '#141414'
-hist_del_modal_bg: '#141414'
+confirm_modal_bg: '#141414'
 dropdown_bg: color-mix(in srgb, var(--surface) 96%, transparent)
 dropdown_border: color-mix(in srgb, var(--green) 18%, transparent)
 dropdown_shadow: rgba(0,0,0,0.35)
@@ -94,7 +93,7 @@ dropdown_item_text: '#9a9a9a'
 overlay_backdrop_bg: rgba(0,0,0,0.76)
 faq_code_bg: '#141414'
 allowed_chip_bg: '#141414'
-options_select_bg: '#141414'
+form_control_bg: '#141414'
 tab_status_ok_bg: '#39ff14'
 toast_bg: '#141414'
 toast_text: '#39ff14'

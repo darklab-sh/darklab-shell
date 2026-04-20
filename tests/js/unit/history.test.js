@@ -409,10 +409,13 @@ describe('history panel actions', () => {
       <div id="history-active-filters" class="u-hidden"></div>
       <div id="history-list"></div>
       <div id="history-load-overlay"></div>
-      <div id="hist-del-overlay"></div>
-      <div id="hist-del-msg"></div>
-      <button id="hist-del-nonfav"></button>
-      <button id="hist-del-confirm"></button>
+      <div id="confirm-host" class="modal-overlay u-hidden">
+        <div class="modal-card modal-card-compact" data-confirm-card>
+          <div class="modal-copy" data-confirm-body></div>
+          <div class="modal-confirm-content" data-confirm-content></div>
+          <div class="modal-actions modal-actions-wrap" data-confirm-actions></div>
+        </div>
+      </div>
       <div id="permalink-toast"></div>
       <div id="tabs-bar"></div>
       <div id="tab-panels"></div>
@@ -476,9 +479,6 @@ describe('history panel actions', () => {
     const historyStarredToggle = document.getElementById('history-starred-toggle')
     const historyClearFiltersBtn = document.getElementById('history-clear-filters')
     const historyActiveFilters = document.getElementById('history-active-filters')
-    const histDelOverlay = document.getElementById('hist-del-overlay')
-    const histDelMsg = document.getElementById('hist-del-msg')
-    const histDelConfirmBtn = document.getElementById('hist-del-confirm')
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
@@ -507,9 +507,7 @@ describe('history panel actions', () => {
           historyClearFiltersBtn,
           historyActiveFilters,
           histRow: document.createElement('div'),
-          histDelOverlay,
-          histDelMsg,
-          histDelConfirmBtn,
+          showConfirm: vi.fn(() => Promise.resolve(null)),
           cmdInput,
           tabs,
           activateTab,

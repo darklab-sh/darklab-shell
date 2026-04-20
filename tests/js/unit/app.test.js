@@ -62,11 +62,6 @@ async function loadAppFns({
     <button id="ln-btn"></button>
     <button id="history-close"></button>
     <button id="hist-clear-all-btn"></button>
-    <button id="hist-del-cancel"></button>
-    <button id="hist-del-nonfav"></button>
-    <button id="hist-del-confirm"></button>
-    <button id="kill-cancel"></button>
-    <button id="kill-confirm"></button>
     <div id="mobile-shell" aria-hidden="true">
       <div id="mobile-shell-chrome"></div>
       <div id="mobile-shell-transcript"></div>
@@ -189,13 +184,6 @@ async function loadAppFns({
       <div id="history-panel"></div>
       <div id="history-list"></div>
       <div id="permalink-toast"></div>
-      <div id="kill-overlay"></div>
-      <div id="hist-del-overlay"></div>
-      <div id="share-redaction-overlay"></div>
-      <button id="share-redaction-cancel"></button>
-      <button id="share-redaction-raw"></button>
-      <button id="share-redaction-confirm"></button>
-      <input id="share-redaction-remember-toggle" type="checkbox" />
       <div class="prompt-wrap"></div>
     </div>
   `
@@ -269,15 +257,6 @@ async function loadAppFns({
     histBtn: document.getElementById('hist-btn'),
     historyCloseBtn: document.getElementById('history-close'),
     histClearAllBtn: document.getElementById('hist-clear-all-btn'),
-    histDelCancelBtn: document.getElementById('hist-del-cancel'),
-    histDelNonfavBtn: document.getElementById('hist-del-nonfav'),
-    histDelConfirmBtn: document.getElementById('hist-del-confirm'),
-    shareRedactionCancelBtn: document.getElementById('share-redaction-cancel'),
-    shareRedactionRawBtn: document.getElementById('share-redaction-raw'),
-    shareRedactionConfirmBtn: document.getElementById('share-redaction-confirm'),
-    shareRedactionRememberToggle: document.getElementById('share-redaction-remember-toggle'),
-    killCancelBtn: document.getElementById('kill-cancel'),
-    killConfirmBtn: document.getElementById('kill-confirm'),
     searchPrevBtn: document.getElementById('search-prev'),
     searchNextBtn: document.getElementById('search-next'),
     searchCloseBtn: document.getElementById('search-close-btn'),
@@ -318,9 +297,6 @@ async function loadAppFns({
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
     themeCloseBtn: document.querySelector('.theme-close'),
-    killOverlay: document.getElementById('kill-overlay'),
-    histDelOverlay: document.getElementById('hist-del-overlay'),
-    shareRedactionOverlay: document.getElementById('share-redaction-overlay'),
     faqOverlay: document.getElementById('faq-overlay'),
     optionsOverlay: document.getElementById('options-overlay'),
     workflowsOverlay: document.getElementById('workflows-overlay'),
@@ -412,6 +388,9 @@ async function loadAppFns({
       apiFetch,
       APP_CONFIG: {},
       AnsiUp: FakeAnsiUp,
+      showConfirm: vi.fn(() => Promise.resolve(null)),
+      isConfirmOpen: vi.fn(() => false),
+      cancelConfirm: vi.fn(),
       ThemeRegistry: themeRegistry,
       ...domBindings,
       getOutput: getOutputOverride || (() => document.getElementById('history-list')),
@@ -437,8 +416,6 @@ async function loadAppFns({
       searchRegexMode: false,
       confirmHistAction: vi.fn(),
       executeHistAction: vi.fn(),
-      histDelOverlay: document.getElementById('hist-del-overlay'),
-      killOverlay: document.getElementById('kill-overlay'),
       pendingHistAction: null,
       pendingKillTabId,
       acHide: acHideOverride,
@@ -538,21 +515,12 @@ async function loadAppFns({
     confirmHistAction,
     executeHistAction,
     doKill,
-    showKillOverlay,
-    hideKillOverlay,
-    isKillOverlayOpen,
-    confirmPendingKill,
-    closeKillOverlay,
     confirmPermalinkRedactionChoice,
-    getRememberedShareRedactionChoice,
     getWelcomeIntroPreference,
     getShareRedactionDefaultPreference,
     getRunNotifyPreference,
     applyRunNotifyPreference,
     syncOptionsControls,
-    resolveShareRedactionChoice,
-    cancelShareRedactionChoice,
-    isShareRedactionOverlayOpen,
     getComposerState,
     setComposerState,
     resetComposerState,
@@ -594,11 +562,6 @@ async function loadAppFns({
     acDropdown,
     acHide: acHideOverride,
     shellPromptWrap: shellPromptWrapEl,
-    showKillOverlay: fns.showKillOverlay,
-    hideKillOverlay: fns.hideKillOverlay,
-    isKillOverlayOpen: fns.isKillOverlayOpen,
-    confirmPendingKill: fns.confirmPendingKill,
-    closeKillOverlay: fns.closeKillOverlay,
     syncShellPrompt: fns.syncShellPrompt,
     sessionStorage: sessionStore,
     getTab,
@@ -1089,11 +1052,6 @@ describe('app helpers', () => {
       <button id="ln-btn"></button>
       <button id="history-close"></button>
       <button id="hist-clear-all-btn"></button>
-      <button id="hist-del-cancel"></button>
-      <button id="hist-del-nonfav"></button>
-      <button id="hist-del-confirm"></button>
-      <button id="kill-cancel"></button>
-      <button id="kill-confirm"></button>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
       <div id="mobile-menu-sheet" class="menu-sheet u-hidden">
@@ -1116,8 +1074,6 @@ describe('app helpers', () => {
       <input id="cmd" />
       <div id="history-panel"></div>
       <div id="history-list"></div>
-      <div id="kill-overlay"></div>
-      <div id="hist-del-overlay"></div>
       <div id="search-bar"></div>
       <input id="search-input" />
       <span id="search-count"></span>
@@ -2993,133 +2949,28 @@ describe('app helpers', () => {
     expect(_getAcIndex()).toBe(0)
   })
 
-  it('wires the history delete modal buttons and backdrop correctly', async () => {
-    const { confirmHistAction, executeHistAction } = await loadAppFns()
-    const histDelOverlay = document.getElementById('hist-del-overlay')
-
+  it('routes hist-clear-all through confirmHistAction', async () => {
+    // Modal wiring itself is covered by ui_confirm.test.js (the primitive)
+    // and history.test.js (confirmHistAction's call to showConfirm). Here
+    // we just verify the app bootstrap still connects the clear-all button.
+    const { confirmHistAction } = await loadAppFns()
     confirmHistAction.mockClear()
-    executeHistAction.mockClear()
-
     document.getElementById('hist-clear-all-btn').click()
     expect(confirmHistAction).toHaveBeenCalledWith('clear')
-
-    histDelOverlay.style.display = 'flex'
-    document.getElementById('hist-del-cancel').click()
-    expect(histDelOverlay.style.display).toBe('none')
-
-    histDelOverlay.style.display = 'flex'
-    document.getElementById('hist-del-nonfav').click()
-    expect(histDelOverlay.style.display).toBe('none')
-    expect(executeHistAction).toHaveBeenCalledWith('clear-nonfav')
-
-    histDelOverlay.style.display = 'flex'
-    document.getElementById('hist-del-confirm').click()
-    expect(histDelOverlay.style.display).toBe('none')
-    expect(executeHistAction).toHaveBeenCalled()
-
-    histDelOverlay.style.display = 'flex'
-    histDelOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(histDelOverlay.style.display).toBe('none')
-  })
-
-  it('wires the kill modal buttons and backdrop correctly', async () => {
-    await loadAppFns()
-    const killOverlay = document.getElementById('kill-overlay')
-
-    killOverlay.style.display = 'flex'
-    document.getElementById('kill-cancel').click()
-    expect(killOverlay.style.display).toBe('none')
-
-    const doKill = vi.fn()
-    await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
-    const killOverlay2 = document.getElementById('kill-overlay')
-
-    killOverlay2.style.display = 'flex'
-    document.getElementById('kill-confirm').click()
-    expect(doKill).toHaveBeenCalledWith('tab-1')
-    expect(killOverlay2.style.display).toBe('none')
-
-    killOverlay2.style.display = 'flex'
-    killOverlay2.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(killOverlay2.style.display).toBe('none')
-  })
-
-  it('does not refocus the mobile composer when closing the kill confirmation modal', async () => {
-    const doKill = vi.fn()
-    const {
-      getVisibleComposerInput,
-      showKillOverlay,
-      isKillOverlayOpen,
-      confirmPendingKill,
-      closeKillOverlay,
-    } = await loadAppFns({
-      doKill,
-      pendingKillTabId: 'tab-1',
-      mobileViewport: { height: 500, offsetTop: 0 },
-    })
-    const visibleInput = getVisibleComposerInput()
-    visibleInput.focus.mockClear()
-
-    showKillOverlay()
-    expect(isKillOverlayOpen()).toBe(true)
-    confirmPendingKill()
-    expect(doKill).toHaveBeenCalledWith('tab-1')
-    expect(isKillOverlayOpen()).toBe(false)
-    expect(visibleInput.focus).not.toHaveBeenCalled()
-
-    visibleInput.focus.mockClear()
-    showKillOverlay()
-    closeKillOverlay()
-    expect(isKillOverlayOpen()).toBe(false)
-    expect(visibleInput.focus).not.toHaveBeenCalled()
-  })
-
-  it('wires the share redaction modal buttons, remember choice, and backdrop correctly', async () => {
-    const {
-      confirmPermalinkRedactionChoice,
-      isShareRedactionOverlayOpen,
-      getRememberedShareRedactionChoice,
-    } = await loadAppFns()
-    const shareRedactionOverlay = document.getElementById('share-redaction-overlay')
-    const rememberToggle = document.getElementById('share-redaction-remember-toggle')
-
-    const redactedChoice = confirmPermalinkRedactionChoice()
-    expect(isShareRedactionOverlayOpen()).toBe(true)
-    rememberToggle.checked = true
-    document.getElementById('share-redaction-confirm').click()
-    await expect(redactedChoice).resolves.toBe('redacted')
-    expect(shareRedactionOverlay.style.display).toBe('none')
-    expect(getRememberedShareRedactionChoice()).toBe('redacted')
-    expect(document.cookie).toContain('pref_share_redaction_default=redacted')
-    expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
-
-    await expect(confirmPermalinkRedactionChoice()).resolves.toBe('redacted')
-    expect(shareRedactionOverlay.style.display).toBe('none')
-
-    document.cookie = 'pref_share_redaction_default=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT'
-    const rawChoice = confirmPermalinkRedactionChoice()
-    expect(isShareRedactionOverlayOpen()).toBe(true)
-    document.getElementById('share-redaction-raw').click()
-    await expect(rawChoice).resolves.toBe('raw')
-    expect(getRememberedShareRedactionChoice()).toBe(null)
-
-    const cancelChoice = confirmPermalinkRedactionChoice()
-    shareRedactionOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await expect(cancelChoice).resolves.toBe(null)
-    expect(shareRedactionOverlay.style.display).toBe('none')
   })
 
   it('uses the persistent share redaction default before showing the modal prompt', async () => {
     const {
       confirmPermalinkRedactionChoice,
-      isShareRedactionOverlayOpen,
       getShareRedactionDefaultPreference,
     } = await loadAppFns({
       cookies: { pref_share_redaction_default: 'raw' },
     })
 
+    // showConfirm is stubbed to resolve null (cancel) by loadAppFns; if the
+    // preference short-circuit failed, this would resolve null instead of
+    // 'raw'. The assertion implicitly verifies the modal was skipped.
     await expect(confirmPermalinkRedactionChoice()).resolves.toBe('raw')
-    expect(isShareRedactionOverlayOpen()).toBe(false)
     expect(getShareRedactionDefaultPreference()).toBe('raw')
   })
 

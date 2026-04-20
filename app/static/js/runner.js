@@ -324,7 +324,21 @@ function interruptPromptLine(tabId = activeTabId) {
 function confirmKill(tabId) {
   pendingKillTabId = tabId;
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-  showKillOverlay();
+  showConfirm({
+    body: {
+      text: 'Kill the running process in this tab?',
+      note: 'This sends SIGTERM to the entire process group.',
+    },
+    tone: 'danger',
+    actions: [
+      { id: 'cancel',  label: 'Cancel', role: 'cancel' },
+      { id: 'confirm', label: '■ Kill', role: 'primary', tone: 'danger' },
+    ],
+  }).then((result) => {
+    const targetId = pendingKillTabId;
+    pendingKillTabId = null;
+    if (result === 'confirm' && targetId) doKill(targetId);
+  });
 }
 
 function doKill(tabId) {

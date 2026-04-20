@@ -114,7 +114,7 @@ const scenes = [
       await freshHome(page, { themeName })
       await runLongCaptureCommandMobile(page)
       await page.locator('#mobile-kill-btn').click()
-      await expect(page.locator('#kill-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
     },
   },
   {
@@ -246,7 +246,7 @@ const scenes = [
       await waitForHistoryRuns(page, 2)
       await openRecentsSheet(page)
       await page.locator('#mobile-recents-clear').click()
-      await expect(page.locator('#hist-del-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {
@@ -259,7 +259,7 @@ const scenes = [
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)
       await page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-action', { hasText: 'delete' }).click()
-      await expect(page.locator('#hist-del-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {

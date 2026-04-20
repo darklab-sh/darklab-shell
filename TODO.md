@@ -125,12 +125,49 @@ This file tracks open work items, known issues, and product ideas for darklab sh
     - **Chip tap behavior** — cycle through running tabs on repeated taps, or always jump to a fixed target (oldest-running, or nearest-off-screen)? Cycling scales with many runs; fixed-target is more predictable. (gates Phase 2 Workstream E)
       - Decision: Cycle through running tabs in order of their tab row placement.
     - **Button role tokens** — do the four roles (`primary` / `secondary` / `ghost` / `destructive`) reuse existing CSS variables, or introduce new role tokens? Affects every theme file and downstream theme contributions. (gates Phase 2 Workstream A)
+      - Decision: introduce new role tokens (`--btn-primary-bg`, `--btn-primary-fg`, `--btn-destructive-bg`, etc.) that default to existing theme vars where a reasonable mapping exists. Pure reuse forces the role system to inherit whatever semantic looseness the theme vars currently have; pure-new balloons the theme surface. Layered tokens (new names, default-to-existing values) give migration headroom without doubling theme files.
+    - **Button class naming convention** — composable (`btn btn-primary btn-danger`) vs pre-composed (`btn btn-primary-danger`, mirroring today's `modal-primary-danger`)? Affects every template and every theme-override selector downstream. (gates Phase 2 Workstream A)
+      - Decision: composable `btn btn-{role} btn-{tone}`. Pre-composed explodes combinatorially (4 roles × 3–4 tones) and makes later additions painful; composable is idiomatic, matches how the rest of the codebase layers classes, and lets tone live independently of role in markup.
+    - **Button tone palette** — keep `warning` as a distinct tone from `danger`, or fold caution into the yellow tier from Workstream D? Today's modal classes encode `-accent` / `-neutral` / `-warning` / `-danger`. (gates Phase 2 Workstream A)
+      - Decision: three tones — `accent` (themed, default on primary), `warning` (yellow, reversible destructive / caution), `danger` (red, irreversible). Drop `neutral` because the `ghost` role already covers no-emphasis. Aligns 1:1 with Workstream D's color semantics.
+    - **Reversible-destructive tier** — is "reversible destructive / caution" its own role (`cautious-destructive`), a tone on existing roles (`destructive warning`), or absorbed into `destructive`? Pinning this decides how delete-non-favorites, clear-output, and similar differ visually from kill / delete-all. (gates Phase 2 Workstreams A + D)
+      - Decision: tone, not role. `destructive warning` = reversible (delete-non-favorites, clear-output); `destructive danger` = irreversible (kill, delete-all). Keeps the role list at four and gives destructive two visual weights without inventing a fifth role.
+    - **Disabled and loading states** — define one shared disabled treatment for every role, and a loading/spinner state for primary actions that trigger async work (run, kill, delete)? Without this pinned, each workstream reimplements. (gates Phase 2 Workstream A)
+      - Decision: yes — one disabled treatment (reduced opacity + `cursor: not-allowed` + `aria-disabled`) uniformly applied, and a loading state only on `primary` and `destructive` primary (spinner replaces label). `ghost` and `secondary` skip loading state.
+    - **Icon-only button variants** — does every role permit icon-only rendering, or is icon-only reserved for `ghost` + the dedicated `close-btn` primitive? (gates Phase 2 Workstream A)
+      - Decision: allow icon-only on `ghost` only (plus `close-btn`). `primary`, `secondary`, and `destructive` always render a label — prevents unlabeled destructive buttons, which are a known usability hazard.
+    - **Button size scale** — single size, or a sm/md/lg scale? Modal footers and history-row actions currently use visibly different heights. (gates Phase 2 Workstream A)
+      - Decision: two sizes — default (modal footers, terminal action row, chrome toolbar) and compact (history-row actions, mobile sheet chips, inline row actions). Avoid a third tier until a concrete third use case appears.
     - **Confirmation primitive scope** — does the new primitive replace the current modal helper, or wrap it? Determines whether kill, history-delete, and share-redaction confirmations migrate in one PR or incrementally. (gates Phase 2 Workstream B)
       Decision: Replace it. And all modular code needs to be implemented via the helpers where possible for easy re-use in the future.
+    - **Type-to-confirm gate** — do any destructive confirmations require typing a word (`DELETE`) to commit, or is destructive styling + explicit label ("Kill", "Delete All") sufficient? (gates Phase 2 Workstream B)
+      - Decision: no type-to-confirm. The operator population will read it as friction and the destructive styling + unambiguous button label already communicates gravity. Revisit only if an action with wider blast radius than single-run deletion is ever added.
+    - **Default-focus policy in confirmation dialogs** — Enter defaults to the destructive action, or to cancel? Affects keyboard ergonomics and accidental commits. (gates Phase 2 Workstream B)
+      - Decision: Enter defaults to cancel (safe action). Destructive commit requires an explicit click or explicit tab-to-focus-then-Enter. Matches macOS and long-standing web convention.
+    - **Mobile stacked-button layout trigger** — when does the confirmation primitive switch from side-by-side to stacked buttons? Viewport breakpoint, button-count threshold, or always-stack on mobile? (gates Phase 2 Workstream B)
+      - Decision: stack when viewport ≤ 480px OR when the dialog hosts 3+ actions at any width. 480px tracks the existing mobile-terminal-mode breakpoint; 3+ actions visually crowd side-by-side on any screen.
     - **Desktop form controls** — fully custom desktop selects and checkboxes, or minimal restyle of native controls first? (gates Phase 2 Workstream C)
       - Decision: minimal restyle of native controls first
+    - **Scope of form-control types in Milestone 2** — Workstream C names `select` + `checkbox`. What about radio, textarea, number input, range, text input? Without an explicit scope, each field relitigated per surface. (gates Phase 2 Workstream C)
+      - Decision: include `select`, `checkbox`, and `radio` in Milestone 2. Defer `textarea`, `text input`, `number input`, `range` — none are used in the Options modal (the Milestone 2 target surface), so deferring keeps scope bounded without creating visible gaps.
+    - **Native-limit acceptance for `<select>`** — minimal restyle can't touch the open dropdown list in most browsers. Accept that for Milestone 2, or graduate to a full custom select? (gates Phase 2 Workstream C)
+      - Decision: accept native dropdown rendering in Milestone 2. Custom select popovers are a high-effort, high-maintenance primitive (keyboard nav, focus trap, screen-reader support); the closed-state trigger is where ~95% of the legibility problem lives.
     - **Per-theme legibility bar for custom controls** — minimum contrast and state-visibility threshold a custom select or checkbox must hit across every shipped theme, set up front so themes do not need to be revisited per workstream. (gates Phase 2 Workstream C)
+      - Decision: adopt WCAG AA (4.5:1 text, 3:1 UI) for label/value text on controls, and require visible focus outline + checked/hover state distinct from resting state across every shipped theme. Run the existing theme capture pack against the Options modal as verification.
     - **Color-semantics yellow scope** — does the new "yellow = caution / reversible / expiring" rule force a token rename across themes, or only a usage audit on existing tokens? Renaming touches every theme; usage-only is local. (gates Phase 2 Workstream D)
+      - Decision: usage audit only in Milestone 2 — keep existing yellow tokens, fix the violations (snapshot metadata, diagnostics values, misapplied warning-like metadata). Defer a token rename to Phase 5 or a follow-up milestone; the rename adds churn without buying a user-visible improvement now.
+    - **Dim token identity** — "dim = neutral metadata" needs a concrete value. Dedicated theme var, foreground alpha, or dedicated gray? (gates Phase 2 Workstream D)
+      - Decision: reuse the existing `--muted` token (already defined per-theme as a dedicated gray, already controls its own dim-to-foreground relationship). The earlier draft of this decision called for a new `--theme-fg-dim` token, but on implementation `--muted` was found to already satisfy the contract (per-theme, decoupled from foreground alpha), so a parallel token would have been pure duplication. Rule: "dim" in the semantic color contract maps to `--muted`. Foreground-with-alpha remains rejected because alpha renders inconsistently against themed panels vs terminal background.
+    - **Severity tiers within a semantic color** — binary (color = semantic) or subtle vs strong tiers per color? (gates Phase 2 Workstream D)
+      - Decision: binary. If a surface needs a softer treatment (e.g. dim snapshot expiry), use the dim token plus the semantic color on the label only, not a second intensity tier. Keeps the color system teachable: one color, one meaning.
+    - **Per-theme guarantee for semantic colors** — must every shipped theme implement red / yellow / green / dim distinctly, or may themes collapse caution into danger? (gates Phase 2 Workstream D)
+      - Decision: all four must be distinct in every shipped theme. Collapsing caution into danger defeats the Workstream D audit's purpose (reversible vs irreversible). Add a theme-audit step to Phase 5 verifying distinctness.
+    - **Token source of truth (cross-cutting)** — where do the new button-role and color-semantic tokens live? In the existing theme files, a new `design-tokens.css`, or derived from base theme vars? (gates Phase 2 Workstreams A + D)
+      - Decision: extend the existing theme files. Add the new semantic tokens alongside current theme vars, referencing base tokens where a clean mapping exists. Avoids introducing a new file type and keeps each theme self-contained.
+    - **Workstream ordering inside Milestone 2** — ship A → B → C → D sequentially, or one consolidated refactor? B depends on A; A's warning tone depends on D; C is independent. (gates Milestone 2 sequencing)
+      - Decision: D (color semantics) → A (buttons, which consume D's tones) → B (confirmation primitive, which consumes A) → C (form controls, independent, may run in parallel with any of the above). Each ships as its own commit inside the Milestone 2 branch; merge back to `v1.5` when all four are done.
+    - **Theme-validation cadence (cross-cutting)** — validate across all shipped themes before merging each workstream, or ship against the default theme and validate others post-hoc? (gates Phase 2 Workstreams A + C + D)
+      - Decision: validate across all shipped themes before merging each workstream. Re-running the existing per-theme capture scenes is cheap; post-hoc validation means a theme-specific regression costs a re-investigation of already-merged work.
   - **Phase 3 decisions**
     - **Workflow execution** — `run` per step only, or `run` plus `run all` in the same pass? (gates Phase 3 workflow-modal item)
       - Decision: Run per step only because the workflow commands are only examples. Unless we add inputs into the workflow form such as "target" or "domain", a run all wouldn't make sense.
@@ -174,10 +211,14 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 #### Phase 2 — Shared system workstreams
 
 - **Workstream A: button hierarchy and destructive semantics**
-  - Define four reusable button roles: `primary`, `secondary`, `ghost`, and `destructive`.
-  - Audit current usage across history rows, modal actions, toolbar buttons, rail/menu actions, and terminal action rows.
-  - Align destructive actions so they never read like safe peer-primary actions.
-  - Reserve `primary` for the dominant action in a cluster and use `ghost` for low-emphasis utilities.
+  - Ship a closed set of five button primitives that every clickable control in the app must map to — no surface-scoped one-offs:
+    - `btn` with role × tone: roles `primary` / `secondary` / `ghost` / `destructive`; tones compose with role where needed (e.g. a primary destructive). Reserve `primary` for the dominant action in a cluster; use `ghost` for low-emphasis utilities; `destructive` must never read as a safe peer-primary action.
+    - `nav-item` — sidebar rail items and mobile menu rows (navigation, not CTA). Replaces `rail-nav-item` and `menu-item` / `menu-subitem`.
+    - `close-btn` — the single icon-close primitive. Replaces `faq-close`, `workflows-close`, `shortcuts-close`, `theme-close`, `options-close`, `history-panel-close`, `search-close-btn`, and `sheet-close`.
+    - `toggle-btn` — pressed-state controls driven by `aria-pressed`. Replaces `search-toggle` and `menu-item-toggle`-style usage.
+    - `kb-key` — mobile on-screen keyboard strip (input surrogate, kept distinct from CTA buttons).
+  - Audit current usage across history rows, modal actions, toolbar buttons, rail/menu actions, terminal action rows, mobile sheets, and panel headers. Map every existing class (`term-action-btn`, `chrome-btn`, `modal-primary` + tone suffixes, `modal-secondary` + tone suffixes, `history-action-btn`, `sheet-clear-btn`, `tabs-scroll-btn`, `rail-collapse-btn`, `diag-back-btn`, `history-panel-clear-all`, `history-filter-clear-btn`, `history-mobile-filters-toggle`, the eight `*-close` classes) onto exactly one of the five primitives.
+  - Treat surface-scoped remnants as defects: after migration, no template or JS-created button should carry a class outside the five primitives (plus layout/positioning classes). Add a lint or grep-based guard to catch regressions.
   - Apply the same role system to mobile action sheets and confirmation dialogs.
 
 - **Workstream B: confirmation-dialog primitive**
@@ -194,10 +235,11 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 - **Workstream D: color-semantics audit**
   - Write explicit semantic color rules:
-    - yellow = caution / reversible destructive / expiring
+    - yellow = caution / reversible destructive / expiring / in-progress (running, live, pending)
     - red = destructive / kill / error / irreversible
-    - green = active / success / enabled / current
+    - green = completed success / enabled / current-focus (the "done/selected" tier, distinct from in-progress)
     - dim = neutral metadata
+  - Named exceptions (universal conventions that override strict semantic mapping): starred items (yellow star icon), search-hit highlights (yellow highlight), macOS-style window-control minimize button (amber, decorative chrome).
   - Audit high-visibility violations first, especially snapshot metadata, diagnostics values, and warning-like metadata that currently overuse yellow.
   - Update component docs or theme guidance where semantic usage needs to be pinned.
 
@@ -280,6 +322,8 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 - Audit all new patterns against UI screenshot capture scenes and demo-recording outputs so visual regressions are caught in the design-review pipeline.
 - Update theme audits or interaction-contract tests where the new semantics become part of a shared contract.
 - Reflect any finalized design-system rules in `FEATURES.md`, `ARCHITECTURE.md`, or `DECISIONS.md` if the changes establish durable UI behavior rather than one-off polish.
+- **Allowlist-style button-primitive contract test.** The existing `tests/js/unit/button_primitives.test.js` is a negative blocklist (retired class names cannot reappear). Add a positive contract test that scans `app/templates` and `app/static/js` for button-like surfaces (`<button>` / `role="button"` / `<a class="...">` acting as a CTA) and fails if a button-like element uses a class outside the allowed primitive family (`btn`, `nav-item`, `close-btn`, `toggle-btn`, `kb-key`) plus an explicit exception list. Starting exceptions to encode: `tab-close` (documented permanent exception — circular chrome, per-theme tokens, parent-hover opacity), and any Workstream A deferred classes that remain unmigrated at the time this test lands (`rail-nav-item`, `rail-collapse-btn`, `tabs-scroll-btn`, `chrome-btn`, `history-action-btn`, `sheet-clear-btn`) so the test is accurate today and the exception list shrinks as each deferred class migrates. Raised by the `ui_review.md` Milestone 2 review.
+- **jsdom regression coverage for the mobile running-indicator contract layer.** `app/static/js/mobile_chrome.js::121+` ships meaningful state logic (chip visibility, chip count, tab cycling, `?ri=off` kill switch, edge-glow sync on mutation / resize / scroll) with zero automated coverage. iOS-Safari-specific behaviors (cold-container smooth-scroll drop, momentum-scroll destabilization from sticky/absolute children) cannot run in jsdom, but the contract layer can: mount / unmount, chip renders N when N non-active tabs are running, chip tap activates next running tab in tab-row order, `?ri=off` skips the mount entirely, edge glow sync coordinates from `.tabs-bar.getBoundingClientRect()` when the mocked bar is scrolled. One new `tests/js/unit/mobile_running_indicator.test.js` with ~8 cases. Raised by the `ui_review.md` Milestone 1 review.
 
 ### ARCHITECTURE.md Restructure Plan
 

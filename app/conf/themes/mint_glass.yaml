@@ -88,8 +88,7 @@ history_load_modal_shadow: "rgba(43, 79, 71, 0.16)"
 
 faq_modal_bg: "#f9fffc"
 options_modal_bg: "#f9fffc"
-kill_modal_bg: "#cfe3db"
-hist_del_modal_bg: "#cfe3db"
+confirm_modal_bg: "#cfe3db"
 
 dropdown_bg: "#edf7f3"
 dropdown_border: "rgba(63, 111, 144, 0.20)"
@@ -102,7 +101,7 @@ overlay_backdrop_bg: "rgba(17, 27, 24, 0.72)"
 
 faq_code_bg: "#e5f2ed"
 allowed_chip_bg: "#e5f2ed"
-options_select_bg: "#edf7f3"
+form_control_bg: "#edf7f3"
 
 tab_status_ok_bg: "#2f8c72"
 toast_bg: "#f6fcf9"
