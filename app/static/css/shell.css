@@ -623,9 +623,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border-color: var(--theme-panel-border);
 }
 
-.modal-card-compact,
-#hist-del-modal,
-#share-redaction-modal {
+.modal-card-compact {
   width: min(520px, 92vw);
   padding: 18px 20px;
 }
@@ -991,16 +989,10 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--green);
 }
 
-/* Session token sub-modals — must sit above the options overlay (z-index 320) */
-#session-token-set-overlay,
-#session-token-migrate-overlay {
+/* Confirmation primitive must sit above the options overlay (z-index 320)
+   so Set / Migrate prompts remain reachable while the options surface is open. */
+#confirm-host {
   z-index: 340;
-}
-
-#session-token-set-modal,
-#session-token-migrate-modal {
-  width: min(480px, 92vw);
-  padding: 18px 20px;
 }
 
 .modal-token-input {
@@ -1307,11 +1299,6 @@ body .welcome-command-badge {
 }
 body .modal-card-compact {
   background: var(--theme-confirm-modal-bg) !important;
-  border-color: var(--theme-panel-border) !important;
-  box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
-}
-body #hist-del-modal {
-  background: var(--theme-hist-del-modal-bg) !important;
   border-color: var(--theme-panel-border) !important;
   box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
 }

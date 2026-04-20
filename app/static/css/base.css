@@ -80,7 +80,6 @@
   --theme-faq-modal-bg: #141414;
   --theme-options-modal-bg: #141414;
   --theme-confirm-modal-bg: #141414;
-  --theme-hist-del-modal-bg: #141414;
   --theme-dropdown-bg: color-mix(in srgb, var(--surface) 96%, transparent);
   --theme-dropdown-border: color-mix(in srgb, var(--green) 18%, transparent);
   --theme-dropdown-shadow: rgba(0,0,0,0.35);

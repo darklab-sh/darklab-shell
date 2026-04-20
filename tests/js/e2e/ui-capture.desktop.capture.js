@@ -262,7 +262,7 @@ const scenes = [
       await runCommand(page, 'date')
       await openHistoryWithEntries(page)
       await page.locator('#hist-clear-all-btn').click()
-      await expect(page.locator('#hist-del-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {
@@ -274,7 +274,7 @@ const scenes = [
       await runCommand(page, 'hostname')
       await openHistoryWithEntries(page)
       await page.locator('.history-entry').first().locator('[data-action="delete"]').click()
-      await expect(page.locator('#hist-del-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toBeVisible()
     },
   },
   {

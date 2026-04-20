@@ -1,11 +1,11 @@
 // Single imperative primitive for modal confirmations in the shell.
 //
-// Replaces (not wraps) the per-surface modal helper family
-// (showKillOverlay / showHistoryDeleteOverlay / showShareRedactionOverlay
-// / showSessionTokenSetOverlay / showSessionTokenMigrateOverlay) that
-// previously each hand-rolled its own markup, show/hide helpers, bindDismissible
-// registration, bindMobileSheet registration, affirmative-button listener,
-// and composer-refocus dance.
+// Every destructive or mode-switching confirmation (kill, history-delete,
+// history-clear, share-redaction, session-token set/migrate) resolves through
+// this helper. Previously each one hand-rolled its own markup, show/hide
+// helpers, bindDismissible registration, bindMobileSheet registration,
+// affirmative-button listener, and composer-refocus dance; now they share a
+// single pre-minted `#confirm-host` element and a declarative call shape.
 //
 // Callers compose the modal declaratively via a single call:
 //
@@ -29,13 +29,24 @@
 //   cause it (clicking through the backdrop-protected area) is not
 //   reachable by the user.
 // - Default focus lands on the role:'cancel' button. Browser native
-//   Enter-activates-focused-button then makes Enter === cancel, matching
-//   the pinned Workstream B decision (safe default, macOS/web convention).
+//   Enter-activates-focused-button then makes Enter === cancel — a safe,
+//   macOS/web convention. Pass `defaultFocus` (an action id or a DOM
+//   Node inside the content slot) to override; explicit defaultFocus
+//   wins over the cancel fallback so dialogs with form inputs can land
+//   focus directly on the input.
 // - Stacks action buttons vertically when the viewport is <=480px OR the
 //   action count is >=3, via `.modal-actions-stacked`. A matchMedia
 //   listener keeps the class reactive to resize while the modal is open.
 // - Composes with bindDismissible ('modal' level) for Escape + backdrop
 //   dismissal and with bindMobileSheet for the drag-down-to-close handle.
+// - Optional `content` slot (Node | array of Nodes) renders arbitrary
+//   markup between the body and the action row — for checkboxes, text
+//   inputs, and any other caller-managed form controls. The primitive
+//   does not inspect or validate content; the caller owns event wiring.
+// - Optional `action.onActivate` lets a caller gate the close. It is
+//   invoked when the action is clicked; returning (or resolving to)
+//   a falsy value keeps the modal open so validation errors can stay
+//   on screen. Any other return closes and resolves with the action id.
 (function (global) {
   'use strict';
 
@@ -45,6 +56,7 @@
   let _host = null;
   let _card = null;
   let _bodyEl = null;
+  let _contentEl = null;
   let _actionsEl = null;
 
   function _getHost() {
@@ -53,6 +65,7 @@
     if (!_host) return null;
     _card = _host.querySelector('[data-confirm-card]');
     _bodyEl = _host.querySelector('[data-confirm-body]');
+    _contentEl = _host.querySelector('[data-confirm-content]');
     _actionsEl = _host.querySelector('[data-confirm-actions]');
     return _host;
   }
@@ -100,6 +113,15 @@
     target.textContent = String(body);
   }
 
+  function _renderContent(target, content) {
+    target.innerHTML = '';
+    if (content === undefined || content === null) return;
+    const nodes = Array.isArray(content) ? content : [content];
+    nodes.forEach((node) => {
+      if (node instanceof Node) target.appendChild(node);
+    });
+  }
+
   function _shouldStack(actionCount) {
     if (actionCount >= 3) return true;
     if (typeof window === 'undefined' || !window.matchMedia) return false;
@@ -129,6 +151,7 @@
       _actionsEl.classList.remove('modal-actions-stacked');
     }
     if (_bodyEl) _bodyEl.innerHTML = '';
+    if (_contentEl) _contentEl.innerHTML = '';
   }
 
   function _resolveWith(value) {
@@ -151,16 +174,20 @@
     if (_isOpen()) return Promise.reject(new Error('showConfirm: another confirm is already open'));
 
     const body = opts && opts.body !== undefined ? opts.body : '';
+    const content = opts && opts.content !== undefined ? opts.content : null;
     const tone = opts && opts.tone ? opts.tone : null; // 'danger' | 'warning' | null
     const actions = opts && Array.isArray(opts.actions) ? opts.actions.filter(a => a && a.id) : [];
     if (actions.length === 0) return Promise.reject(new Error('showConfirm: actions required'));
 
     _renderBody(_bodyEl, body);
+    if (_contentEl) _renderContent(_contentEl, content);
     _card.classList.remove('modal-card-danger', 'modal-card-warning');
     if (tone === 'danger') _card.classList.add('modal-card-danger');
     else if (tone === 'warning') _card.classList.add('modal-card-warning');
 
-    // Build action buttons.
+    // Build action buttons. An action with onActivate is gated: the
+    // callback runs first, and the primitive only closes if the return
+    // (or resolved Promise value) is truthy.
     _actionsEl.innerHTML = '';
     const buttons = [];
     actions.forEach((action) => {
@@ -170,7 +197,19 @@
       btn.textContent = action.label || '';
       btn.dataset.confirmActionId = action.id;
       if (action.role === 'cancel') btn.dataset.confirmRole = 'cancel';
-      btn.addEventListener('click', () => _resolveWith(action.id));
+      btn.addEventListener('click', async () => {
+        if (typeof action.onActivate === 'function') {
+          let result;
+          try { result = action.onActivate(); }
+          catch (_) { return; }
+          if (result && typeof result.then === 'function') {
+            try { result = await result; }
+            catch (_) { return; }
+          }
+          if (!result) return; // keep the modal open
+        }
+        _resolveWith(action.id);
+      });
       _actionsEl.appendChild(btn);
       buttons.push({ btn, action });
     });
@@ -224,13 +263,24 @@
       }
     }
 
-    // Default focus: role:'cancel' button, else defaultFocus, else first.
+    // Default focus precedence:
+    //   1. explicit `defaultFocus` — Node wins literally; a string looks
+    //      up an action id. Explicit callers (e.g. modals with a form
+    //      input) need to override the cancel fallback.
+    //   2. role:'cancel' button — the safe default for confirmation
+    //      dialogs so Enter activates cancel.
+    //   3. first button — last resort when neither cancel nor default
+    //      focus applies.
     let focusTarget = null;
-    const cancel = buttons.find(({ action }) => action.role === 'cancel');
-    if (cancel) focusTarget = cancel.btn;
-    else if (opts.defaultFocus) {
+    if (opts.defaultFocus instanceof Node) {
+      focusTarget = opts.defaultFocus;
+    } else if (typeof opts.defaultFocus === 'string' && opts.defaultFocus) {
       const explicit = buttons.find(({ action }) => action.id === opts.defaultFocus);
       if (explicit) focusTarget = explicit.btn;
+    }
+    if (!focusTarget) {
+      const cancel = buttons.find(({ action }) => action.role === 'cancel');
+      if (cancel) focusTarget = cancel.btn;
     }
     if (!focusTarget && buttons.length) focusTarget = buttons[0].btn;
     if (focusTarget && typeof focusTarget.focus === 'function') {

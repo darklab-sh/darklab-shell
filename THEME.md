@@ -330,8 +330,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 |-----|--------------|---------------|----------|
 | `faq_modal_bg` | `#141414` | `#e8eef6` | FAQ modal background |
 | `options_modal_bg` | `#141414` | `#e8eef6` | Options modal background |
-| `kill_modal_bg` | `#141414` | `#d4e0ec` | Kill confirmation modal background |
-| `hist_del_modal_bg` | `#141414` | `#d4e0ec` | History delete confirmation modal background |
+| `confirm_modal_bg` | `#141414` | `#d4e0ec` | Confirmation modal background (shared for all `showConfirm` dialogs) |
 | `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Main autocomplete dropdown background |
 | `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Main autocomplete border |
 | `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Main autocomplete shadow |

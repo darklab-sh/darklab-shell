@@ -154,8 +154,7 @@ history_load_modal_shadow: "rgba(0,0,0,0.35)"
 # Modals
 faq_modal_bg: "#141414"
 options_modal_bg: "#141414"
-kill_modal_bg: "#141414"
-hist_del_modal_bg: "#141414"
+confirm_modal_bg: "#141414"
 
 # Dropdowns / autocomplete
 dropdown_bg: "color-mix(in srgb, var(--surface) 96%, transparent)"

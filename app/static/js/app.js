@@ -92,8 +92,6 @@ const _historyPanelHomeParent = typeof historyPanel !== 'undefined' && historyPa
 const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && permalinkToast ? permalinkToast.parentElement : null;
 const _confirmHostEl = document.getElementById('confirm-host');
 const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : null;
-const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
-const _shareRedactionOverlayHomeParent = typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay.parentElement : null;
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
@@ -103,7 +101,6 @@ const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTim
 const _headerHomeParent = typeof headerTitle !== 'undefined' && headerTitle ? headerTitle.closest('header') : (typeof document !== 'undefined' ? document.querySelector('header') : null);
 const _mobileHeaderActionsHomeParent = typeof mobileHeaderActions !== 'undefined' && mobileHeaderActions ? mobileHeaderActions : _headerHomeParent;
 const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
-let _pendingShareRedactionResolver = null;
 let _tabSessionPersistTimer = null;
 let _tabSessionRestoreInProgress = false;
 const _welcomeIntroModes = ['animated', 'disable_animation', 'remove'];
@@ -174,8 +171,6 @@ const _uiOverlayRefs = {
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
-  histDelOverlay: typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay : null,
-  shareRedactionOverlay: typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay : null,
 };
 
 function _bindMobileComposerInteractions(uiRefs) {
@@ -249,10 +244,8 @@ const _mobileShellTranscriptNodes = [
 ];
 const _mobileShellOverlayNodes = [
   { node: historyPanel, homeParent: _historyPanelHomeParent, desktopAnchor: permalinkToast || null },
-  { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: _confirmHostEl || histDelOverlay || null },
-  { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: histDelOverlay || null },
-  { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: shareRedactionOverlay || null },
-  { node: shareRedactionOverlay, homeParent: _shareRedactionOverlayHomeParent, desktopAnchor: faqOverlay || null },
+  { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: _confirmHostEl || faqOverlay || null },
+  { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
   { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
@@ -588,64 +581,54 @@ function clearActiveShortcutTab() {
   clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
 }
 
-function getRememberedShareRedactionChoice() {
-  const stored = getShareRedactionDefaultPreference();
-  return stored === 'raw' || stored === 'redacted' ? stored : null;
+function _buildShareRedactionRememberField() {
+  const field = document.createElement('div');
+  field.className = 'faq-item modal-inline-field';
+  const fieldset = document.createElement('div');
+  fieldset.className = 'faq-a options-fieldset';
+  const choice = document.createElement('label');
+  choice.className = 'options-choice';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = 'share-redaction-remember-toggle';
+  const text = document.createElement('span');
+  text.textContent = 'Set this as my default share-snapshot choice';
+  choice.appendChild(checkbox);
+  choice.appendChild(text);
+  fieldset.appendChild(choice);
+  field.appendChild(fieldset);
+  return { field, checkbox };
 }
 
-function _rememberShareRedactionChoice(choice, remember) {
-  if (!remember) return;
-  if (choice === 'raw' || choice === 'redacted') {
+async function confirmPermalinkRedactionChoice() {
+  if (APP_CONFIG && APP_CONFIG.share_redaction_enabled === false) return 'raw';
+  const preferred = getShareRedactionDefaultPreference();
+  if (preferred === 'raw' || preferred === 'redacted') return preferred;
+
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+
+  const { field, checkbox } = _buildShareRedactionRememberField();
+  let choice = null;
+  try {
+    choice = await showConfirm({
+      body: {
+        text: 'Create permalink with redaction enabled?',
+        note: 'Redaction can mask common sensitive values such as IP addresses, host names, email addresses, bearer tokens, and any operator-defined share redaction rules before the snapshot is saved.',
+      },
+      content: field,
+      actions: [
+        { id: 'cancel',   label: 'Cancel',         role: 'cancel' },
+        { id: 'raw',      label: 'Share Raw',      role: 'secondary' },
+        { id: 'redacted', label: 'Share Redacted', role: 'primary' },
+      ],
+    });
+  } catch (_) { choice = null; }
+
+  if ((choice === 'raw' || choice === 'redacted') && checkbox.checked) {
     applyShareRedactionDefaultPreference(choice);
   }
-}
-
-function showShareRedactionOverlay() {
-  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-  if (shareRedactionRememberToggle) shareRedactionRememberToggle.checked = false;
-  showModalOverlay(shareRedactionOverlay, 'flex');
-}
-
-function hideShareRedactionOverlay() {
-  if (shareRedactionRememberToggle) shareRedactionRememberToggle.checked = false;
-  hideModalOverlay(shareRedactionOverlay);
-}
-
-function isShareRedactionOverlayOpen() {
-  return isModalOverlayOpen(shareRedactionOverlay, 'flex');
-}
-
-function resolveShareRedactionChoice(choice) {
-  const remember = !!(shareRedactionRememberToggle && shareRedactionRememberToggle.checked);
-  _rememberShareRedactionChoice(choice, remember);
-  hideShareRedactionOverlay();
-  if (_pendingShareRedactionResolver) {
-    const resolver = _pendingShareRedactionResolver;
-    _pendingShareRedactionResolver = null;
-    resolver(choice);
-  }
-}
-
-function cancelShareRedactionChoice() {
-  const wasOpen = isShareRedactionOverlayOpen();
-  const hadPending = !!_pendingShareRedactionResolver;
-  hideShareRedactionOverlay();
-  if (_pendingShareRedactionResolver) {
-    const resolver = _pendingShareRedactionResolver;
-    _pendingShareRedactionResolver = null;
-    resolver(null);
-  }
-  if (wasOpen || hadPending) refocusComposerAfterAction({ defer: true });
-}
-
-function confirmPermalinkRedactionChoice() {
-  if (APP_CONFIG && APP_CONFIG.share_redaction_enabled === false) return Promise.resolve('raw');
-  const preferred = getShareRedactionDefaultPreference();
-  if (preferred === 'raw' || preferred === 'redacted') return Promise.resolve(preferred);
-  showShareRedactionOverlay();
-  return new Promise(resolve => {
-    _pendingShareRedactionResolver = resolve;
-  });
+  if (choice === 'raw' || choice === 'redacted') return choice;
+  return null;
 }
 
 function _snapshotTabRawLines(rawLines) {

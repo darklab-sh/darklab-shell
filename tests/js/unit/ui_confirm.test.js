@@ -18,6 +18,7 @@ function mountHost() {
     <div id="confirm-host" class="modal-overlay u-hidden">
       <div class="modal-card modal-card-compact" data-confirm-card>
         <div class="modal-copy" data-confirm-body></div>
+        <div class="modal-confirm-content" data-confirm-content></div>
         <div class="modal-actions modal-actions-wrap" data-confirm-actions></div>
       </div>
     </div>
@@ -358,6 +359,198 @@ describe('showConfirm', () => {
           .querySelector('[data-confirm-actions]')
           .classList.contains('modal-actions-stacked'),
       ).toBe(false)
+      g.cancelConfirm()
+      await promise
+    })
+  })
+
+  describe('content slot', () => {
+    it('renders a single Node into the content slot', async () => {
+      const input = document.createElement('input')
+      input.type = 'text'
+      input.id = 'session-token-set-input'
+      const promise = g.showConfirm({ content: input, actions: KILL_ACTIONS })
+      const slot = document.querySelector('[data-confirm-content]')
+      expect(slot.children.length).toBe(1)
+      expect(slot.querySelector('#session-token-set-input')).toBe(input)
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('renders an array of Nodes into the content slot in order', async () => {
+      const a = document.createElement('span')
+      a.textContent = 'first'
+      const b = document.createElement('span')
+      b.textContent = 'second'
+      const promise = g.showConfirm({ content: [a, b], actions: KILL_ACTIONS })
+      const slot = document.querySelector('[data-confirm-content]')
+      expect(slot.children.length).toBe(2)
+      expect(slot.children[0].textContent).toBe('first')
+      expect(slot.children[1].textContent).toBe('second')
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('skips non-Node items in an array silently', async () => {
+      const node = document.createElement('span')
+      node.textContent = 'only me'
+      const promise = g.showConfirm({
+        content: [null, undefined, 'strings-are-ignored', node],
+        actions: KILL_ACTIONS,
+      })
+      const slot = document.querySelector('[data-confirm-content]')
+      expect(slot.children.length).toBe(1)
+      expect(slot.children[0]).toBe(node)
+      g.cancelConfirm()
+      await promise
+    })
+
+    it('clears the content slot on resolve', async () => {
+      const node = document.createElement('div')
+      node.textContent = 'slot content'
+      const promise = g.showConfirm({ content: node, actions: KILL_ACTIONS })
+      const slot = document.querySelector('[data-confirm-content]')
+      expect(slot.children.length).toBe(1)
+      g.cancelConfirm()
+      await promise
+      expect(slot.children.length).toBe(0)
+      expect(slot.innerHTML).toBe('')
+    })
+
+    it('clears stale content between opens', async () => {
+      const first = document.createElement('span')
+      first.textContent = 'first open'
+      const p1 = g.showConfirm({ content: first, actions: KILL_ACTIONS })
+      g.cancelConfirm()
+      await p1
+      const p2 = g.showConfirm({ actions: KILL_ACTIONS })
+      const slot = document.querySelector('[data-confirm-content]')
+      expect(slot.innerHTML).toBe('')
+      g.cancelConfirm()
+      await p2
+    })
+  })
+
+  describe('onActivate gating', () => {
+    it('keeps the modal open when onActivate returns false (sync)', async () => {
+      const onActivate = vi.fn(() => false)
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary', onActivate },
+        ],
+      })
+      document.querySelector('[data-confirm-action-id="apply"]').click()
+      // Flush microtasks so the click handler's await resolves.
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(onActivate).toHaveBeenCalledTimes(1)
+      expect(g.isConfirmOpen()).toBe(true)
+      // Cleanup: dismiss so later tests start clean.
+      g.cancelConfirm()
+      await expect(promise).resolves.toBeNull()
+    })
+
+    it('closes and resolves when onActivate returns true', async () => {
+      const onActivate = vi.fn(() => true)
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary', onActivate },
+        ],
+      })
+      document.querySelector('[data-confirm-action-id="apply"]').click()
+      await expect(promise).resolves.toBe('apply')
+      expect(onActivate).toHaveBeenCalledTimes(1)
+      expect(g.isConfirmOpen()).toBe(false)
+    })
+
+    it('keeps the modal open while an async onActivate is pending', async () => {
+      let resolveGate
+      const onActivate = vi.fn(
+        () => new Promise((r) => { resolveGate = r }),
+      )
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary', onActivate },
+        ],
+      })
+      document.querySelector('[data-confirm-action-id="apply"]').click()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(onActivate).toHaveBeenCalledTimes(1)
+      expect(g.isConfirmOpen()).toBe(true)
+      resolveGate(false)
+      // Resolved to false — modal should remain open after the microtask flush.
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(g.isConfirmOpen()).toBe(true)
+      g.cancelConfirm()
+      await expect(promise).resolves.toBeNull()
+    })
+
+    it('closes and resolves when an async onActivate resolves truthy', async () => {
+      const onActivate = vi.fn(() => Promise.resolve('ok'))
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary', onActivate },
+        ],
+      })
+      document.querySelector('[data-confirm-action-id="apply"]').click()
+      await expect(promise).resolves.toBe('apply')
+      expect(g.isConfirmOpen()).toBe(false)
+    })
+
+    it('keeps the modal open when onActivate throws synchronously', async () => {
+      const onActivate = vi.fn(() => { throw new Error('boom') })
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary', onActivate },
+        ],
+      })
+      document.querySelector('[data-confirm-action-id="apply"]').click()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(onActivate).toHaveBeenCalledTimes(1)
+      expect(g.isConfirmOpen()).toBe(true)
+      g.cancelConfirm()
+      await expect(promise).resolves.toBeNull()
+    })
+
+    it('keeps the modal open when an async onActivate rejects', async () => {
+      const onActivate = vi.fn(() => Promise.reject(new Error('fail')))
+      const promise = g.showConfirm({
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'apply', label: 'Apply', role: 'primary', onActivate },
+        ],
+      })
+      document.querySelector('[data-confirm-action-id="apply"]').click()
+      await Promise.resolve()
+      await Promise.resolve()
+      await Promise.resolve()
+      expect(g.isConfirmOpen()).toBe(true)
+      g.cancelConfirm()
+      await expect(promise).resolves.toBeNull()
+    })
+  })
+
+  describe('defaultFocus Node', () => {
+    it('focuses an explicit Node passed as defaultFocus, overriding role:cancel', async () => {
+      const input = document.createElement('input')
+      input.type = 'text'
+      input.id = 'focus-target-input'
+      // jsdom only allows focus on elements actually attached to the
+      // document, which happens when the primitive appends content.
+      const promise = g.showConfirm({
+        content: input,
+        defaultFocus: input,
+        actions: KILL_ACTIONS,
+      })
+      expect(document.activeElement).toBe(input)
       g.cancelConfirm()
       await promise
     })

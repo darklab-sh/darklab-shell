@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 621
+- `vitest`: 632
 - `playwright`: 179
-- total: 1,636
+- total: 1,647
 
 This document is organized in two parts:
 
@@ -1161,9 +1161,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `Tab expands the typed value to the longest shared autocomplete prefix before cycling` | Verifies that Tab expands the typed value to the longest shared autocomplete prefix before cycling. |
 | `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
 | `Tab key with a modifier does not trigger autocomplete accept or selection` | Tab key with a modifier does not trigger autocomplete accept or selection. |
-| `wires the history delete modal buttons and backdrop correctly` | Verifies that wires the history delete modal buttons and backdrop correctly. |
-| `wires the share redaction modal buttons, remember choice, and backdrop correctly` | Verifies that the permalink share-redaction modal can choose raw vs redacted sharing, persist that choice into the shared Options default when requested, and cancel from the backdrop. |
-| `uses the persistent share redaction default before showing the modal prompt` | Verifies that a persistent raw/redacted preference suppresses the prompt before any modal choice is needed. |
+| `routes hist-clear-all through confirmHistAction` | Verifies that the "Clear history" toolbar button opens the shared `showConfirm` prompt via `confirmHistAction` rather than binding its own modal. |
+| `uses the persistent share redaction default before showing the modal prompt` | Verifies that a persistent raw/redacted preference short-circuits `showConfirm` so the share-redaction prompt is never opened. |
 | `wires search controls and Escape dismissal correctly` | Verifies that wires search controls and Escape dismissal correctly. |
 | `refocuses the visible mobile composer after closing search with Escape` | Verifies that refocuses the visible mobile composer after closing search with Escape. |
 | `opens and closes the FAQ overlay through the wired controls` | Verifies that opens and closes the FAQ overlay through the wired controls. |
@@ -1680,6 +1679,18 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `stacks when there are 3+ actions regardless of viewport` | Verifies modal-actions-stacked is applied when action count is 3 or more. |
 | `stacks when the viewport is <=480px even with 2 actions` | Verifies modal-actions-stacked is applied on narrow viewports for a 2-action dialog. |
 | `does not stack for 2 actions on wide viewports` | Verifies the default side-by-side layout for 2 actions above the breakpoint. |
+| `renders a single Node into the content slot` | Verifies a DOM Node passed as `content` is appended to the `[data-confirm-content]` slot. |
+| `renders an array of Nodes into the content slot in order` | Verifies an array of Nodes is appended into the content slot preserving order. |
+| `skips non-Node items in an array silently` | Verifies non-Node items in the content array are ignored rather than throwing. |
+| `clears the content slot on resolve` | Verifies caller-supplied content is removed when the confirm promise settles. |
+| `clears stale content between opens` | Verifies a second open does not carry over content from the previous call. |
+| `keeps the modal open when onActivate returns false (sync)` | Verifies a primary action's sync onActivate returning false keeps the modal open instead of resolving. |
+| `closes and resolves when onActivate returns true` | Verifies a sync onActivate returning true closes the modal and resolves with the action id. |
+| `keeps the modal open while an async onActivate is pending` | Verifies the modal stays open until an async onActivate settles. |
+| `closes and resolves when an async onActivate resolves truthy` | Verifies an async onActivate resolving truthy closes the modal and resolves the confirm promise. |
+| `keeps the modal open when onActivate throws synchronously` | Verifies a sync throw in onActivate is caught and the modal stays open so callers can surface errors inline. |
+| `keeps the modal open when an async onActivate rejects` | Verifies a rejected async onActivate is caught and the modal stays open. |
+| `focuses an explicit Node passed as defaultFocus, overriding role:cancel` | Verifies a Node passed as `defaultFocus` receives focus on open instead of the cancel button. |
 
 #### `ui_outside_click.test.js`
 

@@ -88,8 +88,7 @@ history_load_modal_shadow: "rgba(66, 61, 92, 0.16)"
 
 faq_modal_bg: "#fbfaff"
 options_modal_bg: "#fbfaff"
-kill_modal_bg: "#d8d1e8"
-hist_del_modal_bg: "#d8d1e8"
+confirm_modal_bg: "#d8d1e8"
 
 dropdown_bg: "#f0edf8"
 dropdown_border: "rgba(93, 113, 168, 0.20)"

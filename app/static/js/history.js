@@ -500,18 +500,6 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 
-function _setHistoryDeleteMessage(title, detail) {
-  const msg = histDelMsg;
-  if (!msg) return;
-  msg.replaceChildren();
-  msg.appendChild(document.createTextNode(title));
-  msg.appendChild(document.createElement('br'));
-  const note = document.createElement('span');
-  note.className = 'history-delete-note';
-  note.textContent = detail;
-  msg.appendChild(note);
-}
-
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry' + (isStarred ? ' starred' : '');
@@ -597,18 +585,29 @@ let pendingHistAction = null;
 
 function confirmHistAction(type, id, command) {
   pendingHistAction = { type, id, command };
-  const msg      = histDelMsg;
-  const confirm  = histDelConfirmBtn;
-  if (type === 'clear') {
-    _setHistoryDeleteMessage('Clear run history?', 'This cannot be undone.');
-    showHistoryDeleteNonfav();
-    confirm.textContent   = 'Delete all';
-  } else {
-    _setHistoryDeleteMessage('Remove this run from history?', 'This cannot be undone.');
-    hideHistoryDeleteNonfav();
-    confirm.textContent   = 'Delete';
-  }
-  showHistoryDeleteOverlay();
+  const isBulk = type === 'clear';
+  const body = isBulk
+    ? { text: 'Clear run history?', note: 'This cannot be undone.' }
+    : { text: 'Remove this run from history?', note: 'This cannot be undone.' };
+  const actions = isBulk
+    ? [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'nonfav', label: 'Delete Non-Favorites', role: 'secondary', tone: 'warning' },
+        { id: 'all',    label: 'Delete all', role: 'primary', tone: 'warning' },
+      ]
+    : [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'one',    label: 'Delete', role: 'primary', tone: 'warning' },
+      ];
+  showConfirm({ body, tone: 'warning', actions }).then((choice) => {
+    if (!choice || choice === 'cancel') {
+      pendingHistAction = null;
+      return;
+    }
+    if (choice === 'nonfav') executeHistAction('clear-nonfav');
+    else if (choice === 'all') executeHistAction();
+    else if (choice === 'one') executeHistAction('delete');
+  });
 }
 
 function executeHistAction(type) {

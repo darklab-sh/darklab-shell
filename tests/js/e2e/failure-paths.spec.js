@@ -80,7 +80,7 @@ test.describe('failure paths', () => {
 
     await runCommand(page, CMD)
     await page.locator('.hud-actions [data-action="permalink"]').click()
-    await page.locator('#share-redaction-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="redacted"]').click()
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to create permalink')
   })
@@ -101,7 +101,7 @@ test.describe('failure paths', () => {
 
     const entry = page.locator('.history-entry').first()
     await entry.locator('[data-action="delete"]').click()
-    await page.locator('#hist-del-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="one"]').click()
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to delete run')
     await expect(page.locator('.history-entry')).toHaveCount(1)
@@ -122,7 +122,7 @@ test.describe('failure paths', () => {
     await page.locator('.rail-nav [data-action="history"]').click()
     await page.locator('#history-list > *').first().waitFor({ state: 'visible' })
     await page.locator('#hist-clear-all-btn').click()
-    await page.locator('#hist-del-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="all"]').click()
 
     await expect(page.locator('#permalink-toast')).toContainText('Failed to clear history')
     await expect(page.locator('.hist-chip')).toHaveCount(2)
