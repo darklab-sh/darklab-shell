@@ -118,6 +118,213 @@
     obs.observe(runTimerEl, { characterData: true, childList: true, subtree: true });
   }
 
+  // ── Mobile non-active running-state indicator (Workstream E prelude) ──
+  // The mobile status pill reflects the active tab only; this surface is
+  // the system-level signal that work is happening on a backgrounded tab.
+  // Trailing-edge chip with the running non-active count cycles through
+  // those tabs on tap (in tab-row order).
+  //
+  // Kill switch for debugging iOS scroll interactions: append ?ri=off
+  // (or ?ri=0) to the URL to fully skip mounting the chip and observers.
+  const _runningIndicatorDisabled = (() => {
+    try {
+      const q = (typeof location !== 'undefined' && location.search) ? location.search : '';
+      return /[?&]ri=(?:off|0)\b/.test(q);
+    } catch (_) { return false; }
+  })();
+  const tabsBarEl    = _runningIndicatorDisabled ? null : document.getElementById('tabs-bar');
+  const terminalBarEl = tabsBarEl ? tabsBarEl.closest('.terminal-bar') : null;
+  let runningChipEl       = null;
+  let runningChipCountEl  = null;
+  let edgeGlowLeftEl      = null;
+  let edgeGlowRightEl     = null;
+  let _runningCycleIdx    = 0;
+
+  function _ensureRunningIndicatorMounts() {
+    if (!terminalBarEl) return;
+    if (!runningChipEl) {
+      runningChipEl = document.createElement('button');
+      runningChipEl.type = 'button';
+      runningChipEl.id = 'mobile-running-chip';
+      runningChipEl.className = 'mobile-running-chip u-hidden';
+      runningChipEl.setAttribute('aria-label', 'Cycle to next running tab');
+      runningChipEl.title = 'Cycle to next running tab';
+      const dot = document.createElement('span');
+      dot.className = 'mobile-running-dot';
+      dot.setAttribute('aria-hidden', 'true');
+      dot.textContent = '●';
+      runningChipCountEl = document.createElement('span');
+      runningChipCountEl.className = 'mobile-running-count';
+      runningChipCountEl.textContent = '0';
+      runningChipEl.append(dot, runningChipCountEl);
+      runningChipEl.addEventListener('click', _onRunningChipTap);
+      terminalBarEl.appendChild(runningChipEl);
+    }
+    // Edge glows are position:fixed overlays parented to body so they
+    // never live inside the tabs-bar flex/scroll chain (which empirically
+    // destabilises iOS Safari momentum scroll — see the comment block in
+    // mobile.css for the full rationale).
+    if (!edgeGlowLeftEl && document.body) {
+      edgeGlowLeftEl = document.createElement('span');
+      edgeGlowLeftEl.className = 'tab-edge-glow tab-edge-glow-left';
+      edgeGlowLeftEl.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(edgeGlowLeftEl);
+    }
+    if (!edgeGlowRightEl && document.body) {
+      edgeGlowRightEl = document.createElement('span');
+      edgeGlowRightEl.className = 'tab-edge-glow tab-edge-glow-right';
+      edgeGlowRightEl.setAttribute('aria-hidden', 'true');
+      document.body.appendChild(edgeGlowRightEl);
+    }
+  }
+
+  function _runningNonActiveTabs() {
+    if (!tabsBarEl) return [];
+    const tabsList = (typeof global.getTabs === 'function') ? global.getTabs() : null;
+    if (!Array.isArray(tabsList)) return [];
+    const activeId = (typeof global.getActiveTabId === 'function') ? global.getActiveTabId() : null;
+    const byId = new Map(tabsList.map(t => [t.id, t]));
+    // Tab-row order is the visual order, not the array order — drag-reorder
+    // mutates the DOM but not the underlying tabs array.
+    const orderedIds = Array.from(tabsBarEl.querySelectorAll('.tab')).map(n => n.dataset.id);
+    return orderedIds
+      .map(id => byId.get(id))
+      .filter(t => !!t && t.st === 'running' && t.id !== activeId);
+  }
+
+  // iOS Safari has a known bug where smooth scrollTo/scrollIntoView is
+  // silently dropped on the first call to a horizontal scroll container
+  // that has never been scrolled (the "cold container" case). Subsequent
+  // calls work because the container is "warm". We avoid the bug by
+  // setting scrollLeft directly, which always takes effect.
+  function _scrollTabIntoView(id) {
+    if (!tabsBarEl || !id) return;
+    const node = tabsBarEl.querySelector(`.tab[data-id="${id}"]`);
+    if (!node) return;
+    const tabRect = node.getBoundingClientRect();
+    const barRect = tabsBarEl.getBoundingClientRect();
+    const visibleLeft = tabRect.left >= barRect.left;
+    const visibleRight = tabRect.right <= barRect.right;
+    if (visibleLeft && visibleRight) return;
+    const tabLeftInContent = tabRect.left - barRect.left + tabsBarEl.scrollLeft;
+    const centered = tabLeftInContent - (barRect.width - tabRect.width) / 2;
+    const maxScroll = Math.max(0, tabsBarEl.scrollWidth - tabsBarEl.clientWidth);
+    tabsBarEl.scrollLeft = Math.max(0, Math.min(maxScroll, centered));
+  }
+
+  function _onRunningChipTap() {
+    const running = _runningNonActiveTabs();
+    if (running.length === 0) return;
+    const next = running[_runningCycleIdx % running.length];
+    _runningCycleIdx += 1;
+    const activate = (typeof window !== 'undefined' && typeof window.activateTab === 'function')
+      ? window.activateTab
+      : (typeof activateTab === 'function' ? activateTab : null);
+    if (activate) activate(next.id, { focusComposer: false });
+    // activateTab calls ensureActiveTabVisible internally with smooth
+    // scroll, but that gets dropped on the first (cold-container) call.
+    // Override with an instant scrollLeft after the activation DOM work
+    // has settled so the user always sees the newly-active tab.
+    _scrollTabIntoView(next.id);
+  }
+
+  function _hideEdgeGlows() {
+    if (edgeGlowLeftEl) edgeGlowLeftEl.classList.remove('is-active');
+    if (edgeGlowRightEl) edgeGlowRightEl.classList.remove('is-active');
+  }
+
+  function _syncEdgeGlows(running) {
+    if (!tabsBarEl || !edgeGlowLeftEl || !edgeGlowRightEl) return;
+    if (!running || running.length === 0) { _hideEdgeGlows(); return; }
+    const barRect = tabsBarEl.getBoundingClientRect();
+    // Position both overlays flush against the visible tab-bar edges.
+    // Round to whole pixels so the glow edge doesn't sub-pixel blur.
+    const top = Math.round(barRect.top) + 'px';
+    const height = Math.round(barRect.height) + 'px';
+    edgeGlowLeftEl.style.top = top;
+    edgeGlowLeftEl.style.height = height;
+    edgeGlowLeftEl.style.left = Math.round(barRect.left) + 'px';
+    edgeGlowRightEl.style.top = top;
+    edgeGlowRightEl.style.height = height;
+    edgeGlowRightEl.style.left = Math.round(barRect.right - 22) + 'px';
+    // Direction: which side(s) have a running non-active tab off-screen.
+    let leftActive = false;
+    let rightActive = false;
+    for (const t of running) {
+      const node = tabsBarEl.querySelector(`.tab[data-id="${t.id}"]`);
+      if (!node) continue;
+      const r = node.getBoundingClientRect();
+      if (r.right < barRect.left + 4) leftActive = true;
+      else if (r.left > barRect.right - 4) rightActive = true;
+    }
+    edgeGlowLeftEl.classList.toggle('is-active', leftActive);
+    edgeGlowRightEl.classList.toggle('is-active', rightActive);
+  }
+
+  let _runningSyncRaf = 0;
+  let _scrollSyncTimer = 0;
+
+  function _applyRunningState() {
+    if (!terminalBarEl || !tabsBarEl) return;
+    const isMobile = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+    if (!isMobile) {
+      if (runningChipEl) runningChipEl.classList.add('u-hidden');
+      _hideEdgeGlows();
+      return;
+    }
+    _ensureRunningIndicatorMounts();
+    const running = _runningNonActiveTabs();
+    const count = running.length;
+    if (count === 0) {
+      runningChipEl.classList.add('u-hidden');
+      _hideEdgeGlows();
+      _runningCycleIdx = 0;
+      return;
+    }
+    runningChipEl.classList.remove('u-hidden');
+    runningChipCountEl.textContent = String(count);
+    _syncEdgeGlows(running);
+  }
+
+  // rAF-coalesced so a burst of class mutations on the tab row folds
+  // into a single sync per frame.
+  function syncRunningIndicator() {
+    if (_runningSyncRaf) return;
+    _runningSyncRaf = (typeof requestAnimationFrame === 'function'
+      ? requestAnimationFrame
+      : (cb) => setTimeout(cb, 16))(() => {
+      _runningSyncRaf = 0;
+      _applyRunningState();
+    });
+  }
+
+  if (terminalBarEl && tabsBarEl && typeof MutationObserver === 'function') {
+    _ensureRunningIndicatorMounts();
+    // Narrow the observer to attribute changes on direct .tab children.
+    // Running/active state lives in per-tab classes; we don't need
+    // subtree+childList which would also fire on timer textNode updates
+    // and drag-reorder DOM moves (both irrelevant to the chip count).
+    new MutationObserver(syncRunningIndicator).observe(tabsBarEl, {
+      attributes: true,
+      attributeFilter: ['class'],
+      subtree: true,
+    });
+    // Also observe childList at the top level so tab add/remove retriggers.
+    new MutationObserver(syncRunningIndicator).observe(tabsBarEl, {
+      childList: true,
+    });
+    window.addEventListener('resize', syncRunningIndicator);
+    // Edge glow direction depends on scroll position; debounce to
+    // scroll-end so we never force layout during momentum. 120ms feels
+    // immediate enough once the finger lifts but avoids firing per-frame
+    // during the flick.
+    tabsBarEl.addEventListener('scroll', () => {
+      if (_scrollSyncTimer) clearTimeout(_scrollSyncTimer);
+      _scrollSyncTimer = setTimeout(syncRunningIndicator, 120);
+    }, { passive: true });
+  }
+  syncRunningIndicator();
+
   // ── 2C: Menu sheet ───────────────────────────────────────────────
   function setActionHint(el, text) {
     if (el) el.textContent = text || '';
@@ -798,15 +1005,28 @@
   // with the sheet drag handlers in mobile_sheet.js, which run on Pointer
   // Events with setPointerCapture and `touch-action: none` on the grab — those
   // already bypass the browser's default touch handling.
+  let _touchStartX = null;
   let _touchStartY = null;
   document.addEventListener('touchstart', (e) => {
-    _touchStartY = e.touches.length === 1 ? e.touches[0].clientY : null;
+    if (e.touches.length === 1) {
+      _touchStartX = e.touches[0].clientX;
+      _touchStartY = e.touches[0].clientY;
+    } else {
+      _touchStartX = null;
+      _touchStartY = null;
+    }
   }, { passive: true });
   document.addEventListener('touchmove', (e) => {
     if (!document.body.classList.contains('mobile-terminal-mode')) return;
     if (_touchStartY == null || e.touches.length !== 1) return;
     const dy = e.touches[0].clientY - _touchStartY;
+    const dx = e.touches[0].clientX - _touchStartX;
     if (dy === 0) return;
+    // Predominantly horizontal gestures are never pull-to-refresh
+    // candidates; bailing out here lets horizontal scroll containers
+    // (e.g. the mobile tab bar, with overflow-y:hidden so the vertical
+    // walk below wouldn't find them) receive the full gesture.
+    if (Math.abs(dx) >= Math.abs(dy)) return;
     let el = e.target;
     while (el && el !== document.body && el !== document.documentElement) {
       if (el.scrollHeight > el.clientHeight) {
@@ -833,5 +1053,6 @@
     openMenuSheet, closeMenuSheet, isMenuSheetOpen,
     renderRecentPeek, syncRunState, syncKbHelper,
     refreshMenuStateHints, refreshWorkflowsCount, refreshThemeHint,
+    syncRunningIndicator,
   };
 })(typeof window !== 'undefined' ? window : this);
