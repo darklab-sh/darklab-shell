@@ -500,14 +500,25 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 
+function _historyRelativeTime(startedAt, now = new Date()) {
+  if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) return '';
+  const diffSec = Math.round((now.getTime() - startedAt.getTime()) / 1000);
+  if (diffSec < 45) return 'just now';
+  if (diffSec < 60 * 60) return `${Math.round(diffSec / 60)}m ago`;
+  if (diffSec < 60 * 60 * 24) return `${Math.round(diffSec / 3600)}h ago`;
+  if (diffSec < 60 * 60 * 24 * 7) return `${Math.round(diffSec / 86400)}d ago`;
+  return startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry' + (isStarred ? ' starred' : '');
   const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
   const startedAt = new Date(run.started);
   const now = new Date();
+  const validDate = !Number.isNaN(startedAt.getTime());
   const time = startedAt.toLocaleTimeString();
-  const showDate = !Number.isNaN(startedAt.getTime()) && (
+  const showDate = validDate && (
     startedAt.getFullYear() !== now.getFullYear()
     || startedAt.getMonth() !== now.getMonth()
     || startedAt.getDate() !== now.getDate()
@@ -554,11 +565,11 @@ function _createHistoryEntry(run, isStarred) {
   const actions = document.createElement('div');
   actions.className = 'history-actions';
 
-  const copyBtn = document.createElement('button');
-  copyBtn.className = 'history-action-btn';
-  copyBtn.dataset.action = 'copy';
-  copyBtn.textContent = 'copy';
-  actions.appendChild(copyBtn);
+  const restoreBtn = document.createElement('button');
+  restoreBtn.className = 'history-action-btn';
+  restoreBtn.dataset.action = 'restore';
+  restoreBtn.textContent = 'restore';
+  actions.appendChild(restoreBtn);
 
   const permalinkBtn = document.createElement('button');
   permalinkBtn.className = 'history-action-btn';
@@ -580,7 +591,7 @@ function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
   const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
   if (!mobileMode) return false;
-  return action === 'copy' || action === 'permalink';
+  return action === 'permalink';
 }
 
 
@@ -730,35 +741,20 @@ function refreshHistoryPanel() {
       const isStarred = starred.has(run.command);
       const entry = _createHistoryEntry(run, isStarred);
 
-      // Click anywhere on the entry (except buttons) to load into a new tab,
-      // or switch to the existing tab if this command is already loaded there.
+      // Click anywhere on the entry (except buttons) to load the command into
+      // the composer for re-run. Full tab-restore is available via the
+      // dedicated `restore` action button.
       entry.addEventListener('click', e => {
         if (e.target.closest('[data-action]')) return;
-
-        // If a tab already has this command and already has the full output,
-        // switch to it instead of duplicating. If the tab is still showing a
-        // truncated preview and the full artifact exists, upgrade that tab in
-        // place so the restored view stays consistent.
-        const existing = tabs.find(t => t.command === run.command);
-        const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
-        if (existing && !canUpgradeExisting) {
-          activateTab(existing.id);
-          hideHistoryPanel();
-          return;
+        const cmd = run.command || '';
+        if (typeof setComposerValue === 'function') {
+          setComposerValue(cmd, cmd.length, cmd.length);
         }
-
-        const cmdEl = entry.querySelector('.history-entry-cmd');
-        cmdEl.textContent = 'loading…';
-        _setHistoryLoadState(true);
-        restoreHistoryRunIntoTab(run, {
-          targetTabId: canUpgradeExisting ? existing.id : null,
-          hidePanelOnSuccess: true,
-        })
-          .catch(() => {
-            entry.querySelector('.history-entry-cmd').textContent = run.command;
-            showToast('Failed to load run');
-          })
-          .finally(() => _setHistoryLoadState(false));
+        hideHistoryPanel();
+        if (typeof refocusComposerAfterAction === 'function') {
+          refocusComposerAfterAction({ preventScroll: true });
+        }
+        resetCmdHistoryNav();
       });
 
       bindPressable(entry.querySelector('[data-action="star"]'), {
@@ -774,12 +770,27 @@ function refreshHistoryPanel() {
         },
       });
 
-      bindPressable(entry.querySelector('[data-action="copy"]'), {
+      bindPressable(entry.querySelector('[data-action="restore"]'), {
         onActivate: () => {
-          copyTextToClipboard(run.command)
-            .then(() => showToast('Command copied to clipboard'))
-            .catch(() => showToast('Failed to copy command', 'error'));
-          if (!_historyActionKeepsPanelOpen('copy')) hideHistoryPanel();
+          const existing = tabs.find(t => t.command === run.command);
+          const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
+          if (existing && !canUpgradeExisting) {
+            activateTab(existing.id);
+            hideHistoryPanel();
+            return;
+          }
+          const cmdEl = entry.querySelector('.history-entry-cmd');
+          cmdEl.textContent = 'loading…';
+          _setHistoryLoadState(true);
+          restoreHistoryRunIntoTab(run, {
+            targetTabId: canUpgradeExisting ? existing.id : null,
+            hidePanelOnSuccess: true,
+          })
+            .catch(() => {
+              entry.querySelector('.history-entry-cmd').textContent = run.command;
+              showToast('Failed to load run');
+            })
+            .finally(() => _setHistoryLoadState(false));
         },
       });
 

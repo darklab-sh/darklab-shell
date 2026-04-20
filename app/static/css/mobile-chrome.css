@@ -180,16 +180,21 @@ body.mobile-terminal-mode {
      don't render two overlapping recents surfaces. */
   #history-row { display: none !important; }
 
-  /* Pull-up recents sheet (opens when the peek row is tapped). */
+  /* Pull-up recents sheet (opens when the peek row is tapped). The scrim sits
+     above the mobile-terminal sticky header (z-index 90) so tapping anywhere
+     outside the sheet — including the visually dimmed header band — hits the
+     scrim's bindDismissible click handler and closes the sheet. The sheet
+     itself stacks one step above the scrim so its own controls remain
+     interactive. */
   .recents-sheet-scrim {
     position: fixed; inset: 0;
     background: var(--theme-history-load-overlay-bg, rgba(0,0,0,0.76));
-    z-index: 50;
+    z-index: 100;
     animation: shell-m-fade-in 200ms ease;
   }
   .recents-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
-    z-index: 51;
+    z-index: 101;
     background: var(--surface);
     border-top: 1px solid var(--border-bright);
     border-radius: 14px 14px 0 0;
@@ -480,6 +485,9 @@ body.mobile-terminal-mode {
     flex-direction: column;
     gap: 7px;
   }
+  .recents-sheet #mobile-recents-list .sheet-item:nth-of-type(even) {
+    background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
+  }
   .recents-sheet .sheet-item-head {
     display: flex;
     align-items: center;
@@ -547,12 +555,12 @@ body.mobile-terminal-mode {
   .menu-sheet-scrim {
     position: fixed; inset: 0;
     background: var(--theme-overlay-backdrop-bg, rgba(0,0,0,0.72));
-    z-index: 50;
+    z-index: 100;
     animation: shell-m-fade-in 200ms ease;
   }
   .menu-sheet {
     position: fixed; left: 0; right: 0; bottom: 0;
-    z-index: 51;
+    z-index: 101;
     background: var(--surface);
     border-top: 1px solid var(--border-bright);
     border-radius: 14px 14px 0 0;

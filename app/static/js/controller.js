@@ -259,6 +259,19 @@ function dispatchMobileMenuAction(action, btn = null) {
     applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
     refocusComposerAfterAction({ defer: true });
   }
+  if (action === 'clear') {
+    // On desktop the clear button lives in `.terminal-actions` per-tab. On
+    // mobile that row is compressed, so clear moves into the hamburger menu
+    // (mobile.css hides the per-tab clear under `body.mobile-terminal-mode`).
+    // Behaviour matches the HUD / per-tab clear: cancel welcome settle if it's
+    // still running on this tab, then clear the output while preserving run
+    // state so a mid-run clear doesn't abandon the SSE stream.
+    if (activeTabId) {
+      if (typeof cancelWelcome === 'function') cancelWelcome(activeTabId);
+      if (typeof clearTab === 'function') clearTab(activeTabId, { preserveRunState: true });
+    }
+    refocusComposerAfterAction({ defer: true });
+  }
   if (action === 'options') openOptions();
   if (action === 'theme') openThemeSelector();
   if (action === 'workflows') openWorkflows();

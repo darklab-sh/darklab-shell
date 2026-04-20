@@ -533,6 +533,12 @@
   /* Kill lives in the mobile composer (see #mobile-kill-btn) so the per-tab
      action-bar duplicate is redundant on mobile. */
   body.mobile-terminal-mode .terminal-actions .tab-kill-btn { display: none !important; }
+  /* Clear moves into the hamburger menu on mobile (data-menu-action="clear")
+     so the per-tab action row keeps its three high-frequency actions (share
+     snapshot · copy · save ▾) fitting cleanly at narrow widths. Clear is a
+     recovery action rather than an in-flow one; keeping it one extra tap away
+     mirrors the kill-button move above. */
+  body.mobile-terminal-mode .terminal-actions [data-action="clear"] { display: none !important; }
 
   /* Mobile overlays: bottom sheet layout for FAQ and options */
   body.mobile-terminal-mode #workflows-overlay,
@@ -719,37 +725,43 @@
     min-height: 176px;
   }
 
-  /* Mobile search bar: larger touch targets and font */
+  /* Mobile search bar: larger touch targets and font. The input takes its own
+     row and the controls (toggles + counter + nav + close) cluster on a second
+     row — `.close-btn` carries `margin-left: auto` from the close primitive so
+     it sits at the right edge of that row, with toggles/counter/nav packed
+     left. Matches the iOS Safari find-on-page layout. */
   body.mobile-terminal-mode .search-bar {
     padding: 8px 12px;
     gap: 10px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
   body.mobile-terminal-mode .search-bar input {
     font-size: 16px;
-    padding: 8px 10px;
-    min-height: 40px;
+    padding: 6px 10px;
+    min-height: 32px;
+    flex: 1 1 100%;
   }
   body.mobile-terminal-mode .search-count {
-    display: none;
+    font-size: 13px;
+    flex: 0 0 auto;
   }
   body.mobile-terminal-mode .search-nav button {
-    min-height: 40px;
-    padding: 0 12px;
+    min-height: 28px;
+    padding: 0 10px;
     font-size: 16px;
   }
   body.mobile-terminal-mode .search-close-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 40px;
-    padding: 0 12px;
+    min-height: 28px;
+    padding: 0 10px;
     font-size: 16px;
     flex: 0 0 auto;
   }
   body.mobile-terminal-mode .search-toggles button {
-    min-height: 40px;
-    padding: 0 10px;
+    min-height: 28px;
+    padding: 0 8px;
     font-size: 13px;
   }
 

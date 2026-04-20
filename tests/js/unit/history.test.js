@@ -527,6 +527,12 @@ describe('history panel actions', () => {
           confirmHistAction: () => {},
           executeHistAction: () => {},
           useMobileTerminalViewportMode: () => mobileMode,
+          setComposerValue: (val, start = null, end = null) => {
+            cmdInput.value = String(val ?? '')
+            if (typeof start === 'number') cmdInput.selectionStart = start
+            if (typeof end === 'number') cmdInput.selectionEnd = end
+          },
+          refocusComposerAfterAction: vi.fn(() => false),
         },
         `{
         refreshHistoryPanel,
@@ -535,6 +541,7 @@ describe('history panel actions', () => {
         clearHistoryFilters,
         _buildHistoryRequestUrl,
         _setHistoryFilter,
+        _historyRelativeTime,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
@@ -551,7 +558,7 @@ describe('history panel actions', () => {
     }
   }
 
-  it('refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject', async () => {
+  it('refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject', async () => {
     const clipboard = {
       writeText: vi.fn(() => Promise.reject(new Error('clipboard denied'))),
     }
@@ -564,8 +571,9 @@ describe('history panel actions', () => {
     refreshHistoryPanel()
     await new Promise((resolve) => setImmediate(resolve))
     const entry = document.querySelector('#history-list .history-entry')
+
     entry
-      .querySelector('[data-action="copy"]')
+      .querySelector('[data-action="permalink"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(clipboard.writeText).toHaveBeenCalledTimes(1)
     await Promise.resolve()
@@ -573,26 +581,27 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.execCommand).toHaveBeenCalledWith('copy')
-    expect(document.getElementById('permalink-toast').textContent).toBe(
-      'Command copied to clipboard',
-    )
-    await new Promise((resolve) => setTimeout(resolve, 0))
-    expect(cmdInput.focus).toHaveBeenCalled()
-
-    entry
-      .querySelector('[data-action="permalink"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(clipboard.writeText).toHaveBeenCalledTimes(2)
-    await Promise.resolve()
-    await Promise.resolve()
-    await new Promise((resolve) => setImmediate(resolve))
-
-    expect(document.execCommand).toHaveBeenCalledTimes(2)
     expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
     document.execCommand = originalExecCommand
   })
 
-  it('closes the history panel for copy / permalink but keeps it open for delete', async () => {
+  it('clicking a history entry row injects the command into the composer and closes the panel', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel()
+    const historyPanel = document.getElementById('history-panel')
+    const cmdInput = document.getElementById('cmd')
+    historyPanel.classList.add('open')
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    entry.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+
+    expect(cmdInput.value).toBe('ping darklab.sh')
+    expect(historyPanel.classList.contains('open')).toBe(false)
+  })
+
+  it('closes the history panel for permalink but keeps it open for star and delete', async () => {
     const { refreshHistoryPanel } = loadHistoryPanel()
     const historyPanel = document.getElementById('history-panel')
     historyPanel.classList.add('open')
@@ -605,12 +614,6 @@ describe('history panel actions', () => {
       .querySelector('[data-action="star"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(historyPanel.classList.contains('open')).toBe(true)
-
-    historyPanel.classList.add('open')
-    entry
-      .querySelector('[data-action="copy"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(historyPanel.classList.contains('open')).toBe(false)
 
     historyPanel.classList.add('open')
     entry
@@ -641,13 +644,6 @@ describe('history panel actions', () => {
     entry
       .querySelector('[data-action="star"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(historyPanel.classList.contains('open')).toBe(true)
-
-    entry
-      .querySelector('[data-action="copy"]')
-      .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    await Promise.resolve()
-    await Promise.resolve()
     expect(historyPanel.classList.contains('open')).toBe(true)
 
     entry
@@ -749,6 +745,48 @@ describe('history panel actions', () => {
     } finally {
       globalThis.Date = RealDate
     }
+  })
+
+  it('_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date', () => {
+    const { _historyRelativeTime } = loadHistoryPanel()
+    const now = new Date('2026-04-20T12:00:00Z')
+    expect(_historyRelativeTime(new Date('2026-04-20T11:59:50Z'), now)).toBe('just now')
+    expect(_historyRelativeTime(new Date('2026-04-20T11:57:00Z'), now)).toBe('3m ago')
+    expect(_historyRelativeTime(new Date('2026-04-20T10:00:00Z'), now)).toBe('2h ago')
+    expect(_historyRelativeTime(new Date('2026-04-18T12:00:00Z'), now)).toBe('2d ago')
+    // Older than a week -> short date ("Apr 10" in en locales; just check shape.)
+    const older = _historyRelativeTime(new Date('2026-04-10T12:00:00Z'), now)
+    expect(older).not.toMatch(/ago|just now/)
+    expect(older.length).toBeGreaterThan(0)
+    expect(_historyRelativeTime('not a date', now)).toBe('')
+    expect(_historyRelativeTime(new Date('invalid'), now)).toBe('')
+  })
+
+  it('desktop history rows keep absolute clock time and no tooltip on the time span', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-04-20T09:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
+        }),
+      ),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const timeEl = document.querySelector('.history-entry-meta span')
+    expect(timeEl.textContent).not.toMatch(/ago|just now/)
+    expect(timeEl.title).toBe('')
   })
 
   it('refreshHistoryPanel sends the active server-side filters to /history', async () => {
@@ -1232,7 +1270,7 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     document
-      .querySelector('.history-entry')
+      .querySelector('.history-entry [data-action="restore"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(document.getElementById('history-load-overlay').classList.contains('open')).toBe(true)
 
@@ -1281,7 +1319,7 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     document
-      .querySelector('.history-entry')
+      .querySelector('.history-entry [data-action="restore"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await new Promise((resolve) => setImmediate(resolve))
     await new Promise((resolve) => setImmediate(resolve))
@@ -1327,7 +1365,7 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     document
-      .querySelector('.history-entry')
+      .querySelector('.history-entry [data-action="restore"]')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await Promise.resolve()
     await Promise.resolve()

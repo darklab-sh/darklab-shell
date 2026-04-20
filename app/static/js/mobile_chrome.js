@@ -456,13 +456,12 @@
   let _recentsSearchQuery = '';
   const _recentsFilterState = { root: '', exit: 'all', date: 'all', starred: false };
 
-  function _recentsFormatTime(iso) {
-    if (!iso) return '';
+  function _recentsParseDate(iso) {
+    if (!iso) return null;
     try {
       const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return '';
-      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-    } catch (_) { return ''; }
+      return Number.isNaN(d.getTime()) ? null : d;
+    } catch (_) { return null; }
   }
   function _recentsDateMatch(iso, mode) {
     if (mode === 'all') return true;
@@ -491,7 +490,7 @@
       }
       if (_recentsFilterState.exit === 'success' && r.exit_code !== 0) return false;
       if (_recentsFilterState.exit === 'failed' && (r.exit_code === 0 || r.exit_code == null)) return false;
-      if (!_recentsDateMatch(r.started_at, _recentsFilterState.date)) return false;
+      if (!_recentsDateMatch(r.started, _recentsFilterState.date)) return false;
       if (starredSet && !starredSet.has(r.command || '')) return false;
       return true;
     });
@@ -579,7 +578,10 @@
       meta.className = 'sheet-item-meta';
       const timeEl = document.createElement('span');
       timeEl.className = 'sheet-item-time';
-      timeEl.textContent = _recentsFormatTime(run.started_at || run.created_at);
+      const parsed = _recentsParseDate(run.started);
+      const relFn = typeof _historyRelativeTime === 'function' ? _historyRelativeTime : null;
+      timeEl.textContent = parsed && relFn ? relFn(parsed) : '';
+      if (parsed) timeEl.title = parsed.toLocaleString();
       const exitEl = document.createElement('span');
       const exitCode = (run.exit_code ?? null);
       exitEl.className = 'sheet-item-exit' + (exitCode !== null && exitCode !== 0 ? ' nonzero' : '');
@@ -589,12 +591,16 @@
 
       const actions = document.createElement('div');
       actions.className = 'sheet-item-actions';
-      actions.appendChild(_recentsMakeAction('copy', () => {
-        if (typeof global.copyTextToClipboard === 'function') {
-          global.copyTextToClipboard(cmd)
-            .then(() => global.showToast && global.showToast('Command copied'))
-            .catch(() => global.showToast && global.showToast('Copy failed', 'error'));
-        }
+      actions.appendChild(_recentsMakeAction('restore', () => {
+        if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
+        const cmdEl2 = item.querySelector('.sheet-item-cmd');
+        if (cmdEl2) cmdEl2.textContent = 'loading…';
+        global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
+          .then(() => closeRecentsSheet())
+          .catch(() => {
+            if (cmdEl2) cmdEl2.textContent = cmd;
+            if (typeof global.showToast === 'function') global.showToast('Failed to load run');
+          });
       }));
       actions.appendChild(_recentsMakeAction('permalink', () => {
         if (!run.id) return;
@@ -616,18 +622,10 @@
 
       item.addEventListener('click', (e) => {
         if (e.target.closest('.sheet-item-action, .sheet-item-star')) return;
-        if (typeof global.restoreHistoryRunIntoTab === 'function') {
-          const cmdEl2 = item.querySelector('.sheet-item-cmd');
-          if (cmdEl2) cmdEl2.textContent = 'loading…';
-          global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
-            .then(() => closeRecentsSheet())
-            .catch(() => {
-              if (cmdEl2) cmdEl2.textContent = cmd;
-              if (typeof global.showToast === 'function') global.showToast('Failed to load run');
-            });
-        } else {
-          closeRecentsSheet();
+        if (typeof global.setComposerValue === 'function') {
+          global.setComposerValue(cmd, cmd.length, cmd.length);
         }
+        closeRecentsSheet();
       });
 
       recentsSheetList.appendChild(item);

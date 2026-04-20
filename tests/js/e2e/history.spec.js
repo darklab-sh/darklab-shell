@@ -22,7 +22,7 @@ test.describe('history drawer', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('loading a run from history opens output in a tab without repopulating command input', async ({
+  test('clicking a history entry injects the command into the composer and closes the drawer', async ({
     page,
   }) => {
     await runCommand(page, CMD_A)
@@ -30,27 +30,43 @@ test.describe('history drawer', () => {
     // Navigate away by opening a new tab (clears the input)
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
+    const tabCountBefore = await page.locator('.tab').count()
 
-    // Open history and click the entry
     await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
-    // Command input remains neutral; loaded output appears in the active tab.
+    // Row click is the re-run path: command is ready in the input, drawer
+    // is closed, and no new tab is created (restoring would spawn one).
+    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+    await expect(page.locator('.tab')).toHaveCount(tabCountBefore)
+  })
+
+  test('the history restore button loads output into a tab without touching the composer', async ({
+    page,
+  }) => {
+    await runCommand(page, CMD_A)
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
+
     await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('.tab-panel.active .output')).toContainText(CMD_A)
   })
 
-  test('clicking a history entry that is already open switches to that tab', async ({ page }) => {
+  test('the history restore button switches to an existing tab instead of duplicating it', async ({
+    page,
+  }) => {
     await runCommand(page, CMD_A)
     const initialTabCount = await page.locator('.tab').count()
 
-    // Open history and click the same entry
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().click()
+    await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
 
-    // No new tab should have been created
     await expect(page.locator('.tab')).toHaveCount(initialTabCount)
-    // The existing tab should be active without repopulating the command input
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
@@ -193,7 +209,7 @@ test.describe('history drawer', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
 
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().click()
+    await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
 
     const output = page.locator('.tab-panel.active .output')
     await expect(output).toContainText('head')
