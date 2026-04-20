@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the current system architecture of darklab shell: runtime layers, request flow, frontend composition, persistence, testing shape, and production deployment model.
+This document describes the current system architecture of darklab shell: runtime boundaries, request flow, browser/runtime composition, persistence, observability, testing shape, and production deployment model.
 
 For the architectural rationale, tradeoffs, and implementation-history notes behind those structures, see [DECISIONS.md](DECISIONS.md).
 
@@ -9,17 +9,16 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 ## Table of Contents
 
 - [System Overview](#system-overview)
-- [Logical Runtime Layers](#logical-runtime-layers)
-- [Runtime Topology](#runtime-topology)
+- [System Structure](#system-structure)
 - [Primary Request Flows](#primary-request-flows)
 - [HTTP Route Inventory](#http-route-inventory)
-- [Frontend Composition](#frontend-composition)
-- [Persistence Model](#persistence-model)
-- [Logging](#logging)
-- [Runtime Security Model](#runtime-security-model)
-- [Shell Prompt Model](#shell-prompt-model)
-- [Config Loading](#config-loading)
-- [Theme System](#theme-system)
+- [Front-end Architecture](#front-end-architecture)
+- [Back-end Architecture](#back-end-architecture)
+- [Run Lifecycle](#run-lifecycle)
+- [State And Persistence](#state-and-persistence)
+- [Observability And Diagnostics](#observability-and-diagnostics)
+- [Security Model](#security-model)
+- [Configuration Surfaces](#configuration-surfaces)
 - [Test Suite](#test-suite)
 - [Production Deployment Notes](#production-deployment-notes)
 - [Related Docs](#related-docs)
@@ -36,12 +35,18 @@ At a high level, it works like this:
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
-- The browser client stays build-step-free. Classic scripts share a single global runtime, with `composerState` acting as the canonical source of truth for prompt value, selection, and active input. Browser cookies hold persistent user preferences such as timestamps, line numbers, welcome-intro mode, the default share-snapshot redaction choice, and the run-notification toggle (`pref_run_notify`). Browser session storage holds the non-running tab/draft snapshot used for reload restore, including tab labels, statuses, transcript previews, and draft input, while `/history/active` covers in-flight runs separately.
-- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`, with additional allowlist, deny-rule, loopback-block, and process-group controls layered on top.
+- The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover user preferences, session identity, and reload continuity.
+- The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`.
+
+The rest of this document is organized by concern rather than by historical file order: stable system structure first, then browser/backend composition, then the core runtime stories such as run lifecycle, state, observability, and security.
 
 ---
 
-## Logical Runtime Layers
+## System Structure
+
+This cluster groups the stable structural views of the application before the document dives into request flow, browser runtime behavior, or persistence details.
+
+### Logical Runtime Layers
 
 ```mermaid
 flowchart TB
@@ -91,9 +96,7 @@ This diagram is intentionally framework- and runtime-oriented rather than app-mo
 
 The goal is for this section to stay stable even when app-specific modules, blueprints, or frontend files are refactored. The more detailed sections below cover those app-level components directly.
 
----
-
-## Runtime Topology
+### Runtime Topology
 
 ```mermaid
 flowchart TB
@@ -205,7 +208,11 @@ This route list belongs in the architecture document because it describes the ap
 
 ---
 
-## Frontend Composition
+## Front-end Architecture
+
+This section is the browser-runtime home for page composition, prompt/composer state, mobile shell behavior, and the helper layer that keeps the classic-script UI consistent.
+
+### Frontend Composition
 
 ```mermaid
 flowchart TD
@@ -252,7 +259,7 @@ Prompt ownership lives in `composerState`, not in whichever DOM input happened t
 
 The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, and snapshot redaction defaults all sit in the frontend layer rather than in `config.yaml`.
 
-### Frontend Architecture
+### Browser Runtime
 
 Modular frontend with no build step. `index.html` is the HTML shell — no inline styles or scripts.
 
@@ -291,29 +298,66 @@ The contract the helpers jointly enforce: focus returns to the composer after no
 
 ---
 
-## Persistence Model
+### Prompt And Composer Runtime
 
-```mermaid
-flowchart TB
-  Runs["runs table"]
-  Snapshots["snapshots table"]
-  ArtifactRows["artifact rows"]
-  Files["gzip full-output files"]
+The prompt architecture is built around one editing state and two render surfaces:
 
-  Runs -->|interactive history + restore queries| Hist["History consumers"]
-  Runs -->|canonical run retrieval| RunPage["Run permalink consumers"]
-  Snapshots -->|snapshot retrieval| SharePage["Snapshot permalink consumers"]
-  ArtifactRows --> Files
-  ArtifactRows -->|full-output lookup| RunPage
-```
+- the hidden real `#cmd` input remains the canonical editing source for browser focus, selection, and keyboard semantics
+- the rendered prompt line inside the active output pane is only a visual mirror of that state
+- on touch-sized viewports, `#mobile-cmd` becomes the visible editing surface, but it still syncs into the same shared composer state instead of creating a second command model
+- the mobile edit bar is a thin action layer over that same shared composer state, so word-jump and delete helpers reuse the same selection/update path as desktop keyboard shortcuts instead of forking mobile-specific command state
+- prompt rows that appear in transcript history are rendered output records, not live editable DOM
 
-The persistence model is intentionally split:
+This split keeps browser editing semantics predictable without relying on `contenteditable`, while still letting the app present a terminal-like prompt inside the transcript.
 
-- `runs` stores fast, capped preview data for the interactive UI
-- `snapshots` stores share-specific captured state
-- `run_output_artifacts` plus gzip files store optional full output without bloating the main `runs` table
+### Browser State Model
 
-That split is what allows the app to keep the interactive shell fast while still supporting durable full-output permalinks and exports.
+Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st, draftInput }`.
+
+- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when clicking history entries (if a matching tab already exists, that tab is activated)
+- `runId` — the UUID from the SSE `started` message, used for kill requests
+- `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
+- `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
+- `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
+- `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
+- `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
+- `draftInput` — unsaved command text for that tab; restored from browser session state for non-running tabs during reload continuity
+
+Tab activation is intentionally stateful rather than stateless rendering. `activateTab()` preserves the leaving tab's draft, restores the arriving tab's draft without reopening autocomplete, and resets transient input-mode state such as history-navigation and autocomplete selection. During full session restore, draft-flush side effects are suppressed until the saved tab set has been rebuilt so non-active drafts cannot be overwritten by the final active-tab selection.
+
+### Welcome Bootstrap Flow
+
+`welcome.js` owns a staged boot flow that is separate from normal run output. The important architectural points are:
+
+- welcome state is tab-scoped, so clearing or running commands in another tab cannot tear down the active welcome tab
+- desktop and mobile share the same timing/config pipeline but can read different banner/hint assets
+- the browser fetches narrow typed endpoints such as `/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`, and `/config` rather than reading raw files directly
+- the same frontend-owned preference layer that controls timestamps and line numbers also controls welcome-intro behavior
+
+The detailed user-visible welcome behavior belongs in the README. Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special `/run` transcript.
+
+### Input Modes And Dropdown State Machines
+
+Command editing is split into separate state machines rather than one overloaded dropdown path:
+
+- normal autocomplete loads structured `context` hints from `/autocomplete`, sourced from `autocomplete.yaml`
+- reverse-history search owns its own pre-draft, query, selection, and exit paths
+- `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
+- navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
+
+The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
+
+Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
+
+---
+
+## Back-end Architecture
+
+This section centralizes the Python/runtime-side composition: the Flask surface, shared infrastructure, command orchestration, and the durable services the browser depends on.
+
+### Backend Composition
+
+The backend is intentionally split so that request handling, shared infrastructure, and command policy stay testable in isolation rather than collapsing into one large Flask module.
 
 The Python backend is split into focused layers with acyclic dependencies:
 
@@ -368,6 +412,104 @@ flowchart TB
 - `commands.py` and `fake_commands.py` stay logically adjacent to the run path but remain separate from the Flask factory so command policy and shell-helper behavior can be tested in isolation.
 - The HTTP layer owns the actual request/response surface, and `app.py` remains a thin factory that composes logging, limiter setup, blueprint registration, and request hooks.
 
+### Backend Runtime Boundaries
+
+This boundary view answers a different question than the dependency graph above: not "which module imports which," but "which runtime service owns which responsibility."
+
+- Flask + Gunicorn own routing, request hooks, response shaping, and template rendering.
+- Redis owns only the shared coordination required across Gunicorn workers: rate limiting and active-run PID tracking for `/kill`.
+- SQLite plus artifact files own durable run, snapshot, token, and search state.
+- Scanner subprocesses remain an out-of-process boundary rather than an in-worker extension of the Flask app.
+- Config and theme YAML files are filesystem-backed dependencies that shape both backend behavior and frontend presentation but do not become a general runtime datastore.
+
+---
+
+## Run Lifecycle
+
+This section groups the full command path — validation, rewrite, execution, streaming, kill, and completion persistence — into one coherent runtime story.
+
+### Validation And Rewrites
+
+The run path applies policy before any subprocess launch:
+
+- command validation blocks filesystem references to `/data` and `/tmp` before subprocess launch
+- loopback targets such as `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked at both the client and server
+- when the allowlist is active, shell operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution stay blocked so users cannot chain into disallowed commands
+
+These rewrites happen in `rewrite_command()` silently (no user-visible notice unless specified):
+
+| Command | Rewrite | Reason |
+| --------- | --------- | -------- |
+| `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
+| `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
+| `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
+| `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
+
+Synthetic post-filters also sit on this run-lifecycle boundary rather than on the shell-parser path. `parse_synthetic_postfilter()` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted.
+
+### Spawn And Stream
+
+Commands flow through `POST /run`, which validates and rewrites the request, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
+
+Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
+
+### Output Prefixes And Follow State
+
+Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes and a synchronized `data-prefix` string, while `syncOutputPrefixes()` recomputes shared prefix width whenever rows are added or the prefix mode changes. That keeps prompt rows, output rows, and exit rows aligned without re-rendering the transcript body.
+
+Welcome rows are excluded from normal prefix numbering, and `tab.runStart` is captured after the submitted prompt line is appended so elapsed timing applies only to run output.
+
+### Kill Flow And Exit Reconciliation
+
+Because commands run as `scanner` and Gunicorn runs as `appuser`, the web worker cannot directly signal `scanner`-owned processes. The kill path therefore uses `sudo -u scanner kill -TERM -<pgid>` so the signal is sent by the user that owns the process group.
+
+This gets more important with multiple Gunicorn workers. The worker that receives `POST /kill` may not be the worker that launched the process. To solve that:
+
+- `pid_register(run_id, pid)` writes the process id to Redis with a 4-hour TTL
+- `pid_pop(run_id)` uses Redis `GETDEL` so lookup and removal are atomic
+- any worker can therefore resolve and kill the correct process group without relying on shared in-memory state
+
+When a user clicks Kill:
+
+1. `doKill()` sets `tab.killed = true`, shows KILLED status
+2. Server receives SIGTERM, process exits with code -15
+3. SSE stream sends `exit` message with code -15
+4. Exit handler checks `tab.killed` — if true, skips status update and resets flag
+
+Without the `killed` flag, the `-15` exit code causes the exit handler to set status to ERROR, briefly flashing KILLED before reverting.
+
+---
+
+## State And Persistence
+
+This section groups durable server state, browser-owned session state, session identity, and reload continuity into one model of where state lives and how it survives reloads or moves between devices.
+
+### Persistence Model
+
+The key architectural distinction is that the app does not use one monolithic store for everything. It deliberately splits fast interactive state, durable share state, and optional full-output storage so each surface can stay efficient without losing fidelity where it matters.
+
+```mermaid
+flowchart TB
+  Runs["runs table"]
+  Snapshots["snapshots table"]
+  ArtifactRows["artifact rows"]
+  Files["gzip full-output files"]
+
+  Runs -->|interactive history + restore queries| Hist["History consumers"]
+  Runs -->|canonical run retrieval| RunPage["Run permalink consumers"]
+  Snapshots -->|snapshot retrieval| SharePage["Snapshot permalink consumers"]
+  ArtifactRows --> Files
+  ArtifactRows -->|full-output lookup| RunPage
+```
+
+The persistence model is intentionally split:
+
+- `runs` stores fast, capped preview data for the interactive UI
+- `snapshots` stores share-specific captured state
+- `run_output_artifacts` plus gzip files store optional full output without bloating the main `runs` table
+
+That split is what allows the app to keep the interactive shell fast while still supporting durable full-output permalinks and exports.
+
 ### Database
 
 `./data/history.db` — SQLite, WAL mode. Five persistent tables, one FTS5 virtual table, and file-backed run-output artifacts:
@@ -392,11 +534,43 @@ The storage model is intentionally split:
 - artifact readers stay backward-compatible with older plain-text gzip artifacts by normalizing them into structured `{text, cls, tsC, tsE}` entries at load time
 - deleting a run, clearing history, or retention pruning removes both the DB metadata and any associated artifact files
 
-Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL (see Cross-User Signalling And Multi-Worker Kill below).
+Active process tracking (`run_id → pid`) was previously a third table (`active_procs`) cleared on startup. It has been replaced by Redis keys with a 4-hour TTL, which keeps the kill path correct across multiple Gunicorn workers without pushing ephemeral run state into SQLite.
 
 ---
 
-## Logging
+### Session Identity
+
+Session identity is a two-tier model managed in `app/static/js/session.js`:
+
+1. **UUID session (anonymous)** — generated by `_generateUUID()` on first visit and persisted in `localStorage` under `session_id`. Always present; never removed. `_generateUUID()` tries `crypto.randomUUID()` first (HTTPS/localhost) and falls back to `crypto.getRandomValues()` so HTTP LAN deployments (e.g. `http://192.168.x.x`) work without a secure context.
+2. **Session token (named)** — a `tok_<32 hex>` string generated server-side by `GET /session/token/generate` and persisted in `localStorage` under `session_token`. Takes precedence over the UUID when present. Stored in the `session_tokens` database table `(token TEXT PRIMARY KEY, created TEXT)`.
+
+`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History and run data is scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session.
+
+**Server-side token validation:** `get_session_id()` in `helpers.py` validates `tok_`-prefixed header values against the `session_tokens` table on every request. A revoked or never-issued `tok_` token is treated as anonymous (returns `""`) so the caller loses access to session-scoped data immediately, without requiring a client-side logout. UUID-format session IDs pass through without a DB lookup.
+
+`maskSessionToken(token)` in `session.js` produces display-safe representations: `tok_XXXX••••••••` for named tokens and `uuid8ch••••••••` for UUIDs.
+
+History migration between identities goes through `POST /session/migrate` — see `### Session Token Security` in [DECISIONS.md](DECISIONS.md) for the constraints on that endpoint.
+
+### Reload Continuity
+
+There are two persistence layers for reload restore:
+
+- `/history/active` covers in-flight runs owned by the server/session
+- browser `sessionStorage` covers non-running tabs, transcript previews, status, draft input, and active-tab selection
+
+`/history/active` exposes only the current session's in-flight run metadata so the browser can rebuild running tabs after a reload, keep kill available, render the submitted command as a normal prompt line, and then hand those tabs back to the normal `/history/<run_id>` restore path once the run completes. Non-running tabs and drafts are restored separately from browser `sessionStorage`, which keeps the reload path split cleanly between browser-owned idle state and server-owned active-run state.
+
+That split is also what lets the browser keep a separate `sessionStorage` snapshot for non-running tabs and draft input without persisting that UI state across browser sessions.
+
+---
+
+## Observability And Diagnostics
+
+This section groups log emission, health/status surfaces, and the operator diagnostics page into one observability story rather than scattering them across unrelated runtime sections.
+
+### Logging
 
 The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
 
@@ -473,7 +647,28 @@ The current event inventory is:
 
 ---
 
-## Runtime Security Model
+### Health, Status, And Diagnostics Surfaces
+
+- `/health` remains the load-balancer contract and reports whether DB and Redis are healthy, with degraded states surfacing through status code.
+- `/status` is intentionally a softer browser-HUD contract and always responds 200 so status-pill polling never causes UI flapping or reconnect churn.
+- `/diag` is the operator-facing structured view that surfaces runtime config, service health, asset presence, tool availability, and activity summaries without opening a shell session.
+
+These three surfaces share the same runtime health model, but they target different consumers: infrastructure checks, browser chrome, and operator diagnostics.
+
+### Operator Diagnostics
+
+The diagnostics page lives behind the same trusted-proxy-aware client IP resolution path used by logging and rate limiting. When enabled through `diagnostics_allowed_cidrs`, it exposes a live operator view of the running instance and reuses the same themed header foundation as permalink/export surfaces.
+
+Operationally, `/diag` sits on top of the same underlying sources described earlier in the document:
+
+- Redis and SQLite health come from the same runtime boundary described in **System Structure**
+- run counts, top commands, and stored artifacts come from the persistence layer described in **State And Persistence**
+- config values reflect the browser/backend config split described in **Configuration Surfaces**
+- access control and denied-access logging reuse the same client-IP trust model described in **Security Model** and **Logging**
+
+---
+
+## Security Model
 
 The runtime security model is layered across process ownership, command validation, and container-level controls.
 
@@ -491,52 +686,11 @@ The container uses two unprivileged system users:
 
 The container starts as root only long enough for `entrypoint.sh` to fix `/data` ownership after volume mount, set `/tmp` to `1777`, pre-create `/tmp/.config` and `/tmp/.cache` for `scanner`, and then drop to `appuser` via `gosu`.
 
-### Validation And Network Guards
+### Trust Boundary Notes
 
-- command validation blocks filesystem references to `/data` and `/tmp` before subprocess launch
-- loopback targets such as `localhost`, `127.0.0.1`, `0.0.0.0`, and `[::1]` are blocked at both the client and server
-- when the allowlist is active, shell operators such as `&&`, `||`, `|`, `;`, redirection, and command substitution stay blocked so users cannot chain into disallowed commands
-- `entrypoint.sh` also adds an OS-level rule blocking the `scanner` user from making outbound TCP connections back to the app port
-
-### Command Auto-Rewrites
-
-These happen in `rewrite_command()` silently (no user-visible notice unless specified):
-
-| Command | Rewrite | Reason |
-| --------- | --------- | -------- |
-| `mtr` | Adds `--report-wide` | mtr requires a TTY for interactive mode; report mode works without one. User is shown a notice. |
-| `nmap` | Adds `--privileged` | Required for raw socket features with setcap. Silent. |
-| `nuclei` | Adds `-ud /tmp/nuclei-templates` | Redirects template storage to tmpfs. Silent. |
-| `wapiti` | Adds `-f txt -o /dev/stdout` | wapiti writes reports to file by default; this streams to terminal. Silent. |
-
-### Session Identity
-
-Session identity is a two-tier model managed in `app/static/js/session.js`:
-
-1. **UUID session (anonymous)** — generated by `_generateUUID()` on first visit and persisted in `localStorage` under `session_id`. Always present; never removed. `_generateUUID()` tries `crypto.randomUUID()` first (HTTPS/localhost) and falls back to `crypto.getRandomValues()` so HTTP LAN deployments (e.g. `http://192.168.x.x`) work without a secure context.
-2. **Session token (named)** — a `tok_<32 hex>` string generated server-side by `GET /session/token/generate` and persisted in `localStorage` under `session_token`. Takes precedence over the UUID when present. Stored in the `session_tokens` database table `(token TEXT PRIMARY KEY, created TEXT)`.
-
-`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History and run data is scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session.
-
-**Server-side token validation:** `get_session_id()` in `helpers.py` validates `tok_`-prefixed header values against the `session_tokens` table on every request. A revoked or never-issued `tok_` token is treated as anonymous (returns `""`) so the caller loses access to session-scoped data immediately, without requiring a client-side logout. UUID-format session IDs pass through without a DB lookup.
-
-`maskSessionToken(token)` in `session.js` produces display-safe representations: `tok_XXXX••••••••` for named tokens and `uuid8ch••••••••` for UUIDs.
-
-History migration between identities goes through `POST /session/migrate` — see `### Session Token Security` in DECISIONS.md for the constraints on that endpoint.
-
-Open-tab sync is two-layered: the `storage` listener updates `SESSION_ID` in passive tabs, and session-scoped UI state is refreshed through `reloadSessionHistory()` and `_updateOptionsSessionTokenStatus()` so chips, starred state, history data, and the options token status stay aligned with the new identity rather than waiting for a full reload.
-
-It's not authentication — just isolation between sessions. The browser also keeps a separate `sessionStorage` snapshot for non-running tabs and draft input so reload restores can rebuild the recent workspace without persisting that UI state across browser sessions.
-
-### Cross-User Signalling And Multi-Worker Kill
-
-Because commands run as `scanner` and Gunicorn runs as `appuser`, the web worker cannot directly signal `scanner`-owned processes. The kill path therefore uses `sudo -u scanner kill -TERM -<pgid>` so the signal is sent by the user that owns the process group.
-
-This gets more important with multiple Gunicorn workers. The worker that receives `POST /kill` may not be the worker that launched the process. To solve that:
-
-- `pid_register(run_id, pid)` writes the process id to Redis with a 4-hour TTL
-- `pid_pop(run_id)` uses Redis `GETDEL` so lookup and removal are atomic
-- any worker can therefore resolve and kill the correct process group without relying on shared in-memory state
+- command validation and rewrite behavior are part of the trust boundary, but the execution mechanics themselves now live in **Run Lifecycle** above because they are also central runtime behavior
+- session identity is isolation, not authentication; the actual session model lives in **State And Persistence**
+- cross-worker kill relies on Redis-backed PID lookup and a user-bound signal path, as described in **Run Lifecycle**
 
 ### nmap Capability Model
 
@@ -550,89 +704,15 @@ The app also injects `--privileged` into `nmap` commands during rewrite so the b
 
 ---
 
-## Shell Prompt Model
-
-The prompt architecture is built around one editing state and two render surfaces:
-
-- the hidden real `#cmd` input remains the canonical editing source for browser focus, selection, and keyboard semantics
-- the rendered prompt line inside the active output pane is only a visual mirror of that state
-- on touch-sized viewports, `#mobile-cmd` becomes the visible editing surface, but it still syncs into the same shared composer state instead of creating a second command model
-- the mobile edit bar is a thin action layer over that same shared composer state, so word-jump and delete helpers reuse the same selection/update path as desktop keyboard shortcuts instead of forking mobile-specific command state
-- prompt rows that appear in transcript history are rendered output records, not live editable DOM
-
-This split keeps browser editing semantics predictable without relying on `contenteditable`, while still letting the app present a terminal-like prompt inside the transcript.
-
-### Tab State
-
-Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st, draftInput }`.
-
-- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when clicking history entries (if a matching tab already exists, that tab is activated)
-- `runId` — the UUID from the SSE `started` message, used for kill requests
-- `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
-- `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
-- `killed` — boolean flag set by `doKill()` to prevent the subsequent `-15` exit code from overwriting the KILLED status with ERROR
-- `pendingKill` — boolean flag set when the user clicks Kill before the SSE `started` message has arrived (i.e. `runId` is not yet known); the `started` handler checks this and sends the kill request immediately
-- `st` — current status string (`'idle'`, `'running'`, `'ok'`, `'fail'`, `'killed'`); set synchronously by `setTabStatus()` so `runCommand()` can check it without waiting for the async SSE `started` message
-- `draftInput` — unsaved command text for that tab; restored from browser session state for non-running tabs during reload continuity
-
-Tab activation is intentionally stateful rather than stateless rendering. `activateTab()` preserves the leaving tab's draft, restores the arriving tab's draft without reopening autocomplete, and resets transient input-mode state such as history-navigation and autocomplete selection. During full session restore, draft-flush side effects are suppressed until the saved tab set has been rebuilt so non-active drafts cannot be overwritten by the final active-tab selection.
-
-### Live Output Rendering
-
-Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
-
-### Output Prefixes: Line Numbers And Timestamps
-
-Line numbers and timestamps are rendered from stored per-line metadata rather than by rebuilding transcript text. Each appended `.line` keeps timestamp attributes and a synchronized `data-prefix` string, while `syncOutputPrefixes()` recomputes shared prefix width whenever rows are added or the prefix mode changes. That keeps prompt rows, output rows, and exit rows aligned without re-rendering the transcript body.
-
-Welcome rows are excluded from normal prefix numbering, and `tab.runStart` is captured after the submitted prompt line is appended so elapsed timing applies only to run output.
-
-### Welcome Bootstrap Flow
-
-`welcome.js` owns a staged boot flow that is separate from normal run output. The important architectural points are:
-
-- welcome state is tab-scoped, so clearing or running commands in another tab cannot tear down the active welcome tab
-- desktop and mobile share the same timing/config pipeline but can read different banner/hint assets
-- the browser fetches narrow typed endpoints such as `/welcome`, `/welcome/ascii`, `/welcome/ascii-mobile`, `/welcome/hints`, and `/config` rather than reading raw files directly
-- the same frontend-owned preference layer that controls timestamps and line numbers also controls welcome-intro behavior
-
-The detailed user-visible welcome behavior belongs in the README. Here, the important distinction is that welcome is a client-owned bootstrap experience built from server-normalized content routes, not a special `/run` transcript.
-
-### Input State Machines
-
-Command editing is split into separate state machines rather than one overloaded dropdown path:
-
-- normal autocomplete loads structured `context` hints from `/autocomplete`, sourced from `autocomplete.yaml`
-- reverse-history search owns its own pre-draft, query, selection, and exit paths
-- `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
-- navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
-
-The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
-
-Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
-
-### The KILLED Race Condition
-
-When a user clicks Kill:
-
-1. `doKill()` sets `tab.killed = true`, shows KILLED status
-2. Server receives SIGTERM, process exits with code -15
-3. SSE stream sends `exit` message with code -15
-4. Exit handler checks `tab.killed` — if true, skips status update and resets flag
-
-Without the `killed` flag, the `-15` exit code causes the exit handler to set status to ERROR, briefly flashing KILLED before reverting.
-
----
-
-## Config Loading
+## Configuration Surfaces
 
 The frontend fetches `/config` on page load and stores the normalized payload in `APP_CONFIG`. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than `config.yaml`; backend-only persistence and storage controls do not cross that boundary.
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_mb` stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB value is converted to bytes internally before any artifact truncation logic runs.
 
----
+This is also where backend configuration crosses into presentation: the browser bootstrap payload, the resolved theme palette, and the frontend-owned preference layer all meet here, but they do not collapse into one generic config blob.
 
-## Theme System
+### Theme System
 
 Theme values are resolved server-side from named YAML variants in `app/conf/themes/` and injected into every presentation surface — live shell, permalink pages, runtime selector, and exported HTML — through a single shared palette. No surface maintains its own independent palette logic. See [THEME.md](THEME.md) for the full architecture, token reference, and authoring workflow.
 

@@ -272,13 +272,14 @@
       const row = document.createElement('button');
       row.type = 'button';
       row.className = 'rail-item rail-item-muted';
-      row.title = wf.description || wf.title || '';
+      const label = wf.title || wf.name || `workflow ${idx + 1}`;
+      row.title = [label, wf.description].filter(Boolean).join('\n');
       const glyph = document.createElement('span');
+      glyph.className = 'drill-chev';
       glyph.textContent = '›';
-      glyph.style.flex = '0 0 auto';
       const text = document.createElement('span');
-      text.className = 'rail-item-text';
-      text.textContent = wf.title || wf.name || `workflow ${idx + 1}`;
+      text.className = 'rail-item-text line-clamp-2';
+      text.textContent = label;
       row.appendChild(glyph);
       row.appendChild(text);
       row.addEventListener('click', () => openScopedWorkflow(idx));

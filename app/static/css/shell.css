@@ -925,22 +925,18 @@ body.mobile-terminal-mode .output-follow-btn {
   min-height: 260px;
 }
 
-.theme-card:hover {
+/* :hover and :focus-visible defer to the selected-card primitive so the
+   selected visual is not overridden when the user mouses or tabs onto an
+   already-selected card. See .is-selected-card in components.css. */
+.theme-card:hover:not(.is-selected-card) {
   transform: translateY(-1px);
   border-color: var(--green-dim);
   box-shadow: 0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
 }
 
-.theme-card:focus-visible {
+.theme-card:focus-visible:not(.is-selected-card) {
   outline: 1px solid var(--green-dim);
   box-shadow: 0 0 0 3px var(--green-glow);
-}
-
-.theme-card.theme-card-active {
-  border-color: var(--green-dim);
-  box-shadow:
-    0 0 0 1px var(--green-glow),
-    0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
 }
 
 .theme-card-preview {

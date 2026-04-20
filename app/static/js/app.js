@@ -1590,6 +1590,7 @@ function syncThemeSelectionControls() {
   themeSelect.querySelectorAll('[data-theme-name]').forEach(card => {
     const active = card.dataset.themeName === themeName;
     card.classList.toggle('theme-card-active', active);
+    card.classList.toggle('is-selected-card', active);
     card.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
 }
