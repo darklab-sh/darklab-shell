@@ -275,8 +275,8 @@
       const label = wf.title || wf.name || `workflow ${idx + 1}`;
       row.title = [label, wf.description].filter(Boolean).join('\n');
       const glyph = document.createElement('span');
+      glyph.className = 'drill-chev';
       glyph.textContent = '›';
-      glyph.style.flex = '0 0 auto';
       const text = document.createElement('span');
       text.className = 'rail-item-text line-clamp-2';
       text.textContent = label;

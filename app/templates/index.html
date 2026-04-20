@@ -103,7 +103,7 @@
       </div>
       <div class="sheet-filters">
         <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search commands" autocomplete="off" spellcheck="false" aria-label="Search recent commands">
-        <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false">filters</button>
+        <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false"><span class="sheet-filter-toggle-label">filters</span><span class="disclosure-chev" aria-hidden="true">▸</span></button>
         <div class="sheet-filter-expanded u-hidden" id="mobile-recents-filters-expanded">
           <label class="sheet-filter-row sheet-filter-input">
             <span class="sheet-filter-label">root:</span>
@@ -113,7 +113,7 @@
             <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
               <span class="sheet-filter-label">exit:</span>
               <span class="sheet-filter-value" data-dropdown-label>all</span>
-              <span class="sheet-filter-caret" aria-hidden="true">⌄</span>
+              <span class="sheet-filter-caret" aria-hidden="true">▾</span>
             </button>
             <div class="sheet-filter-menu" role="listbox">
               <button type="button" role="option" data-dropdown-value="all">all</button>
@@ -125,7 +125,7 @@
             <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
               <span class="sheet-filter-label">date:</span>
               <span class="sheet-filter-value" data-dropdown-label>all</span>
-              <span class="sheet-filter-caret" aria-hidden="true">⌄</span>
+              <span class="sheet-filter-caret" aria-hidden="true">▾</span>
             </button>
             <div class="sheet-filter-menu" role="listbox">
               <button type="button" role="option" data-dropdown-value="all">all</button>
@@ -155,19 +155,18 @@
         <button type="button" class="menu-item" data-menu-action="search">
           <span class="menu-item-icon" aria-hidden="true">⌕</span>
           <span class="menu-item-label">search</span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="ln" aria-pressed="false">
           <span class="menu-item-icon" aria-hidden="true">#</span>
           <span class="menu-item-label">line numbers</span>
           <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
-          <span class="menu-item-chev">›</span>
         </button>
         <button type="button" class="menu-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
           <span class="menu-item-icon" aria-hidden="true">◷</span>
           <span class="menu-item-label">timestamps</span>
           <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
-          <span class="menu-item-chev">›</span>
+          <span class="disclosure-chev">▸</span>
         </button>
         <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
           <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="off">
@@ -194,34 +193,34 @@
           <span class="menu-item-icon" aria-hidden="true">⧖</span>
           <span class="menu-item-label">history</span>
           <span class="menu-item-hint" id="mobile-menu-history-count"></span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="workflows">
           <span class="menu-item-icon" aria-hidden="true">⚙</span>
           <span class="menu-item-label">workflows</span>
           <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="options">
           <span class="menu-item-icon" aria-hidden="true">≡</span>
           <span class="menu-item-label">options</span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="theme">
           <span class="menu-item-icon" aria-hidden="true">◐</span>
           <span class="menu-item-label">theme</span>
           <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="faq">
           <span class="menu-item-icon" aria-hidden="true">?</span>
           <span class="menu-item-label">FAQ</span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
         <button type="button" class="menu-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
           <span class="menu-item-icon" aria-hidden="true">◇</span>
           <span class="menu-item-label">diag</span>
-          <span class="menu-item-chev">›</span>
+          <span class="menu-item-chev drill-chev">›</span>
         </button>
       </div>
 

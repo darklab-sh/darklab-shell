@@ -1033,3 +1033,36 @@ body #diag-btn:hover {
     0 0 14px color-mix(in srgb, var(--green) 22%, transparent),
     0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
 }
+
+/* ── Chev primitives ─────────────────────────────────────────────────────
+   Two shared glyph classes for the app's navigation vocabulary:
+
+   .disclosure-chev — rotating ▸ glyph for a button that expands an inline
+     section (block disclosure). Rotation activates when any ancestor's
+     aria-expanded="true" matches, turning the right-pointing ▸ visually
+     into ▾.
+
+   .drill-chev — static › glyph for rows that navigate to another surface
+     (sheet, modal, panel). Non-rotating by design.
+
+   Both inherit color via currentColor so each surface keeps its theming.
+   Dropdown carets use a separate 180° rotating ▾ convention and are not
+   part of this primitive set. */
+.disclosure-chev {
+  display: inline-block;
+  font-size: 24px;
+  line-height: 1;
+  transition: transform 160ms ease;
+  opacity: 1;
+  flex: 0 0 auto;
+}
+[aria-expanded="true"] .disclosure-chev {
+  transform: rotate(90deg);
+}
+.drill-chev {
+  display: inline-block;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}

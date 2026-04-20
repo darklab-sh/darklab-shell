@@ -592,7 +592,10 @@
     if (recentsFiltersToggle) {
       const count = _recentsFiltersActiveCount();
       const open = recentsFiltersToggle.getAttribute('aria-expanded') === 'true';
-      recentsFiltersToggle.textContent = (open ? 'hide filters' : 'filters') + (count ? ` (${count})` : '');
+      const labelEl = recentsFiltersToggle.querySelector('.sheet-filter-toggle-label');
+      const text = (open ? 'hide filters' : 'filters') + (count ? ` (${count})` : '');
+      if (labelEl) labelEl.textContent = text;
+      else recentsFiltersToggle.textContent = text;
     }
     _renderRecentsChips();
   }

@@ -290,6 +290,17 @@ body.mobile-terminal-mode {
     color: var(--green);
     border-color: color-mix(in srgb, var(--green) 50%, transparent);
   }
+  /* Surface-specific tweaks for the disclosure primitive on the filters
+     toggle. Colour matches the muted convention used by .menu-sheet, and a
+     small translateY pulls the glyph onto the visual centerline of the
+     shorter row (the ▸ codepoint renders in the upper half of its em-box). */
+  .recents-sheet .sheet-filter-toggle .disclosure-chev {
+    color: var(--border-bright);
+    transform: translateY(2px);
+  }
+  .recents-sheet .sheet-filter-toggle[aria-expanded="true"] .disclosure-chev {
+    transform: translateY(2px) rotate(90deg);
+  }
   .recents-sheet .sheet-filter-expanded {
     display: flex;
     flex-direction: column;
@@ -394,7 +405,8 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-filter-caret {
     color: var(--muted);
     opacity: 0.6;
-    font-size: 13px;
+    font-size: 16px;
+    line-height: 1;
   }
   .recents-sheet .sheet-filter-checkbox {
     width: 14px;
@@ -634,15 +646,16 @@ body.mobile-terminal-mode {
     font-size: 11px;
     opacity: 0.8;
   }
-  .menu-sheet .menu-item-chev {
+  /* Surface-specific chev color: drill-chev (drill-in rows) and
+     disclosure-chev (timestamps expander) both render in --border-bright
+     so they recede against the menu text. The primitives in components.css
+     own size/spacing/rotation. */
+  .menu-sheet .menu-item-chev,
+  .menu-sheet .disclosure-chev {
     color: var(--border-bright);
-    font-size: 14px;
-    transition: transform 160ms ease;
   }
-  .menu-sheet .menu-item-expander[aria-expanded="true"] .menu-item-chev {
-    transform: rotate(90deg);
-    color: var(--green);
-  }
+  /* Block-disclosure rotation for the timestamps expander now lives in the
+     shared .disclosure-chev primitive (components.css). */
   .menu-sheet .menu-submenu {
     display: flex;
     flex-direction: column;
