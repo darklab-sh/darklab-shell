@@ -1819,12 +1819,26 @@ function renderWorkflowItems(items) {
         const li = document.createElement('li');
         li.className = 'workflow-step';
 
+        const main = document.createElement('div');
+        main.className = 'workflow-step-main';
+
         const chip = document.createElement('span');
         chip.className = 'allowed-chip faq-chip workflow-step-cmd';
         chip.textContent = step.cmd || '';
         chip.title = 'Click to load into prompt';
         chip.dataset.faqCommand = step.cmd || '';
-        li.appendChild(chip);
+        main.appendChild(chip);
+
+        const runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'btn btn-ghost btn-compact btn-icon-only workflow-step-run';
+        runBtn.textContent = '▶';
+        runBtn.title = 'Run this step';
+        runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
+        runBtn.dataset.workflowStepCmd = step.cmd || '';
+        main.appendChild(runBtn);
+
+        li.appendChild(main);
 
         if (step.note) {
           const note = document.createElement('span');
@@ -1842,4 +1856,22 @@ function renderWorkflowItems(items) {
   });
 
   wireFaqCommandChips(body);
+  wireWorkflowStepRunButtons(body);
+}
+
+function activateWorkflowStepRun(cmd) {
+  if (!cmd) return;
+  _closeMajorOverlays();
+  if (typeof submitComposerCommand === 'function') {
+    submitComposerCommand(cmd, { dismissKeyboard: true });
+  }
+}
+
+function wireWorkflowStepRunButtons(root) {
+  if (!root || typeof bindPressable !== 'function') return;
+  root.querySelectorAll('.workflow-step-run[data-workflow-step-cmd]').forEach(btn => {
+    bindPressable(btn, {
+      onActivate: () => activateWorkflowStepRun(btn.dataset.workflowStepCmd || ''),
+    });
+  });
 }

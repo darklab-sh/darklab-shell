@@ -113,6 +113,50 @@ test.describe('FAQ modal', () => {
   })
 })
 
+test.describe('workflows modal', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('each workflow step renders a chip and a per-step run button', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    const firstStep = page.locator('.workflow-card').first().locator('.workflow-step').first()
+    await expect(firstStep.locator('.workflow-step-cmd')).toBeVisible()
+    const runBtn = firstStep.locator('.workflow-step-run')
+    await expect(runBtn).toBeVisible()
+    await expect(runBtn).toHaveText('▶')
+    const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
+    expect(cmd && cmd.length > 0).toBe(true)
+    const ariaLabel = await runBtn.getAttribute('aria-label')
+    expect(ariaLabel).toBe(`Run: ${cmd}`)
+  })
+
+  test('step layout is a two-row grid with chip on row 1 and note on row 2', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    const firstStep = page.locator('.workflow-card').first().locator('.workflow-step').first()
+    const layout = await firstStep.evaluate((el) => ({
+      display: getComputedStyle(el).display,
+      children: Array.from(el.children).map((c) => c.className),
+    }))
+    expect(layout.display).toBe('grid')
+    expect(layout.children[0]).toContain('workflow-step-main')
+    expect(layout.children[1]).toContain('workflow-step-note')
+  })
+
+  test('clicking a step run button closes the modal and submits the command', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    const runBtn = page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-run')
+    const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
+    await runBtn.click()
+    await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('body')).toContainText(cmd)
+  })
+})
+
 test.describe('options modal', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
