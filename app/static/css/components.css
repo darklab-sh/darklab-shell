@@ -1015,3 +1015,21 @@ body #diag-btn:hover {
 /* .mobile-sheet-handle was retired in favour of a single .sheet-grab class
    shared by every mobile bottom-sheet — see mobile-chrome.css and
    app/static/js/mobile_sheet.js::bindMobileSheet. */
+
+/* ── Selected-card primitive ─────────────────────────────────────────────
+   Shared visual for "this card is the current selection from a set."
+   Apply by toggling .is-selected-card on the surface element (e.g. theme
+   picker cards today; future workflow/preset pickers when they need a
+   selected state). The treatment uses the bright --green token, an outer
+   glow ring, and a soft halo to stay visibly distinct from :hover (which
+   uses --green-dim) and :focus-visible (which uses an outline). Surfaces
+   that have a :hover or :focus-visible rule on the same element should
+   add :not(.is-selected-card) to those rules so the selected visual is
+   not overridden when the user hovers or tabs onto the selected card. */
+.is-selected-card {
+  border-color: var(--green);
+  box-shadow:
+    0 0 0 2px var(--green-glow),
+    0 0 14px color-mix(in srgb, var(--green) 22%, transparent),
+    0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
+}
