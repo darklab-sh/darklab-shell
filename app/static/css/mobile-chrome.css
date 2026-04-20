@@ -486,7 +486,7 @@ body.mobile-terminal-mode {
     gap: 7px;
   }
   .recents-sheet #mobile-recents-list .sheet-item:nth-of-type(even) {
-    background-color: color-mix(in srgb, var(--surface) 98%, var(--text) 2%);
+    background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
   }
   .recents-sheet .sheet-item-head {
     display: flex;

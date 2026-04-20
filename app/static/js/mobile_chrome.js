@@ -591,12 +591,16 @@
 
       const actions = document.createElement('div');
       actions.className = 'sheet-item-actions';
-      actions.appendChild(_recentsMakeAction('copy', () => {
-        if (typeof global.copyTextToClipboard === 'function') {
-          global.copyTextToClipboard(cmd)
-            .then(() => global.showToast && global.showToast('Command copied'))
-            .catch(() => global.showToast && global.showToast('Copy failed', 'error'));
-        }
+      actions.appendChild(_recentsMakeAction('restore', () => {
+        if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
+        const cmdEl2 = item.querySelector('.sheet-item-cmd');
+        if (cmdEl2) cmdEl2.textContent = 'loading…';
+        global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
+          .then(() => closeRecentsSheet())
+          .catch(() => {
+            if (cmdEl2) cmdEl2.textContent = cmd;
+            if (typeof global.showToast === 'function') global.showToast('Failed to load run');
+          });
       }));
       actions.appendChild(_recentsMakeAction('permalink', () => {
         if (!run.id) return;
@@ -618,18 +622,10 @@
 
       item.addEventListener('click', (e) => {
         if (e.target.closest('.sheet-item-action, .sheet-item-star')) return;
-        if (typeof global.restoreHistoryRunIntoTab === 'function') {
-          const cmdEl2 = item.querySelector('.sheet-item-cmd');
-          if (cmdEl2) cmdEl2.textContent = 'loading…';
-          global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
-            .then(() => closeRecentsSheet())
-            .catch(() => {
-              if (cmdEl2) cmdEl2.textContent = cmd;
-              if (typeof global.showToast === 'function') global.showToast('Failed to load run');
-            });
-        } else {
-          closeRecentsSheet();
+        if (typeof global.setComposerValue === 'function') {
+          global.setComposerValue(cmd, cmd.length, cmd.length);
         }
+        closeRecentsSheet();
       });
 
       recentsSheetList.appendChild(item);

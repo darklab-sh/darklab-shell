@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 647
-- `playwright`: 185
-- total: 1,674
+- `vitest`: 648
+- `playwright`: 186
+- total: 1,676
 
 This document is organized in two parts:
 
@@ -1276,8 +1276,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
 | `limits visible recent chips on mobile and appends an overflow chip` | Verifies that limits visible recent chips on mobile and appends an overflow chip. |
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
-| `refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject` | Verifies that refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject. |
-| `closes the history panel for copy / permalink but keeps it open for delete` | Verifies copy/permalink still close the desktop drawer while delete keeps it open so the confirm modal overlays it with the row still in context. |
+| `refreshHistoryPanel permalink action falls back to execCommand when clipboard writes reject` | Verifies the history drawer permalink action falls back to execCommand when clipboard writeText rejects. |
+| `clicking a history entry row injects the command into the composer and closes the panel` | Verifies row click is the re-run path — the command lands in the composer, the drawer closes, and no tab restore runs. |
+| `closes the history panel for permalink but keeps it open for star and delete` | Verifies permalink closes the desktop drawer while star and delete keep it open so the row stays in context under the confirm modal. |
 | `keeps the history panel open on mobile for every row action (confirm modal overlays it)` | Verifies the mobile drawer no longer auto-closes on the delete row — the confirm modal overlays the drawer and ui_confirm owns refocus on resolve. |
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
@@ -1866,8 +1867,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 
 | Test | Description |
 | --- | --- |
-| `loading a run from history opens output in a tab without repopulating command input` | Verifies that loading a run from history opens output in a tab without repopulating command input. |
-| `clicking a history entry that is already open switches to that tab` | Verifies that clicking a history entry that is already open switches to that tab. |
+| `clicking a history entry injects the command into the composer and closes the drawer` | Verifies that the row-tap primary action populates `#cmd` with the selected history command and closes the history panel without spawning a tab. |
+| `the history restore button loads output into a tab without touching the composer` | Verifies that the per-row `restore` action button loads the run's output into a tab and leaves `#cmd` empty — the pre-swap "click row to restore" behavior now lives on an explicit button. |
+| `the history restore button switches to an existing tab instead of duplicating it` | Verifies that clicking `restore` for a run whose output is already open activates the existing tab rather than opening a duplicate. |
 | `deleting a starred entry removes it from the chip bar` | Verifies that deleting a starred entry removes it from the chip bar. |
 | `toggling the history star keeps the desktop drawer open` | Verifies that desktop starring behaves like a toggle and does not collapse the drawer while you are working through history entries. |
 | `clear all history removes all chips including starred ones` | Verifies that clear all history removes all chips including starred ones. |
@@ -1934,10 +1936,10 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
 | `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the `.workflows-close` X button — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
 | `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
-| `mobile recents sheet restores a previous run into the active tab` | Verifies that selecting a row in the mobile recents pull-up sheet restores the corresponding run into the active tab. |
-| `mobile history restore works from a newly created session via the mobile menu` | Verifies that mobile history restore works from a newly created session via the mobile menu. |
+| `mobile recents sheet injects the tapped command into the composer and closes` | Verifies that tapping a row in the mobile recents sheet populates `#mobile-cmd` with the selected command and dismisses the sheet — the primary tap path is now composer-injection, not tab-restore. |
+| `mobile recents sheet restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile recents sheet loads the corresponding run into the active tab — the pre-swap row-tap behavior now lives on an explicit button. |
 | `mobile history rows render relative time with absolute time in the tooltip` | Verifies that the mobile recents sheet shows relative timestamps ("just now", "3m ago", ...) and surfaces the absolute time through the span's title attribute. |
-| `mobile history copy and permalink actions keep the drawer open` | Verifies that common mobile history actions do not dismiss the drawer after each tap, reducing repeated reopen churn. |
+| `mobile history permalink action keeps the drawer open` | Verifies that the permalink action in the mobile recents sheet does not dismiss the drawer after tap, reducing repeated reopen churn. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |
 | `mobile edit bar moves the caret and deletes a word` | Verifies character moves, word jumps, and delete-word behavior through the real mobile helper row. |

@@ -618,7 +618,7 @@ test.describe('mobile menu', () => {
     await expect(items).toHaveCount(commands.length)
   })
 
-  test('mobile recents sheet restores a previous run into the active tab', async ({ page }) => {
+  test('mobile recents sheet injects the tapped command into the composer and closes', async ({ page }) => {
     const commands = ['hostname', 'date', 'uptime']
 
     for (const [index, command] of commands.entries()) {
@@ -635,11 +635,11 @@ test.describe('mobile menu', () => {
       .filter({ hasText: 'hostname' })
       .first()
       .click()
-    await expect(page.locator('.tab-panel.active .output')).toContainText('hostname')
-    await expect(page.locator('#mobile-composer')).toBeVisible()
+    await expect(page.locator('#mobile-recents-sheet')).not.toBeVisible()
+    await expect(page.locator('#mobile-cmd')).toHaveValue('hostname')
   })
 
-  test('mobile history restore works from a newly created session via the mobile menu', async ({
+  test('mobile recents sheet restore action loads the run into the active tab', async ({
     page,
   }) => {
     const commands = ['hostname', 'date']
@@ -660,6 +660,7 @@ test.describe('mobile menu', () => {
       .locator('#mobile-recents-list .sheet-item')
       .filter({ hasText: 'date' })
       .first()
+      .locator('.sheet-item-action', { hasText: 'restore' })
       .click()
     await expect(page.locator('.tab-panel.active .output')).toContainText('date')
     await expect(page.locator('#cmd')).toHaveValue('')
@@ -681,7 +682,7 @@ test.describe('mobile menu', () => {
     expect(title.length).toBeGreaterThan(0)
   })
 
-  test('mobile history copy and permalink actions keep the drawer open', async ({ page }) => {
+  test('mobile history permalink action keeps the drawer open', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)
 
@@ -690,10 +691,6 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
 
     const firstEntry = page.locator('#mobile-recents-list .sheet-item').first()
-    await firstEntry.locator('.sheet-item-action', { hasText: 'copy' }).click()
-    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
-    await expect(page.locator('#permalink-toast')).toContainText('Command copied')
-
     await firstEntry.locator('.sheet-item-action', { hasText: 'permalink' }).click()
     await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
