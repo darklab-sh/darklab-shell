@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 632
+- `vitest`: 642
 - `playwright`: 179
-- total: 1,647
+- total: 1,657
 
 This document is organized in two parts:
 
@@ -1270,8 +1270,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `limits visible recent chips on mobile and appends an overflow chip` | Verifies that limits visible recent chips on mobile and appends an overflow chip. |
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
 | `refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject` | Verifies that refreshHistoryPanel copy actions fall back to execCommand when clipboard writes reject. |
-| `closes the history panel when a history action button is clicked` | Verifies that closes the history panel when a history action button is clicked. |
-| `keeps common history actions open on mobile and only closes for delete` | Verifies that mobile history actions like star, copy, and permalink keep the drawer open while delete still hands off to the destructive flow. |
+| `closes the history panel for copy / permalink but keeps it open for delete` | Verifies copy/permalink still close the desktop drawer while delete keeps it open so the confirm modal overlays it with the row still in context. |
+| `keeps the history panel open on mobile for every row action (confirm modal overlays it)` | Verifies the mobile drawer no longer auto-closes on the delete row — the confirm modal overlays the drawer and ui_confirm owns refocus on resolve. |
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
 | `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
@@ -1567,6 +1567,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `skips refocus when refocusComposer: false` | Verifies disclosure surfaces can opt out of composer refocus. |
 | `passes defer through to refocus` | Verifies the defer option is forwarded to refocusComposerAfterAction. |
 | `passes preventScroll: false through to refocus` | Verifies the preventScroll option can be disabled. |
+| `skips refocus when onActivate opened a confirm modal` | Verifies `_afterActivate` defers to `isConfirmOpen()` and leaves focus on the modal's default action. |
 | `runs refocus even if onActivate throws` | Verifies the try/finally contract keeps refocus deterministic. |
 | `preventFocusTheft blocks pointerdown default (primary button only)` | Verifies focus-theft prevention on primary contact and pass-through on secondary. |
 | `preventFocusTheft: false does not add pointerdown listener` | Verifies opt-in semantics for preventFocusTheft. |
@@ -1691,6 +1692,20 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps the modal open when onActivate throws synchronously` | Verifies a sync throw in onActivate is caught and the modal stays open so callers can surface errors inline. |
 | `keeps the modal open when an async onActivate rejects` | Verifies a rejected async onActivate is caught and the modal stays open. |
 | `focuses an explicit Node passed as defaultFocus, overriding role:cancel` | Verifies a Node passed as `defaultFocus` receives focus on open instead of the cancel button. |
+| `focus trap > traps Tab from the last action button back to the first` | Verifies the focus-trap wraps Tab forward inside the confirm modal instead of escaping to the document. |
+| `focus trap > traps Shift+Tab from the first action button back to the last` | Verifies the focus-trap wraps Shift+Tab backward inside the confirm modal. |
+
+#### `ui_focus_trap.test.js`
+
+| Test | Description |
+| --- | --- |
+| `wraps Tab from the last focusable back to the first` | Verifies the primitive cycles focus forward at the container's end boundary and preventDefaults the browser Tab. |
+| `wraps Shift+Tab from the first focusable back to the last` | Verifies the primitive cycles focus backward at the container's start boundary. |
+| `does not preventDefault when Tab moves between middle focusables` | Verifies the trap leaves middle-of-list Tab movement to the browser so native focus order still applies. |
+| `is a no-op when the container has no focusable children` | Verifies a trap-bound empty container does not block Tab. |
+| `returns null on a re-bind to the same container (idempotent)` | Verifies the data-focus-trap-bound guard prevents duplicate bindings. |
+| `dispose removes the keydown handler and clears the bound flag` | Verifies the disposable contract unwinds the listener and the idempotency marker. |
+| `skips hidden focusables inside the container` | Verifies `[hidden]` descendants are excluded from the focus list. |
 
 #### `ui_outside_click.test.js`
 

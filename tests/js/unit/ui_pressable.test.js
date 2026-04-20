@@ -147,6 +147,22 @@ describe('bindPressable', () => {
     expect(refocus).toHaveBeenCalledWith({ preventScroll: false, defer: false })
   })
 
+  it('skips refocus when onActivate opened a confirm modal', () => {
+    // Regression: clicking the trash icon in a history row runs an onActivate
+    // that opens a confirm modal (which focuses Cancel). Before this guard,
+    // _afterActivate then yanked focus back to the composer, breaking the
+    // modal's default focus and leaving its focus trap with no target.
+    const btn = makeEl('button')
+    window.isConfirmOpen = () => true
+    try {
+      g.bindPressable(btn, { onActivate: () => {} })
+      btn.click()
+      expect(refocus).not.toHaveBeenCalled()
+    } finally {
+      delete window.isConfirmOpen
+    }
+  })
+
   it('runs refocus even if onActivate throws', () => {
     // The DOM event dispatcher reports errors from listeners rather than
     // rethrowing, so we swallow the window 'error' event to keep the test

@@ -789,7 +789,6 @@ function refreshHistoryPanel() {
       bindPressable(entry.querySelector('[data-action="delete"]'), {
         onActivate: () => {
           confirmHistAction('delete', run.id, run.command);
-          hideHistoryPanel();
         },
       });
 

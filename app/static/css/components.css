@@ -1094,6 +1094,18 @@ body #diag-btn:hover {
   outline-offset: 1px;
 }
 
+/* Inside a confirm modal, always render the focus indicator on :focus — not
+   just :focus-visible. When the user opens a confirm via a mouse click (e.g.
+   the history-row trash icon), the browser's :focus-visible heuristic
+   suppresses the keyboard-cue outline on the programmatically-focused cancel
+   button, leaving keyboard users without a visible focus target. Inside a
+   modal dialog that auto-focuses a button, the focus location matters for
+   keyboard users regardless of how the modal was opened. */
+#confirm-host .btn:focus {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
 .btn[aria-disabled="true"],
 .btn:disabled {
   opacity: 0.45;

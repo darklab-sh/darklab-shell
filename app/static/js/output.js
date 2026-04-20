@@ -145,10 +145,18 @@ function _stickOutputToBottom(out, tab) {
   out.scrollTop = out.scrollHeight;
   if (tab) {
     const token = tab._outputFollowToken;
+    // 16ms follow-up re-sticks the bottom once layout (fonts, images,
+    // prompt mount) has settled. If the user or a caller flipped
+    // followOutput to false during that window (e.g. scrolled up to read
+    // earlier output) we must not yank them back — their scroll intent
+    // wins over our layout-settle retry.
     setTimeout(() => {
-      if (!getTab(tab.id) || tab._outputFollowToken !== token) return;
-      out.scrollTop = out.scrollHeight;
-      tab.suppressOutputScrollTracking = false;
+      const live = getTab(tab.id);
+      if (!live || live._outputFollowToken !== token) return;
+      if (live.followOutput !== false) {
+        out.scrollTop = out.scrollHeight;
+      }
+      live.suppressOutputScrollTracking = false;
     }, 16);
   }
 }

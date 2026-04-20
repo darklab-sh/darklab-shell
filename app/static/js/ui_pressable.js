@@ -55,7 +55,13 @@
       try { el.blur(); } catch (_) { /* non-critical */ }
     }
     if (options.clearPressStyle) _clearPress(el);
-    if (options.refocusComposer !== false && typeof global.refocusComposerAfterAction === 'function') {
+    // If onActivate opened a confirm modal, the modal already focused its
+    // default action (Cancel) and installed a focus trap. Yanking focus
+    // back to the composer here would defeat both and leave Tab with no
+    // trap target. ui_confirm.js refocuses the composer itself once the
+    // modal resolves, so skipping here does not leak focus state.
+    const modalOwnsFocus = typeof global.isConfirmOpen === 'function' && global.isConfirmOpen();
+    if (!modalOwnsFocus && options.refocusComposer !== false && typeof global.refocusComposerAfterAction === 'function') {
       global.refocusComposerAfterAction({
         preventScroll: options.preventScroll !== false,
         defer: !!options.defer,

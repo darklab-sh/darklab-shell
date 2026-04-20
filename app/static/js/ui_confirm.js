@@ -136,6 +136,9 @@
   function _cleanup(state) {
     if (!_host) return;
     if (state && state.mqList && typeof state.mqList.remove === 'function') state.mqList.remove();
+    if (state && state.focusTrapHandle && typeof state.focusTrapHandle.dispose === 'function') {
+      state.focusTrapHandle.dispose();
+    }
     if (state && state.dismissibleHandle && typeof state.dismissibleHandle.dispose === 'function') {
       state.dismissibleHandle.dispose();
     }
@@ -231,9 +234,17 @@
     const state = {
       resolve: resolveFn,
       dismissibleHandle: null,
+      focusTrapHandle: null,
       mqList: null,
     };
     _activeState = state;
+
+    // Focus trap: keep Tab cycling inside the card while the modal is open;
+    // otherwise Tab falls through to the document and starts cycling into
+    // rail / tab / HUD buttons behind the backdrop.
+    if (typeof global.bindFocusTrap === 'function' && _card) {
+      state.focusTrapHandle = global.bindFocusTrap(_card);
+    }
 
     // Escape + backdrop via bindDismissible.
     if (typeof global.bindDismissible === 'function') {
