@@ -21,6 +21,7 @@
   const railSectionWorkflows = document.getElementById('rail-section-workflows');
   const railWorkflowsBody = document.getElementById('rail-workflows-list');
   const railWorkflowsHeader = document.getElementById('rail-workflows-header');
+  const railWorkflowsCount = document.getElementById('rail-workflows-count');
   const railNav           = document.getElementById('rail-nav');
 
   const hudStatusCell     = document.getElementById('hud-status-cell');
@@ -259,6 +260,7 @@
   // ── Workflows list rendering ────────────────────────────────────
   function renderRailWorkflows(items) {
     allWorkflows = Array.isArray(items) ? items.slice() : [];
+    if (railWorkflowsCount) railWorkflowsCount.textContent = String(allWorkflows.length);
     if (!railWorkflowsBody) return;
     railWorkflowsBody.replaceChildren();
     if (!allWorkflows.length) {
