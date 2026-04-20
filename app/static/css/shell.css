@@ -411,16 +411,16 @@ body.mobile-terminal-mode .output-follow-btn {
 .save-menu {
   display: none;
   position: absolute;
-  bottom: calc(100% + 4px);
+  bottom: calc(100% - 1px);
   right: 0;
   background: var(--theme-dropdown-bg);
   border: 1px solid var(--theme-dropdown-border);
-  border-radius: 4px;
+  border-radius: 4px 4px 0 0;
   box-shadow:
     0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
     0 -6px 18px var(--theme-dropdown-shadow);
   z-index: 200;
-  min-width: 72px;
+  min-width: 160px;
   overflow: hidden;
 }
 
@@ -449,8 +449,13 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 /* Dropdown indicator arrow on the save trigger button (direct child of the
-   wrap — class-agnostic so it survives primitive migrations) */
-.save-menu-wrap > button::after {
+   wrap — class-agnostic so it survives primitive migrations). Base state is
+   an up-pointing triangle (▴) because the default menu opens upward; the
+   `.save-menu-down` variant (permalink) rotates it so the chevron points
+   down (▾) to match its downward-opening menu. Adding `.open` flips each
+   by 180° so the chevron always points away from the currently-visible menu. */
+.save-menu-wrap > button::after,
+.hud-save-wrap > button::after {
   content: '';
   flex: none;
   align-self: center;
@@ -459,18 +464,28 @@ body.mobile-terminal-mode .output-follow-btn {
   height: 0;
   border-left: 2px solid transparent;
   border-right: 2px solid transparent;
-  border-top: 3px solid currentColor;
+  border-bottom: 3px solid currentColor;
   transition: transform 0.15s ease;
 }
 
-.save-menu-wrap.open > button::after {
+.save-menu-wrap.save-menu-down > button::after {
   transform: rotate(180deg);
+}
+
+.save-menu-wrap.open > button::after,
+.hud-save-wrap.open > button::after {
+  transform: rotate(180deg);
+}
+
+.save-menu-wrap.save-menu-down.open > button::after {
+  transform: rotate(0deg);
 }
 
 /* Downward-opening variant — used when the trigger is near the top of the page (e.g. permalink header) */
 .save-menu-wrap.save-menu-down .save-menu {
   bottom: auto;
-  top: calc(100% + 4px);
+  top: calc(100% - 1px);
+  border-radius: 0 0 4px 4px;
 }
 
 .terminal-body {

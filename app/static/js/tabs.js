@@ -518,7 +518,7 @@ function _createTabPanel(id) {
   saveBtn.textContent = 'save';
   const saveMenu = document.createElement('div');
   saveMenu.className = 'save-menu';
-  [['save-txt', 'txt'], ['save-html', 'html'], ['save-pdf', 'pdf']].forEach(([action, label]) => {
+  [['save-txt', 'Plain text (.txt)'], ['save-html', 'Styled HTML (.html)'], ['save-pdf', 'PDF document (.pdf)']].forEach(([action, label]) => {
     const item = document.createElement('button');
     item.type = 'button';
     item.dataset.action = action;

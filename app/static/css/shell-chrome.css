@@ -620,15 +620,15 @@
   .hud-save-wrap { position: relative; }
   .hud-save-wrap .save-menu {
     position: absolute;
-    bottom: calc(100% + 4px);
+    bottom: calc(100% - 1px);
     right: 0;
     display: none;
     flex-direction: column;
     background: var(--theme-panel-alt-bg);
     border: 1px solid var(--border-bright);
-    border-radius: 3px;
+    border-radius: 3px 3px 0 0;
     padding: 4px;
-    min-width: 80px;
+    min-width: 160px;
     z-index: 20;
     box-shadow: 0 6px 18px color-mix(in srgb, var(--bg) 60%, transparent);
   }
