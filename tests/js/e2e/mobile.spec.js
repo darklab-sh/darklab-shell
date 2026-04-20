@@ -665,6 +665,22 @@ test.describe('mobile menu', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
+  test('mobile history rows render relative time with absolute time in the tooltip', async ({ page }) => {
+    await runCommandMobile(page, 'hostname')
+    await waitForHistoryRuns(page, 1)
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
+    await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
+
+    const timeEl = page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-time')
+    await expect(timeEl).toHaveText(/just now|\d+m ago|\d+h ago/)
+    // Absolute time is surfaced via the title attribute for precise lookups on long-press.
+    const title = await timeEl.getAttribute('title')
+    expect(title).toBeTruthy()
+    expect(title.length).toBeGreaterThan(0)
+  })
+
   test('mobile history copy and permalink actions keep the drawer open', async ({ page }) => {
     await runCommandMobile(page, 'hostname')
     await waitForHistoryRuns(page, 1)

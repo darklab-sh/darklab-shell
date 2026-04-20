@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 645
-- `playwright`: 184
-- total: 1,671
+- `vitest`: 647
+- `playwright`: 185
+- total: 1,674
 
 This document is organized in two parts:
 
@@ -1282,6 +1282,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `refreshHistoryPanel labels the history permalink action as permalink` | Verifies that the history drawer permalink action keeps the expected label. |
 | `shows a date in history metadata when the run is not from today` | Verifies that older history entries include a date token in their metadata row. |
 | `omits the date in history metadata for runs from the current day` | Verifies that same-day history entries keep the compact time-only metadata row. |
+| `_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date` | Verifies the relative-time helper used by the mobile recents sheet returns stable bucket strings and a short date for older runs. |
+| `desktop history rows keep absolute clock time and no tooltip on the time span` | Regression: the desktop history drawer keeps exact clock time and does not set a title tooltip on the time span, so only the mobile sheet switches to relative copy. |
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
@@ -1934,6 +1936,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
 | `mobile recents sheet restores a previous run into the active tab` | Verifies that selecting a row in the mobile recents pull-up sheet restores the corresponding run into the active tab. |
 | `mobile history restore works from a newly created session via the mobile menu` | Verifies that mobile history restore works from a newly created session via the mobile menu. |
+| `mobile history rows render relative time with absolute time in the tooltip` | Verifies that the mobile recents sheet shows relative timestamps ("just now", "3m ago", ...) and surfaces the absolute time through the span's title attribute. |
 | `mobile history copy and permalink actions keep the drawer open` | Verifies that common mobile history actions do not dismiss the drawer after each tap, reducing repeated reopen churn. |
 | `mobile run button disables while a command is running` | Verifies that the mobile Run button follows the same running-state guard as desktop. |
 | `mobile permalink copies via the fallback path when clipboard writeText is unavailable` | Verifies that the mobile permalink flow still succeeds when the Clipboard API fallback path is required. |

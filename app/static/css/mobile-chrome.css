@@ -485,6 +485,9 @@ body.mobile-terminal-mode {
     flex-direction: column;
     gap: 7px;
   }
+  .recents-sheet #mobile-recents-list .sheet-item:nth-of-type(even) {
+    background-color: color-mix(in srgb, var(--surface) 98%, var(--text) 2%);
+  }
   .recents-sheet .sheet-item-head {
     display: flex;
     align-items: center;

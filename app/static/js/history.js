@@ -500,14 +500,25 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 
+function _historyRelativeTime(startedAt, now = new Date()) {
+  if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) return '';
+  const diffSec = Math.round((now.getTime() - startedAt.getTime()) / 1000);
+  if (diffSec < 45) return 'just now';
+  if (diffSec < 60 * 60) return `${Math.round(diffSec / 60)}m ago`;
+  if (diffSec < 60 * 60 * 24) return `${Math.round(diffSec / 3600)}h ago`;
+  if (diffSec < 60 * 60 * 24 * 7) return `${Math.round(diffSec / 86400)}d ago`;
+  return startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry' + (isStarred ? ' starred' : '');
   const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
   const startedAt = new Date(run.started);
   const now = new Date();
+  const validDate = !Number.isNaN(startedAt.getTime());
   const time = startedAt.toLocaleTimeString();
-  const showDate = !Number.isNaN(startedAt.getTime()) && (
+  const showDate = validDate && (
     startedAt.getFullYear() !== now.getFullYear()
     || startedAt.getMonth() !== now.getMonth()
     || startedAt.getDate() !== now.getDate()

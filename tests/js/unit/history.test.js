@@ -535,6 +535,7 @@ describe('history panel actions', () => {
         clearHistoryFilters,
         _buildHistoryRequestUrl,
         _setHistoryFilter,
+        _historyRelativeTime,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
         _saveStarred,
@@ -749,6 +750,48 @@ describe('history panel actions', () => {
     } finally {
       globalThis.Date = RealDate
     }
+  })
+
+  it('_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date', () => {
+    const { _historyRelativeTime } = loadHistoryPanel()
+    const now = new Date('2026-04-20T12:00:00Z')
+    expect(_historyRelativeTime(new Date('2026-04-20T11:59:50Z'), now)).toBe('just now')
+    expect(_historyRelativeTime(new Date('2026-04-20T11:57:00Z'), now)).toBe('3m ago')
+    expect(_historyRelativeTime(new Date('2026-04-20T10:00:00Z'), now)).toBe('2h ago')
+    expect(_historyRelativeTime(new Date('2026-04-18T12:00:00Z'), now)).toBe('2d ago')
+    // Older than a week -> short date ("Apr 10" in en locales; just check shape.)
+    const older = _historyRelativeTime(new Date('2026-04-10T12:00:00Z'), now)
+    expect(older).not.toMatch(/ago|just now/)
+    expect(older.length).toBeGreaterThan(0)
+    expect(_historyRelativeTime('not a date', now)).toBe('')
+    expect(_historyRelativeTime(new Date('invalid'), now)).toBe('')
+  })
+
+  it('desktop history rows keep absolute clock time and no tooltip on the time span', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-04-20T09:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
+        }),
+      ),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const timeEl = document.querySelector('.history-entry-meta span')
+    expect(timeEl.textContent).not.toMatch(/ago|just now/)
+    expect(timeEl.title).toBe('')
   })
 
   it('refreshHistoryPanel sends the active server-side filters to /history', async () => {

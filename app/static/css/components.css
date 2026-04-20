@@ -738,6 +738,9 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   cursor: pointer;
   transition: background-color 0.15s;
 }
+.history-entry:nth-of-type(even) {
+  background-color: color-mix(in srgb, var(--surface) 98%, var(--text) 2%);
+}
 .history-entry:hover,
 .history-entry:focus-visible {
   background-color: var(--theme-history-entry-hover-bg);

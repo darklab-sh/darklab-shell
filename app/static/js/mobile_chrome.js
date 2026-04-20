@@ -456,13 +456,12 @@
   let _recentsSearchQuery = '';
   const _recentsFilterState = { root: '', exit: 'all', date: 'all', starred: false };
 
-  function _recentsFormatTime(iso) {
-    if (!iso) return '';
+  function _recentsParseDate(iso) {
+    if (!iso) return null;
     try {
       const d = new Date(iso);
-      if (Number.isNaN(d.getTime())) return '';
-      return d.toLocaleTimeString([], { hour: 'numeric', minute: '2-digit', second: '2-digit' });
-    } catch (_) { return ''; }
+      return Number.isNaN(d.getTime()) ? null : d;
+    } catch (_) { return null; }
   }
   function _recentsDateMatch(iso, mode) {
     if (mode === 'all') return true;
@@ -491,7 +490,7 @@
       }
       if (_recentsFilterState.exit === 'success' && r.exit_code !== 0) return false;
       if (_recentsFilterState.exit === 'failed' && (r.exit_code === 0 || r.exit_code == null)) return false;
-      if (!_recentsDateMatch(r.started_at, _recentsFilterState.date)) return false;
+      if (!_recentsDateMatch(r.started, _recentsFilterState.date)) return false;
       if (starredSet && !starredSet.has(r.command || '')) return false;
       return true;
     });
@@ -579,7 +578,10 @@
       meta.className = 'sheet-item-meta';
       const timeEl = document.createElement('span');
       timeEl.className = 'sheet-item-time';
-      timeEl.textContent = _recentsFormatTime(run.started_at || run.created_at);
+      const parsed = _recentsParseDate(run.started);
+      const relFn = typeof _historyRelativeTime === 'function' ? _historyRelativeTime : null;
+      timeEl.textContent = parsed && relFn ? relFn(parsed) : '';
+      if (parsed) timeEl.title = parsed.toLocaleString();
       const exitEl = document.createElement('span');
       const exitCode = (run.exit_code ?? null);
       exitEl.className = 'sheet-item-exit' + (exitCode !== null && exitCode !== 0 ? ' nonzero' : '');
