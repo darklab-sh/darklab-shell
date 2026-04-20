@@ -557,7 +557,7 @@ body.permalink-page .output:empty::before {
   content: none;
 }
 body.permalink-page .permalink-error-heading {
-  color: var(--amber);
+  color: var(--red);
   font-weight: 700;
   margin-bottom: 12px;
 }

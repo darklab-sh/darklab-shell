@@ -1185,7 +1185,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border: 1px solid var(--border-bright);
   border-radius: 3px;
   padding: 1px 6px;
-  color: var(--amber);
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -1281,7 +1281,7 @@ body.mobile-terminal-mode .output-follow-btn {
   background: var(--surface);
   border: 1px solid var(--border-bright);
   border-radius: 3px;
-  color: var(--amber);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 2px 8px;

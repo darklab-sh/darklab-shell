@@ -7,6 +7,7 @@ This document is the full reference for the shell theme system. It explains how 
 ## Table of Contents
 
 - [Overview](#overview)
+- [Semantic Color Contract](#semantic-color-contract)
 - [Theme Resolution Order](#theme-resolution-order)
 - [Baked-In Fallback Palette](#baked-in-fallback-palette)
 - [How the Code Works](#how-the-code-works)
@@ -23,6 +24,34 @@ This document is the full reference for the shell theme system. It explains how 
 ## Overview
 
 The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, and exported HTML all read from the same resolved values rather than each maintaining a separate palette. Themes are selectable at runtime through a preview modal without requiring code changes or a container rebuild.
+
+---
+
+## Semantic Color Contract
+
+Every theme provides four semantic colors with fixed meanings. Themes may choose any visual tone for each color, but the four must stay visually distinct within a single theme so each meaning remains recognizable.
+
+| Semantic | Token | Meaning |
+|----------|-------|---------|
+| yellow | `--amber` | caution / reversible destructive / expiring / in-progress (running, live, pending) |
+| red | `--red` | destructive / kill / error / irreversible |
+| green | `--green` | completed success / enabled / current-focus (the "done/selected" tier) |
+| dim | `--muted` | neutral metadata — labels, timestamps, non-critical values |
+
+### Rules
+
+- **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment (e.g. dimmed expiry text) it uses the `dim` token plus the semantic color on the label only, not a second intensity tier of the same color.
+- **All four must stay distinct per theme.** A theme that collapses caution into danger (yellow ≈ red) defeats the purpose of the contract. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme, not just in aggregate across the palette family.
+- **In-progress belongs to yellow, not green.** A "running" task is yellow; a "completed success" task is green. This keeps the two states visually distinct even when both are "active" in the loose sense. Use yellow for running, live, pending, and the HUD `RUNNING` pill; use green only for completed success, enabled switches, and current-focus indicators.
+- **Use existing theme tokens.** Do not introduce surface-local amber / red / green variants. If a surface needs tuning, add a new `--theme-*` chrome token derived from the base semantic token via `color-mix()` in the theme file — never hardcode a one-off color.
+
+### Documented exceptions
+
+These uses of yellow do not match the strict semantic meaning above, but are retained because they match widely established cross-product conventions. They should not be cited as precedent for introducing further exceptions.
+
+- **Starred items.** A yellow star icon on favorited / starred entries (history rows, chips, sheet items) — matches the universal star-is-yellow convention (GitHub, Gmail, etc.).
+- **Search-hit highlights.** `mark.search-hl` tints matches yellow — matches browser and IDE find-in-page convention.
+- **macOS-style minimize button.** `window_btn_minimize` in every theme renders the amber traffic-light dot — decorative chrome that mirrors the macOS window-control convention, not a semantic signal.
 
 ---
 

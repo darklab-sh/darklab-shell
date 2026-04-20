@@ -139,9 +139,10 @@ body.diag-page::before { display: none; }
 }
 
 /* Status values */
-.diag-ok   { color: var(--green); }
-.diag-warn { color: var(--amber); }
-.diag-fail { color: var(--red); }
+.diag-ok    { color: var(--green); }
+.diag-warn  { color: var(--amber); }
+.diag-fail  { color: var(--red); }
+.diag-muted { color: var(--muted); }
 
 /* Dot indicator beside status text */
 .diag-dot {

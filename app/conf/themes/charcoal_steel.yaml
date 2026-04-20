@@ -11,9 +11,9 @@ border: rgba(122, 151, 181, 0.14)
 border_bright: rgba(122, 151, 181, 0.28)
 text: '#e4e8ed'
 muted: '#87929e'
-green: '#7ab7d8'
-green_dim: '#5f91ae'
-green_glow: rgba(122, 183, 216, 0.10)
+green: '#6bb36a'
+green_dim: '#4a7c4a'
+green_glow: rgba(107, 179, 106, 0.10)
 amber: '#c6a05a'
 red: '#dd6a68'
 blue: '#a1c6ff'
