@@ -229,11 +229,6 @@ body #ln-btn.active {
   border-color: var(--theme-toolbar-button-active-border);
   background: var(--theme-toolbar-button-active-bg);
 }
-body .search-toggle.active {
-  color: var(--theme-toolbar-button-active-text);
-  border-color: var(--theme-toolbar-button-active-border);
-  background: var(--theme-toolbar-button-active-bg);
-}
 body .history-action-btn {
   background: var(--theme-toolbar-button-bg);
   border-color: var(--theme-toolbar-button-border);
@@ -243,16 +238,6 @@ body .history-action-btn:hover {
   background: var(--theme-toolbar-button-hover-bg);
   border-color: var(--theme-toolbar-button-hover-border);
   color: var(--theme-toolbar-button-hover-text);
-}
-body .star-btn.starred {
-  background: var(--theme-chip-bg);
-  border-color: var(--theme-chip-border);
-  color: var(--theme-chip-text);
-}
-body .star-btn.starred:hover {
-  background: var(--theme-chip-hover-bg);
-  border-color: var(--theme-chip-hover-border);
-  color: var(--theme-chip-hover-text);
 }
 .tab .tab-close {
   opacity: 0;
@@ -424,19 +409,6 @@ body .star-btn.starred:hover {
   border-color: var(--text);
 }
 .search-toggles { display: flex; gap: 4px; }
-.search-toggle {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 3px 7px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.search-toggle:hover { color: var(--text); border-color: var(--text); }
-.search-toggle.active { color: var(--green); border-color: var(--green-dim); background: color-mix(in srgb, var(--green) 6%, transparent); }
 mark.search-hl { background: color-mix(in srgb, var(--amber) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transparent); }
 
@@ -542,10 +514,6 @@ body.permalink-page .permalink-actions {
   gap: 8px;
   flex-wrap: wrap;
   align-items: flex-start;
-}
-body.permalink-page .permalink-actions .term-action-btn:hover {
-  border-color: var(--green-dim);
-  color: var(--green);
 }
 body.permalink-page .permalink-expiry {
   font-size: 10px;
@@ -880,10 +848,6 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   border-color: var(--border-bright);
 }
 .history-action-btn:hover { color: var(--green); border-color: var(--green-dim); }
-.tab-kill-btn-danger {
-  color: var(--red);
-  border-color: var(--red);
-}
 
 body #hist-btn,
 body #faq-btn,
@@ -1065,4 +1029,375 @@ body #diag-btn:hover {
   line-height: 1;
   opacity: 0.75;
   flex: 0 0 auto;
+}
+
+/* ── Button primitives ─────────────────────────────────────────────────────
+   Closed five-primitive set every clickable control in the app must map to.
+   No surface-scoped button classes; one-offs are defects.
+
+   Primitives:
+     .btn        — role × tone × size × state composable CTA
+     .nav-item   — sidebar rail and mobile menu rows (navigation)
+     .close-btn  — icon-only X button
+     .toggle-btn — aria-pressed mode toggle
+     .kb-key     — mobile on-screen keyboard key (see mobile-chrome.css)
+
+   Composition rules for .btn:
+     role  — pick exactly one: btn-primary | btn-secondary | btn-ghost | btn-destructive
+     tone  — pick zero-or-one: btn-warning | btn-danger  (accent is default;
+             btn-destructive defaults its tone to danger)
+     size  — default unless marked btn-compact
+     state — aria-disabled="true" (all roles) or aria-busy="true"
+             (primary + destructive only)
+     icon-only — btn-icon-only permitted on ghost role only (plus close-btn)
+
+   Role chrome:
+     primary     — filled, high-emphasis CTA
+     secondary   — outlined, neutral/mid emphasis
+     ghost       — transparent, low emphasis; only role allowed icon-only on btn
+     destructive — outlined-tint chrome reserved for destructive action weight
+
+   Tone colors flow through the local --_tone custom property so role rules
+   can compose with tone overrides without long :is() selectors. */
+
+.btn {
+  --_tone: var(--green);
+  --_tone-dim: var(--green-dim);
+  --_tone-bg: var(--green);
+  --_tone-fg: var(--theme-on-accent-text);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.2;
+  letter-spacing: 0.3px;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
+  cursor: pointer;
+  transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+  background: transparent;
+  color: var(--text);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+
+.btn[aria-disabled="true"],
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* u-hidden escape hatch: the primitive's display:inline-flex is a single-class
+   rule that out-ranks the .u-hidden utility by load order. Re-assert hide
+   when both classes are present. */
+.btn.u-hidden,
+.nav-item.u-hidden,
+.close-btn.u-hidden,
+.toggle-btn.u-hidden {
+  display: none;
+}
+
+.btn[aria-busy="true"] {
+  cursor: progress;
+  color: transparent !important;
+  position: relative;
+}
+.btn[aria-busy="true"]::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  color: var(--_tone);
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* Tone overrides — applied to any role */
+.btn.btn-warning {
+  --_tone: var(--amber);
+  --_tone-dim: color-mix(in srgb, var(--amber) 58%, transparent);
+  --_tone-bg: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
+  --_tone-fg: var(--theme-modal-warning-btn-text);
+}
+.btn.btn-danger,
+.btn.btn-destructive {
+  --_tone: var(--red);
+  --_tone-dim: color-mix(in srgb, var(--red) 54%, transparent);
+  --_tone-bg: var(--red);
+  --_tone-fg: var(--theme-modal-danger-btn-text);
+}
+
+/* Role: primary — filled */
+.btn-primary {
+  background: var(--_tone-bg);
+  border: 1px solid var(--_tone-dim);
+  color: var(--_tone-fg);
+}
+.btn-primary:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone-bg) 92%, var(--text));
+  transform: translateY(-1px);
+}
+
+/* Role: secondary — outlined with neutral default; tone pulls the outline
+   and hover wash toward the tone color while keeping the resting state
+   restrained. */
+.btn-secondary {
+  background: color-mix(in srgb, var(--surface) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-bright) 88%, transparent);
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+}
+.btn-secondary:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright));
+  color: var(--text);
+  background: color-mix(in srgb, var(--_tone) 7%, transparent);
+  transform: translateY(-1px);
+}
+.btn-secondary.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-secondary.btn-danger:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--_tone);
+  border-color: color-mix(in srgb, var(--_tone) 52%, transparent);
+  background: color-mix(in srgb, var(--_tone) 6%, transparent);
+}
+
+/* Role: ghost — transparent, low emphasis; icon-only permitted */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+}
+.btn-ghost.btn-warning,
+.btn-ghost.btn-danger,
+.btn-ghost.btn-destructive {
+  color: var(--_tone);
+}
+.btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone) 10%, transparent);
+  color: var(--text);
+}
+.btn-ghost.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-ghost.btn-danger:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-ghost.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--_tone);
+  background: color-mix(in srgb, var(--_tone) 12%, transparent);
+}
+
+/* Role: destructive — outlined chrome with tone-tinted background.
+   Default tone is danger (irreversible); btn-warning on destructive renders
+   the reversible-destructive treatment (caution yellow). Accepts labels
+   only — never icon-only, to prevent unlabeled destructive controls. */
+.btn-destructive {
+  background: color-mix(in srgb, var(--_tone) 8%, transparent);
+  border: 1px solid var(--_tone-dim);
+  color: var(--_tone);
+}
+.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone) 16%, transparent);
+  color: var(--_tone);
+  transform: translateY(-1px);
+}
+
+/* Size — compact */
+.btn-compact {
+  min-height: 22px;
+  padding: 3px 9px;
+  font-size: 10px;
+  gap: 4px;
+}
+
+/* Icon-only — ghost only */
+.btn-icon-only {
+  padding: 4px 6px;
+  min-width: 26px;
+  min-height: 26px;
+  gap: 0;
+}
+.btn-icon-only.btn-compact {
+  padding: 2px 4px;
+  min-width: 22px;
+  min-height: 22px;
+}
+
+/* ── Nav-item primitive ─────────────────────────────────────────────────────
+   Row-shaped navigation / menu control. Covers sidebar rail items, rail
+   section headers, mobile hamburger menu rows, submenu rows, recents-row
+   action chips, FAQ question toggles. Distinct from .btn because these are
+   *rows in a list* — wider, left-aligned, and visually subordinate to the
+   CTAs in their surface. Compose with .disclosure-chev or .drill-chev from
+   the chev primitives to signal behavior. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+.nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+  color: var(--green);
+}
+.nav-item:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.nav-item[aria-disabled="true"],
+.nav-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.nav-item.is-active,
+.nav-item[aria-current="page"] {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+.nav-item.is-muted { color: var(--muted); }
+
+/* ── Close-btn primitive ────────────────────────────────────────────────────
+   The single icon-close control. Composes with faq-close, workflows-close,
+   shortcuts-close, theme-close, options-close, history-panel-close,
+   search-close-btn, sheet-close. Surface classes remain as JS hooks and
+   for surface-local overrides (e.g. sheet-close mobile touch padding).
+
+   Subtle variant (.close-btn-subtle) renders with opacity-only chrome for
+   contexts where the X should recede until hovered.
+
+   Documented exception: .tab .tab-close retains its own surface-specific
+   chrome (circular shape, per-theme bg/border tokens, parent-hover opacity
+   reveal) because the primitive's shape-and-state model doesn't fit. */
+.close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+}
+.close-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+}
+.close-btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.close-btn[aria-disabled="true"],
+.close-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.close-btn-subtle {
+  opacity: 0.4;
+  margin-left: 0;
+  padding: 1px 4px;
+  font-size: 13px;
+}
+.close-btn-subtle:hover:not([aria-disabled="true"]):not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+/* ── Toggle-btn primitive ───────────────────────────────────────────────────
+   aria-pressed mode toggles: case-sensitive / regex in search, starred
+   filter, mobile recents filter-checks, star icons on history and recents
+   rows. The "is the mode on?" state is always carried by aria-pressed; the
+   CSS only reacts to that attribute. */
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-height: 22px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 72%, transparent);
+  border-radius: 3px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toggle-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
+.toggle-btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.toggle-btn[aria-pressed="true"] {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+.toggle-btn[aria-disabled="true"],
+.toggle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Star toggle — icon-only variant used by history and recents rows. Yellow
+   when pressed matches the Workstream D named exception (starred items use
+   amber regardless of otherwise strict semantic mapping). */
+.toggle-btn-star {
+  border: none;
+  padding: 2px 4px;
+  min-height: 20px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.toggle-btn-star:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--amber);
+  border: none;
+  background: transparent;
+}
+.toggle-btn-star[aria-pressed="true"] {
+  color: var(--amber);
+  border: none;
+  background: transparent;
 }

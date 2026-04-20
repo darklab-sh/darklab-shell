@@ -475,8 +475,8 @@
       color-mix(in srgb, var(--amber) 55%, transparent),
       transparent);
   }
-  body.mobile-terminal-mode .term-action-btn:focus,
-  body.mobile-terminal-mode .term-action-btn:focus-visible,
+  body.mobile-terminal-mode .terminal-actions .btn:focus,
+  body.mobile-terminal-mode .terminal-actions .btn:focus-visible,
   body.mobile-terminal-mode .history-action-btn:focus,
   body.mobile-terminal-mode .history-action-btn:focus-visible {
     outline: none;
@@ -485,8 +485,8 @@
     border-color: var(--border-bright);
     background: transparent;
   }
-  body.mobile-terminal-mode .term-action-btn:hover,
-  body.mobile-terminal-mode .term-action-btn:active,
+  body.mobile-terminal-mode .terminal-actions .btn:hover,
+  body.mobile-terminal-mode .terminal-actions .btn:active,
   body.mobile-terminal-mode .history-action-btn:hover,
   body.mobile-terminal-mode .history-action-btn:active {
     color: var(--muted);
@@ -497,7 +497,7 @@
     padding: 5px 10px;
     gap: 4px;
   }
-  body.mobile-terminal-mode .terminal-actions .term-action-btn {
+  body.mobile-terminal-mode .terminal-actions .btn {
     min-height: 26px;
     padding: 3px 8px;
   }

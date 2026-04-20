@@ -545,6 +545,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── search.test.js      # search helper, regex/case modes, mixed-content line regression
 │       │   ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
 │       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
+│       │   ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
 │       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
 │       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution

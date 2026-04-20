@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 584
+- `vitest`: 596
 - `playwright`: 179
-- total: 1,599
+- total: 1,611
 
 This document is organized in two parts:
 
@@ -1219,6 +1219,23 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does not auto-highlight any item when the menu opens above (same as below)` | Verifies that does not auto-highlight any item when the menu opens above (same as below). |
 | `forces the dropdown above the detached mobile composer and aligns it to the composer width` | Verifies that forces the dropdown above the detached mobile composer and aligns it to the composer width. |
 | `keeps the active autocomplete item in view as the highlighted option moves` | Verifies that keeps the active autocomplete item in view as the highlighted option moves. |
+
+#### `button_primitives.test.js`
+
+| Test | Description |
+| --- | --- |
+| `no source file references retired class 'term-action-btn'` | Regression guard: fails if the retired `term-action-btn` class reappears in app source. |
+| `no source file references retired class 'hud-kill-btn'` | Regression guard: fails if the retired `hud-kill-btn` class reappears in app source. |
+| `no source file references retired class 'hud-action-btn'` | Regression guard: fails if the retired `hud-action-btn` class reappears in app source. |
+| `no source file references retired class 'tab-kill-btn-danger'` | Regression guard: fails if the retired `tab-kill-btn-danger` class reappears in app source. |
+| `no source file references retired class 'modal-primary'` | Regression guard: fails if the retired `modal-primary` class reappears in app source. |
+| `no source file references retired class 'modal-primary-danger'` | Regression guard: fails if the retired `modal-primary-danger` class reappears in app source. |
+| `no source file references retired class 'modal-primary-warning'` | Regression guard: fails if the retired `modal-primary-warning` class reappears in app source. |
+| `no source file references retired class 'modal-primary-accent'` | Regression guard: fails if the retired `modal-primary-accent` class reappears in app source. |
+| `no source file references retired class 'modal-secondary'` | Regression guard: fails if the retired `modal-secondary` class reappears in app source. |
+| `no source file references retired class 'modal-secondary-warning'` | Regression guard: fails if the retired `modal-secondary-warning` class reappears in app source. |
+| `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
+| `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
 
 #### `config.test.js`
 

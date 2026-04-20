@@ -423,7 +423,8 @@ function _createTabHeader(id, label) {
 function _createTabActionButton(id, action, label, { hidden = false, danger = false } = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'term-action-btn' + (action === 'kill' ? ' tab-kill-btn' : '') + (danger ? ' tab-kill-btn-danger' : '');
+  const base = danger ? 'btn btn-destructive btn-compact' : 'btn btn-secondary btn-compact';
+  btn.className = base + (action === 'kill' ? ' tab-kill-btn' : '');
   btn.dataset.action = action;
   btn.dataset.tab = id;
   if (hidden) btn.hidden = true;
@@ -511,7 +512,7 @@ function _createTabPanel(id) {
   saveWrap.className = 'save-menu-wrap';
   const saveBtn = document.createElement('button');
   saveBtn.type = 'button';
-  saveBtn.className = 'term-action-btn';
+  saveBtn.className = 'btn btn-secondary btn-compact';
   saveBtn.dataset.action = 'save-menu';
   saveBtn.dataset.tab = id;
   saveBtn.textContent = 'save';
@@ -593,7 +594,7 @@ function createTab(label) {
   }
   terminalBody?.addEventListener('click', e => {
     if (id !== activeTabId) return;
-    if (e.target.closest('.term-action-btn')) return;
+    if (e.target.closest('.btn')) return;
     if (e.target.closest('.welcome-command-loadable')) return;
     // Don't steal focus while the user has text selected — they may be about to copy.
     if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;

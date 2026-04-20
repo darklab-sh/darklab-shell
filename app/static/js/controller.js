@@ -198,7 +198,7 @@ function setupMobileComposer() {
   if (mobileShellTranscript) {
     const closeKeyboardFromTranscript = e => {
       const interactiveTarget = e && e.target && e.target.closest
-        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
+        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .hist-chip');
       if (interactiveTarget) return;
       if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
         if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay: 120 });
@@ -768,13 +768,13 @@ searchInput.addEventListener('keydown', e => {
 
 searchCaseBtn.addEventListener('click', () => {
   searchCaseSensitive = !searchCaseSensitive;
-  searchCaseBtn.classList.toggle('active', searchCaseSensitive);
+  searchCaseBtn.setAttribute('aria-pressed', searchCaseSensitive ? 'true' : 'false');
   runSearch();
 });
 
 searchRegexBtn.addEventListener('click', () => {
   searchRegexMode = !searchRegexMode;
-  searchRegexBtn.classList.toggle('active', searchRegexMode);
+  searchRegexBtn.setAttribute('aria-pressed', searchRegexMode ? 'true' : 'false');
   runSearch();
 });
 

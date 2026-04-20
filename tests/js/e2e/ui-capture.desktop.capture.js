@@ -126,7 +126,7 @@ const scenes = [
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
       await runLongCaptureCommand(page)
-      await page.locator('.hud-kill-btn').click()
+      await page.locator('#hud-actions [data-action="kill"]').click()
       await expect(page.locator('#kill-modal')).toBeVisible()
     },
   },

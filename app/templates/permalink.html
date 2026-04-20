@@ -17,21 +17,21 @@
 
 {% block header_actions %}
   {% for action in extra_actions %}
-    <a class="term-action-btn" href="{{ action.href }}">{{ action.label }}</a>
+    <a class="btn btn-secondary btn-compact" href="{{ action.href }}">{{ action.label }}</a>
   {% endfor %}
-  <button class="term-action-btn" id="toggle-ln">line numbers: off</button>
-  <button class="term-action-btn" id="toggle-ts"{% if toggle_ts_disabled %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
-  <a class="term-action-btn" href="{{ json_url }}">view json</a>
-  <button class="term-action-btn" data-action="copy-txt">copy</button>
+  <button class="btn btn-secondary btn-compact" id="toggle-ln">line numbers: off</button>
+  <button class="btn btn-secondary btn-compact" id="toggle-ts"{% if toggle_ts_disabled %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
+  <a class="btn btn-secondary btn-compact" href="{{ json_url }}">view json</a>
+  <button class="btn btn-secondary btn-compact" data-action="copy-txt">copy</button>
   <div class="save-menu-wrap save-menu-down" id="perm-save-wrap">
-    <button class="term-action-btn" id="perm-save-btn">save</button>
+    <button class="btn btn-secondary btn-compact" id="perm-save-btn">save</button>
     <div class="save-menu">
       <button data-action="save-txt">txt</button>
       <button data-action="save-html">html</button>
       <button data-action="save-pdf">pdf</button>
     </div>
   </div>
-  <a class="term-action-btn" href="/">← back to shell</a>
+  <a class="btn btn-secondary btn-compact" href="/">← back to shell</a>
 {% endblock %}
 
 {% block output %}{% endblock %}

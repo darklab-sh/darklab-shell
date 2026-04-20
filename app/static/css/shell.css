@@ -402,44 +402,6 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 5px 11px;
 }
 
-.term-action-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-bright) 88%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1.2;
-  text-align: center;
-  letter-spacing: 0.3px;
-  padding: 4px 9px;
-  border-radius: 3px;
-  cursor: pointer;
-  white-space: normal;
-  text-decoration: none;
-  transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s;
-}
-
-.term-action-btn[hidden] {
-  display: none !important;
-}
-.term-action-btn:focus:not(:focus-visible),
-.term-action-btn:focus-visible {
-  outline: none;
-  box-shadow: none;
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  border-color: color-mix(in srgb, var(--border-bright) 88%, transparent);
-}
-.term-action-btn:hover {
-  border-color: color-mix(in srgb, var(--green-dim) 72%, var(--border-bright));
-  color: var(--text);
-  background: color-mix(in srgb, var(--green) 7%, transparent);
-  transform: translateY(-1px);
-}
-
 /* ── Save menu dropdown ── */
 .save-menu-wrap {
   position: relative;
@@ -486,8 +448,9 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--text);
 }
 
-/* Dropdown indicator arrow on the save trigger button */
-.save-menu-wrap .term-action-btn::after {
+/* Dropdown indicator arrow on the save trigger button (direct child of the
+   wrap — class-agnostic so it survives primitive migrations) */
+.save-menu-wrap > button::after {
   content: '';
   flex: none;
   align-self: center;
@@ -500,7 +463,7 @@ body.mobile-terminal-mode .output-follow-btn {
   transition: transform 0.15s ease;
 }
 
-.save-menu-wrap.open .term-action-btn::after {
+.save-menu-wrap.open > button::after {
   transform: rotate(180deg);
 }
 
@@ -693,76 +656,10 @@ body.mobile-terminal-mode .output-follow-btn {
   .modal-actions-wrap {
     gap: 6px;
   }
-  .modal-actions-wrap .modal-primary,
-  .modal-actions-wrap .modal-secondary {
-    padding: 6px 10px;
-  }
-}
-
-.modal-primary,
-.modal-secondary {
-  border-radius: 4px;
-  padding: 6px 18px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
-}
-
-.modal-primary {
-  border: none;
-}
-
-.modal-primary-danger {
-  background: var(--red);
-  color: var(--theme-modal-danger-btn-text);
-}
-
-.modal-secondary-warning {
-  background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, var(--text));
-  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
-}
-
-.modal-secondary-neutral {
-  background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, var(--text));
-  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
-}
-
-.modal-secondary-neutral:hover {
-  color: var(--text);
-  border-color: color-mix(in srgb, var(--theme-panel-border) 100%, transparent);
-  background: color-mix(in srgb, var(--theme-panel-bg) 18%, transparent);
-}
-
-.modal-secondary-warning:hover {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 52%, transparent);
-  background: color-mix(in srgb, var(--amber) 6%, transparent);
-}
-
-.modal-primary-warning {
-  background: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
-  color: var(--theme-modal-warning-btn-text);
-  border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
-}
-
-.modal-primary-accent {
-  background: color-mix(in srgb, var(--green) 88%, var(--theme-panel-bg));
-  color: var(--theme-on-accent-text);
-  border: 1px solid color-mix(in srgb, var(--green) 54%, transparent);
 }
 
 .modal-inline-field {
   margin-bottom: 18px;
-}
-
-.modal-primary-warning:hover {
-  background: color-mix(in srgb, var(--amber) 92%, var(--theme-panel-bg));
-}
-
-.modal-primary-danger {
-  border: 1px solid color-mix(in srgb, var(--red) 54%, transparent);
 }
 
 .faq-header {

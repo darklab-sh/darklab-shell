@@ -741,7 +741,8 @@ body.mobile-terminal-mode {
   }
 
   /* Run ↔ Kill swap in the composer. The Kill button mirrors the desktop
-     .hud-kill-btn styling but tuned for the tighter mobile row. */
+     HUD Kill primitive (.btn.btn-destructive.btn-compact) but tuned for the
+     tighter mobile row. */
   #mobile-composer.is-running #mobile-run-btn { display: none; }
   #mobile-composer:not(.is-running) #mobile-kill-btn { display: none; }
   #mobile-kill-btn {

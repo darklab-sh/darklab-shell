@@ -99,7 +99,7 @@
         <span class="sheet-title-label">Recent</span>
         <span class="sheet-title-spacer"></span>
         <button type="button" class="sheet-clear-btn" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
-        <button type="button" class="sheet-close" id="mobile-recents-close" aria-label="Close recents">✕</button>
+        <button type="button" class="close-btn sheet-close" id="mobile-recents-close" aria-label="Close recents">✕</button>
       </div>
       <div class="sheet-filters">
         <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search commands" autocomplete="off" spellcheck="false" aria-label="Search recent commands">
@@ -148,7 +148,7 @@
       <div class="sheet-grab" aria-hidden="true"></div>
       <div class="menu-title">
         <span class="menu-title-label">Menu</span>
-        <button type="button" class="sheet-close" id="mobile-menu-sheet-close" aria-label="Close menu">✕</button>
+        <button type="button" class="close-btn sheet-close" id="mobile-menu-sheet-close" aria-label="Close menu">✕</button>
       </div>
 
       <div class="menu-group">
@@ -308,15 +308,15 @@
       <div class="search-bar u-hidden" id="search-bar">
         <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
         <div class="search-toggles">
-          <button id="search-case-btn" class="search-toggle" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
-          <button id="search-regex-btn" class="search-toggle" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
+          <button id="search-case-btn" class="toggle-btn" type="button" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
+          <button id="search-regex-btn" class="toggle-btn" type="button" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
         </div>
         <span class="search-count" id="search-count"></span>
         <div class="search-nav">
           <button id="search-prev">↑</button>
           <button id="search-next">↓</button>
         </div>
-        <button id="search-close-btn" class="search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
+        <button id="search-close-btn" class="close-btn search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
       </div>
       <div id="tab-panels">
         <!-- panels injected here -->
@@ -399,7 +399,7 @@
   <div class="history-panel-header">
     <span class="history-panel-title">RUN HISTORY</span>
     <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">delete all</button>
-    <button class="history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
+    <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
   <div class="history-panel-body">
     <div class="history-panel-filters">
@@ -460,8 +460,8 @@
       <span class="modal-copy-note">This sends SIGTERM to the entire process group.</span>
     </div>
     <div class="modal-actions">
-      <button id="kill-cancel" class="term-action-btn">Cancel</button>
-      <button id="kill-confirm" class="modal-primary modal-primary-danger" type="button">■ Kill</button>
+      <button id="kill-cancel" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="kill-confirm" class="btn btn-primary btn-danger" type="button">■ Kill</button>
     </div>
   </div>
 </div>
@@ -471,9 +471,9 @@
   <div id="hist-del-modal" class="modal-card modal-card-warning">
     <div id="hist-del-msg" class="modal-copy"></div>
     <div class="modal-actions modal-actions-wrap">
-      <button id="hist-del-cancel" class="term-action-btn">Cancel</button>
-      <button id="hist-del-nonfav" class="modal-secondary modal-secondary-warning" type="button">Delete Non-Favorites</button>
-      <button id="hist-del-confirm" class="modal-primary modal-primary-warning" type="button">Delete</button>
+      <button id="hist-del-cancel" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="hist-del-nonfav" class="btn btn-secondary btn-warning" type="button">Delete Non-Favorites</button>
+      <button id="hist-del-confirm" class="btn btn-primary btn-warning" type="button">Delete</button>
     </div>
   </div>
 </div>
@@ -494,9 +494,9 @@
       </div>
     </div>
     <div class="modal-actions modal-actions-wrap">
-      <button id="share-redaction-cancel" class="term-action-btn" type="button">Cancel</button>
-      <button id="share-redaction-raw" class="modal-secondary modal-secondary-neutral" type="button">Share Raw</button>
-      <button id="share-redaction-confirm" class="modal-primary modal-primary-accent" type="button">Share Redacted</button>
+      <button id="share-redaction-cancel" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="share-redaction-raw" class="btn btn-secondary" type="button">Share Raw</button>
+      <button id="share-redaction-confirm" class="btn btn-primary" type="button">Share Redacted</button>
     </div>
   </div>
 </div>
@@ -511,8 +511,8 @@
     <input id="session-token-set-input" class="options-token-input modal-token-input" type="text" placeholder="tok_... or UUID" autocomplete="off" spellcheck="false" />
     <div id="session-token-set-error" class="options-session-token-msg is-error" style="display:none"></div>
     <div class="modal-actions">
-      <button id="session-token-set-cancel" class="term-action-btn" type="button">Cancel</button>
-      <button id="session-token-set-confirm" class="modal-primary modal-primary-accent" type="button">Apply</button>
+      <button id="session-token-set-cancel" class="btn btn-secondary" type="button">Cancel</button>
+      <button id="session-token-set-confirm" class="btn btn-primary" type="button">Apply</button>
     </div>
   </div>
 </div>
@@ -522,8 +522,8 @@
   <div id="session-token-migrate-modal" class="modal-card">
     <div id="session-token-migrate-msg" class="modal-copy"></div>
     <div class="modal-actions">
-      <button id="session-token-migrate-no" class="modal-secondary modal-secondary-neutral" type="button">Skip</button>
-      <button id="session-token-migrate-yes" class="modal-primary modal-primary-accent" type="button">Yes, migrate</button>
+      <button id="session-token-migrate-no" class="btn btn-secondary" type="button">Skip</button>
+      <button id="session-token-migrate-yes" class="btn btn-primary" type="button">Yes, migrate</button>
     </div>
   </div>
 </div>
@@ -533,7 +533,7 @@
   <div id="workflows-modal">
     <div class="faq-header">
       <span class="faq-title">WORKFLOWS</span>
-      <button class="workflows-close" aria-label="Close workflows">✕</button>
+      <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
     </div>
     <div class="workflows-body"></div>
   </div>
@@ -544,7 +544,7 @@
   <div id="faq-modal">
     <div class="faq-header">
       <span class="faq-title">FAQ</span>
-      <button class="faq-close" aria-label="Close FAQ">✕</button>
+      <button type="button" class="close-btn faq-close" aria-label="Close FAQ">✕</button>
     </div>
     <div class="faq-body"></div>
   </div>
@@ -555,7 +555,7 @@
   <div id="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
     <div class="faq-header">
       <span class="faq-title" id="shortcuts-title">KEYBOARD SHORTCUTS</span>
-      <button class="shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
+      <button type="button" class="close-btn shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
     </div>
     <div class="faq-body shortcuts-body">
       <div id="shortcuts-list" class="shortcuts-list" aria-live="polite"></div>
@@ -569,7 +569,7 @@
   <div id="theme-modal">
     <div class="faq-header">
       <span class="faq-title">THEME</span>
-      <button class="theme-close" aria-label="Close theme selector">✕</button>
+      <button type="button" class="close-btn theme-close" aria-label="Close theme selector">✕</button>
     </div>
     <div class="faq-body theme-body">
       <div id="theme-select" class="theme-picker-grid" aria-label="Theme selector" tabindex="-1"></div>
@@ -582,7 +582,7 @@
   <div id="options-modal">
     <div class="faq-header">
       <span class="faq-title">OPTIONS</span>
-      <button class="options-close" aria-label="Close options">✕</button>
+      <button type="button" class="close-btn options-close" aria-label="Close options">✕</button>
     </div>
     <div class="faq-body options-body">
       <div class="faq-item">
@@ -639,13 +639,13 @@
           <div class="options-session-token-desc">Carry your run history across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
           <div class="options-session-token-status-row">
             <div id="options-session-token-status" class="options-session-token-status"></div>
-            <button id="options-session-token-copy-btn" class="term-action-btn" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+            <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
           </div>
           <div class="options-session-token-actions">
-            <button id="options-session-token-generate-btn" class="term-action-btn" type="button">Generate</button>
-            <button id="options-session-token-set-btn" class="term-action-btn" type="button">Set</button>
-            <button id="options-session-token-rotate-btn" class="term-action-btn" type="button">Rotate</button>
-            <button id="options-session-token-clear-btn" class="term-action-btn" type="button">Clear</button>
+            <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
+            <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
+            <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
+            <button id="options-session-token-clear-btn" class="btn btn-destructive btn-compact" type="button">Clear</button>
           </div>
           <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
         </div>

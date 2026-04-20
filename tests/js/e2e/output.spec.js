@@ -245,8 +245,10 @@ test.describe('output follow helper', () => {
             requestAnimationFrame(() => {
               const out = getOutput(activeTabId)
               const tab = getTab(activeTabId)
+              tab.suppressOutputScrollTracking = true
               out.scrollTop = 0
               tab.followOutput = false
+              tab.suppressOutputScrollTracking = false
               updateOutputFollowButton(activeTabId)
               resolve()
             }),
@@ -254,13 +256,33 @@ test.describe('output follow helper', () => {
         }),
     )
 
-    await page.waitForFunction(() => {
-      const tab = getTab(activeTabId)
-      const btn = document.querySelector('.tab-panel.active .output-follow-btn')
-      return (
-        !!tab && tab.st === 'idle' && !!btn && !btn.hidden && btn.textContent === 'jump to bottom'
+    await expect
+      .poll(async () =>
+        page.evaluate(() => {
+          const tab = getTab(activeTabId)
+          const out = getOutput(activeTabId)
+          const btn = document.querySelector('.tab-panel.active .output-follow-btn')
+          if (out && out.scrollTop !== 0) {
+            tab.suppressOutputScrollTracking = true
+            out.scrollTop = 0
+            tab.followOutput = false
+            tab.suppressOutputScrollTracking = false
+            updateOutputFollowButton(activeTabId)
+          }
+          return {
+            status: tab?.st || '',
+            followOutput: !!tab && tab.followOutput,
+            hidden: !!btn && btn.hidden,
+            text: btn?.textContent || '',
+          }
+        }),
       )
-    })
+      .toEqual({
+        status: 'idle',
+        followOutput: false,
+        hidden: false,
+        text: 'jump to bottom',
+      })
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to bottom')
   })
