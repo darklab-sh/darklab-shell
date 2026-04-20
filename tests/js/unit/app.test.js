@@ -94,6 +94,7 @@ async function loadAppFns({
             <button data-menu-action="ts-set" data-ts-mode="clock"></button>
           </div>
           <button data-menu-action="search"></button>
+          <button data-menu-action="clear"></button>
           <button data-menu-action="history"></button>
           <button data-menu-action="options"></button>
           <button data-menu-action="theme"></button>
@@ -720,6 +721,24 @@ describe('app helpers', () => {
       .click()
 
     expect(document.body.classList.contains('ts-clock')).toBe(true)
+    expect(sheet.classList.contains('u-hidden')).toBe(true)
+  })
+
+  it('clear cancels welcome, clears the active tab preserving run state, and closes the sheet', async () => {
+    const clearTabSpy = vi.fn()
+    const cancelWelcomeSpy = vi.fn()
+    await loadAppFns({
+      clearTab: clearTabSpy,
+      cancelWelcome: cancelWelcomeSpy,
+      activeTabId: 'tab-1',
+    })
+    const sheet = document.getElementById('mobile-menu-sheet')
+    sheet.classList.remove('u-hidden')
+
+    document.querySelector('#mobile-menu-sheet [data-menu-action="clear"]').click()
+
+    expect(cancelWelcomeSpy).toHaveBeenCalledWith('tab-1')
+    expect(clearTabSpy).toHaveBeenCalledWith('tab-1', { preserveRunState: true })
     expect(sheet.classList.contains('u-hidden')).toBe(true)
   })
 

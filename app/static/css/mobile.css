@@ -533,6 +533,12 @@
   /* Kill lives in the mobile composer (see #mobile-kill-btn) so the per-tab
      action-bar duplicate is redundant on mobile. */
   body.mobile-terminal-mode .terminal-actions .tab-kill-btn { display: none !important; }
+  /* Clear moves into the hamburger menu on mobile (data-menu-action="clear")
+     so the per-tab action row keeps its three high-frequency actions (share
+     snapshot · copy · save ▾) fitting cleanly at narrow widths. Clear is a
+     recovery action rather than an in-flow one; keeping it one extra tap away
+     mirrors the kill-button move above. */
+  body.mobile-terminal-mode .terminal-actions [data-action="clear"] { display: none !important; }
 
   /* Mobile overlays: bottom sheet layout for FAQ and options */
   body.mobile-terminal-mode #workflows-overlay,

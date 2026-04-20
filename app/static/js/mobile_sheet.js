@@ -71,11 +71,17 @@
       }
     }
 
+    function _removeWindowFallbacks() {
+      window.removeEventListener('pointerup', _windowEnd, true);
+      window.removeEventListener('pointercancel', _windowCancel, true);
+    }
+
     function endDrag(pointerId, cancelled) {
       if (!drag || drag.pointerId !== pointerId) return;
       const dy = drag.dy;
       const moved = drag.maxDy;
       drag = null;
+      _removeWindowFallbacks();
       try { sheet.releasePointerCapture(pointerId); } catch (_) { /* non-critical */ }
       try { grab.releasePointerCapture(pointerId); } catch (_) { /* non-critical */ }
       if (cancelled) {
@@ -92,15 +98,29 @@
       settle(dy >= threshold);
     }
 
+    function _windowEnd(e) { endDrag(e.pointerId, false); }
+    function _windowCancel(e) { endDrag(e.pointerId, true); }
+
+    // Safety net: if the sheet is hidden mid-drag (e.g. user taps the X close
+    // button or scrim while a finger is still on the grab), the grab's
+    // pointerup may never fire and endDrag never cleans up. Left unchecked,
+    // `transform: translateY(...)` persists on the sheet and follows it into
+    // the next open — pinning the modal low and making the grab/content
+    // unreachable. Clearing any leaked inline styles at the start of each
+    // fresh drag recovers the sheet; window-level fallbacks ensure endDrag
+    // runs even if the grab is no longer receiving events.
     grab.addEventListener('pointerdown', e => {
       if (!_isMobileMode()) return;
       if (typeof e.button === 'number' && e.button !== 0) return;
+      clearStyles();
       drag = { pointerId: e.pointerId, startY: e.clientY, dy: 0, maxDy: 0 };
       sheet.style.willChange = 'transform';
       sheet.style.transition = 'none';
       // Capture on the grab so subsequent move/up events still fire here even
       // if the finger drifts outside the small handle target.
       try { grab.setPointerCapture(e.pointerId); } catch (_) { /* non-critical */ }
+      window.addEventListener('pointerup', _windowEnd, true);
+      window.addEventListener('pointercancel', _windowCancel, true);
     });
 
     grab.addEventListener('pointermove', e => {
@@ -122,6 +142,38 @@
         onClose();
       }
     });
+
+    // Final safety net. If some other code path (close button click, scrim
+    // tap, _closeMajorOverlays, etc.) hides the sheet while `drag` is still
+    // active and the captured pointerup never reaches window — possible on
+    // iOS Safari when the captured element loses its compositor layer — the
+    // inline `transform: translateY(...)` would follow the sheet into its
+    // next open, pinning the modal low with an unresponsive grab. Watching
+    // the sheet's computed visibility lets us scrub inline styles at the
+    // exact moment the sheet becomes hidden, independent of pointer state.
+    let _lastHidden = !_isVisible(sheet);
+    const visibilityObserver = new MutationObserver(() => {
+      const hidden = !_isVisible(sheet);
+      if (hidden && !_lastHidden) {
+        drag = null;
+        _removeWindowFallbacks();
+        clearStyles();
+      }
+      _lastHidden = hidden;
+    });
+    visibilityObserver.observe(sheet, { attributes: true, attributeFilter: ['class', 'style'] });
+    if (sheet.parentElement) {
+      visibilityObserver.observe(sheet.parentElement, { attributes: true, attributeFilter: ['class', 'style'] });
+    }
+  }
+
+  function _isVisible(el) {
+    if (!el || typeof el.getClientRects !== 'function') return false;
+    if (el.offsetParent === null && getComputedStyle(el).position !== 'fixed') {
+      const rects = el.getClientRects();
+      if (!rects.length) return false;
+    }
+    return getComputedStyle(el).display !== 'none' && getComputedStyle(el).visibility !== 'hidden';
   }
 
   global.bindMobileSheet = bindMobileSheet;

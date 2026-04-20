@@ -313,11 +313,16 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.tab-panel.active [data-action="permalink"]')).not.toBeFocused()
     await page.locator('.tab-panel.active [data-action="copy"]').click()
     await expect(page.locator('.tab-panel.active [data-action="copy"]')).not.toBeFocused()
-    await page.locator('.tab-panel.active [data-action="clear"]').click()
+    // Clear moved into the hamburger menu on mobile (phase 4 item 2) — the
+    // per-tab clear button is hidden under `body.mobile-terminal-mode`, so
+    // exercising clear with the keyboard open now goes through the menu.
+    await page.locator('#hamburger-btn').click()
+    await expect(page.locator('#mobile-menu-sheet')).not.toHaveClass(/u-hidden/)
+    await page.locator('#mobile-menu-sheet [data-menu-action="clear"]').click()
 
     await expect(page.locator('.tab-panel.active .output .line')).toHaveCount(0)
     await expect(page.locator('#mobile-kb-helper')).toBeHidden()
-    await expect(page.locator('.tab-panel.active [data-action="clear"]')).not.toBeFocused()
+    await expect(page.locator('#mobile-menu-sheet')).toHaveClass(/u-hidden/)
     await expect
       .poll(async () => page.evaluate(() => window.scrollY))
       .toBeLessThanOrEqual(startScrollY + 12)
@@ -519,6 +524,72 @@ test.describe('mobile menu', () => {
     // Tap the scrim (the canonical "outside the sheet" surface)
     await page.locator('#mobile-menu-sheet-scrim').click()
     await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
+  })
+
+  test('tapping the sticky header dismisses the mobile menu sheet', async ({ page }) => {
+    // The mobile-terminal header sits at z-index 90; the menu-sheet scrim must
+    // be layered above it (z-index 100) so tapping the header band lands on
+    // the scrim and closes the sheet via bindDismissible. A previous iteration
+    // of the layering left the header above the scrim, silently breaking the
+    // "tap outside to close" affordance for every mobile sheet.
+    await page.locator('#hamburger-btn').click()
+    await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
+
+    // Tap at a coordinate that lives inside the header's bounding box (top
+    // 10px of the viewport) — before the fix this hit the header and no-op'd.
+    await page.mouse.click(40, 10)
+    await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
+  })
+
+  test('workflows sheet reopens at full height after an interrupted drag', async ({ page }) => {
+    // Regression: dragging the workflows sheet grab and then closing the sheet
+    // via the X button (an external path that bypasses mobile_sheet.js's
+    // pointerup bookkeeping) used to leave `transform: translateY(...)` inline
+    // on #workflows-modal. The leaked transform followed the modal into its
+    // next open, pinning it near the bottom of the viewport with only the
+    // header visible and making the grab and close button unreachable.
+    // bindMobileSheet now watches the sheet's visibility and scrubs any stale
+    // inline styles the moment the sheet becomes hidden.
+    await page.waitForFunction(() => {
+      const body = document.querySelector('#workflows-modal .workflows-body')
+      return body && body.children.length > 0
+    }, { timeout: 5000 })
+
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await expect(page.locator('#workflows-modal')).toBeVisible()
+
+    // Start a synthetic drag on the grab that moves the sheet 40px down.
+    const grabBox = await page.locator('#workflows-modal > .sheet-grab').boundingBox()
+    const cx = grabBox.x + grabBox.width / 2
+    const cy = grabBox.y + grabBox.height / 2
+    await page.evaluate(({ cx, cy }) => {
+      const grab = document.querySelector('#workflows-modal > .sheet-grab')
+      grab.dispatchEvent(new PointerEvent('pointerdown', { pointerId: 77, clientX: cx, clientY: cy, button: 0, bubbles: true }))
+      grab.dispatchEvent(new PointerEvent('pointermove', { pointerId: 77, clientX: cx, clientY: cy + 40, bubbles: true }))
+    }, { cx, cy })
+    await expect.poll(
+      async () => page.locator('#workflows-modal').evaluate(el => el.style.transform || ''),
+    ).toContain('translateY')
+
+    // External close: click the X. The drag's pointerup never fires.
+    await page.locator('#workflows-modal .workflows-close').click()
+    await expect(page.locator('#workflows-modal')).toBeHidden()
+
+    // Inline transform must be scrubbed before the next open so the modal
+    // opens at its normal height.
+    const leakedStyle = await page.locator('#workflows-modal').evaluate(el => el.getAttribute('style') || '')
+    expect(leakedStyle).not.toContain('translateY')
+
+    // Reopen and confirm the modal renders at normal height, not pinned low.
+    await page.locator('#hamburger-btn').click()
+    await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+    await expect(page.locator('#workflows-modal')).toBeVisible()
+    const box = await page.locator('#workflows-modal').boundingBox()
+    const viewport = page.viewportSize()
+    // The sheet renders roughly 88svh tall; it must occupy the majority of
+    // the viewport, not collapse to a sliver at the bottom.
+    expect(box.height).toBeGreaterThan(viewport.height * 0.5)
   })
 
   test('mobile recent peek summarizes recent runs and opens the recents sheet on tap', async ({

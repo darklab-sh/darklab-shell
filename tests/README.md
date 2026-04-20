@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 644
-- `playwright`: 182
-- total: 1,668
+- `vitest`: 645
+- `playwright`: 184
+- total: 1,671
 
 This document is organized in two parts:
 
@@ -1082,6 +1082,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `refocuses the terminal input after toggling timestamps and line numbers` | Verifies that refocuses the terminal input after toggling timestamps and line numbers. |
 | `ts-toggle expands the inline sub-menu without closing the sheet` | Verifies that the mobile menu `ts-toggle` row flips `aria-expanded` and reveals the sub-menu without dismissing the menu sheet. |
 | `ts-set applies the selected mode and closes the sheet` | Verifies that tapping a `ts-set` sub-menu row applies the chosen timestamps mode (off/elapsed/clock) and closes the menu sheet. |
+| `clear cancels welcome, clears the active tab preserving run state, and closes the sheet` | Verifies that the mobile menu `clear` entry routes through `cancelWelcome(activeTabId)` + `clearTab(activeTabId, { preserveRunState: true })` and closes the menu sheet. |
 | `opens the theme selector from the theme button` | Verifies that opens the theme selector from the theme button. |
 | `populates the theme select from the registry and applies the selected theme` | Verifies that populates the theme select from the registry and applies the selected theme. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
@@ -1928,6 +1929,8 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `mobile theme selector opens full screen with evenly sized grouped sections` | Verifies that mobile theme selector opens full screen with evenly sized grouped sections. |
 | `selecting a theme on mobile applies the shell palette, not just the modal preview` | Verifies that selecting a theme on mobile applies the shell palette, not just the modal preview. |
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
+| `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
+| `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the `.workflows-close` X button — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
 | `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
 | `mobile recents sheet restores a previous run into the active tab` | Verifies that selecting a row in the mobile recents pull-up sheet restores the corresponding run into the active tab. |
 | `mobile history restore works from a newly created session via the mobile menu` | Verifies that mobile history restore works from a newly created session via the mobile menu. |
