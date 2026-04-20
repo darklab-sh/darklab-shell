@@ -288,6 +288,11 @@
   .rail-item-text {
     overflow: hidden;
     text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .rail-section-workflows .rail-item {
+    align-items: flex-start;
+    white-space: normal;
   }
   .rail-section-empty {
     padding: 5px 18px;
