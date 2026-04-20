@@ -114,7 +114,7 @@ const scenes = [
       await freshHome(page, { themeName })
       await runLongCaptureCommandMobile(page)
       await page.locator('#mobile-kill-btn').click()
-      await expect(page.locator('#kill-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
     },
   },
   {

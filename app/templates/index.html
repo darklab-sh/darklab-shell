@@ -452,17 +452,13 @@
 </div>
 
 
-<!-- Kill confirmation modal -->
-<div id="kill-overlay" class="modal-overlay u-hidden">
-  <div id="kill-modal" class="modal-card modal-card-danger">
-    <div class="modal-copy">
-      Kill the running process in this tab?<br>
-      <span class="modal-copy-note">This sends SIGTERM to the entire process group.</span>
-    </div>
-    <div class="modal-actions">
-      <button id="kill-cancel" class="btn btn-secondary" type="button">Cancel</button>
-      <button id="kill-confirm" class="btn btn-primary btn-danger" type="button">■ Kill</button>
-    </div>
+<!-- Shared confirmation-dialog host. Pre-minted once; showConfirm()
+     populates the card on each open and resolves a promise with the
+     chosen action id (or null for cancel). See ui_confirm.js. -->
+<div id="confirm-host" class="modal-overlay u-hidden">
+  <div class="modal-card modal-card-compact" data-confirm-card>
+    <div class="modal-copy" data-confirm-body></div>
+    <div class="modal-actions modal-actions-wrap" data-confirm-actions></div>
   </div>
 </div>
 
@@ -669,6 +665,7 @@
 <script src="/static/js/ui_pressable.js"></script>
 <script src="/static/js/ui_disclosure.js"></script>
 <script src="/static/js/ui_dismissible.js"></script>
+<script src="/static/js/ui_confirm.js"></script>
 <script src="/static/js/ui_outside_click.js"></script>
 <script src="/static/js/export_pdf.js"></script>
 <script src="/static/js/tabs.js"></script>

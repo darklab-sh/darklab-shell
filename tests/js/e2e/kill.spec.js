@@ -5,6 +5,14 @@ import { ensurePromptReady, makeTestIp } from './helpers.js'
 const LONG_CMD = 'ping -c 1000 127.0.0.1'
 const TEST_IP = makeTestIp(63)
 
+// Selectors for the shared confirmation-dialog primitive (ui_confirm.js).
+// The kill flow builds the modal via showConfirm(), so the DOM is the same
+// pre-minted #confirm-host element each time — only the buttons and copy
+// are re-rendered on open.
+const CONFIRM_HOST = '#confirm-host'
+const CONFIRM_BTN = '#confirm-host [data-confirm-action-id="confirm"]'
+const CANCEL_BTN = '#confirm-host [data-confirm-action-id="cancel"]'
+
 test.describe('kill running command', () => {
   test.beforeEach(async ({ page }) => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
@@ -84,8 +92,8 @@ test.describe('kill running command', () => {
     await killBtn.click()
 
     // Confirm the kill in the modal
-    await page.locator('#kill-confirm').waitFor({ state: 'visible' })
-    await page.locator('#kill-confirm').click()
+    await page.locator(CONFIRM_BTN).waitFor({ state: 'visible' })
+    await page.locator(CONFIRM_BTN).click()
 
     // STATUS pill is binary (RUNNING/IDLE); the KILLED signal moved to the
     // LAST EXIT pill to avoid duplicating state across two adjacent pills.
@@ -100,8 +108,8 @@ test.describe('kill running command', () => {
 
     await page.locator('#hud-actions [data-action="kill"]').waitFor({ state: 'visible' })
     await page.locator('#hud-actions [data-action="kill"]').click()
-    await page.locator('#kill-confirm').waitFor({ state: 'visible' })
-    await page.locator('#kill-confirm').click()
+    await page.locator(CONFIRM_BTN).waitFor({ state: 'visible' })
+    await page.locator(CONFIRM_BTN).click()
 
     await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
     await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
@@ -116,11 +124,11 @@ test.describe('kill running command', () => {
 
     await page.locator('#cmd').press('Control+c')
 
-    await expect(page.locator('#kill-overlay')).toBeVisible()
-    await expect(page.locator('#kill-confirm')).toBeVisible()
+    await expect(page.locator(CONFIRM_HOST)).toBeVisible()
+    await expect(page.locator(CONFIRM_BTN)).toBeVisible()
 
-    await page.locator('#kill-cancel').click()
-    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await page.locator(CANCEL_BTN).click()
+    await expect(page.locator(CONFIRM_HOST)).toBeHidden()
   })
 
   test('closing the only running tab kills the command and resets the shell', async ({ page }) => {
@@ -136,19 +144,28 @@ test.describe('kill running command', () => {
     await expect(page.locator('#hud-actions [data-action="kill"]')).toBeHidden()
   })
 
-  test('Enter confirms kill while the kill confirmation modal is open', async ({ page }) => {
+  test('Enter cancels kill while the kill confirmation modal is open', async ({ page }) => {
+    // Workstream B pinned decision: Enter defaults to the cancel action
+    // (safe, macOS/web convention). The primitive focuses the cancel
+    // button on open; the browser's native Enter-activates-focused-button
+    // then routes Enter through the cancel resolver.
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
     await page.locator('#cmd').press('Control+c')
-    await expect(page.locator('#kill-overlay')).toBeVisible()
+    await expect(page.locator(CONFIRM_HOST)).toBeVisible()
 
     await page.keyboard.press('Enter')
 
+    await expect(page.locator(CONFIRM_HOST)).toBeHidden()
+    await expect(page.locator('.status-pill')).toHaveText('RUNNING')
+
+    // Clean up the still-running command so the next test starts from a blank session.
+    await page.locator('#cmd').press('Control+c')
+    await page.locator(CONFIRM_BTN).click()
     await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
     await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
-    await expect(page.locator('#kill-overlay')).toBeHidden()
   })
 
   test('Escape cancels kill while the kill confirmation modal is open', async ({ page }) => {
@@ -157,16 +174,16 @@ test.describe('kill running command', () => {
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
     await page.locator('#cmd').press('Control+c')
-    await expect(page.locator('#kill-overlay')).toBeVisible()
+    await expect(page.locator(CONFIRM_HOST)).toBeVisible()
 
     await page.keyboard.press('Escape')
 
-    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await expect(page.locator(CONFIRM_HOST)).toBeHidden()
     await expect(page.locator('.status-pill')).toHaveText('RUNNING')
 
     // Clean up the still-running command so the next test starts from a blank session.
     await page.locator('#cmd').press('Control+c')
-    await page.locator('#kill-confirm').click()
+    await page.locator(CONFIRM_BTN).click()
     await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
     await expect(page.locator('#hud-last-exit')).toHaveText('KILLED', { timeout: 10_000 })
   })
@@ -179,7 +196,7 @@ test.describe('kill running command', () => {
     await page.locator('#cmd').press('Control+c')
 
     await expect(page.locator('.tab-panel.active .output .line.prompt-echo')).toHaveCount(1)
-    await expect(page.locator('#kill-overlay')).toBeHidden()
+    await expect(page.locator(CONFIRM_HOST)).toBeHidden()
     await expect(page.locator('#cmd')).toBeFocused()
   })
 })

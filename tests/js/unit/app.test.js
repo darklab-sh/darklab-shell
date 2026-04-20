@@ -65,8 +65,6 @@ async function loadAppFns({
     <button id="hist-del-cancel"></button>
     <button id="hist-del-nonfav"></button>
     <button id="hist-del-confirm"></button>
-    <button id="kill-cancel"></button>
-    <button id="kill-confirm"></button>
     <div id="mobile-shell" aria-hidden="true">
       <div id="mobile-shell-chrome"></div>
       <div id="mobile-shell-transcript"></div>
@@ -189,7 +187,6 @@ async function loadAppFns({
       <div id="history-panel"></div>
       <div id="history-list"></div>
       <div id="permalink-toast"></div>
-      <div id="kill-overlay"></div>
       <div id="hist-del-overlay"></div>
       <div id="share-redaction-overlay"></div>
       <button id="share-redaction-cancel"></button>
@@ -276,8 +273,6 @@ async function loadAppFns({
     shareRedactionRawBtn: document.getElementById('share-redaction-raw'),
     shareRedactionConfirmBtn: document.getElementById('share-redaction-confirm'),
     shareRedactionRememberToggle: document.getElementById('share-redaction-remember-toggle'),
-    killCancelBtn: document.getElementById('kill-cancel'),
-    killConfirmBtn: document.getElementById('kill-confirm'),
     searchPrevBtn: document.getElementById('search-prev'),
     searchNextBtn: document.getElementById('search-next'),
     searchCloseBtn: document.getElementById('search-close-btn'),
@@ -318,7 +313,6 @@ async function loadAppFns({
     historyLoadOverlay: document.getElementById('history-load-overlay'),
     acDropdown,
     themeCloseBtn: document.querySelector('.theme-close'),
-    killOverlay: document.getElementById('kill-overlay'),
     histDelOverlay: document.getElementById('hist-del-overlay'),
     shareRedactionOverlay: document.getElementById('share-redaction-overlay'),
     faqOverlay: document.getElementById('faq-overlay'),
@@ -438,7 +432,6 @@ async function loadAppFns({
       confirmHistAction: vi.fn(),
       executeHistAction: vi.fn(),
       histDelOverlay: document.getElementById('hist-del-overlay'),
-      killOverlay: document.getElementById('kill-overlay'),
       pendingHistAction: null,
       pendingKillTabId,
       acHide: acHideOverride,
@@ -538,11 +531,6 @@ async function loadAppFns({
     confirmHistAction,
     executeHistAction,
     doKill,
-    showKillOverlay,
-    hideKillOverlay,
-    isKillOverlayOpen,
-    confirmPendingKill,
-    closeKillOverlay,
     confirmPermalinkRedactionChoice,
     getRememberedShareRedactionChoice,
     getWelcomeIntroPreference,
@@ -594,11 +582,6 @@ async function loadAppFns({
     acDropdown,
     acHide: acHideOverride,
     shellPromptWrap: shellPromptWrapEl,
-    showKillOverlay: fns.showKillOverlay,
-    hideKillOverlay: fns.hideKillOverlay,
-    isKillOverlayOpen: fns.isKillOverlayOpen,
-    confirmPendingKill: fns.confirmPendingKill,
-    closeKillOverlay: fns.closeKillOverlay,
     syncShellPrompt: fns.syncShellPrompt,
     sessionStorage: sessionStore,
     getTab,
@@ -1092,8 +1075,6 @@ describe('app helpers', () => {
       <button id="hist-del-cancel"></button>
       <button id="hist-del-nonfav"></button>
       <button id="hist-del-confirm"></button>
-      <button id="kill-cancel"></button>
-      <button id="kill-confirm"></button>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
       <div id="mobile-menu-sheet" class="menu-sheet u-hidden">
@@ -1116,7 +1097,6 @@ describe('app helpers', () => {
       <input id="cmd" />
       <div id="history-panel"></div>
       <div id="history-list"></div>
-      <div id="kill-overlay"></div>
       <div id="hist-del-overlay"></div>
       <div id="search-bar"></div>
       <input id="search-input" />
@@ -3020,58 +3000,6 @@ describe('app helpers', () => {
     histDelOverlay.style.display = 'flex'
     histDelOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(histDelOverlay.style.display).toBe('none')
-  })
-
-  it('wires the kill modal buttons and backdrop correctly', async () => {
-    await loadAppFns()
-    const killOverlay = document.getElementById('kill-overlay')
-
-    killOverlay.style.display = 'flex'
-    document.getElementById('kill-cancel').click()
-    expect(killOverlay.style.display).toBe('none')
-
-    const doKill = vi.fn()
-    await loadAppFns({ doKill, pendingKillTabId: 'tab-1' })
-    const killOverlay2 = document.getElementById('kill-overlay')
-
-    killOverlay2.style.display = 'flex'
-    document.getElementById('kill-confirm').click()
-    expect(doKill).toHaveBeenCalledWith('tab-1')
-    expect(killOverlay2.style.display).toBe('none')
-
-    killOverlay2.style.display = 'flex'
-    killOverlay2.dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    expect(killOverlay2.style.display).toBe('none')
-  })
-
-  it('does not refocus the mobile composer when closing the kill confirmation modal', async () => {
-    const doKill = vi.fn()
-    const {
-      getVisibleComposerInput,
-      showKillOverlay,
-      isKillOverlayOpen,
-      confirmPendingKill,
-      closeKillOverlay,
-    } = await loadAppFns({
-      doKill,
-      pendingKillTabId: 'tab-1',
-      mobileViewport: { height: 500, offsetTop: 0 },
-    })
-    const visibleInput = getVisibleComposerInput()
-    visibleInput.focus.mockClear()
-
-    showKillOverlay()
-    expect(isKillOverlayOpen()).toBe(true)
-    confirmPendingKill()
-    expect(doKill).toHaveBeenCalledWith('tab-1')
-    expect(isKillOverlayOpen()).toBe(false)
-    expect(visibleInput.focus).not.toHaveBeenCalled()
-
-    visibleInput.focus.mockClear()
-    showKillOverlay()
-    closeKillOverlay()
-    expect(isKillOverlayOpen()).toBe(false)
-    expect(visibleInput.focus).not.toHaveBeenCalled()
   })
 
   it('wires the share redaction modal buttons, remember choice, and backdrop correctly', async () => {

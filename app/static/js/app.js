@@ -90,7 +90,8 @@ const _searchBarHomeParent = typeof searchBar !== 'undefined' && searchBar ? sea
 const _tabPanelsHomeParent = typeof tabPanels !== 'undefined' && tabPanels ? tabPanels.parentElement : null;
 const _historyPanelHomeParent = typeof historyPanel !== 'undefined' && historyPanel ? historyPanel.parentElement : null;
 const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && permalinkToast ? permalinkToast.parentElement : null;
-const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay ? killOverlay.parentElement : null;
+const _confirmHostEl = document.getElementById('confirm-host');
+const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : null;
 const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
 const _shareRedactionOverlayHomeParent = typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay.parentElement : null;
 const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
@@ -173,7 +174,6 @@ const _uiOverlayRefs = {
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
-  killOverlay: typeof killOverlay !== 'undefined' && killOverlay ? killOverlay : null,
   histDelOverlay: typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay : null,
   shareRedactionOverlay: typeof shareRedactionOverlay !== 'undefined' && shareRedactionOverlay ? shareRedactionOverlay : null,
 };
@@ -249,8 +249,8 @@ const _mobileShellTranscriptNodes = [
 ];
 const _mobileShellOverlayNodes = [
   { node: historyPanel, homeParent: _historyPanelHomeParent, desktopAnchor: permalinkToast || null },
-  { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: killOverlay || null },
-  { node: killOverlay, homeParent: _killOverlayHomeParent, desktopAnchor: histDelOverlay || null },
+  { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: _confirmHostEl || histDelOverlay || null },
+  { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: histDelOverlay || null },
   { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: shareRedactionOverlay || null },
   { node: shareRedactionOverlay, homeParent: _shareRedactionOverlayHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
@@ -588,12 +588,6 @@ function clearActiveShortcutTab() {
   clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
 }
 
-function closeKillOverlay() {
-  hideKillOverlay();
-  pendingKillTabId = null;
-  refocusComposerAfterAction({ defer: true });
-}
-
 function getRememberedShareRedactionChoice() {
   const stored = getShareRedactionDefaultPreference();
   return stored === 'raw' || stored === 'redacted' ? stored : null;
@@ -809,15 +803,6 @@ function restoreTabSessionState() {
   } finally {
     _tabSessionRestoreInProgress = false;
   }
-}
-
-function confirmPendingKill() {
-  hideKillOverlay();
-  if (pendingKillTabId) {
-    doKill(pendingKillTabId);
-    pendingKillTabId = null;
-  }
-  refocusComposerAfterAction({ defer: true });
 }
 
 function eventMatchesCode(e, code) {

@@ -550,7 +550,7 @@
   body.mobile-terminal-mode #faq-modal,
   body.mobile-terminal-mode #theme-modal,
   body.mobile-terminal-mode #options-modal,
-  body.mobile-terminal-mode #kill-modal,
+  body.mobile-terminal-mode .modal-card-compact,
   body.mobile-terminal-mode #hist-del-modal,
   body.mobile-terminal-mode #share-redaction-modal {
     width: 100%;
@@ -562,7 +562,7 @@
     max-height: 88svh;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
-  body.mobile-terminal-mode #kill-modal,
+  body.mobile-terminal-mode .modal-card-compact,
   body.mobile-terminal-mode #hist-del-modal,
   body.mobile-terminal-mode #share-redaction-modal {
     width: calc(100% - 24px);
@@ -617,7 +617,7 @@
   body.mobile-terminal-mode #faq-modal::before,
   body.mobile-terminal-mode #theme-modal::before,
   body.mobile-terminal-mode #options-modal::before,
-  body.mobile-terminal-mode #kill-modal::before,
+  body.mobile-terminal-mode .modal-card-compact::before,
   body.mobile-terminal-mode #hist-del-modal::before,
   body.mobile-terminal-mode #share-redaction-modal::before {
     display: none;

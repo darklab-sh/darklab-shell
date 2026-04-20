@@ -94,7 +94,6 @@ function setupMobileSheetDragClose() {
   if (typeof bindMobileSheet !== 'function') return;
   const faqModal = document.getElementById('faq-modal');
   const optionsModal = document.getElementById('options-modal');
-  const killModal = document.getElementById('kill-modal');
   const histDelModal = document.getElementById('hist-del-modal');
   const shareRedactionModal = document.getElementById('share-redaction-modal');
   const workflowsModal = document.getElementById('workflows-modal');
@@ -104,7 +103,6 @@ function setupMobileSheetDragClose() {
   bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
   bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
   bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
-  bindMobileSheet(killModal,          { onClose: () => closeKillOverlay() });
   bindMobileSheet(histDelModal,       { onClose: () => { hideHistoryDeleteOverlay(); pendingHistAction = null; } });
   bindMobileSheet(shareRedactionModal, { onClose: () => cancelShareRedactionChoice() });
 }
@@ -162,12 +160,6 @@ function setupDismissibleOverlays() {
     // dismissal is handled by the ambient-click listener in the global
     // click handler below, not by backdrop-click here.
     closeOnBackdrop: false,
-  });
-  bindDismissible(_uiOverlayRefs.killOverlay, {
-    level: 'modal',
-    isOpen: isKillOverlayOpen,
-    onClose: closeKillOverlay,
-    closeButtons: killCancelBtn,
   });
   bindDismissible(_uiOverlayRefs.histDelOverlay, {
     level: 'modal',
@@ -818,13 +810,6 @@ shareRedactionConfirmBtn?.addEventListener('click', () => {
   resolveShareRedactionChoice('redacted');
 });
 
-// ── Kill modal ──
-// Backdrop + cancel-button dismissal are registered via bindDismissible;
-// only the affirmative confirm button lives here.
-killConfirmBtn.addEventListener('click', () => {
-  confirmPendingKill();
-});
-
 // ── Global keyboard shortcuts ──
 // Current bindings intentionally stay narrow:
 // - Ctrl+C: running => kill confirm, idle => fresh prompt line
@@ -836,17 +821,12 @@ killConfirmBtn.addEventListener('click', () => {
 // - Alt+Tab / Alt+Shift+Tab for tab cycling (forward/backward)
 // - Alt+ArrowLeft / Alt+ArrowRight for tab cycling (same as Tab)
 // - Alt+P for permalink, Alt+Shift+C for copy
-// - Enter / Escape for kill-confirm accept / cancel
+// Confirmation dialogs (kill, history-delete, share-redaction, ...) use
+// default-focus-on-cancel so Enter resolves to the safe action via the
+// browser's native button activation. Escape is routed through the
+// dismissible dispatcher below.
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
 document.addEventListener('keydown', e => {
-  // Kill confirmation has a modal-specific Enter-to-confirm shortcut that
-  // is not a dismiss action; Escape-to-close is owned by bindDismissible
-  // via the unified Escape dispatch below.
-  if (isKillOverlayOpen() && e.key === 'Enter') {
-    confirmPendingKill();
-    e.preventDefault();
-    return;
-  }
   // Unified Escape dispatch: closes the topmost open dismissible
   // (modal > sheet > panel) via the registry populated by
   // setupDismissibleOverlays(). Replaces the per-overlay if-chain that
@@ -956,7 +936,7 @@ document.addEventListener('keydown', e => {
     && !(e.target && e.target.closest && e.target.closest('button, a, select'))
     && cmdInput
     && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
-    && !isKillOverlayOpen()
+    && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
     && !isShareRedactionOverlayOpen()
   ) {
     e.preventDefault();

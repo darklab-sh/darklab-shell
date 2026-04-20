@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 836
-- `vitest`: 596
+- `vitest`: 621
 - `playwright`: 179
-- total: 1,611
+- total: 1,636
 
 This document is organized in two parts:
 
@@ -1162,8 +1162,6 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `Tab cycles autocomplete suggestions once the shared prefix is exhausted` | Verifies that Tab cycles autocomplete suggestions once the shared prefix is exhausted. |
 | `Tab key with a modifier does not trigger autocomplete accept or selection` | Tab key with a modifier does not trigger autocomplete accept or selection. |
 | `wires the history delete modal buttons and backdrop correctly` | Verifies that wires the history delete modal buttons and backdrop correctly. |
-| `wires the kill modal buttons and backdrop correctly` | Verifies that wires the kill modal buttons and backdrop correctly. |
-| `does not refocus the mobile composer when closing the kill confirmation modal` | Verifies that does not refocus the mobile composer when closing the kill confirmation modal. |
 | `wires the share redaction modal buttons, remember choice, and backdrop correctly` | Verifies that the permalink share-redaction modal can choose raw vs redacted sharing, persist that choice into the shared Options default when requested, and cancel from the backdrop. |
 | `uses the persistent share redaction default before showing the modal prompt` | Verifies that a persistent raw/redacted preference suppresses the prompt before any modal choice is needed. |
 | `wires search controls and Escape dismissal correctly` | Verifies that wires search controls and Escape dismissal correctly. |
@@ -1651,6 +1649,38 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `skips entries that report closed` | Verifies closed entries are ignored during cascade dispatch. |
 | `closes only one surface per call` | Verifies closeTopmostDismissible closes at most one surface. |
 
+#### `ui_confirm.test.js`
+
+| Test | Description |
+| --- | --- |
+| `rejects when #confirm-host is not present` | Verifies the guard against a missing pre-minted host node. |
+| `rejects when actions is empty` | Verifies the guard against an empty actions array. |
+| `rejects when actions is missing` | Verifies the guard when the actions option is omitted. |
+| `rejects a concurrent second call` | Verifies only one confirm can be open at a time. |
+| `resolves with the clicked action id` | Verifies clicking a button resolves the promise with that action's id. |
+| `resolves null when the cancel action is clicked` | Documents that role:'cancel' resolves with its id; null is reserved for non-button dismissal. |
+| `resolves null on backdrop click` | Verifies backdrop dismissal resolves the promise with null. |
+| `resolves null on Escape via closeTopmostDismissible` | Verifies Escape routed through the shared dismissible dispatcher resolves with null. |
+| `resolves null via cancelConfirm()` | Verifies the imperative cancel entrypoint resolves with null. |
+| `hides the host and clears action markup after resolve` | Verifies cleanup hides the host, re-applies u-hidden, and clears rendered buttons. |
+| `refocuses the composer on resolve` | Verifies resolution triggers refocusComposerAfterAction with defer:true. |
+| `renders a plain string body` | Verifies string bodies are set as textContent on the body slot. |
+| `renders {text, note} as text + <br> + .modal-copy-note span` | Verifies the {text, note} shape renders primary copy plus a styled secondary note. |
+| `renders a Node body directly` | Verifies a DOM Node body is appended without re-wrapping. |
+| `applies modal-card-danger when tone: danger` | Verifies tone:'danger' adds modal-card-danger to the card. |
+| `applies modal-card-warning when tone: warning` | Verifies tone:'warning' adds modal-card-warning to the card. |
+| `applies neither tone class when tone is omitted` | Verifies the card has no tone class when tone is not set. |
+| `clears stale tone class between opens` | Verifies the previous tone class is cleared before a new open applies its own. |
+| `maps role:primary + tone:danger to btn-primary btn-danger` | Verifies the role+tone class mapping for the kill-style primary-danger button. |
+| `maps role:cancel to btn-secondary` | Verifies role:'cancel' renders as btn-secondary and sets data-confirm-role. |
+| `maps role:secondary + tone:warning to btn-secondary btn-warning` | Verifies role+tone mapping for a non-primary warning action. |
+| `focuses the role:cancel button by default` | Verifies default focus lands on the cancel action so Enter routes to cancel. |
+| `honors defaultFocus when no cancel action is present` | Verifies defaultFocus selects a specific action id when no cancel is available. |
+| `falls back to the first button when no cancel and no defaultFocus` | Verifies the focus fallback when neither a cancel role nor a defaultFocus is given. |
+| `stacks when there are 3+ actions regardless of viewport` | Verifies modal-actions-stacked is applied when action count is 3 or more. |
+| `stacks when the viewport is <=480px even with 2 actions` | Verifies modal-actions-stacked is applied on narrow viewports for a 2-action dialog. |
+| `does not stack for 2 actions on wide viewports` | Verifies the default side-by-side layout for 2 actions above the breakpoint. |
+
 #### `ui_outside_click.test.js`
 
 | Test | Description |
@@ -1831,7 +1861,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `kill button disappears after the command is killed` | Verifies that kill button disappears after the command is killed. |
 | `Ctrl+C opens the kill confirmation modal while a command is running` | Ctrl+C opens the kill confirmation modal while a command is running. |
 | `closing the only running tab kills the command and resets the shell` | Verifies that closing the only running tab kills the command and resets the shell. |
-| `Enter confirms kill while the kill confirmation modal is open` | Enter confirms kill while the kill confirmation modal is open. |
+| `Enter cancels kill while the kill confirmation modal is open` | Verifies that Enter defaults to the cancel action because the confirmation-dialog primitive focuses the cancel button on open. |
 | `Escape cancels kill while the kill confirmation modal is open` | Escape cancels kill while the kill confirmation modal is open. |
 | `Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation` | Ctrl+C on an idle prompt appends a new prompt line instead of opening kill confirmation. |
 

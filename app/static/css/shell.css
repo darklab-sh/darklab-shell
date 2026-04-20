@@ -623,7 +623,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border-color: var(--theme-panel-border);
 }
 
-#kill-modal,
+.modal-card-compact,
 #hist-del-modal,
 #share-redaction-modal {
   width: min(520px, 92vw);
@@ -656,6 +656,16 @@ body.mobile-terminal-mode .output-follow-btn {
   .modal-actions-wrap {
     gap: 6px;
   }
+}
+
+.modal-actions.modal-actions-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
+}
+
+.modal-actions.modal-actions-stacked .btn {
+  width: 100%;
 }
 
 .modal-inline-field {
@@ -1295,8 +1305,8 @@ body .welcome-command-badge {
   color: var(--blue);
   border-color: color-mix(in srgb, var(--blue) 40%, transparent);
 }
-body #kill-modal {
-  background: var(--theme-kill-modal-bg) !important;
+body .modal-card-compact {
+  background: var(--theme-confirm-modal-bg) !important;
   border-color: var(--theme-panel-border) !important;
   box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
 }

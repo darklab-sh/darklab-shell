@@ -413,9 +413,6 @@
     return next;
   };
   global.isModalOverlayOpen = (el, display = 'flex') => !!(el && el.style && el.style.display === display);
-  global.showKillOverlay = () => showModalOverlay(killOverlay, 'flex');
-  global.hideKillOverlay = () => hideModalOverlay(killOverlay);
-  global.isKillOverlayOpen = () => isModalOverlayOpen(killOverlay, 'flex');
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {
     hidePanelOverlay(historyPanel);

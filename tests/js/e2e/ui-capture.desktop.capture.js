@@ -127,7 +127,7 @@ const scenes = [
       await freshHome(page, { themeName })
       await runLongCaptureCommand(page)
       await page.locator('#hud-actions [data-action="kill"]').click()
-      await expect(page.locator('#kill-modal')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
     },
   },
   {
