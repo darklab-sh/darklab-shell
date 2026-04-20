@@ -34,7 +34,7 @@ from commands import (
     load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
-from permalinks import _format_retention, _expiry_note, _permalink_error_page
+from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -1280,6 +1280,57 @@ class TestExpiryNote:
         # Should include a YYYY-MM-DD formatted date
         import re
         assert re.search(r'\d{4}-\d{2}-\d{2}', result)
+
+
+# ── _prompt_echo_text + synthesized prompt-echo lines ────────────────────────
+
+class TestPromptEchoText:
+    def test_uses_configured_prompt_prefix(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            assert _prompt_echo_text("ls -la") == "ops@darklab:~$ ls -la"
+
+    def test_falls_back_to_dollar_when_prefix_missing(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": ""}):
+            assert _prompt_echo_text("ls -la") == "$ ls -la"
+
+    def test_strips_trailing_space_when_label_empty(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "anon@darklab:~$"}):
+            assert _prompt_echo_text("") == "anon@darklab:~$"
+
+
+class TestNormalizePermalinkLinesPromptEcho:
+    """Regression guard: when a history snapshot does not already carry a
+    prompt-echo line, the normalizer synthesizes one using the configured
+    prompt_prefix — not a reduced bare `$` — so permalink pages render the
+    same prompt identity as the live shell."""
+
+    def test_unstructured_content_uses_configured_prefix(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
+        assert lines[0]["cls"] == "prompt-echo"
+        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+
+    def test_structured_snapshot_without_echo_gets_configured_prefix(self):
+        content = [
+            {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
+        ]
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            lines = _normalize_permalink_lines(content, label="echo hello")
+        assert lines[0]["cls"] == "prompt-echo"
+        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+
+    def test_structured_snapshot_with_existing_echo_is_preserved(self):
+        content = [
+            {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
+            {"text": "hello", "cls": ""},
+        ]
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            lines = _normalize_permalink_lines(content, label="echo hello")
+        # Existing echo survives; normalizer does not prepend a second one.
+        echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]
+        assert len(echo_lines) == 1
+        assert echo_lines[0]["text"] == "anon@darklab:~$ echo hello"
 
 
 # ── _permalink_error_page ─────────────────────────────────────────────────────

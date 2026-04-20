@@ -72,12 +72,24 @@ def _format_retention(days: int) -> str:
     return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
+def _prompt_echo_text(label: str) -> str:
+    # Single server-side source of truth for prompt-echo text on synthesized
+    # history/snapshot lines. Reads CFG["prompt_prefix"] so permalinks render
+    # the full configured prefix (e.g. "anon@darklab:~$ ls -la") rather than a
+    # reduced "$ ls -la" echo that drifts from the live shell. Paired with the
+    # JS export helper (ExportHtmlUtils.renderExportPromptEcho) that consumes
+    # this text by splitting on its first space to colorize the prefix.
+    prefix = str(CFG.get("prompt_prefix", "$")).strip() or "$"
+    return f"{prefix} {label}".rstrip()
+
+
 def _normalize_permalink_lines(content_lines, label: str):
     # History pages, share pages, and HTML exports feed slightly different line
     # shapes into this layer; normalize them once for the shared template.
     content_items = list(content_lines or [])
     is_structured_snapshot = any(isinstance(entry, dict) for entry in content_items)
     normalized_lines = []
+    echo_text = _prompt_echo_text(label)
 
     if is_structured_snapshot:
         has_prompt_echo = any(
@@ -87,7 +99,7 @@ def _normalize_permalink_lines(content_lines, label: str):
             for entry in content_items
         )
         if not has_prompt_echo:
-            normalized_lines.append({"text": f"$ {label}", "cls": "prompt-echo", "tsC": "", "tsE": ""})
+            normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
             normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
         for entry in content_items:
             if isinstance(entry, str):
@@ -100,7 +112,7 @@ def _normalize_permalink_lines(content_lines, label: str):
                     "tsE": str(entry.get("tsE", "")),
                 })
     else:
-        normalized_lines.append({"text": f"$ {label}", "cls": "prompt-echo", "tsC": "", "tsE": ""})
+        normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
         normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
         for entry in content_items:
             normalized_lines.append({"text": str(entry), "cls": "", "tsC": "", "tsE": ""})

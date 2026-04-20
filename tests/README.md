@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 836
+- `pytest`: 842
 - `vitest`: 642
 - `playwright`: 182
-- total: 1,660
+- total: 1,666
 
 This document is organized in two parts:
 
@@ -423,6 +423,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestExpiryNote.test_returns_empty_when_already_expired` | Returns empty when already expired. |
 | `TestExpiryNote.test_returns_empty_on_invalid_date` | Returns empty on invalid date. |
 | `TestExpiryNote.test_includes_expiry_date` | Checks includes expiry date handling. |
+| `TestPromptEchoText.test_uses_configured_prompt_prefix` | Checks `_prompt_echo_text` renders the configured `CFG["prompt_prefix"]`. |
+| `TestPromptEchoText.test_falls_back_to_dollar_when_prefix_missing` | Checks fallback to bare `$` when `prompt_prefix` is empty. |
+| `TestPromptEchoText.test_strips_trailing_space_when_label_empty` | Checks trailing-space strip when the echoed label is empty. |
+| `TestNormalizePermalinkLinesPromptEcho.test_unstructured_content_uses_configured_prefix` | Unstructured content synthesizes a prompt-echo line using the configured prefix. |
+| `TestNormalizePermalinkLinesPromptEcho.test_structured_snapshot_without_echo_gets_configured_prefix` | Structured snapshots without an echo line get one synthesized with the configured prefix. |
+| `TestNormalizePermalinkLinesPromptEcho.test_structured_snapshot_with_existing_echo_is_preserved` | Existing prompt-echo lines in structured snapshots are preserved. |
 | `TestPermalinkErrorPage.test_returns_404_status` | Checks returns 404 status handling. |
 | `TestPermalinkErrorPage.test_includes_noun_in_body` | Includes noun in body. |
 | `TestPermalinkErrorPage.test_includes_app_name` | Checks includes app name handling. |
