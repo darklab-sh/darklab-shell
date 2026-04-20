@@ -101,7 +101,7 @@ overlay_backdrop_bg: "rgba(23, 29, 23, 0.72)"
 
 faq_code_bg: "#e8ede0"
 allowed_chip_bg: "#e8ede0"
-options_select_bg: "#f0efe4"
+form_control_bg: "#f0efe4"
 
 tab_status_ok_bg: "#5e8a4d"
 toast_bg: "#f6f7f1"

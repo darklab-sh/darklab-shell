@@ -167,7 +167,7 @@ SECTION_ORDER = [
             ),
             (
                 "# FAQ / options controls",
-                ["faq_code_bg", "allowed_chip_bg", "options_select_bg"],
+                ["faq_code_bg", "allowed_chip_bg", "form_control_bg"],
             ),
             (
                 "# Status / toasts",

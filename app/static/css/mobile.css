@@ -713,7 +713,7 @@
     z-index: 2;
     background: var(--surface);
   }
-  body.mobile-terminal-mode .options-choice {
+  body.mobile-terminal-mode .form-check {
     min-height: 44px;
     padding: 8px 0;
   }

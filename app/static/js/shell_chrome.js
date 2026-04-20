@@ -276,6 +276,7 @@
       row.title = [label, wf.description].filter(Boolean).join('\n');
       const glyph = document.createElement('span');
       glyph.className = 'drill-chev';
+      glyph.setAttribute('aria-hidden', 'true');
       glyph.textContent = '›';
       const text = document.createElement('span');
       text.className = 'rail-item-text line-clamp-2';

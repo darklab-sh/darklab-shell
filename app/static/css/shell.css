@@ -937,13 +937,13 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--text);
 }
 
-.options-fieldset {
+.form-fieldset {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.options-choice {
+.form-check {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -951,22 +951,53 @@ body.mobile-terminal-mode .output-follow-btn {
   cursor: pointer;
 }
 
-.options-choice input {
-  accent-color: var(--green);
+.form-check:hover {
+  color: var(--text);
 }
 
-.options-select {
+.form-check input[type="checkbox"],
+.form-check input[type="radio"] {
+  accent-color: var(--green);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.form-check input[type="checkbox"]:focus-visible,
+.form-check input[type="radio"]:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--green-glow);
+}
+
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
   width: min(240px, 100%);
-  background: var(--surface);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text) 50%),
+    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
   color: var(--text);
   border: 1px solid var(--border-bright);
   border-radius: 4px;
-  padding: 8px 10px;
+  padding: 8px 28px 8px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
+  cursor: pointer;
 }
 
-.options-select:focus-visible {
+.form-select:hover {
+  border-color: var(--green-dim);
+}
+
+.form-select:focus-visible {
   outline: 1px solid var(--green-dim);
   box-shadow: 0 0 0 3px var(--green-glow);
 }
@@ -1304,7 +1335,7 @@ body .modal-card-compact {
 }
 body .faq-a code { background: var(--theme-faq-code-bg); }
 body .allowed-chip { background: var(--theme-allowed-chip-bg); }
-body .options-select { background: var(--theme-options-select-bg); }
+body .form-select { background-color: var(--theme-form-control-bg); }
 body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 
 /* ── FAQ accordion ────────────────────────────────────────────────── */

@@ -585,9 +585,9 @@ function _buildShareRedactionRememberField() {
   const field = document.createElement('div');
   field.className = 'faq-item modal-inline-field';
   const fieldset = document.createElement('div');
-  fieldset.className = 'faq-a options-fieldset';
+  fieldset.className = 'faq-a form-fieldset';
   const choice = document.createElement('label');
-  choice.className = 'options-choice';
+  choice.className = 'form-check';
   const checkbox = document.createElement('input');
   checkbox.type = 'checkbox';
   checkbox.id = 'share-redaction-remember-toggle';

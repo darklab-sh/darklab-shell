@@ -169,7 +169,7 @@ overlay_backdrop_bg: "rgba(0,0,0,0.76)"
 # FAQ / options controls
 faq_code_bg: "#141414"
 allowed_chip_bg: "#141414"
-options_select_bg: "#141414"
+form_control_bg: "#141414"
 
 # Status / toasts
 tab_status_ok_bg: "#39ff14"

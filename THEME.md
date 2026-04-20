@@ -341,7 +341,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `overlay_backdrop_bg` | `rgba(0,0,0,0.75)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
 | `faq_code_bg` | `#141414` | `#dce6f0` | Code-styled FAQ tokens and examples |
 | `allowed_chip_bg` | `#141414` | `#dce6f0` | Allowed-command chips in the FAQ |
-| `options_select_bg` | `#141414` | `#e0e8f4` | Options modal select controls |
+| `form_control_bg` | `#141414` | `#e0e8f4` | Background for themed `<select>` form controls (`.form-select`) |
 
 ### Status and Toasts
 

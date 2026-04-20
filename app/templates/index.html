@@ -155,7 +155,7 @@
         <button type="button" class="menu-item" data-menu-action="search">
           <span class="menu-item-icon" aria-hidden="true">⌕</span>
           <span class="menu-item-label">search</span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="ln" aria-pressed="false">
           <span class="menu-item-icon" aria-hidden="true">#</span>
@@ -166,7 +166,7 @@
           <span class="menu-item-icon" aria-hidden="true">◷</span>
           <span class="menu-item-label">timestamps</span>
           <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
-          <span class="disclosure-chev">▸</span>
+          <span class="disclosure-chev" aria-hidden="true">▸</span>
         </button>
         <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
           <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="off">
@@ -193,34 +193,34 @@
           <span class="menu-item-icon" aria-hidden="true">⧖</span>
           <span class="menu-item-label">history</span>
           <span class="menu-item-hint" id="mobile-menu-history-count"></span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="workflows">
           <span class="menu-item-icon" aria-hidden="true">⚙</span>
           <span class="menu-item-label">workflows</span>
           <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="options">
           <span class="menu-item-icon" aria-hidden="true">≡</span>
           <span class="menu-item-label">options</span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="theme">
           <span class="menu-item-icon" aria-hidden="true">◐</span>
           <span class="menu-item-label">theme</span>
           <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="faq">
           <span class="menu-item-icon" aria-hidden="true">?</span>
           <span class="menu-item-label">FAQ</span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
           <span class="menu-item-icon" aria-hidden="true">◇</span>
           <span class="menu-item-label">diag</span>
-          <span class="menu-item-chev drill-chev">›</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
       </div>
 
@@ -247,7 +247,7 @@
       <div class="rail-section rail-section-recent" id="rail-section-recent">
         <button class="rail-section-header" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
           <span class="rail-section-header-left">
-            <span class="rail-section-chev">▸</span>
+            <span class="rail-section-chev" aria-hidden="true">▸</span>
             <span class="rail-section-label">Recent</span>
           </span>
           <span class="rail-section-count" id="rail-recent-count">0</span>
@@ -262,7 +262,7 @@
       <div class="rail-section rail-section-workflows closed" id="rail-section-workflows">
         <button class="rail-section-header" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
           <span class="rail-section-header-left">
-            <span class="rail-section-chev">▸</span>
+            <span class="rail-section-chev" aria-hidden="true">▸</span>
             <span class="rail-section-label">Workflows</span>
           </span>
         </button>
@@ -523,7 +523,7 @@
       <div class="faq-item">
         <div class="faq-q">Timestamps</div>
         <div class="faq-a">
-          <select id="options-ts-select" class="options-select" aria-label="Timestamp mode">
+          <select id="options-ts-select" class="form-select" aria-label="Timestamp mode">
             <option value="off">Off</option>
             <option value="elapsed">Elapsed</option>
             <option value="clock">Clock</option>
@@ -532,8 +532,8 @@
       </div>
       <div class="faq-item">
         <div class="faq-q">Line Numbers</div>
-        <div class="faq-a options-fieldset">
-          <label class="options-choice">
+        <div class="faq-a form-fieldset">
+          <label class="form-check">
             <input type="checkbox" id="options-ln-toggle">
             <span>Show line numbers beside output and the live prompt</span>
           </label>
@@ -542,7 +542,7 @@
       <div class="faq-item">
         <div class="faq-q">Welcome Intro</div>
         <div class="faq-a">
-          <select id="options-welcome-select" class="options-select" aria-label="Welcome intro mode">
+          <select id="options-welcome-select" class="form-select" aria-label="Welcome intro mode">
             <option value="animated">Animated</option>
             <option value="disable_animation">Disable Animation</option>
             <option value="remove">Remove Completely</option>
@@ -552,7 +552,7 @@
       <div class="faq-item">
         <div class="faq-q">Share Snapshot Redaction</div>
         <div class="faq-a">
-          <select id="options-share-redaction-select" class="options-select" aria-label="Share snapshot redaction default">
+          <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
             <option value="unset">Prompt Until Set</option>
             <option value="redacted">Default To Redacted</option>
             <option value="raw">Default To Raw</option>
@@ -561,8 +561,8 @@
       </div>
       <div class="faq-item">
         <div class="faq-q">Run Notifications</div>
-        <div class="faq-a options-fieldset">
-          <label class="options-choice">
+        <div class="faq-a form-fieldset">
+          <label class="form-check">
             <input type="checkbox" id="options-notify-toggle">
             <span>Notify when a run completes or is killed</span>
           </label>
@@ -570,7 +570,7 @@
       </div>
       <div class="faq-item">
         <div class="faq-q">Session Token</div>
-        <div class="faq-a options-fieldset">
+        <div class="faq-a form-fieldset">
           <div class="options-session-token-desc">Carry your run history across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
           <div class="options-session-token-status-row">
             <div id="options-session-token-status" class="options-session-token-status"></div>
