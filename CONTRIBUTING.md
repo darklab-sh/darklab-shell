@@ -119,6 +119,8 @@ Commit messages should describe the intent of the change, not just what files we
 
 **General** — avoid speculative abstractions. Add helpers only when a pattern recurs across at least two real call sites. Prefer editing the relevant existing file over creating new ones.
 
+**Frontend UI rules** — cross-cutting UI rules (button primitive family, disclosure glyph mapping, semantic color contract, confirmation dialog contract) live in [ARCHITECTURE.md § Frontend Design System](ARCHITECTURE.md#frontend-design-system). New pressable surfaces, modals, disclosures, and color decisions must follow those rules or add an explicit exception to the relevant contract test.
+
 ---
 
 ## Running Tests
