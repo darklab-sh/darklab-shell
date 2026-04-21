@@ -699,8 +699,8 @@ loadStarredFromServer().catch(err => {
   logClientError('failed to load /session/starred', err);
 });
 
-// Migrate any pre-Phase-2 stars from localStorage to the server, and clean up
-// the stale key for users who never trigger a session change.
+// Migrate any legacy stars from localStorage to the server, and clean up the
+// stale key for users who never trigger a session change.
 if (typeof _seedLocalStorageStarsToServer === 'function') {
   _seedLocalStorageStarsToServer().catch(err => {
     logClientError('failed to seed localStorage stars', err);

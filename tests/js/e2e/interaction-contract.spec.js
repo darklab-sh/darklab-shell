@@ -1,12 +1,11 @@
 import { test, expect } from '@playwright/test'
 
-// Phase 6 of the UI Interaction Helper Refactor: assertions for the
-// shared interaction contract exercised against real mounted UI rather
-// than helper fixtures. Each phase ships its own per-helper unit suite
-// (`ui_pressable.test.js`, `ui_disclosure.test.js`, `ui_dismissible.test.js`,
-// `ui_outside_click.test.js`, `ui_focus_helpers.test.js`); this file
-// checks that the contracts those helpers encode actually hold end-to-end
-// on the surfaces that compose them.
+// Assertions for the shared interaction contract exercised against real
+// mounted UI rather than helper fixtures. Each helper has its own unit
+// suite (`ui_pressable.test.js`, `ui_disclosure.test.js`,
+// `ui_dismissible.test.js`, `ui_outside_click.test.js`,
+// `ui_focus_helpers.test.js`); this file checks that the contracts those
+// helpers encode actually hold end-to-end on the surfaces that compose them.
 
 const OVERLAYS = [
   { name: 'FAQ',       id: '#faq-overlay',       open: 'openFaq',            close: '.faq-close' },

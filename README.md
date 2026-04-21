@@ -546,6 +546,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── welcome.test.js     # welcome animation, config-driven timing, featured-sample interaction
 │       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
 │       │   ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
+│       │   ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
 │       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
 │       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
@@ -558,6 +559,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── ui_outside_click.test.js # bindOutsideClickClose helper coverage — guards, outside-click dismissal, trigger exemption, exempt selectors, scope override
 │       │   ├── ui_pressable.test.js # bindPressable helper coverage — activation paths, press-style clearing, focus-theft prevention, idempotency
 │       │   └── utils.test.js       # escapeHtml, escapeRegex, MOTD rendering
+│       ├── fixtures/            # Shared unit-test fixture data
+│       │   └── button_primitive_allowlist.json # Exception selectors for button_primitives_allowlist.test.js
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
 │           ├── helpers.js      # runCommand/openHistory helpers

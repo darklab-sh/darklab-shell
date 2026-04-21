@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 649
+- `vitest`: 657
 - `playwright`: 191
-- total: 1,682
+- total: 1,690
 
 This document is organized in two parts:
 
@@ -1241,6 +1241,21 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
 | `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
 
+#### `button_primitives_allowlist.test.js`
+
+Positive counterpart to the negative blocklist in `button_primitives.test.js`. Each row below is one dynamically-generated test — the suite walks `app/templates/**.html` and emits one test per file, plus a fixture-validity test. Every `<button>`, `[role="button"]`, and `<a role="button">` in the scanned file must either carry an allowed primitive class (`btn`, `nav-item`, `close-btn`, `toggle-btn`, `kb-key`) or match a selector in `tests/js/fixtures/button_primitive_allowlist.json`. The allowlist fixture documents surfaces that deliberately opt out of the primitives (legacy or surface-specific class families).
+
+| Test | Description |
+| --- | --- |
+| `app/templates/diag.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator diagnostics page — currently emits no button-like elements, so the assertion short-circuits clean and pins that state (any future button added to `/diag` must go through a primitive or an allowlist entry). |
+| `app/templates/index.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the main app template — the surface that owns the desktop rail, tab bar, terminal chrome, mobile hamburger/recents sheets, and the five app-level modals. The bulk of the exception fixture exists because of this file. |
+| `app/templates/permalink.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink viewer — the `toggle-ln` / `toggle-ts` / `copy-txt` / `perm-save-btn` row uses `.btn .btn-secondary .btn-compact` directly, and the `save-txt` / `save-html` / `save-pdf` entries inside the save menu are covered by the `[data-action^="save-"]` exception. |
+| `app/templates/permalink_base.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink layout base — currently emits no button-like elements; pins that state. |
+| `app/templates/permalink_error.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink error template — currently emits no button-like elements; pins that state. |
+| `app/templates/theme_vars_script.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the theme-variables script include — currently emits no button-like elements; pins that state. |
+| `app/templates/theme_vars_style.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the theme-variables style include — currently emits no button-like elements; pins that state. |
+| `fixture selectors are all syntactically valid` | Validates that every `exceptions[].selector` in the allowlist fixture is a parseable CSS selector — catches typos before they mask real regressions. |
+
 #### `config.test.js`
 
 | Test | Description |
@@ -1395,7 +1410,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `formats multi-minute durations without hours` | Verifies that formats multi-minute durations without hours. |
 | `formats exactly one hour` | Verifies that formats exactly one hour. |
 | `formats hour + minutes + seconds` | Verifies that formats hour + minutes + seconds. |
-| `accepts the narrow phase-1 grep form` | Verifies that accepts the narrow phase-1 grep form. |
+| `accepts the narrow synthetic grep form` | Verifies that accepts the narrow synthetic grep form. |
 | `accepts no-space pipe variants` | Verifies that accepts no-space pipe variants. |
 | `rejects unsupported shell operator forms` | Verifies that rejects unsupported shell operator forms. |
 | `accepts the narrow head/tail/wc forms` | Verifies that accepts the narrow head/tail/wc forms. |
@@ -1413,7 +1428,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
-| `runCommand allows phase-1 synthetic grep through to the API` | Verifies that runCommand allows phase-1 synthetic grep through to the API. |
+| `runCommand allows the narrow synthetic grep form through to the API` | Verifies that runCommand allows the narrow synthetic grep form through to the API. |
 | `runCommand allows other synthetic post-filters through to the API` | Verifies that runCommand allows other synthetic post-filters through to the API. |
 | `runCommand allows exact special built-in commands with shell punctuation through to the API` | Verifies that runCommand allows exact special built-in commands with shell punctuation through to the API. |
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
@@ -1589,7 +1604,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does nothing when el is null` | Verifies guard against missing element. |
 | `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
 | `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
-| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the post-Phase-2 dispose contract: a successful bind returns `{ dispose }`. |
+| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the dispose contract: a successful bind returns `{ dispose }`. |
 | `dispose > returns null on guard-fail paths (missing onActivate, missing el, already bound)` | Verifies guard-fail paths consistently return null instead of undefined. |
 | `dispose > dispose() removes the click listener` | Verifies dispose unwinds the click listener so subsequent clicks are inert. |
 | `dispose > dispose() removes the keydown listener for non-native buttons` | Verifies dispose unwinds the Enter/Space keydown handler installed for role="button" surfaces. |

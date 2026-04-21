@@ -168,7 +168,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommandMobile(page, 'ping -c 4 127.0.0.1')
+      await runCommandMobile(page, 'ping -c 4 darklab.sh')
       await page.evaluate(() => {
         if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed')
       })
@@ -181,7 +181,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommandMobile(page, 'ping -c 4 127.0.0.1')
+      await runCommandMobile(page, 'ping -c 4 darklab.sh')
       await page.evaluate(() => {
         if (typeof applyLineNumberPreference === 'function') applyLineNumberPreference('on')
         if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed')

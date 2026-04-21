@@ -426,7 +426,7 @@ def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, s
             return None, "Synthetic grep only supports a single pattern argument."
         if token.startswith('-') and token != '-':
             if token.startswith('--'):
-                return None, "Synthetic grep supports only -i, -v, and -E in phase 1."
+                return None, "Synthetic grep supports only -i, -v, and -E."
             for flag in token[1:]:
                 if flag == 'i':
                     options["ignore_case"] = True
@@ -435,7 +435,7 @@ def _parse_synthetic_grep_stage(stage_tokens: list[str]) -> tuple[dict | None, s
                 elif flag == 'E':
                     options["extended"] = True
                 else:
-                    return None, "Synthetic grep supports only -i, -v, and -E in phase 1."
+                    return None, "Synthetic grep supports only -i, -v, and -E."
             continue
         pattern = token
 
@@ -463,7 +463,7 @@ def _parse_synthetic_head_tail_stage(stage_tokens: list[str]) -> tuple[dict | No
         return {"kind": command_name, "count": int(stage_tokens[1][1:])}, None
 
     if len(stage_tokens) != 3 or stage_tokens[1] != "-n":
-        return None, f"Synthetic {command_name} supports only `-n <count>` or `-<count>` in phase 1."
+        return None, f"Synthetic {command_name} supports only `-n <count>` or `-<count>`."
     if not stage_tokens[2].isdigit():
         return None, f"Synthetic {command_name} requires a non-negative numeric count."
 
@@ -476,7 +476,7 @@ def _parse_synthetic_wc_stage(stage_tokens: list[str]) -> tuple[dict | None, str
         return None, None
     if stage_tokens[1:] == ["-l"]:
         return {"kind": "wc_l"}, None
-    return None, "Synthetic wc supports only `wc -l` in phase 1."
+    return None, "Synthetic wc supports only `wc -l`."
 
 
 _SORT_VALID_FLAGS = frozenset("rnu")
@@ -494,7 +494,7 @@ def _parse_synthetic_sort_stage(stage_tokens: list[str]) -> tuple[dict | None, s
             chars = set(flag[1:])
             return {"kind": "sort", "reverse": "r" in chars,
                     "numeric": "n" in chars, "unique": "u" in chars}, None
-    return None, "Synthetic sort supports only -r, -n, and -u flags in phase 1."
+    return None, "Synthetic sort supports only -r, -n, and -u flags."
 
 
 def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
@@ -505,7 +505,7 @@ def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, s
         return {"kind": "uniq", "count": False}, None
     if len(stage_tokens) == 2 and stage_tokens[1] == "-c":
         return {"kind": "uniq", "count": True}, None
-    return None, "Synthetic uniq supports only -c in phase 1."
+    return None, "Synthetic uniq supports only -c."
 
 
 def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:

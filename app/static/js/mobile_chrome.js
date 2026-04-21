@@ -118,7 +118,7 @@
     obs.observe(runTimerEl, { characterData: true, childList: true, subtree: true });
   }
 
-  // ── Mobile non-active running-state indicator (Workstream E prelude) ──
+  // ── Mobile non-active running-state indicator ──
   // The mobile status pill reflects the active tab only; this surface is
   // the system-level signal that work is happening on a backgrounded tab.
   // Trailing-edge chip with the running non-active count cycles through

@@ -1,9 +1,9 @@
 /**
  * Theme audit — not a correctness test. Walks every installed theme, opens the
- * mobile sheets introduced in the Phase 6 refactor, and reports WCAG contrast
- * ratios for the pairs most likely to break under low-alpha colored borders and
- * light surfaces. Prints a table; only hard-fails on catastrophic regressions
- * (contrast < 1.20) so the suite doesn't block on subjective aesthetic calls.
+ * mobile sheets, and reports WCAG contrast ratios for the pairs most likely to
+ * break under low-alpha colored borders and light surfaces. Prints a table;
+ * only hard-fails on catastrophic regressions (contrast < 1.20) so the suite
+ * doesn't block on subjective aesthetic calls.
  *
  * Run: npx playwright test theme-audit --config config/playwright.config.js
  */

@@ -328,7 +328,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommand(page, 'ping -c 4 127.0.0.1')
+      await runCommand(page, 'ping -c 4 darklab.sh')
       await page.locator('#ts-btn').click()
       await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
     },
@@ -339,7 +339,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommand(page, 'ping -c 4 127.0.0.1')
+      await runCommand(page, 'ping -c 4 darklab.sh')
       await page.locator('#ln-btn').click()
       await page.locator('#ts-btn').click()
       await expect(page.locator('body')).toHaveClass(/ln-on/)
