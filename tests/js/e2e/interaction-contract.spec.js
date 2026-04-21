@@ -103,6 +103,100 @@ test.describe('UI interaction contract — disclosures', () => {
 
 })
 
+test.describe('UI interaction contract — modal focus trap', () => {
+  const MODALS = [
+    { name: 'FAQ',       overlay: '#faq-overlay',       modal: '#faq-modal',       open: 'openFaq' },
+    { name: 'theme',     overlay: '#theme-overlay',     modal: '#theme-modal',     open: 'openThemeSelector' },
+    { name: 'options',   overlay: '#options-overlay',   modal: '#options-modal',   open: 'openOptions' },
+    { name: 'workflows', overlay: '#workflows-overlay', modal: '#workflows-modal', open: 'openWorkflows' },
+  ]
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('each app-level modal card carries data-focus-trap-bound after startup wiring', async ({ page }) => {
+    for (const modal of MODALS) {
+      await expect(page.locator(modal.modal)).toHaveAttribute('data-focus-trap-bound', '1')
+    }
+  })
+
+  for (const modal of MODALS) {
+    test(`${modal.name} modal wraps Tab and Shift+Tab at its card boundary`, async ({ page }) => {
+      await openOverlay(page, modal.open)
+      await expect(page.locator(modal.overlay)).toHaveClass(/\bopen\b/)
+
+      // Content for FAQ and workflows loads async from /faq and /workflows
+      // — wait for the card to have at least two focusable descendants
+      // before running the boundary test so the test is independent of
+      // network timing. Visibility filter mirrors ui_focus_trap.js so the
+      // test and the trap agree on which element is "last": hidden
+      // attribute, [hidden] ancestor, and display:none (via client-rect).
+      await expect
+        .poll(async () => {
+          return page.evaluate((selector) => {
+            const card = document.querySelector(selector)
+            if (!card) return 0
+            const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+            return Array.from(card.querySelectorAll(SEL))
+              .filter((el) => !el.hidden
+                && !(typeof el.closest === 'function' && el.closest('[hidden]'))
+                && window.getComputedStyle(el).display !== 'none')
+              .length
+          }, modal.modal)
+        })
+        .toBeGreaterThanOrEqual(2)
+
+      // Run the whole focus-trap exercise inside a single page.evaluate
+      // so focus() and the Tab keydown dispatch happen in one
+      // synchronous JS turn. An earlier version used real
+      // page.keyboard.press('Tab') and proved flaky under parallel e2e
+      // load: some modal open handlers (notably openThemeSelector)
+      // schedule a setTimeout(0) default-focus that can land between
+      // our focus() and the Tab keydown, stealing focus and breaking
+      // the `active === last` branch of the trap. Dispatching the
+      // keydown as a synthetic KeyboardEvent on the card eliminates
+      // that race — bundled macrotask flushes + synchronous dispatch
+      // means no other handler can run in between. This still
+      // verifies the integration contract: that `setupModalFocusTraps`
+      // bound the trap on the real mounted card (the
+      // data-focus-trap-bound attribute test above covers presence;
+      // this test covers behavior). The per-helper unit suite in
+      // ui_focus_trap.test.js covers the trap's own keydown logic.
+      const result = await page.evaluate((selector) => {
+        const card = document.querySelector(selector)
+        const SEL = 'button:not([disabled]), a[href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+        const list = Array.from(card.querySelectorAll(SEL))
+          .filter((el) => !el.hidden
+            && !(typeof el.closest === 'function' && el.closest('[hidden]'))
+            && window.getComputedStyle(el).display !== 'none')
+        const first = list[0]
+        const last = list[list.length - 1]
+        first.dataset.focustestFirst = '1'
+        last.dataset.focustestLast = '1'
+
+        last.focus()
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true }))
+        const afterTab = document.activeElement?.dataset?.focustestFirst === '1'
+
+        // For Shift+Tab, explicitly re-focus first — the trap's
+        // forward-tab path calls first.focus() which should have left
+        // us there, but re-focusing makes the Shift+Tab assertion
+        // independent of the forward assertion's outcome.
+        first.focus()
+        card.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', shiftKey: true, bubbles: true, cancelable: true }))
+        const afterShiftTab = document.activeElement?.dataset?.focustestLast === '1'
+
+        return { afterTab, afterShiftTab }
+      }, modal.modal)
+
+      expect(result.afterTab).toBe(true)
+      expect(result.afterShiftTab).toBe(true)
+    })
+  }
+})
+
 test.describe('UI interaction contract — ambient outside-click', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')

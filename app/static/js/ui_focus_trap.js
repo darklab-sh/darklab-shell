@@ -33,11 +33,17 @@
   function _isVisible(el) {
     if (!el) return false;
     if (el.hidden) return false;
-    // `closest` walks up the tree; catches ancestors hidden via the .u-hidden
-    // escape hatch or the `hidden` attribute. Skipping display:none through
-    // computed style is intentionally avoided — it's expensive and rarely
-    // needed inside a modal we fully control.
     if (typeof el.closest === 'function' && el.closest('[hidden]')) return false;
+    // display:none check — the options modal toggles session-token buttons
+    // between visible and `style="display:none"` based on token state. If
+    // the trap includes a display:none button as its last focusable, Tab
+    // from the *actual* last visible button won't match `active === last`
+    // and focus leaks out of the card. Works in both jsdom (style.display
+    // is reflected in getComputedStyle) and real browsers.
+    if (typeof window !== 'undefined' && typeof window.getComputedStyle === 'function') {
+      const style = window.getComputedStyle(el);
+      if (style && style.display === 'none') return false;
+    }
     return true;
   }
 

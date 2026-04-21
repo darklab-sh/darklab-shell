@@ -159,6 +159,23 @@ function setupDismissibleOverlays() {
   });
 }
 
+function setupModalFocusTraps() {
+  // Keep Tab / Shift+Tab cycling inside each modal card while its overlay is
+  // open — otherwise focus falls through to the rail / tabs / HUD behind the
+  // backdrop. #confirm-host wires its own focus trap per-open through
+  // showConfirm() because the card's focusables change between shows; the
+  // four app-level modals have persistent DOM, so a one-shot idempotent bind
+  // at startup is equivalent. bindFocusTrap is a no-op when the card is
+  // hidden (display: none on the overlay wrapper), so the listener is only
+  // reachable while the modal is open.
+  if (typeof bindFocusTrap !== 'function') return;
+  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workflows-modal'];
+  ids.forEach((id) => {
+    const card = document.getElementById(id);
+    if (card) bindFocusTrap(card);
+  });
+}
+
 function setupMobileComposer() {
   // The mobile composer reuses the same shared input state as desktop, but its
   // focus/keyboard handling has to be managed separately for mobile browsers.
@@ -731,6 +748,7 @@ setTimeout(() => {
 syncMobileViewportState();
 setupMobileSheetDragClose();
 setupDismissibleOverlays();
+setupModalFocusTraps();
 
 newTabBtn.addEventListener('click', () => {
   createShortcutTab();

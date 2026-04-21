@@ -395,7 +395,7 @@ The contract:
 - **One at a time.** A second `showConfirm()` call while another is open is rejected. The shell never stacks confirms.
 - **Role-based action ids.** Each action carries `role: 'primary' | 'secondary' | 'ghost' | 'cancel'` and an optional `tone: 'danger' | 'warning'`. `role` drives the button primitive class (`btn-primary` / `btn-secondary` / `btn-ghost`); `tone` adds the destructive overlay. Callers receive the id of the activated action, or `null` for cancel.
 - **Default focus on cancel.** For confirmations, the cancel action is focused on open so browser native Enter-activates-focused-button makes `Enter === cancel`. Callers with a form input in the `content` slot can override via `defaultFocus`.
-- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell must use this helper; `#confirm-host` is wired today and the remaining app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal`) are tracked for parity.
+- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell uses this helper: `#confirm-host` binds per-open because its card content changes between shows, and the four app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal`) bind once at startup via `setupModalFocusTraps()` in `controller.js` because their DOM is persistent.
 - **Dismissal is layered.** `bindDismissible` at `level: 'modal'` owns Escape + backdrop click. `bindMobileSheet` owns the drag-down-to-close handle on mobile. Both resolve the promise with `null` so callers cannot accidentally treat dismissal as confirmation.
 - **Actions stack at narrow widths.** The action row adds `.modal-actions-stacked` when the viewport is ≤480px or the action count is ≥3. A `matchMedia` listener keeps the class reactive to resize while the modal is open.
 - **Gate via `onActivate`.** An action can supply `onActivate` to run validation before close. Returning a falsy value (or a Promise resolving to one) keeps the modal open so form errors stay on screen; any truthy return closes and resolves with the action id.
@@ -780,9 +780,9 @@ The test stack is intentionally split into three layers:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 648
-- `playwright`: 186
-- total: 1,676
+- `vitest`: 649
+- `playwright`: 191
+- total: 1,682
 
 ### Testing Architecture
 

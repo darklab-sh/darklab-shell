@@ -125,4 +125,24 @@ describe('bindFocusTrap', () => {
     expect(ev.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(first)
   })
+
+  it('skips focusables with inline display:none (options-modal session-token buttons pattern)', () => {
+    // Matches the real options-modal scenario: a button later in DOM order
+    // is toggled to style="display:none" by app code, and the trap must
+    // treat the *visible* last button as the boundary. Without this filter,
+    // Tab from the actual last visible button would not match `active ===
+    // last`, the handler would no-op, and focus would leak out of the card.
+    const card = makeCard({ buttons: 2 })
+    const trailingHidden = document.createElement('button')
+    trailingHidden.textContent = 'trailing-hidden'
+    trailingHidden.style.display = 'none'
+    card.appendChild(trailingHidden)
+    const [first, last] = card.querySelectorAll('button:not([style*="display: none"])')
+    g.bindFocusTrap(card)
+    last.focus()
+    const ev = tabEvent()
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+  })
 })
