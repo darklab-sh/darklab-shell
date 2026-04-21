@@ -523,8 +523,15 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
 
-    // Tap the scrim (the canonical "outside the sheet" surface)
-    await page.locator('#mobile-menu-sheet-scrim').click()
+    // Tap the scrim (the canonical "outside the sheet" surface). The scrim is
+    // `position: fixed; inset: 0` so its bounding-box center is the viewport
+    // center, which sits behind the bottom-anchored menu sheet (z-index 101 >
+    // scrim's 100). A bare `.click()` targets that center and Playwright
+    // flags it as intercepted — repeatedly, because expander hover inside
+    // the sheet keeps mutating which element is under the pointer — until
+    // the 30s actionability timeout. Click near the top-left corner where
+    // the scrim is guaranteed to be unobstructed.
+    await page.locator('#mobile-menu-sheet-scrim').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
   })
 

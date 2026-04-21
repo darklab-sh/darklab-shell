@@ -20,8 +20,8 @@ Current totals:
 
 - `pytest`: 842
 - `vitest`: 666
-- `playwright`: 191
-- total: 1,699
+- `playwright`: 197
+- total: 1,705
 
 This document is organized in two parts:
 
@@ -1928,6 +1928,11 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `theme modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the theme selector modal `#theme-modal`. |
 | `options modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the options modal `#options-modal`. |
 | `workflows modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the workflows modal `#workflows-modal`. |
+| `showConfirm focuses the role:cancel action by default so Enter defaults to cancel` | Opens a real `showConfirm({actions: [{role: 'cancel'}, {role: 'primary'}]})` and asserts `document.activeElement` carries `data-confirm-action-id="cancel"` — pins the Confirmation Dialog Contract's default-focus rule end-to-end against the mounted `#confirm-host`. |
+| `Escape dismisses the dialog and resolves with null via closeTopmostDismissible` | Pins that Escape on an open confirm routes through the real `closeTopmostDismissible`, hides the host, and resolves the `showConfirm()` promise with null. |
+| `stacks actions when the viewport narrows to <=480px` | Opens the confirm on a 1024-wide viewport (not stacked), resizes to 390-wide, and asserts `.modal-actions-stacked` lands on `[data-confirm-actions]` — covers both the initial apply path and the reactive matchMedia listener path. |
+| `stacks actions when there are 3 or more actions regardless of viewport` | Opens a 3-action confirm at desktop viewport and asserts `.modal-actions-stacked` is applied — the action-count branch of `_shouldStack()` is independent of viewport width. |
+| `onActivate keeps the dialog open when the callback returns false` | Wires an `onActivate` returning false on the primary action, clicks it twice, and asserts the modal stays visible and the callback ran twice — pins the gate-close contract so validation errors can stay on screen. |
 
 #### `kill.spec.js`
 
@@ -2098,6 +2103,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | Test | Description |
 | --- | --- |
 | `audit mobile surfaces across every installed theme` | Reusable theme audit tool — iterates every theme in `app/conf/themes/`, force-opens each mobile sheet, reads computed styles, and asserts WCAG contrast ratios with alpha compositing on ten representative pairs (`--text` / `--muted` / `--green` / `--amber` / `--red` / `--border-bright` over `--surface` and `--theme-panel-alt-bg`, plus the menu scrim and sub-menu radio states). Prints a per-theme contrast table and hard-fails only on pairs below 1.20. |
+| `semantic color contract: four semantic tokens stay perceptually distinct within each theme` | Walks every theme and asserts the four semantic tokens from THEME.md § Semantic Color Contract (`--amber` / `--red` / `--green` / `--muted`) stay perceptually distinct — pairwise CIELAB deltaE76 is computed for all 6 pairs, with a per-theme table printed and a hard gate at deltaE 10 (below that, two colors read as the same at a glance and the contract is broken). |
 
 #### `timestamps.spec.js`
 

@@ -190,3 +190,147 @@ test('audit mobile surfaces across every installed theme', async ({ page }) => {
   const broken = rows.filter((r) => r.minRatio < 1.2)
   expect(broken, `themes with invisible surfaces: ${broken.map((r) => r.themeName).join(', ')}`).toHaveLength(0)
 })
+
+// Semantic color contract (see THEME.md § Semantic Color Contract): every
+// theme must provide four semantic tokens (--amber / --red / --green /
+// --muted) that stay visually distinct *within* that theme. Collapsing any
+// pair (e.g. amber ≈ red) defeats the whole point of the contract: running,
+// error, success, and neutral states stop being readable at a glance. The
+// existing audit above compares each token against the surface background
+// (WCAG luminance contrast), which doesn't catch two colors that have
+// similar luminance but very different hue — so this case uses CIELAB
+// deltaE76 (Euclidean distance in Lab space) as a perceptual-difference
+// proxy instead.
+test('semantic color contract: four semantic tokens stay perceptually distinct within each theme', async ({ page }) => {
+  test.setTimeout(120_000)
+
+  const themes = allThemeNames()
+  await page.setViewportSize(MOBILE)
+  await page.goto('/')
+  await ensurePromptReady(page)
+
+  const results = []
+  for (const themeName of themes) {
+    await page.evaluate((name) => {
+      if (typeof applyThemeSelection === 'function') applyThemeSelection(name, false)
+    }, themeName)
+
+    const deltas = await page.evaluate(() => {
+      const probe = document.createElement('div')
+      probe.style.display = 'none'
+      document.body.appendChild(probe)
+      const toRgb = (cssColor) => {
+        probe.style.color = ''
+        probe.style.color = cssColor
+        const m = getComputedStyle(probe).color.match(
+          /rgba?\(\s*([\d.]+)\s*[, ]\s*([\d.]+)\s*[, ]\s*([\d.]+)/,
+        )
+        return m ? [+m[1], +m[2], +m[3]] : [0, 0, 0]
+      }
+      const readVar = (name) =>
+        toRgb(getComputedStyle(document.body).getPropertyValue(name).trim())
+
+      // sRGB → linear RGB → XYZ(D65) → Lab(D65). Stock conversion used by
+      // every color-science library; inlined here to avoid a dependency.
+      const sRgbToLinear = (v) => {
+        const n = v / 255
+        return n <= 0.04045 ? n / 12.92 : Math.pow((n + 0.055) / 1.055, 2.4)
+      }
+      const rgbToXyz = ([r, g, b]) => {
+        const lr = sRgbToLinear(r), lg = sRgbToLinear(g), lb = sRgbToLinear(b)
+        return [
+          lr * 0.4124564 + lg * 0.3575761 + lb * 0.1804375,
+          lr * 0.2126729 + lg * 0.7151522 + lb * 0.072175,
+          lr * 0.0193339 + lg * 0.119192 + lb * 0.9503041,
+        ]
+      }
+      const xyzToLab = ([x, y, z]) => {
+        const xr = x / 0.95047, yr = y / 1.0, zr = z / 1.08883
+        const f = (v) => (v > 0.008856 ? Math.cbrt(v) : 7.787 * v + 16 / 116)
+        const fx = f(xr), fy = f(yr), fz = f(zr)
+        return [116 * fy - 16, 500 * (fx - fy), 200 * (fy - fz)]
+      }
+      const toLab = (rgb) => xyzToLab(rgbToXyz(rgb))
+      const deltaE76 = (a, b) =>
+        Math.sqrt((a[0] - b[0]) ** 2 + (a[1] - b[1]) ** 2 + (a[2] - b[2]) ** 2)
+
+      const lab = {
+        amber: toLab(readVar('--amber')),
+        red: toLab(readVar('--red')),
+        green: toLab(readVar('--green')),
+        muted: toLab(readVar('--muted')),
+      }
+
+      probe.remove()
+      return {
+        amberRed: deltaE76(lab.amber, lab.red),
+        amberGreen: deltaE76(lab.amber, lab.green),
+        amberMuted: deltaE76(lab.amber, lab.muted),
+        redGreen: deltaE76(lab.red, lab.green),
+        redMuted: deltaE76(lab.red, lab.muted),
+        greenMuted: deltaE76(lab.green, lab.muted),
+      }
+    })
+
+    const entries = Object.entries(deltas)
+    const min = entries.reduce((a, b) => (a[1] < b[1] ? a : b))
+    results.push({ themeName, minPair: min[0], minDelta: min[1], ...deltas })
+  }
+
+  results.sort((a, b) => a.minDelta - b.minDelta)
+
+  // Reference points for Lab deltaE76:
+  //   <  1: not perceptible
+  //     ~2: barely perceptible on close inspection
+  //    ~10: clearly visible at a glance
+  //   20+: large, obviously different colors
+  // The hard gate matches the existing audit's "fail only on catastrophic"
+  // philosophy: <10 is the collapse boundary (two colors that read as the
+  // same at a glance). The report still flags <15 (⚠) and <25 (·) so
+  // operators can see tightening trends before a real collapse lands.
+  const fmt = (n) => n.toFixed(1).padStart(5)
+  const flag = (v) => (v < 15 ? '⚠' : v < 25 ? '·' : ' ')
+  const cell = (v) => `${flag(v)}${fmt(v)}`
+  const headers = [
+    'theme'.padEnd(18),
+    'A-R'.padStart(8),
+    'A-G'.padStart(8),
+    'A-M'.padStart(8),
+    'R-G'.padStart(8),
+    'R-M'.padStart(8),
+    'G-M'.padStart(8),
+    '  weakest',
+  ]
+  const lines = [
+    '',
+    '── Theme audit: semantic color distinctness (Lab deltaE76) ──',
+    '',
+    '    A = --amber, R = --red, G = --green, M = --muted',
+    '    ⚠ = < 15 (likely collapsed)   · = < 25 (tight but distinct)',
+    '',
+    headers.join(''),
+    '─'.repeat(headers.join('').length),
+  ]
+  for (const row of results) {
+    lines.push(
+      [
+        row.themeName.padEnd(18),
+        cell(row.amberRed).padStart(8),
+        cell(row.amberGreen).padStart(8),
+        cell(row.amberMuted).padStart(8),
+        cell(row.redGreen).padStart(8),
+        cell(row.redMuted).padStart(8),
+        cell(row.greenMuted).padStart(8),
+        `  ${cell(row.minDelta)} ${row.minPair}`,
+      ].join(''),
+    )
+  }
+  lines.push('')
+  console.log(lines.join('\n'))
+
+  const collapsed = results.filter((r) => r.minDelta < 10)
+  expect(
+    collapsed,
+    `themes with collapsed semantic colors: ${collapsed.map((r) => `${r.themeName} (${r.minPair}=${r.minDelta.toFixed(1)})`).join(', ')}`,
+  ).toHaveLength(0)
+})

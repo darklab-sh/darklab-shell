@@ -196,6 +196,142 @@ test.describe('UI interaction contract — modal focus trap', () => {
   }
 })
 
+test.describe('UI interaction contract — confirmation dialog', () => {
+  // Integration coverage for the Confirmation Dialog Contract documented in
+  // ARCHITECTURE § Frontend Design System. The per-helper unit suite in
+  // ui_confirm.test.js already covers every rule against a stubbed host; the
+  // cases below re-exercise the same rules against the *real* mounted
+  // #confirm-host so the wiring (showModalOverlay, refocusComposerAfterAction,
+  // the real closeTopmostDismissible, the real matchMedia) is also pinned.
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('showConfirm focuses the role:cancel action by default so Enter defaults to cancel', async ({ page }) => {
+    await page.evaluate(() => {
+      window.__confirmPromise = window.showConfirm({
+        body: 'Continue?',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'confirm', label: 'Continue', role: 'primary' },
+        ],
+      })
+    })
+    await page.locator('#confirm-host').waitFor({ state: 'visible' })
+    const focused = await page.evaluate(
+      () => document.activeElement?.dataset?.confirmActionId,
+    )
+    expect(focused).toBe('cancel')
+
+    // Clean up — resolve the promise so later cases start fresh.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#confirm-host')).toBeHidden()
+  })
+
+  test('Escape dismisses the dialog and resolves with null via closeTopmostDismissible', async ({ page }) => {
+    await page.evaluate(() => {
+      window.__confirmResult = 'PENDING'
+      window.showConfirm({
+        body: 'Continue?',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'confirm', label: 'Continue', role: 'primary' },
+        ],
+      }).then((value) => { window.__confirmResult = value })
+    })
+    await page.locator('#confirm-host').waitFor({ state: 'visible' })
+
+    await page.keyboard.press('Escape')
+
+    await expect(page.locator('#confirm-host')).toBeHidden()
+    // The promise resolves on the next microtask — poll briefly so the
+    // assertion is independent of scheduling.
+    await expect.poll(() => page.evaluate(() => window.__confirmResult)).toBeNull()
+  })
+
+  test('stacks actions when the viewport narrows to <=480px', async ({ page }) => {
+    // The reactive matchMedia listener keeps stacking in sync with viewport
+    // changes while the modal is open; resize *after* the open call so the
+    // listener path is also exercised (not just the initial apply).
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.evaluate(() => {
+      window.showConfirm({
+        body: 'Continue?',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'confirm', label: 'Continue', role: 'primary' },
+        ],
+      })
+    })
+    await page.locator('#confirm-host').waitFor({ state: 'visible' })
+
+    const actions = page.locator('#confirm-host [data-confirm-actions]')
+    await expect(actions).not.toHaveClass(/\bmodal-actions-stacked\b/)
+
+    await page.setViewportSize({ width: 390, height: 844 })
+    await expect(actions).toHaveClass(/\bmodal-actions-stacked\b/)
+
+    // Clean up.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#confirm-host')).toBeHidden()
+  })
+
+  test('stacks actions when there are 3 or more actions regardless of viewport', async ({ page }) => {
+    await page.setViewportSize({ width: 1024, height: 768 })
+    await page.evaluate(() => {
+      window.showConfirm({
+        body: 'Pick a branch.',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          { id: 'skip', label: 'Skip', role: 'secondary' },
+          { id: 'confirm', label: 'Continue', role: 'primary' },
+        ],
+      })
+    })
+    await page.locator('#confirm-host').waitFor({ state: 'visible' })
+
+    const actions = page.locator('#confirm-host [data-confirm-actions]')
+    await expect(actions).toHaveClass(/\bmodal-actions-stacked\b/)
+
+    // Clean up.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#confirm-host')).toBeHidden()
+  })
+
+  test('onActivate keeps the dialog open when the callback returns false', async ({ page }) => {
+    await page.evaluate(() => {
+      window.__onActivateCount = 0
+      window.showConfirm({
+        body: 'Confirm with gated validation.',
+        actions: [
+          { id: 'cancel', label: 'Cancel', role: 'cancel' },
+          {
+            id: 'confirm',
+            label: 'Continue',
+            role: 'primary',
+            onActivate: () => { window.__onActivateCount += 1; return false },
+          },
+        ],
+      })
+    })
+    await page.locator('#confirm-host').waitFor({ state: 'visible' })
+
+    const confirmBtn = page.locator('#confirm-host [data-confirm-action-id="confirm"]')
+    await confirmBtn.click()
+    await confirmBtn.click()
+
+    // Modal still visible and the onActivate callback ran twice — the
+    // primitive respects the gate and does not close on a falsy return.
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    expect(await page.evaluate(() => window.__onActivateCount)).toBe(2)
+
+    // Clean up.
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#confirm-host')).toBeHidden()
+  })
+})
+
 test.describe('UI interaction contract — ambient outside-click', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
