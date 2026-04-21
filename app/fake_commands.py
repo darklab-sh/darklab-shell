@@ -30,6 +30,8 @@ from process import active_runs_for_session
 
 
 _STARTED_AT = datetime.now(timezone.utc)
+# Per-OS key labels use {"mac": ..., "other": ...}. Both sides bind to the same
+# DOM event (Option/Alt share e.altKey) — only the printed glyph differs.
 _CURRENT_SHORTCUTS = [
     ("Terminal", [
         ("?", "open the keyboard shortcuts overlay (works from the prompt when empty)"),
@@ -41,26 +43,26 @@ _CURRENT_SHORTCUTS = [
         ("Ctrl+A", "move to the beginning of the line"),
         ("Ctrl+K", "delete to the end of the line"),
         ("Ctrl+E", "move to the end of the line"),
-        ("Option+B/F or Alt+B/F", "move backward / forward by word"),
+        ({"mac": "Option+B / Option+F", "other": "Alt+B / Alt+F"}, "move backward / forward by word"),
         ("Ctrl+L", "clear the active tab"),
     ]),
     ("Tabs", [
-        ("Option+T / Alt+T", "open a new tab"),
-        ("Option+W / Alt+W", "close the current tab"),
-        ("Option+Left/Right", "switch to previous / next tab"),
-        ("Option+Tab / Alt+Tab", "cycle to next tab (add Shift to reverse)"),
-        ("Option+1 ... Option+9", "jump directly to tab 1 ... 9"),
-        ("Option+P / Alt+P", "create a permalink for the active tab"),
-        ("Option+Shift+C", "copy active-tab output"),
+        ({"mac": "Option+T", "other": "Alt+T"}, "open a new tab"),
+        ({"mac": "Option+W", "other": "Alt+W"}, "close the current tab"),
+        ({"mac": "Option+Left / Option+Right", "other": "Alt+Left / Alt+Right"}, "switch to previous / next tab"),
+        ({"mac": "Option+Tab", "other": "Alt+Tab"}, "cycle to next tab (add Shift to reverse)"),
+        ({"mac": "Option+1 … Option+9", "other": "Alt+1 … Alt+9"}, "jump directly to tab 1 … 9"),
+        ({"mac": "Option+P", "other": "Alt+P"}, "create a permalink for the active tab"),
+        ({"mac": "Option+Shift+C", "other": "Alt+Shift+C"}, "copy active-tab output"),
     ]),
     ("UI", [
-        ("Alt+\\", "toggle the desktop sidebar (rail) open / collapsed"),
-        ("Alt+S", "toggle the transcript search bar"),
-        ("Alt+H", "toggle the history drawer"),
-        ("Alt+,", "open the options panel"),
-        ("Alt+Shift+T", "open the theme selector"),
-        ("Alt+G", "open the guided workflows panel"),
-        ("Alt+/", "open the FAQ overlay"),
+        ({"mac": "Option+\\", "other": "Alt+\\"}, "toggle the desktop sidebar (rail) open / collapsed"),
+        ({"mac": "Option+S", "other": "Alt+S"}, "toggle the transcript search bar"),
+        ({"mac": "Option+H", "other": "Alt+H"}, "toggle the history drawer"),
+        ({"mac": "Option+,", "other": "Alt+,"}, "open the options panel"),
+        ({"mac": "Option+Shift+T", "other": "Alt+Shift+T"}, "open the theme selector"),
+        ({"mac": "Option+G", "other": "Alt+G"}, "open the guided workflows panel"),
+        ({"mac": "Option+/", "other": "Alt+/"}, "open the FAQ overlay"),
     ]),
 ]
 _SNARKY_SUDO_RESPONSES = [
@@ -432,22 +434,54 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
 
 
 _SHORTCUTS_NOTE = (
-    "Note: on macOS, use Option for app-safe tab shortcuts; browser Command "
-    "shortcuts remain environment-dependent."
+    "Note: browser shortcuts (Command on macOS, Ctrl elsewhere) remain "
+    "environment-dependent."
 )
 
 
-def get_current_shortcuts() -> dict:
+def _is_mac_user_agent(user_agent: str | None) -> bool:
+    if not user_agent:
+        return False
+    return "Mac" in user_agent
+
+
+def _resolve_shortcut_key(key, is_mac: bool) -> str:
+    if isinstance(key, dict):
+        return key["mac"] if is_mac else key["other"]
+    return key
+
+
+def _detect_mac_from_request() -> bool:
+    try:
+        from flask import request, has_request_context
+    except ImportError:
+        return False
+    if not has_request_context():
+        return False
+    return _is_mac_user_agent(request.user_agent.string)
+
+
+def get_current_shortcuts(is_mac: bool | None = None) -> dict:
     """Return the shortcut reference as a JSON-serialisable payload.
 
     Single source of truth consumed by the `shortcuts` built-in command and by
-    the browser-side shortcuts overlay (press `?` from the terminal).
+    the browser-side shortcuts overlay (press `?` from the terminal). Pass
+    `is_mac=True/False` to force a platform; when omitted, the active Flask
+    request's User-Agent is inspected (and falls back to non-Mac outside any
+    request context).
     """
+    resolved_mac = _detect_mac_from_request() if is_mac is None else is_mac
     return {
         "sections": [
             {
                 "title": title,
-                "items": [{"key": name, "description": description} for name, description in items],
+                "items": [
+                    {
+                        "key": _resolve_shortcut_key(key, resolved_mac),
+                        "description": description,
+                    }
+                    for key, description in items
+                ],
             }
             for title, items in _CURRENT_SHORTCUTS
         ],
@@ -456,16 +490,25 @@ def get_current_shortcuts() -> dict:
 
 
 def _run_fake_shortcuts() -> list[dict[str, str]]:
-    width = max(len(name) for _, items in _CURRENT_SHORTCUTS for name, _ in items)
+    payload = get_current_shortcuts()
+    width = max(
+        (len(item["key"]) for section in payload["sections"] for item in section["items"]),
+        default=0,
+    )
     lines: list[dict[str, str]] = []
-    for index, (title, items) in enumerate(_CURRENT_SHORTCUTS):
+    for index, section in enumerate(payload["sections"]):
         if index > 0:
             lines.append(_output_line("", "fake-spacer"))
-        lines.append(_output_line(f"{title}:", "fake-section"))
-        for name, description in items:
-            lines.append(_output_line(_format_native_record(name, description, width), "fake-shortcut"))
+        lines.append(_output_line(f"{section['title']}:", "fake-section"))
+        for item in section["items"]:
+            lines.append(
+                _output_line(
+                    _format_native_record(item["key"], item["description"], width),
+                    "fake-shortcut",
+                )
+            )
     lines.append(_output_line("", "fake-spacer"))
-    lines.append(_output_line(_SHORTCUTS_NOTE, "fake-note"))
+    lines.append(_output_line(payload["note"], "fake-note"))
     return lines
 
 

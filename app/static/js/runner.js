@@ -1092,6 +1092,9 @@ function submitCommand(rawCmd) {
                   if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
                   if (tabId === activeTabId) setStatus('ok');
                   setTabStatus(tabId, 'ok');
+                  if (typeof addToRecentPreview === 'function' && t && t.command) {
+                    addToRecentPreview(t.command);
+                  }
                 } else {
                   appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
                   if (tabId === activeTabId) setStatus('fail');

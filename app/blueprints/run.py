@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import re
-import select
+import selectors
 import shutil
 import signal
 import subprocess  # nosec B404
@@ -147,6 +147,37 @@ def _finalize_completed_run(run_id, session_id, client_ip, original_command, run
 
 def _timeout_notice(command_timeout):
     return f"[timeout] Command exceeded {command_timeout}s limit and was killed."
+
+
+def _stdout_ready(stream, timeout):
+    sel = selectors.DefaultSelector()
+    try:
+        sel.register(stream, selectors.EVENT_READ)
+        return bool(sel.select(timeout))
+    finally:
+        sel.close()
+
+
+def _cleanup_proc_stream(proc):
+    stdout = getattr(proc, "stdout", None)
+    if stdout is not None and not getattr(stdout, "closed", False):
+        try:
+            stdout.close()
+        except Exception:
+            pass
+    if getattr(proc, "returncode", None) is None:
+        _wait_for_proc_exit_code(proc)
+
+
+def _wait_for_proc_exit_code(proc):
+    if getattr(proc, "returncode", None) is not None:
+        return proc.returncode
+    try:
+        return proc.wait(timeout=5)
+    except TypeError:
+        return proc.wait()
+    except Exception:
+        return getattr(proc, "returncode", None)
 
 
 def _synthetic_run_response(original_command, session_id, client_ip, events, exit_code=0, *, cmd_type="builtin"):
@@ -487,8 +518,7 @@ def run_command():
                             "timeout": COMMAND_TIMEOUT, "cmd": original_command,
                         })
                         break
-                ready, _, _ = select.select([proc.stdout], [], [], HEARTBEAT_INTERVAL)
-                if ready:
+                if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
                     line = proc.stdout.readline()
                     if line:
                         filtered_lines = postfilter.process_output_line(line)
@@ -512,17 +542,16 @@ def run_command():
                     ts_clock=line_dt.strftime("%H:%M:%S"),
                     ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                 )
-
-            proc.stdout.close()
-            proc.wait()
+            exit_code = _wait_for_proc_exit_code(proc)
             _finalize_completed_run(
-                run_id, session_id, client_ip, original_command, run_started, proc.returncode, capture,
+                run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
             )
         except Exception:
             log.error("RUN_STREAM_ERROR", exc_info=True, extra={
                 "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
             })
         finally:
+            _cleanup_proc_stream(proc)
             pid_pop(run_id)
             active_run_remove(run_id)
 
@@ -571,8 +600,7 @@ def run_command():
                         yield f"data: {json.dumps({'type': 'notice', 'text': timeout_msg})}\n\n"
                         break
                 # Wait up to HEARTBEAT_INTERVAL seconds for output
-                ready, _, _ = select.select([proc.stdout], [], [], HEARTBEAT_INTERVAL)
-                if ready:
+                if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
                     line = proc.stdout.readline()
                     if line:
                         filtered_lines = postfilter.process_output_line(line)
@@ -602,10 +630,7 @@ def run_command():
                     ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                 )
                 yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
-
-            proc.stdout.close()
-            proc.wait()
-            exit_code = proc.returncode
+            exit_code = _wait_for_proc_exit_code(proc)
             elapsed = _finalize_completed_run(
                 run_id, session_id, client_ip, original_command, run_started, exit_code, capture,
             )
@@ -632,6 +657,7 @@ def run_command():
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         finally:
             if not detached:
+                _cleanup_proc_stream(proc)
                 pid_pop(run_id)
                 active_run_remove(run_id)
 

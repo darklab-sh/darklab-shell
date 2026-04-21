@@ -224,24 +224,29 @@ describe('command history hydration', () => {
       resetCmdHistoryNav,
       renderHistory,
       getCmdHistory: () => cmdHistory.slice(),
+      getRecentPreviewHistory: () => recentPreviewHistory.slice(),
     }`,
     )
   }
 
   it('hydrates unique recent commands from server history and enables navigation', () => {
-    const { hydrateCmdHistory, navigateCmdHistory, getCmdHistory } = loadHistoryHelpers()
+    const { hydrateCmdHistory, navigateCmdHistory, getCmdHistory, getRecentPreviewHistory } = loadHistoryHelpers()
     const cmdInput = document.getElementById('cmd')
 
     hydrateCmdHistory([
-      { command: 'dig darklab.sh A' },
-      { command: 'curl -I https://darklab.sh' },
-      { command: 'dig darklab.sh A' },
-      { command: 'ping -c 4 darklab.sh' },
+      { command: 'dig darklab.sh A', exit_code: 0 },
+      { command: 'curl -I https://darklab.sh', exit_code: 7 },
+      { command: 'dig darklab.sh A', exit_code: 0 },
+      { command: 'ping -c 4 darklab.sh', exit_code: 0 },
     ])
 
     expect(getCmdHistory()).toEqual([
       'dig darklab.sh A',
       'curl -I https://darklab.sh',
+      'ping -c 4 darklab.sh',
+    ])
+    expect(getRecentPreviewHistory()).toEqual([
+      'dig darklab.sh A',
       'ping -c 4 darklab.sh',
     ])
 

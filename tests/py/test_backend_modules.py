@@ -1036,17 +1036,18 @@ class TestAutocompleteContextLoading:
                   - value: -sV
                     description: Service detection
                   - -Pn
-                expects_value:
-                  - -p
-                arg_hints:
-                  "-p":
-                    - value: "<ports>"
+                  - value: -p
+                    description: Port list
+                    takes_value: true
+                    value_hint:
+                      placeholder: "<ports>"
                       description: Port list
               wc:
-                pipe_command: true
-                pipe_insert_value: wc -l
-                pipe_label: wc -l
-                pipe_description: Count lines
+                pipe:
+                  enabled: true
+                  insert: wc -l
+                  label: wc -l
+                  description: Count lines
             """))
             path = f.name
         try:
@@ -1063,26 +1064,24 @@ class TestAutocompleteContextLoading:
         assert result["wc"]["pipe_label"] == "wc -l"
         assert result["wc"]["pipe_description"] == "Count lines"
 
-    def test_arg_hints_preserve_insert_value_with_trailing_whitespace(self):
-        # YAML authors use `insertValue: "set "` to leave the caret past a
+    def test_value_hints_preserve_insert_with_trailing_whitespace(self):
+        # YAML authors use `insert: "set "` to leave the caret past a
         # trailing space so the next argument can be typed. The normalizer
         # must not strip the space or drop the key.
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write(textwrap.dedent("""
             context:
               session-token:
-                expects_value:
-                  - set
-                arg_hints:
-                  "set":
-                    - value: "<token>"
+                subcommands:
+                  - value: set
+                    description: Activate an existing session token
+                    takes_value: true
+                    value_hint:
+                      placeholder: "<token>"
                       description: Paste a tok_ token
-                  "__positional__":
-                    - value: "set <token>"
-                      insertValue: "set "
-                      description: Activate an existing session token
-                    - value: "clear"
-                      description: Remove the session token
+                  - value: clear
+                    description: Remove the session token
+                    closes: true
             """))
             path = f.name
         try:
@@ -1101,6 +1100,83 @@ class TestAutocompleteContextLoading:
         assert set_hint["value"] == "<token>"
         assert "insertValue" not in set_hint
 
+    def test_arguments_and_subcommands_normalize_into_runtime_hints(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              ping:
+                argument_limit: 1
+                flags:
+                  - value: -c
+                    description: Count
+                    takes_value: true
+                    suggest:
+                      - value: "4"
+                        description: Four probes
+                arguments:
+                  - placeholder: "<host>"
+                    description: Hostname or IP address
+              session-token:
+                subcommands:
+                  - value: generate
+                    description: Generate a new token
+                    closes: true
+                  - value: set
+                    description: Activate an existing token
+                    takes_value: true
+                    value_hint:
+                      placeholder: "<token>"
+                      description: Paste a token
+              grep:
+                pipe:
+                  enabled: true
+                  description: Filter lines by pattern
+            """))
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
+        finally:
+            os.unlink(path)
+
+        assert result["ping"]["expects_value"] == ["-c"]
+        assert result["ping"]["arg_hints"]["-c"][0]["value"] == "4"
+        assert result["ping"]["arg_hints"]["__positional__"][0]["value"] == "<host>"
+        assert result["ping"]["argument_limit"] == 1
+
+        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
+        assert session_positionals[0]["value"] == "generate"
+        set_entry = next(item for item in session_positionals if item["value"] == "set <token>")
+        assert set_entry["insertValue"] == "set "
+        assert result["session-token"]["expects_value"] == ["set"]
+        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert result["session-token"]["arg_hints"]["generate"] == []
+
+        assert result["grep"]["pipe_command"] is True
+        assert result["grep"]["pipe_description"] == "Filter lines by pattern"
+
+    def test_value_taking_flags_preserve_case_distinct_tokens(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              ping:
+                flags:
+                  - value: -W
+                    description: Per-packet timeout
+                    takes_value: true
+                  - value: -w
+                    description: Deadline before ping exits
+                    takes_value: true
+            """))
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
+        finally:
+            os.unlink(path)
+
+        assert result["ping"]["expects_value"] == ["-W", "-w"]
+
     def test_local_overlay_merges_unique_context_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
             base_path = os.path.join(tmp, "autocomplete_context.yaml")
@@ -1111,11 +1187,13 @@ class TestAutocompleteContextLoading:
                   nmap:
                     flags:
                       - -sV
-                    expects_value:
-                      - -p
+                      - value: -p
+                        description: Port list
+                        takes_value: true
                   wc:
-                    pipe_command: true
-                    pipe_insert_value: wc -l
+                    pipe:
+                      enabled: true
+                      insert: wc -l
                 """))
             with open(local_path, "w") as f:
                 f.write(textwrap.dedent("""
@@ -1123,24 +1201,134 @@ class TestAutocompleteContextLoading:
                   nmap:
                     flags:
                       - -Pn
-                    expects_value:
-                      - --top-ports
+                      - value: --top-ports
+                        description: Top ports
+                        takes_value: true
                   ffuf:
                     flags:
                       - -u
                   wc:
-                    pipe_label: wc -l
-                    pipe_description: Count lines
+                    pipe:
+                      label: wc -l
+                      description: Count lines
                 """))
             with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
                 result = load_autocomplete_context()
-        assert [item["value"] for item in result["nmap"]["flags"]] == ["-sV", "-Pn"]
+        assert [item["value"] for item in result["nmap"]["flags"]] == ["-sV", "-p", "-Pn", "--top-ports"]
         assert result["nmap"]["expects_value"] == ["-p", "--top-ports"]
         assert [item["value"] for item in result["ffuf"]["flags"]] == ["-u"]
         assert result["wc"]["pipe_command"] is True
         assert result["wc"]["pipe_insert_value"] == "wc -l"
         assert result["wc"]["pipe_label"] == "wc -l"
         assert result["wc"]["pipe_description"] == "Count lines"
+
+    def test_local_overlay_preserves_case_distinct_value_taking_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  ping:
+                    flags:
+                      - value: -W
+                        description: Per-packet timeout
+                        takes_value: true
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  ping:
+                    flags:
+                      - value: -w
+                        description: Deadline before exit
+                        takes_value: true
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+
+        assert result["ping"]["expects_value"] == ["-W", "-w"]
+
+    def test_local_overlay_merges_arguments_and_subcommands_without_duplication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  session-token:
+                    subcommands:
+                      - value: generate
+                        description: Generate a new token
+                        closes: true
+                      - value: set
+                        description: Activate an existing token
+                        takes_value: true
+                        value_hint:
+                          placeholder: "<token>"
+                          description: Paste a token
+                  curl:
+                    arguments:
+                      - placeholder: "<url>"
+                        description: Target URL
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  session-token:
+                    subcommands:
+                      - value: revoke
+                        description: Revoke a token
+                        takes_value: true
+                        value_hint:
+                          placeholder: "<token>"
+                          description: Token to revoke
+                  curl:
+                    arguments:
+                      - value: "https://"
+                        description: Start an HTTP or HTTPS URL
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+
+        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
+        assert [item["value"] for item in session_positionals] == ["generate", "set <token>", "revoke <token>"]
+        assert result["session-token"]["expects_value"] == ["set", "revoke"]
+        assert result["session-token"]["arg_hints"]["generate"] == []
+        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert result["session-token"]["arg_hints"]["revoke"][0]["value"] == "<token>"
+
+        curl_positionals = result["curl"]["arg_hints"]["__positional__"]
+        assert [item["value"] for item in curl_positionals] == ["<url>", "https://"]
+
+    def test_local_overlay_can_override_argument_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  man:
+                    argument_limit: 1
+                    arguments:
+                      - value: curl
+                        description: curl manual page
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  man:
+                    argument_limit: 2
+                    arguments:
+                      - value: ping
+                        description: ping manual page
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+
+        assert result["man"]["argument_limit"] == 2
+        man_positionals = result["man"]["arg_hints"]["__positional__"]
+        assert [item["value"] for item in man_positionals] == ["curl", "ping"]
 
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────

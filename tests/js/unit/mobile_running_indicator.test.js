@@ -126,6 +126,15 @@ describe('mobile running-state indicator', () => {
     expect(document.querySelectorAll('.tab-edge-glow.tab-edge-glow-right').length).toBe(1)
   })
 
+  it('does not mount a separate mobile runtime pill because the header timer is canonical', () => {
+    ctx = mountModule({
+      tabs: [{ id: 'tab-a', st: 'running' }],
+      activeTabId: 'tab-b',
+    })
+
+    expect(document.getElementById('mobile-runtime')).toBeNull()
+  })
+
   it('?ri=off kill switch skips mounting the chip and edge glows entirely', () => {
     ctx = mountModule({
       tabs: [{ id: 'tab-a', st: 'running' }],

@@ -107,7 +107,7 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 
 **Structured context format**
 
-`conf/autocomplete.yaml` uses a single `context` key for root-aware flag and value hints:
+`conf/autocomplete.yaml` uses a single `context` key for root-aware flag, argument, subcommand, and pipe hints:
 
 ```yaml
 context:
@@ -120,45 +120,38 @@ context:
 Inside `context`, each command root can define:
 
 ```yaml
-nmap:
-  flags:
-    - value: -sV
-      description: Service/version detection
-    - value: -Pn
-      description: Skip host discovery
-  expects_value:
-    - -p
-  arg_hints:
-    "-p":
-      - value: "<ports>"
-        description: Comma-separated ports or ranges
-    "__positional__":
-      - value: "<target>"
-        description: Hostname, IP, or CIDR
+man:
+  argument_limit: 1
+  arguments:
+    - value: curl
+      description: curl manual page
+    - placeholder: "<command>"
+      description: Manual page for any allowed command
 ```
 
 How the keys work:
 
+- `argument_limit`
+  - optional cap on how many positional arguments should keep receiving autocomplete guidance
+  - once that many positional arguments are already filled, positional hints stop, but flags and other non-positional suggestions can still appear
 - `flags`
   - suggestions shown when the current token is a flag position for that command root, for example `nmap -`
-- `expects_value`
-  - flags whose next token should be treated as a value slot rather than another flag slot
-  - example:
-    - `curl -o <cursor>` will use the `-o` value hints instead of showing more curl flags
-- `arg_hints`
-  - controls what is shown after a specific token has been typed and accepted
-  - each key under `arg_hints` is one of:
-    - a real flag like `-o`, `-u`, or `-severity` — shows value suggestions after that flag
-    - a flag mapped to an empty list `[]` — collapses the dropdown after that token (see terminal flags below)
-    - the special key `__positional__`
-
-`__positional__` means:
-- use these hints when the user is typing a normal non-flag argument for that command and no more specific flag-value hint is taking priority
-- these hints are also shown alongside flags when the user is sitting at `command `, so commands like `nmap ` can surface both `-sV` and `<target>` in the same dropdown
-- examples:
-  - `dig <cursor>` can suggest `<domain>`
-  - `nmap <cursor>` can suggest `<target>`
-  - `ffuf <cursor>` can suggest a target URL placeholder
+  - each flag can carry its own next-token behavior:
+    - `takes_value: true` means the next token is a value slot for that flag
+    - `value_hint` adds display-only guidance for that value slot
+    - `suggest` adds concrete insertable examples for that value slot
+    - `closes: true` suppresses further autocomplete after that token is accepted
+- `arguments`
+  - ordered unflagged argument slots like `<target>`, `<url>`, or `<domain>`
+  - these appear both at `command ` and while the user types the argument value
+  - use `placeholder` for persistent guidance and `value` for concrete starter text
+- `subcommands`
+  - command trees such as `session-token generate`, `session-token set <token>`, or `git clone`
+  - each subcommand can also use `takes_value`, `value_hint`, `suggest`, `insert`, and `closes`
+- `pipe`
+  - marks entries that should appear after `command |`
+  - `enabled: true` turns the entry on in pipe position
+  - `insert`, `label`, and `description` control how the pipe-stage entry is inserted and displayed
 
 More examples:
 
@@ -167,72 +160,83 @@ curl:
   flags:
     - value: -H
       description: Add request header
+      takes_value: true
+      suggest:
+        - value: "Authorization: Bearer <token>"
+          description: Example auth header
     - value: -o
       description: Write body to file
-  expects_value:
-    - -H
-    - -o
-  arg_hints:
-    "-H":
-      - value: "Authorization: Bearer <token>"
-        description: Example auth header
-    "-o":
-      - value: "/dev/null"
-        description: Discard body and keep metadata
-    "__positional__":
-      - value: "https://"
-        description: Start an HTTP or HTTPS URL
+      takes_value: true
+      suggest:
+        - value: "/dev/null"
+          description: Discard body and keep metadata
+  arguments:
+    - value: "https://"
+      description: Start an HTTP or HTTPS URL
+    - placeholder: "<url>"
+      description: Target URL to request
 ```
 
 That means:
 - `curl -` suggests curl flags
 - `curl -H <cursor>` suggests header values
 - `curl -o <cursor>` suggests file/value targets like `/dev/null`
-- `curl <cursor>` suggests generic positional URL hints
+- `curl <cursor>` can show both a starter value like `https://` and a persistent `<url>` hint
 
-**Terminal flags**
+**Terminal tokens**
 
-Map a flag to an empty list in `arg_hints` to suppress the dropdown after it is typed. This is used for flags that accept no further input — help flags, version flags, and exclusive subcommands that end the command:
+Use `closes: true` for flags or subcommands that should suppress the dropdown after they are typed. This is used for help flags, version flags, and exclusive subcommands that end the command:
 
 ```yaml
 nmap:
-  arg_hints:
-    "-h": []          # after `nmap -h `, dropdown closes
-    "-p":
-      - value: "80,443"
-        description: Common web ports
+  flags:
+    - value: -h
+      description: Show help
+      closes: true
+    - value: -p
+      description: Port list
+      takes_value: true
+      suggest:
+        - value: "80,443"
+          description: Common web ports
 
 session-token:
-  expects_value:
-    - set             # `set` consumes the next token (the token value)
-  arg_hints:
-    "set":
-      - value: "<token>"
+  subcommands:
+    - value: set
+      description: Activate an existing session token
+      takes_value: true
+      value_hint:
+        placeholder: "<token>"
         description: Paste a tok_... token or UUID from another device
-    "generate": []    # after `session-token generate `, dropdown closes
-    "clear": []
-    "rotate": []
+    - value: generate
+      description: Generate a new session token
+      closes: true
+    - value: clear
+      description: Remove the active session token
+      closes: true
 ```
-
-Do not add terminal flags to `expects_value` — that list is only for flags that genuinely consume a value argument. The empty `arg_hints` entry is sufficient on its own.
 
 Practical authoring guidance:
 
-- use `context` when the next useful suggestion depends on the command root or the preceding flag
-- use `pipe_command: true` when that context entry should also appear after `command |`
-- use `expects_value` only when the next token should be a value consumed by the preceding flag (e.g. `-p <ports>`, `-H <header>`)
-- use `arg_hints["<flag>"]: []` for terminal flags and standalone subcommands so the dropdown collapses after they are typed
-- use `arg_hints["__positional__"]` for unflagged arguments like hosts, URLs, domains, or CIDR targets
-- prefer concrete values when prefix matching should work, and placeholders when the hint is mainly explanatory
+- use `context` when the next useful suggestion depends on the command root or the preceding flag/subcommand
+- use `argument_limit` for commands such as `man`, `which`, or `type` where the shell should stop suggesting additional positional operands after one topic/command has already been provided
+- group related behavior together:
+  - if a flag takes a value, describe that under the flag
+  - if a command has subcommands, keep their insert/hint/close behavior under `subcommands`
+- use `arguments` for unflagged inputs like hosts, URLs, domains, files, or CIDR targets
+- use `placeholder: "<...>"` when the hint is explanatory and should persist while typing
+- use `value: "..."` when the suggestion should be inserted and prefix-filtered normally
+- use `pipe.enabled: true` when that context entry should also appear after `command |`
 
 The shipped file is intentionally small and focused. Add entries only for commands where token-aware guidance is clearly more useful than the flat whole-command list.
 
-For built-in pipe support, the same file can also describe the narrow pipe stage:
+For built-in pipe support, the same file can describe the narrow pipe stage:
 
 ```yaml
 grep:
-  pipe_command: true
-  pipe_description: Filter lines by pattern
+  pipe:
+    enabled: true
+    description: Filter lines by pattern
   flags:
     - value: -i
       description: Ignore case
@@ -242,10 +246,11 @@ grep:
       description: Extended regex
 
 wc:
-  pipe_command: true
-  pipe_insert_value: "wc -l"
-  pipe_label: "wc -l"
-  pipe_description: Count lines
+  pipe:
+    enabled: true
+    insert: "wc -l"
+    label: "wc -l"
+    description: Count lines
 ```
 
 That means:

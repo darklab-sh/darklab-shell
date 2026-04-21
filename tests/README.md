@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 842
-- `vitest`: 666
+- `pytest`: 853
+- `vitest`: 681
 - `playwright`: 197
-- total: 1,705
+- total: 1,731
 
 This document is organized in two parts:
 
@@ -405,7 +405,12 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestAutocompleteLoading.test_comment_lines_filtered` | Checks comment lines filtered handling. |
 | `TestAutocompleteLoading.test_blank_lines_filtered` | Checks blank lines filtered handling. |
 | `TestAutocompleteLoading.test_local_overlay_appends_unique_entries` | Checks that local overlay appends unique entries. |
-| `TestAutocompleteContextLoading.test_arg_hints_preserve_insert_value_with_trailing_whitespace` | Verifies that the Python normalizer preserves an author-supplied `insertValue` including trailing whitespace (so `"set "` stays intact), retains `<placeholder>` arg_hint values verbatim with no synthetic `insertValue`, and omits the key entirely when YAML does not set it. |
+| `TestAutocompleteContextLoading.test_value_hints_preserve_insert_with_trailing_whitespace` | Verifies that the Python normalizer preserves an author-supplied `insert` including trailing whitespace (so `"set "` stays intact), retains `<placeholder>` value hints verbatim with no synthetic insert text, and omits `insertValue` from the normalized output when YAML does not set it. |
+| `TestAutocompleteContextLoading.test_arguments_and_subcommands_normalize_into_runtime_hints` | Verifies that the readable autocomplete schema (`arguments`, `subcommands`, and `pipe`) compiles into the normalized runtime hint shape consumed by the frontend. |
+| `TestAutocompleteContextLoading.test_value_taking_flags_preserve_case_distinct_tokens` | Verifies that value-taking flags remain distinct when they differ only by case, such as `-W` and `-w`. |
+| `TestAutocompleteContextLoading.test_local_overlay_preserves_case_distinct_value_taking_flags` | Verifies that the local autocomplete overlay preserves case-distinct value-taking flags instead of collapsing them during merge. |
+| `TestAutocompleteContextLoading.test_local_overlay_merges_arguments_and_subcommands_without_duplication` | Verifies that local autocomplete overlays can add new `arguments` and `subcommands` without duplicating or collapsing the base normalized runtime hint buckets. |
+| `TestAutocompleteContextLoading.test_local_overlay_can_override_argument_limit` | Verifies that a local autocomplete overlay can replace a command's `argument_limit` while still merging its argument suggestions correctly. |
 | `TestAllowedCommandsGroupingBasics.test_missing_file_returns_none` | Checks that missing file returns none. |
 | `TestAllowedCommandsGroupingBasics.test_commands_grouped_by_header` | Checks that commands grouped by header. |
 | `TestAllowedCommandsGroupingBasics.test_commands_without_header_get_empty_name` | Checks that commands without header get empty name. |
@@ -711,6 +716,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
 | `TestShortcutsRoute.test_includes_question_mark_self_reference` | Confirms the `?` overlay trigger is listed in its own reference. |
 | `TestShortcutsRoute.test_matches_shortcuts_builtin_source` | Confirms the overlay payload matches the `shortcuts` built-in source. |
+| `TestShortcutsRoute.test_non_mac_user_agent_renders_alt_prefix` | Confirms a Linux/Windows User-Agent renders `Alt+*` chord labels with no `Option+*` leakage. |
+| `TestShortcutsRoute.test_mac_user_agent_renders_option_prefix` | Confirms a Macintosh User-Agent renders `Option+*` chord labels with no `Alt+*` leakage. |
 | `TestWelcomeAsciiRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestWelcomeAsciiRoute.test_contains_banner_art` | Checks contains banner art handling. |
 | `TestWelcomeAsciiMobileRoute.test_returns_200` | Checks returns 200 handling. |
@@ -818,11 +825,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_run_rejects_invalid_synthetic_grep_regex` | Checks that invalid synthetic `grep -E` regexes fail as user-facing errors. |
 | `TestRunStreaming.test_run_emits_timeout_notice_when_command_exceeds_limit` | Checks that run emits timeout notice when command exceeds limit. |
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
+| `TestRunStreaming.test_run_waits_before_emitting_exit_code` | Checks that successful runs wait before emitting the final exit code when the subprocess return code is still pending at EOF. |
+| `TestRunStreaming.test_run_cleans_up_stdout_and_waits_when_streaming_errors` | Checks that stream errors still close stdout and wait on the subprocess. |
+| `TestRunStreaming.test_run_disconnect_detaches_and_cleans_up_stdout` | Checks that disconnect-driven detaches still close stdout and wait on the subprocess. |
 | `TestRunStreaming.test_fake_ls_streams_allowed_commands_and_persists_history` | Checks that fake ls streams allowed commands and persists history. |
 | `TestRunStreaming.test_fake_clear_emits_clear_event_and_persists_history` | Checks that fake clear emits clear event and persists history. |
 | `TestRunStreaming.test_fake_env_returns_web_environment` | Checks that fake env returns web environment. |
 | `TestRunStreaming.test_fake_help_lists_available_helpers` | Checks that fake help lists available helpers. |
 | `TestRunStreaming.test_fake_shortcuts_lists_current_shortcuts` | Checks that fake shortcuts lists current shortcuts. |
+| `TestRunStreaming.test_fake_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
 | `TestRunStreaming.test_fake_banner_renders_ascii_art` | Checks that fake banner renders ascii art. |
 | `TestRunStreaming.test_fake_which_and_type_describe_commands` | Checks that fake which and type describe commands. |
 | `TestRunStreaming.test_fake_limits_and_status_show_configuration` | Checks that fake limits and status show configuration. |
@@ -1179,6 +1190,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `hides rotate/clear/copy session token buttons when no token is set — desktop open` | Verifies that hides rotate/clear/copy session token buttons when no token is set — desktop open. |
 | `hides rotate/clear/copy session token buttons when no token is set — mobile menu open` | Verifies that hides rotate/clear/copy session token buttons when no token is set — mobile menu open. |
 | `shows rotate/clear/copy session token buttons when a token is active — mobile menu open` | Verifies that shows rotate/clear/copy session token buttons when a token is active — mobile menu open. |
+| `aborts session-token set when the migration prompt is dismissed instead of applying the token` | Verifies that dismissing the migration confirm during the Set-token flow aborts activation instead of silently applying the token. |
+| `applies session-token set on explicit skip without running migration` | Verifies that the Set-token flow still applies the token when the user explicitly chooses `Skip`, without calling `/session/migrate`. |
+| `aborts generated-token activation when the migration prompt is dismissed` | Verifies that dismissing the migration confirm during Generate aborts activation and does not switch the active token. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that persists options changes through cookies and syncs quick-toggle state. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
 | `loads FAQ command chips into the visible mobile composer and refocuses it` | Verifies that loads FAQ command chips into the visible mobile composer and refocuses it. |
@@ -1206,19 +1220,29 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `acAccept updates the input, hides the dropdown, and refocuses the input` | Verifies that acAccept updates the input, hides the dropdown, and refocuses the input. |
 | `acAccept keeps focus on the visible mobile composer when mobile mode is active` | Verifies that acAccept keeps focus on the visible mobile composer when mobile mode is active. |
 | `acAccept replaces only the current token for contextual suggestions` | Verifies that accepting a contextual suggestion replaces only the active token instead of rewriting the full command. |
+| `acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen` | Verifies that accepting a suggestion hides the dropdown and suppresses the one programmatic input update caused by the accept path, so the menu does not immediately reopen. |
 | `computes the shared prefix across multiple suggestions` | Verifies that computes the shared prefix across multiple suggestions. |
 | `expands the composer value to the longest shared prefix when one exists` | Verifies that expands the composer value to the longest shared prefix when one exists. |
 | `expands through the shared trailing space when suggestions only diverge after the command root` | Verifies that expands through the shared trailing space when suggestions only diverge after the command root. |
 | `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
+| `keeps an exact single flag match visible so its description is still shown` | Verifies that typing a full flag token such as `curl -w` keeps the single matching flag row visible long enough to expose its description instead of collapsing the dropdown immediately. |
+| `still collapses an exact single non-flag match` | Verifies that the exact-match dropdown auto-hide rule still applies to normal non-flag suggestions such as a flat `ping` root match. |
 | `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space, and that `<placeholder>` entries are flagged `hintOnly` with an empty `insertValue`. |
-| `marks <placeholder> arg_hints as hintOnly and preserves insertValue whitespace` | Verifies that `session-token se` + Tab inserts `set ` with the trailing space preserved (not trimmed), that `session-token set ` surfaces `<token>` as a display-only `hintOnly` item with `insertValue: ''`, and that calling `acAccept` on a `hintOnly` item is a no-op. |
+| `marks <placeholder> value hints as hintOnly and preserves trailing insert whitespace` | Verifies that `session-token se` + Tab inserts `set ` with the trailing space preserved (not trimmed), that `session-token set ` surfaces `<token>` as a display-only `hintOnly` item with `insertValue: ''`, and that calling `acAccept` on a `hintOnly` item is a no-op. |
+| `keeps direct placeholder hints visible while typing the argument value` | Verifies that a direct placeholder hint such as `session-token set <token>` stays visible as guidance even after the user starts typing the real token value. |
 | `returns value hints after a value-taking flag and trailing space` | Verifies that value hints appear after accepting or typing a value-taking flag such as `curl -o `. |
+| `keeps placeholder guidance after concrete value hints and preserves ordering` | Verifies that a value-taking slot with both concrete suggestions and a placeholder keeps concrete matches first and the display-only placeholder last. |
+| `keeps positional placeholder hints visible while typing the argument value` | Verifies that a positional placeholder such as `ping ... <host>` stays visible as guidance while the user types the real host value. |
+| `drops positional placeholder guidance once the token context changes to a new flag slot` | Verifies that positional placeholder guidance does not linger once the user starts a new flag token such as `ping -c 4 -`. |
+| `shows starter values together with placeholders and then leaves only the placeholder while typing` | Verifies that starter values like `https://` can appear alongside a `<url>` placeholder at the argument slot, and that the placeholder remains once the typed token no longer matches the starter value. |
+| `stops suggesting more positional arguments after reaching argument_limit, but still allows flags` | Verifies that `argument_limit` suppresses further positional guidance once the configured number of positional arguments is filled, while still allowing flag suggestions in a later flag slot. |
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
 | `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
 | `positions dropdown above when space below is tight and preserves item order` | Verifies that positions dropdown above when space below is tight and preserves item order. |
+| `keeps the above-mode dropdown pinned to the prompt as the item count shrinks` | Verifies that a desktop autocomplete dropdown opened above the prompt keeps the same bottom offset as its item count shrinks, instead of drifting farther away from the prompt. |
 | `clamps the below-mode dropdown height so it does not extend past the viewport edge` | Verifies that clamps the below-mode dropdown height so it does not extend past the viewport edge. |
 | `does not auto-highlight any item when the menu opens above (same as below)` | Verifies that does not auto-highlight any item when the menu opens above (same as below). |
 | `forces the dropdown above the detached mobile composer and aligns it to the composer width` | Verifies that forces the dropdown above the detached mobile composer and aligns it to the composer width. |
@@ -1348,6 +1372,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | Test | Description |
 | --- | --- |
 | `mounts the chip and both edge-glow overlays when enabled` | Verifies the `<button id="mobile-running-chip">` chip (with the `Cycle to next running tab` aria-label) and both `.tab-edge-glow-left` / `.tab-edge-glow-right` overlays are inserted on mount. |
+| `does not mount a separate mobile runtime pill because the header timer is canonical` | Verifies that `mobile_chrome.js` does not insert a separate `#mobile-runtime` timer surface, leaving the shared header `#run-timer` as the only elapsed-time display. |
 | `?ri=off kill switch skips mounting the chip and edge glows entirely` | Verifies that when the page is loaded with `?ri=off`, neither the chip nor the edge glows are mounted — the kill switch reads `location.search` once at IIFE init. |
 | `?ri=0 kill switch also skips mounting` | Verifies the `?ri=0` alias for the kill switch also suppresses the mount. |
 | `hides the chip when there are no running non-active tabs` | Verifies that with no running non-active tabs, the chip carries `u-hidden`. |
@@ -1454,6 +1479,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `runCommand handles a 500 response as a friendly server error` | Verifies that runCommand handles a 500 response as a friendly server error. |
 | `runCommand handles a 403 response as a denied command` | Verifies that runCommand handles a 403 response as a denied command. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
+| `adds successful commands to the preview recents but not failed commands` | Verifies that only successful exits update the success-only recents preview list. |
 | `runCommand dismisses the mobile keyboard after a successful submit` | Verifies that runCommand dismisses the mobile keyboard after a successful submit. |
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |

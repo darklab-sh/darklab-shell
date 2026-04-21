@@ -414,14 +414,14 @@ function _optionsTokenShowMsg(msg, isError = false) {
 
 async function _waitForMigrateChoice(msg) {
   if (typeof showConfirm !== 'function') return false;
-  const choice = await showConfirm({
+  return await showConfirm({
     body: msg,
     actions: [
-      { id: 'skip', label: 'Skip',         role: 'cancel' },
-      { id: 'yes',  label: 'Yes, migrate', role: 'primary' },
+      { id: 'cancel', label: 'Cancel',       role: 'cancel' },
+      { id: 'skip',   label: 'Skip',         role: 'secondary' },
+      { id: 'yes',    label: 'Yes, migrate', role: 'primary' },
     ],
   });
-  return choice === 'yes';
 }
 
 document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
@@ -455,10 +455,11 @@ document.getElementById('options-session-token-generate-btn')?.addEventListener(
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
     if (runCount > 0) {
-      const migrate = await _waitForMigrateChoice(
+      const migrateChoice = await _waitForMigrateChoice(
         `You have ${runCount} run(s) in your previous session. Migrate history to the new token?`
       );
-      if (migrate) {
+      if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
+      if (migrateChoice === 'yes') {
         const migrateResp = await fetch('/session/migrate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
@@ -588,10 +589,11 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
     // Migrate BEFORE switching identity so a failed /session/migrate does not
     // leave the user on the new token with their runs still on the old session.
     if (runCount > 0) {
-      const migrate = await _waitForMigrateChoice(
+      const migrateChoice = await _waitForMigrateChoice(
         `You have ${runCount} run(s) in your current session. Migrate history to this token?`
       );
-      if (migrate) {
+      if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
+      if (migrateChoice === 'yes') {
         const migrateResp = await fetch('/session/migrate', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },

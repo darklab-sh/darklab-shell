@@ -13,6 +13,7 @@ async function loadAppFns({
   themeRegistry = null,
   cookies = {},
   apiFetch: apiFetchOverride = null,
+  showConfirm: showConfirmOverride = null,
   doKill: doKillOverride = vi.fn(),
   pendingKillTabId = null,
   requestWelcomeSettle: requestWelcomeSettleOverride = vi.fn(),
@@ -47,6 +48,11 @@ async function loadAppFns({
   mobileTouch = true,
   Notification: NotificationOverride = undefined,
   showToast: showToastOverride = vi.fn(),
+  updateSessionId: updateSessionIdOverride = vi.fn(),
+  copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
+  reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
+  seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
+  sessionId = 'session-old',
 } = {}) {
   document.body.className = ''
   document.body.innerHTML = `
@@ -155,6 +161,7 @@ async function loadAppFns({
     <div id="options-modal"></div>
     <span id="options-session-token-status"></span>
     <button id="options-session-token-generate-btn"></button>
+    <button id="options-session-token-set-btn"></button>
     <button id="options-session-token-rotate-btn"></button>
     <button id="options-session-token-clear-btn"></button>
     <button id="options-session-token-copy-btn"></button>
@@ -389,10 +396,15 @@ async function loadAppFns({
       apiFetch,
       APP_CONFIG: {},
       AnsiUp: FakeAnsiUp,
-      showConfirm: vi.fn(() => Promise.resolve(null)),
+      showConfirm: showConfirmOverride || vi.fn(() => Promise.resolve(null)),
       isConfirmOpen: vi.fn(() => false),
       cancelConfirm: vi.fn(),
       ThemeRegistry: themeRegistry,
+      SESSION_ID: sessionId,
+      updateSessionId: updateSessionIdOverride,
+      copyTextToClipboard: copyTextToClipboardOverride,
+      reloadSessionHistory: reloadSessionHistoryOverride,
+      _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
       ...domBindings,
       getOutput: getOutputOverride || (() => document.getElementById('history-list')),
       renderMotd: (text) => text,
@@ -545,6 +557,11 @@ async function loadAppFns({
     navigateSearch,
     cmdInput,
     requestWelcomeSettle: requestWelcomeSettleOverride,
+    showConfirm: showConfirmOverride,
+    updateSessionId: updateSessionIdOverride,
+    copyTextToClipboard: copyTextToClipboardOverride,
+    reloadSessionHistory: reloadSessionHistoryOverride,
+    seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
     confirmKill: confirmKillOverride,
     createTab: createTabOverride,
     closeTab: closeTabOverride,
@@ -3154,6 +3171,229 @@ describe('app helpers', () => {
     expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('')
     expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('')
     expect(document.getElementById('options-session-token-copy-btn').style.display).toBe('')
+  })
+
+  it('aborts session-token set when the migration prompt is dismissed instead of applying the token', async () => {
+    const updateSessionId = vi.fn()
+    const showToast = vi.fn()
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/token/verify') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ exists: true }),
+        })
+      }
+      if (url === '/session/run-count') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ count: 3 }),
+        })
+      }
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              default_theme: 'darklab_obsidian.yaml',
+              share_redaction_enabled: true,
+              share_redaction_rules: [],
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi
+      .fn()
+      .mockImplementationOnce(async (opts) => {
+        const input = opts.content.find((node) => node?.id === 'session-token-set-input')
+        input.value = 'tok_existing1234567890abcdef1234567890'
+        const apply = opts.actions.find((action) => action.id === 'apply')
+        const ok = await apply.onActivate()
+        return ok ? 'apply' : null
+      })
+      .mockResolvedValueOnce(null)
+
+    const { storage } = await loadAppFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+      updateSessionId,
+      sessionId: 'session-old',
+    })
+
+    document.getElementById('options-session-token-set-btn').click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(2))
+    expect(showConfirm.mock.calls[1][0].actions.map((action) => action.id)).toEqual([
+      'cancel',
+      'skip',
+      'yes',
+    ])
+    expect(storage.getItem('session_token')).toBeNull()
+    expect(updateSessionId).not.toHaveBeenCalled()
+    expect(showToast).not.toHaveBeenCalledWith('Session token applied')
+  })
+
+  it('applies session-token set on explicit skip without running migration', async () => {
+    const updateSessionId = vi.fn()
+    const showToast = vi.fn()
+    const fetchSpy = vi.fn()
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/session/token/verify') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ exists: true }),
+        })
+      }
+      if (url === '/session/run-count') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ count: 2 }),
+        })
+      }
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              default_theme: 'darklab_obsidian.yaml',
+              share_redaction_enabled: true,
+              share_redaction_rules: [],
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi
+      .fn()
+      .mockImplementationOnce(async (opts) => {
+        const input = opts.content.find((node) => node?.id === 'session-token-set-input')
+        input.value = 'tok_existing1234567890abcdef1234567890'
+        const apply = opts.actions.find((action) => action.id === 'apply')
+        const ok = await apply.onActivate()
+        return ok ? 'apply' : null
+      })
+      .mockResolvedValueOnce('skip')
+    const originalFetch = global.fetch
+    global.fetch = fetchSpy
+
+    try {
+      const { storage } = await loadAppFns({
+        apiFetch,
+        showConfirm,
+        showToast,
+        updateSessionId,
+        sessionId: 'session-old',
+      })
+
+      document.getElementById('options-session-token-set-btn').click()
+      await vi.waitFor(() =>
+        expect(storage.getItem('session_token')).toBe('tok_existing1234567890abcdef1234567890'),
+      )
+      expect(updateSessionId).toHaveBeenCalledWith('tok_existing1234567890abcdef1234567890')
+      expect(fetchSpy).not.toHaveBeenCalled()
+      expect(showToast).toHaveBeenCalledWith('Session token applied')
+    } finally {
+      global.fetch = originalFetch
+    }
+  })
+
+  it('aborts generated-token activation when the migration prompt is dismissed', async () => {
+    const updateSessionId = vi.fn()
+    const showToast = vi.fn()
+    const copyTextToClipboard = vi.fn(() => Promise.resolve())
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/token/generate') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ session_token: 'tok_generated1234567890abcdef1234567' }),
+        })
+      }
+      if (url === '/session/run-count') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ count: 4 }),
+        })
+      }
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              default_theme: 'darklab_obsidian.yaml',
+              share_redaction_enabled: true,
+              share_redaction_rules: [],
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({
+          json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }),
+        })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const showConfirm = vi.fn().mockResolvedValue(null)
+
+    const { storage } = await loadAppFns({
+      apiFetch,
+      showConfirm,
+      showToast,
+      updateSessionId,
+      copyTextToClipboard,
+      sessionId: 'session-old',
+    })
+
+    document.getElementById('options-session-token-generate-btn').click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1))
+    expect(showConfirm.mock.calls[0][0].actions.map((action) => action.id)).toEqual([
+      'cancel',
+      'skip',
+      'yes',
+    ])
+    expect(storage.getItem('session_token')).toBeNull()
+    expect(updateSessionId).not.toHaveBeenCalled()
+    expect(copyTextToClipboard).not.toHaveBeenCalled()
+    expect(showToast).not.toHaveBeenCalledWith('Session token applied')
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {

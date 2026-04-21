@@ -1,4 +1,4 @@
-/* Mobile chrome — runtime pill, progress bar, recents peek + pull-up sheet,
+/* Mobile chrome — progress bar, recents peek + pull-up sheet,
    bottom-sheet menu, and keyboard-aware edit helper. All rules scoped under
    body.mobile-terminal-mode so they never leak into desktop. Relies on the
    theme variables declared in base.css + app/conf/themes/*.yaml. */
@@ -49,17 +49,6 @@ body.mobile-terminal-mode {
   .menu-sheet .menu-submenu.u-hidden,
   .recents-sheet .sheet-filter-expanded.u-hidden {
     display: none;
-  }
-
-  /* Runtime counter that rides inside the status pill row. */
-  .status-runtime {
-    font-family: var(--font-mono);
-    font-variant-numeric: tabular-nums;
-    font-size: 11px;
-    color: var(--muted);
-    letter-spacing: 0.3px;
-    margin-left: 7px;
-    align-self: center;
   }
 
   /* Thin amber slide under the header while a command is running. */
@@ -238,22 +227,6 @@ body.mobile-terminal-mode {
     border-color: color-mix(in srgb, var(--red, #ff6b6b) 55%, transparent);
     color: var(--red, #ff6b6b);
   }
-  .sheet-close {
-    appearance: none;
-    -webkit-appearance: none;
-    margin-left: auto;
-    background: transparent;
-    border: none;
-    color: var(--muted);
-    font-size: 18px;
-    line-height: 1;
-    padding: 6px 10px;
-    cursor: pointer;
-    transition: color 0.15s;
-  }
-  .sheet-close:hover,
-  .sheet-close:active { color: var(--text); }
-
   .recents-sheet .sheet-filters {
     padding: 0 14px 10px;
     display: flex;

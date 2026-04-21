@@ -816,14 +816,17 @@ def _normalize_context_suggestion(item):
         return {"value": value, "description": ""} if value else None
     if not isinstance(item, dict):
         return None
-    value = str(item.get("value", "")).strip()
+    raw_value = item.get("value")
+    if raw_value is None and item.get("placeholder") is not None:
+        raw_value = item.get("placeholder")
+    value = str(raw_value or "").strip()
     if not value:
         return None
     description = str(item.get("description", "")).strip()
     result: dict[str, object] = {"value": value, "description": description}
-    # insertValue is whitespace-significant (e.g. "set " to leave the caret
+    # Insert text is whitespace-significant (e.g. "set " to leave the caret
     # past a trailing space), so only strip when the key is absent.
-    raw_insert = item.get("insertValue")
+    raw_insert = item.get("insert")
     if raw_insert is not None:
         result["insertValue"] = str(raw_insert)
     raw_label = item.get("label")
@@ -834,6 +837,29 @@ def _normalize_context_suggestion(item):
     if "hintOnly" in item:
         result["hintOnly"] = bool(item.get("hintOnly"))
     return result
+
+
+def _append_unique_context_token(bucket, seen, raw_token):
+    token = str(raw_token or "").strip()
+    if not token:
+        return
+    key = token
+    if key in seen:
+        return
+    seen.add(key)
+    bucket.append(token)
+
+
+def _append_unique_context_suggestions(bucket, seen, raw_items):
+    for raw_item in raw_items or []:
+        hint = _normalize_context_suggestion(raw_item)
+        if not hint:
+            continue
+        key = str(hint["value"]).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        bucket.append(hint)
 
 
 def _normalize_autocomplete_context(data):
@@ -858,40 +884,98 @@ def _normalize_autocomplete_context(data):
 
         expects_value = []
         seen_value_flags = set()
-        for raw_flag in raw_spec.get("expects_value", []) or []:
-            token = str(raw_flag or "").strip()
-            if not token:
-                continue
-            key = token.lower()
-            if key in seen_value_flags:
-                continue
-            seen_value_flags.add(key)
-            expects_value.append(token)
 
         arg_hints = {}
-        raw_arg_hints = raw_spec.get("arg_hints", {}) or {}
-        if isinstance(raw_arg_hints, dict):
-            for raw_trigger, raw_items in raw_arg_hints.items():
-                trigger = str(raw_trigger or "").strip()
-                if not trigger:
-                    continue
-                hints = []
-                seen_hints = set()
-                for raw_item in raw_items or []:
-                    hint = _normalize_context_suggestion(raw_item)
-                    if not hint:
-                        continue
-                    key = str(hint["value"]).lower()
-                    if key in seen_hints:
-                        continue
-                    seen_hints.add(key)
-                    hints.append(hint)
-                arg_hints[trigger] = hints
 
-        pipe_command = bool(raw_spec.get("pipe_command"))
-        pipe_insert_value = str(raw_spec.get("pipe_insert_value") or "").strip()
-        pipe_label = str(raw_spec.get("pipe_label") or "").strip() or pipe_insert_value
-        pipe_description = str(raw_spec.get("pipe_description") or "").strip()
+        def _hint_bucket(trigger):
+            bucket = arg_hints.setdefault(trigger, [])
+            seen = {str(item.get("value", "")).lower() for item in bucket if isinstance(item, dict)}
+            return bucket, seen
+
+        for raw_flag in raw_spec.get("flags", []) or []:
+            if not isinstance(raw_flag, dict):
+                continue
+            token = str(raw_flag.get("value") or "").strip()
+            if not token:
+                continue
+            if raw_flag.get("takes_value"):
+                _append_unique_context_token(expects_value, seen_value_flags, token)
+            if raw_flag.get("closes"):
+                arg_hints.setdefault(token, [])
+            hint_sources = []
+            raw_value_hint = raw_flag.get("value_hint")
+            if raw_value_hint is not None:
+                hint_sources.extend(raw_value_hint if isinstance(raw_value_hint, list) else [raw_value_hint])
+            if raw_flag.get("suggest") is not None:
+                hint_sources.extend(raw_flag.get("suggest") or [])
+            if hint_sources:
+                bucket, seen = _hint_bucket(token)
+                _append_unique_context_suggestions(bucket, seen, hint_sources)
+
+        positional_bucket, positional_seen = _hint_bucket("__positional__")
+        _append_unique_context_suggestions(
+            positional_bucket,
+            positional_seen,
+            raw_spec.get("arguments") or [],
+        )
+
+        raw_argument_limit = raw_spec.get("argument_limit")
+        argument_limit = raw_argument_limit if isinstance(raw_argument_limit, int) and raw_argument_limit > 0 else None
+
+        for raw_sub in raw_spec.get("subcommands", []) or []:
+            if not isinstance(raw_sub, dict):
+                continue
+            token = str(raw_sub.get("value") or "").strip()
+            if not token:
+                continue
+            if raw_sub.get("takes_value"):
+                _append_unique_context_token(expects_value, seen_value_flags, token)
+            if raw_sub.get("closes"):
+                arg_hints.setdefault(token, [])
+
+            hint_sources = []
+            raw_value_hint = raw_sub.get("value_hint")
+            if raw_value_hint is not None:
+                hint_sources.extend(raw_value_hint if isinstance(raw_value_hint, list) else [raw_value_hint])
+            if raw_sub.get("suggest") is not None:
+                hint_sources.extend(raw_sub.get("suggest") or [])
+            if hint_sources:
+                bucket, seen = _hint_bucket(token)
+                _append_unique_context_suggestions(bucket, seen, hint_sources)
+
+            subcommand_display = {
+                "value": token,
+                "description": str(raw_sub.get("description", "")).strip(),
+            }
+            if raw_sub.get("takes_value"):
+                placeholder = None
+                if isinstance(raw_value_hint, dict):
+                    placeholder = raw_value_hint.get("placeholder") or raw_value_hint.get("value")
+                elif isinstance(raw_value_hint, list) and raw_value_hint:
+                    first_hint = raw_value_hint[0]
+                    if isinstance(first_hint, dict):
+                        placeholder = first_hint.get("placeholder") or first_hint.get("value")
+                if placeholder:
+                    subcommand_display["value"] = f"{token} {str(placeholder).strip()}"
+                raw_insert = raw_sub.get("insert")
+                subcommand_display["insert"] = str(raw_insert) if raw_insert is not None else f"{token} "
+            else:
+                raw_insert = raw_sub.get("insert")
+                if raw_insert is not None:
+                    subcommand_display["insert"] = str(raw_insert)
+            normalized_sub = _normalize_context_suggestion(subcommand_display)
+            if normalized_sub:
+                key = str(normalized_sub["value"]).lower()
+                if key not in positional_seen:
+                    positional_seen.add(key)
+                    positional_bucket.append(normalized_sub)
+
+        raw_pipe_spec = raw_spec.get("pipe")
+        pipe_spec: dict[str, object] = raw_pipe_spec if isinstance(raw_pipe_spec, dict) else {}
+        pipe_command = bool(pipe_spec.get("enabled"))
+        pipe_insert_value = str(pipe_spec.get("insert") or "").strip()
+        pipe_label = str(pipe_spec.get("label") or "").strip() or pipe_insert_value
+        pipe_description = str(pipe_spec.get("description") or "").strip()
 
         examples = []
         seen_examples = set()
@@ -909,6 +993,7 @@ def _normalize_autocomplete_context(data):
             "flags": flags,
             "expects_value": expects_value,
             "arg_hints": arg_hints,
+            "argument_limit": argument_limit,
             "pipe_command": pipe_command,
             "pipe_insert_value": pipe_insert_value,
             "pipe_label": pipe_label,
@@ -927,12 +1012,16 @@ def _merge_autocomplete_context(base, overlay):
             "flags": [],
             "expects_value": [],
             "arg_hints": {},
+            "argument_limit": None,
             "pipe_command": False,
             "pipe_insert_value": "",
             "pipe_label": "",
             "pipe_description": "",
             "examples": [],
         })
+
+        if isinstance(spec.get("argument_limit"), int) and spec["argument_limit"] > 0:
+            current["argument_limit"] = spec["argument_limit"]
 
         if spec.get("pipe_command"):
             current["pipe_command"] = True
@@ -953,9 +1042,9 @@ def _merge_autocomplete_context(base, overlay):
             seen_flags.add(key)
             current.setdefault("flags", []).append(flag)
 
-        seen_value_flags = {str(item).lower() for item in current.get("expects_value", [])}
+        seen_value_flags = {str(item) for item in current.get("expects_value", [])}
         for token in spec.get("expects_value", []) or []:
-            key = str(token).lower()
+            key = str(token)
             if key in seen_value_flags:
                 continue
             seen_value_flags.add(key)

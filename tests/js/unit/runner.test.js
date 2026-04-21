@@ -134,6 +134,7 @@ function loadRunnerFns({
   apiFetch = () => Promise.resolve(),
   createTab = () => 'tab-2',
   addToHistory = () => {},
+  addToRecentPreview = () => {},
   appendLine = () => {},
   appendCommandEcho = () => {},
   getComposerValue: getComposerValueOverride = null,
@@ -235,6 +236,7 @@ function loadRunnerFns({
       _welcomeDone: false,
       searchBar: document.createElement('div'),
       addToHistory,
+      addToRecentPreview,
       setTabLabel,
       setTabStatus,
       activateTab,
@@ -515,6 +517,82 @@ describe('runner helpers', () => {
       'denied',
     )
     expect(status.className).not.toBe('status-pill fail')
+  })
+
+  it('adds successful commands to the preview recents but not failed commands', async () => {
+    let readCount = 0
+    const addToRecentPreview = vi.fn()
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              readCount += 1
+              if (readCount === 1) {
+                return Promise.resolve({
+                  done: false,
+                  value: new TextEncoder().encode(
+                    'data: {"type":"started","run_id":"run-1"}\n\n' +
+                    'data: {"type":"exit","code":0,"elapsed":"0.1"}\n\n',
+                  ),
+                })
+              }
+              return Promise.resolve({ done: true })
+            }),
+          }),
+        },
+      }),
+    )
+    const { runCommand } = loadRunnerFns({
+      cmdValue: 'ping -c 1 darklab.sh',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      addToRecentPreview,
+    })
+
+    runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 darklab.sh')
+
+    readCount = 0
+    addToRecentPreview.mockClear()
+    const failedFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              readCount += 1
+              if (readCount === 1) {
+                return Promise.resolve({
+                  done: false,
+                  value: new TextEncoder().encode(
+                    'data: {"type":"started","run_id":"run-2"}\n\n' +
+                    'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
+                  ),
+                })
+              }
+              return Promise.resolve({ done: true })
+            }),
+          }),
+        },
+      }),
+    )
+    const failedHarness = loadRunnerFns({
+      cmdValue: 'ping -c 1 nope.darklab',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch: failedFetch,
+      addToRecentPreview,
+    })
+
+    failedHarness.runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(addToRecentPreview).not.toHaveBeenCalled()
   })
 
   it('runCommand allows other synthetic post-filters through to the API', () => {

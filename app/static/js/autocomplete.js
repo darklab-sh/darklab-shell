@@ -117,7 +117,41 @@ function _buildAutocompleteItem({ value, description = '', replaceStart, replace
 function _filterAutocompleteItems(items, query) {
   const q = String(query || '').toLowerCase();
   if (!q) return items.slice();
-  return items.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
+  const concrete = [];
+  const hintOnly = [];
+  items.forEach(item => {
+    if (item && typeof item === 'object' && item.hintOnly) hintOnly.push(item);
+    else concrete.push(item);
+  });
+  const filteredConcrete = concrete.filter(item => _acItemInsertValue(item).toLowerCase().startsWith(q));
+  return filteredConcrete.concat(hintOnly);
+}
+
+function _countCompletedPositionalArgs(ctx, spec) {
+  const expectsValue = Array.isArray(spec.expects_value) ? spec.expects_value : [];
+  const expectsValueExact = new Set(expectsValue.map(token => String(token || '')));
+  const expectsValueLower = new Set(expectsValue.map(token => String(token || '').toLowerCase()));
+  const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
+  let count = 0;
+  let skipNext = false;
+
+  for (let index = 1; index < completedTokens.length; index += 1) {
+    const tokenValue = String(completedTokens[index].value || '');
+    const tokenLower = tokenValue.toLowerCase();
+    if (!tokenValue) continue;
+    if (skipNext) {
+      skipNext = false;
+      continue;
+    }
+    if (expectsValueExact.has(tokenValue) || expectsValueLower.has(tokenLower)) {
+      skipNext = true;
+      continue;
+    }
+    if (tokenValue.startsWith('-') || tokenValue.startsWith('+')) continue;
+    count += 1;
+  }
+
+  return count;
 }
 
 function _buildContextAutocomplete(ctx) {
@@ -173,9 +207,13 @@ function _buildContextAutocomplete(ctx) {
   }
 
   const currentIsFlag = ctx.currentToken.startsWith('-') || ctx.currentToken.startsWith('+');
-  const expectsValue = Array.isArray(spec.expects_value) ? spec.expects_value : [];
   const argHints = spec.arg_hints || {};
   const previousLower = String(ctx.previousToken || '').toLowerCase();
+  const argumentLimit = Number.isInteger(spec.argument_limit) && spec.argument_limit > 0
+    ? spec.argument_limit
+    : null;
+  const allowPositionalHints = !argumentLimit
+    || _countCompletedPositionalArgs(ctx, spec) < argumentLimit;
 
   const directHints = Object.prototype.hasOwnProperty.call(argHints, ctx.previousToken || '')
     ? argHints[ctx.previousToken || '']
@@ -213,7 +251,7 @@ function _buildContextAutocomplete(ctx) {
         insertValue: flag.value + (ctx.atWhitespace ? '' : ''),
       }));
     const filteredFlags = _filterAutocompleteItems(flags, ctx.currentToken);
-    if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length) {
+    if (!ctx.currentToken && ctx.atWhitespace && positionalHints.length && allowPositionalHints) {
       const positionalItems = positionalHints.map(item => _buildAutocompleteItem({
         value: item.value,
         label: item.label || item.value,
@@ -227,7 +265,7 @@ function _buildContextAutocomplete(ctx) {
     return filteredFlags;
   }
 
-  if (positionalHints.length) {
+  if (positionalHints.length && allowPositionalHints) {
     return _filterAutocompleteItems(
       positionalHints.map(item => _buildAutocompleteItem({
         value: item.value,
@@ -288,12 +326,17 @@ function getAutocompleteMatches(value, cursorPos) {
     return items;
   }
 
-  // Hide the dropdown once the current token already equals the only suggestion —
-  // but keep hint-only placeholders visible so the user still sees what argument
-  // the command expects next.
+  // Hide the dropdown once the current token already equals the only suggestion.
+  // Keep hint-only placeholders visible so the user still sees what argument
+  // the command expects next, and keep exact flag matches visible so their
+  // descriptions remain discoverable until the user types a trailing space.
+  const singleItem = items[0];
+  const singleItemIsFlag = String(singleItem && singleItem.value || '').startsWith('-')
+    || String(singleItem && singleItem.value || '').startsWith('+');
   if (items.length === 1
-      && !items[0].hintOnly
-      && _acItemInsertValue(items[0]).toLowerCase() === ctx.currentToken.toLowerCase()) {
+      && !singleItem.hintOnly
+      && !singleItemIsFlag
+      && _acItemInsertValue(singleItem).toLowerCase() === ctx.currentToken.toLowerCase()) {
     return [];
   }
   return items;
@@ -361,12 +404,14 @@ function _positionAutocomplete(itemsCount) {
   const available = showAbove ? spaceAbove : spaceBelow;
   const edgeBuffer = mobileComposerMode ? 12 : (showAbove ? 20 : 30);
   const maxHeight = Math.max(0, Math.min(mobileComposerMode ? 200 : 260, available > edgeBuffer ? available - edgeBuffer : available));
-  const visibleHeight = Math.max(0, Math.min(targetHeight, maxHeight || targetHeight));
   acDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
-  acDropdown.style.top = showAbove
-    ? `${Math.max(8, Math.round(rect.top - visibleHeight - 2))}px`
-    : `${Math.max(8, Math.round(rect.bottom + 2))}px`;
-  acDropdown.style.bottom = 'auto';
+  if (showAbove) {
+    acDropdown.style.top = 'auto';
+    acDropdown.style.bottom = `${Math.max(8, Math.round(window.innerHeight - rect.top + 2))}px`;
+  } else {
+    acDropdown.style.top = `${Math.max(8, Math.round(rect.bottom + 2))}px`;
+    acDropdown.style.bottom = 'auto';
+  }
   return showAbove;
 }
 
@@ -521,6 +566,7 @@ function acAccept(s) {
     const insertValue = _acItemInsertText(s);
     const replaceStart = Number(s.replaceStart);
     const replaceEnd = Number(s.replaceEnd);
+    if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
     if (Number.isFinite(replaceStart) && Number.isFinite(replaceEnd)) {
       const next = currentValue.slice(0, replaceStart) + insertValue + currentValue.slice(replaceEnd);
       const caret = replaceStart + insertValue.length;
@@ -531,6 +577,7 @@ function acAccept(s) {
       setComposerValue(insertValue, insertValue.length, insertValue.length);
     }
   } else {
+    if (typeof acSuppressInputOnce !== 'undefined') acSuppressInputOnce = true;
     acHide();
     setComposerValue(s, s.length, s.length);
   }

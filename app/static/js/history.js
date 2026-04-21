@@ -372,6 +372,12 @@ function addToHistory(cmd) {
   renderHistory();
 }
 
+function addToRecentPreview(cmd) {
+  recentPreviewHistory = [cmd, ...recentPreviewHistory.filter(c => c !== cmd)]
+    .slice(0, APP_CONFIG.recent_commands_limit);
+  renderHistory();
+}
+
 function hydrateCmdHistory(runs) {
   const items = Array.isArray(runs) ? runs : [];
   const seen = new Set();
@@ -380,6 +386,16 @@ function hydrateCmdHistory(runs) {
     .filter(cmd => {
       if (!cmd || seen.has(cmd)) return false;
       seen.add(cmd);
+      return true;
+    })
+    .slice(0, APP_CONFIG.recent_commands_limit);
+  const previewSeen = new Set();
+  recentPreviewHistory = items
+    .filter(run => run && run.exit_code === 0)
+    .map(run => run && typeof run.command === 'string' ? run.command : '')
+    .filter(cmd => {
+      if (!cmd || previewSeen.has(cmd)) return false;
+      previewSeen.add(cmd);
       return true;
     })
     .slice(0, APP_CONFIG.recent_commands_limit);
@@ -644,6 +660,7 @@ function executeHistAction(type) {
         }).catch(() => {});
       }
       cmdHistory = cmdHistory.filter(c => c !== command);
+      recentPreviewHistory = recentPreviewHistory.filter(c => c !== command);
       renderHistory();
       refreshHistoryPanel();
     }).catch(() => showToast('Failed to delete run'));
@@ -656,6 +673,7 @@ function executeHistAction(type) {
         const deleteCmds = new Set(toDelete.map(r => r.command));
         // Remove deleted commands from chips; starred commands remain
         cmdHistory = cmdHistory.filter(c => !deleteCmds.has(c));
+        recentPreviewHistory = recentPreviewHistory.filter(c => !deleteCmds.has(c));
         renderHistory();
         return Promise.all(toDelete.map(r => apiFetch(`/history/${r.id}`, { method: 'DELETE' })));
       })
@@ -667,6 +685,7 @@ function executeHistAction(type) {
       _saveStarred(new Set());
       apiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
       cmdHistory = [];
+      recentPreviewHistory = [];
       renderHistory();
       refreshHistoryPanel();
     }).catch(() => showToast('Failed to clear history'));

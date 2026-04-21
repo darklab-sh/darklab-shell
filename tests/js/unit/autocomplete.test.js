@@ -157,6 +157,44 @@ describe('autocomplete helpers', () => {
     expect(input.value).toBe('nmap -sV')
   })
 
+  it('acAccept suppresses one synthetic input cycle so the dropdown does not immediately reopen', () => {
+    const { acAccept } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => document.getElementById('cmd').value,
+        setComposerValue: (value, start, end) => {
+          const input = document.getElementById('cmd')
+          input.value = value
+          input.selectionStart = start
+          input.selectionEnd = end == null ? start : end
+          if (typeof acSuppressInputOnce !== 'undefined' && acSuppressInputOnce) {
+            acSuppressInputOnce = false
+            acHide()
+          }
+        },
+        acSuggestions: [],
+        acContextRegistry: {},
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      acAccept,
+    }`,
+    )
+
+    document.getElementById('ac').style.display = 'block'
+    acAccept({ value: '-sT', replaceStart: 5, replaceEnd: 6 })
+
+    expect(document.getElementById('cmd').value).toBe('-sT')
+    expect(document.getElementById('ac').style.display).toBe('none')
+  })
+
   it('computes the shared prefix across multiple suggestions', () => {
     const { _getAutocompleteSharedPrefix } = loadAutocompleteFns()
 
@@ -235,6 +273,67 @@ describe('autocomplete helpers', () => {
     const items = getAutocompleteMatches('nmap -Pn -', 10)
     expect(items).toHaveLength(1)
     expect(items[0].value).toBe('-sV')
+  })
+
+  it('keeps an exact single flag match visible so its description is still shown', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'curl -w',
+        acSuggestions: [],
+        acContextRegistry: {
+          curl: {
+            flags: [
+              { value: '-w', description: 'Write selected metadata after the transfer' },
+            ],
+            expects_value: ['-w'],
+            arg_hints: {
+              '-w': [{ value: '"%{http_code}"', description: 'Print the final HTTP status code' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('curl -w', 7)
+    expect(items).toHaveLength(1)
+    expect(items[0].value).toBe('-w')
+    expect(items[0].description).toBe('Write selected metadata after the transfer')
+  })
+
+  it('still collapses an exact single non-flag match', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'ping',
+        acSuggestions: ['ping'],
+        acContextRegistry: {},
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('ping', 4)).toEqual([])
   })
 
   it('shows positional hints alongside flag hints at command-root whitespace', () => {
@@ -345,6 +444,41 @@ describe('autocomplete helpers', () => {
     expect(cmd.value).toBe('session-token set ')
   })
 
+  it('keeps direct placeholder hints visible while typing the argument value', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'session-token set abc',
+        acSuggestions: [],
+        acContextRegistry: {
+          'session-token': {
+            expects_value: ['set'],
+            arg_hints: {
+              set: [{ value: '<token>', description: 'Paste a token' }],
+              __positional__: [{ value: 'set <token>', insertValue: 'set ' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('session-token set abc', 21)
+    expect(items).toHaveLength(1)
+    expect(items[0].value).toBe('<token>')
+    expect(items[0].hintOnly).toBe(true)
+  })
+
   it('returns value hints after a value-taking flag and trailing space', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
@@ -377,6 +511,204 @@ describe('autocomplete helpers', () => {
     const items = getAutocompleteMatches('curl -o ', 8)
     expect(items.map((item) => item.value)).toEqual(['/dev/null'])
     expect(items[0].description).toBe('Discard body output')
+  })
+
+  it('keeps placeholder guidance after concrete value hints and preserves ordering', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'curl -o ',
+        acSuggestions: [],
+        acContextRegistry: {
+          curl: {
+            flags: [{ value: '-o', description: 'Write output to file' }],
+            expects_value: ['-o'],
+            arg_hints: {
+              '-o': [
+                { value: '/dev/null', description: 'Discard body output' },
+                { value: '<file>', description: 'Destination file path' },
+              ],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('curl -o ', 8)
+    expect(items.map((item) => item.value)).toEqual(['/dev/null', '<file>'])
+    expect(items[0].hintOnly).toBe(false)
+    expect(items[1].hintOnly).toBe(true)
+  })
+
+  it('keeps positional placeholder hints visible while typing the argument value', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'ping -c 4 darklab.sh',
+        acSuggestions: [],
+        acContextRegistry: {
+          ping: {
+            flags: [
+              { value: '-c', description: 'Stop after count replies' },
+              { value: '-i', description: 'Wait interval seconds between probes' },
+            ],
+            expects_value: ['-c', '-i'],
+            arg_hints: {
+              '-c': [{ value: '4', description: 'Send four probes' }],
+              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('ping -c 4 darklab.sh', 20)
+    expect(items).toHaveLength(1)
+    expect(items[0].value).toBe('<host>')
+    expect(items[0].hintOnly).toBe(true)
+  })
+
+  it('drops positional placeholder guidance once the token context changes to a new flag slot', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'ping -c 4 -',
+        acSuggestions: [],
+        acContextRegistry: {
+          ping: {
+            flags: [
+              { value: '-c', description: 'Stop after count replies' },
+              { value: '-i', description: 'Wait interval seconds between probes' },
+            ],
+            expects_value: ['-c', '-i'],
+            arg_hints: {
+              '-c': [{ value: '4', description: 'Send four probes' }],
+              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('ping -c 4 -', 11)
+    expect(items.map((item) => item.value)).toEqual(['-i'])
+  })
+
+  it('shows starter values together with placeholders and then leaves only the placeholder while typing', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'curl ',
+        acSuggestions: [],
+        acContextRegistry: {
+          curl: {
+            arg_hints: {
+              __positional__: [
+                { value: 'https://', description: 'Start an HTTP or HTTPS URL' },
+                { value: '<url>', description: 'Target URL to request' },
+              ],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const rootItems = getAutocompleteMatches('curl ', 5)
+    expect(rootItems.map((item) => item.value)).toEqual(['https://', '<url>'])
+
+    const typingItems = getAutocompleteMatches('curl https://ex', 15)
+    expect(typingItems).toHaveLength(1)
+    expect(typingItems[0].value).toBe('<url>')
+    expect(typingItems[0].hintOnly).toBe(true)
+  })
+
+  it('stops suggesting more positional arguments after reaching argument_limit, but still allows flags', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'man curl ',
+        acSuggestions: [],
+        acContextRegistry: {
+          man: {
+            argument_limit: 1,
+            arg_hints: {
+              __positional__: [
+                { value: 'curl', description: 'curl manual page' },
+                { value: '<command>', description: 'Manual page for any allowed command' },
+              ],
+            },
+          },
+          ping: {
+            argument_limit: 1,
+            flags: [{ value: '-c', description: 'Stop after count replies' }],
+            arg_hints: {
+              __positional__: [{ value: '<host>', description: 'Hostname or IP address to probe' }],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('man curl ', 9)).toEqual([])
+
+    const flagItems = getAutocompleteMatches('ping darklab.sh -', 16)
+    expect(flagItems).toHaveLength(1)
+    expect(flagItems[0].value).toBe('-c')
   })
 
   it('suggests built-in pipe commands after a supported command pipe', () => {
@@ -543,9 +875,49 @@ describe('autocomplete helpers', () => {
     acShow(['nmap -sV', 'nslookup darklab.sh'])
 
     expect(document.getElementById('ac').classList.contains('ac-up')).toBe(true)
+    expect(document.getElementById('ac').style.top).toBe('auto')
+    expect(document.getElementById('ac').style.bottom).toBe('42px')
     const items = [...document.querySelectorAll('.ac-item')].map((el) => el.textContent.trim())
     expect(items[0]).toBe('nmap -sV')
     expect(items[1]).toBe('nslookup darklab.sh')
+  })
+
+  it('keeps the above-mode dropdown pinned to the prompt as the item count shrinks', () => {
+    const { acShow } = loadAutocompleteFns()
+    const input = document.getElementById('cmd')
+    input.value = 'n'
+    const wrap = document.createElement('div')
+    wrap.className = 'shell-prompt-wrap'
+    wrap.appendChild(document.getElementById('ac'))
+    document.body.appendChild(wrap)
+
+    const prefix = document.createElement('span')
+    prefix.className = 'prompt-prefix'
+    prefix.textContent = 'anon@darklab:~$'
+    wrap.insertBefore(prefix, document.getElementById('ac'))
+
+    vi.spyOn(prefix, 'getBoundingClientRect').mockReturnValue({ width: 100 })
+    vi.spyOn(wrap, 'getBoundingClientRect').mockReturnValue({
+      top: 260,
+      bottom: 295,
+      left: 0,
+      right: 0,
+      width: 0,
+      height: 0,
+      x: 0,
+      y: 0,
+      toJSON: () => ({}),
+    })
+    Object.defineProperty(window, 'innerHeight', { value: 300, configurable: true })
+
+    acShow(['nmap -sV', 'nslookup darklab.sh', 'netstat -an'])
+    const dropdown = document.getElementById('ac')
+    expect(dropdown.style.bottom).toBe('42px')
+
+    acShow(['nmap -sV'])
+    expect(dropdown.classList.contains('ac-up')).toBe(true)
+    expect(dropdown.style.top).toBe('auto')
+    expect(dropdown.style.bottom).toBe('42px')
   })
 
   it('clamps the below-mode dropdown height so it does not extend past the viewport edge', () => {

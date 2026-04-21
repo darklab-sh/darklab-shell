@@ -1,5 +1,5 @@
 // ── Mobile chrome controller ──
-// Owns the mobile-only UI: progress bar + runtime pill, recent peek row,
+// Owns the mobile-only UI: progress bar, recent peek row,
 // bottom-sheet menu from the hamburger, and the keyboard-aware edit helper
 // row. Loaded after dom.js, state.js, ui_helpers.js, history.js, tabs.js,
 // app.js, controller.js, shell_chrome.js so every helper it delegates to is
@@ -20,20 +20,16 @@
   const mobileEditBar         = document.getElementById('mobile-edit-bar');
   const hamburgerBtnEl        = document.getElementById('hamburger-btn');
   const statusPillEl          = document.getElementById('status');
-  const runTimerEl            = document.getElementById('run-timer');
-
   const recentPeek            = document.getElementById('mobile-recent-peek');
   const recentPeekCount       = document.getElementById('mobile-recent-peek-count');
   const recentPeekPreview     = document.getElementById('mobile-recent-peek-preview');
   const recentsSheet          = document.getElementById('mobile-recents-sheet');
   const recentsSheetScrim     = document.getElementById('mobile-recents-sheet-scrim');
-  const recentsSheetCloseBtn  = document.getElementById('mobile-recents-close');
   const recentsSheetClearBtn  = document.getElementById('mobile-recents-clear');
   const recentsSheetSearch    = document.getElementById('mobile-recents-search');
   const recentsSheetList      = document.getElementById('mobile-recents-list');
   const menuSheet             = document.getElementById('mobile-menu-sheet');
   const menuSheetScrim        = document.getElementById('mobile-menu-sheet-scrim');
-  const menuSheetCloseBtn     = document.getElementById('mobile-menu-sheet-close');
   const menuLnState           = document.getElementById('mobile-menu-ln-state');
   const menuTsState           = document.getElementById('mobile-menu-ts-state');
   const menuWorkflowsCount    = document.getElementById('mobile-menu-workflows-count');
@@ -41,12 +37,10 @@
   const menuThemeHint         = document.getElementById('mobile-menu-theme-hint');
   const kbHelper              = document.getElementById('mobile-kb-helper');
 
-  // ── Progress bar + runtime pill mounted programmatically ──────
+  // ── Progress bar mounted programmatically ──────────────────────
   // Placed inside #mobile-shell-chrome so the teleport logic in app.js that
   // moves the tab bar in and out on viewport changes does not clobber them.
   let progressBar  = null;
-  let runtimePill  = null;
-  let runtimeLabel = null;
 
   function ensureChromeMounts() {
     if (!mobileShellChrome) return;
@@ -56,15 +50,6 @@
       progressBar.className = 'shell-progress-bar u-hidden';
       mobileShellChrome.appendChild(progressBar);
     }
-    if (!runtimePill) {
-      runtimePill = document.createElement('span');
-      runtimePill.id = 'mobile-runtime';
-      runtimePill.className = 'status-runtime u-hidden';
-      runtimeLabel = document.createElement('span');
-      runtimeLabel.textContent = '0s';
-      runtimePill.appendChild(runtimeLabel);
-      mobileShellChrome.appendChild(runtimePill);
-    }
   }
   ensureChromeMounts();
 
@@ -73,17 +58,14 @@
   const hide = (el) => el && el.classList && el.classList.add('u-hidden');
   const isRunning = () => !!(statusPillEl && statusPillEl.classList && statusPillEl.classList.contains('running'));
 
-  // ── 2A+2B: Status-driven progress bar, runtime mirror, composer ring ──
+  // ── 2A+2B: Status-driven progress bar and composer ring ─────────
   function syncRunState() {
     const running = isRunning();
     if (running) {
       show(progressBar);
-      show(runtimePill);
       if (mobileComposer && mobileComposer.classList) mobileComposer.classList.add('is-running');
     } else {
       hide(progressBar);
-      hide(runtimePill);
-      if (runtimeLabel) runtimeLabel.textContent = '0s';
       if (mobileComposer && mobileComposer.classList) mobileComposer.classList.remove('is-running');
     }
     // Mobile only: the desktop pill intentionally shows only IDLE/RUNNING
@@ -109,14 +91,6 @@
     obs.observe(statusPillEl, { attributes: true, attributeFilter: ['class'] });
   }
   syncRunState();
-
-  if (runTimerEl && typeof MutationObserver === 'function') {
-    const obs = new MutationObserver(() => {
-      if (!runtimeLabel) return;
-      runtimeLabel.textContent = runTimerEl.textContent || '0s';
-    });
-    obs.observe(runTimerEl, { characterData: true, childList: true, subtree: true });
-  }
 
   // ── Mobile non-active running-state indicator ──
   // The mobile status pill reflects the active tab only; this surface is
@@ -421,7 +395,7 @@
       }
     }, true);
   });
-  // Scrim click + close button + Escape are owned by bindDismissible
+  // Scrim click + Escape are owned by bindDismissible
   // (ui_dismissible.js) so every sheet/panel/modal surface uses the same
   // registry-driven close cascade instead of hand-rolled wiring.
   if (typeof global.bindDismissible === 'function') {
@@ -430,13 +404,12 @@
       isOpen: isMenuSheetOpen,
       onClose: closeMenuSheet,
       backdropEl: menuSheetScrim,
-      closeButtons: menuSheetCloseBtn,
     });
   }
 
   // ── 2D: Recent peek ─────────────────────────────────────────────
   function readCmdHistory() {
-    const h = global.cmdHistory;
+    const h = global.recentPreviewHistory;
     return Array.isArray(h) ? h : [];
   }
   function renderRecentPeek() {
@@ -669,7 +642,7 @@
     return !!(recentsSheet && recentsSheet.classList && !recentsSheet.classList.contains('u-hidden'));
   }
 
-  // Scrim click + close button + Escape are owned by bindDismissible so
+  // Scrim click + Escape are owned by bindDismissible so
   // the sheet participates in the unified modal > sheet > panel Escape
   // cascade (see ui_dismissible.js).
   if (typeof global.bindDismissible === 'function') {
@@ -678,7 +651,6 @@
       isOpen: isRecentsSheetOpen,
       onClose: closeRecentsSheet,
       backdropEl: recentsSheetScrim,
-      closeButtons: recentsSheetCloseBtn,
     });
   }
   recentsSheetClearBtn?.addEventListener('click', () => {
@@ -1049,8 +1021,8 @@
   global._mobileChrome = {
     nodes: {
       mobileShellChrome, recentPeek, recentPeekCount, recentPeekPreview,
-      menuSheet, menuSheetScrim, menuSheetCloseBtn, menuLnState, menuTsState,
-      menuWorkflowsCount, menuThemeHint, kbHelper, progressBar, runtimePill, runtimeLabel,
+      menuSheet, menuSheetScrim, menuLnState, menuTsState,
+      menuWorkflowsCount, menuThemeHint, kbHelper, progressBar,
     },
     openMenuSheet, closeMenuSheet, isMenuSheetOpen,
     renderRecentPeek, syncRunState, syncKbHelper,

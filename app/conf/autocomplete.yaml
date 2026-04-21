@@ -1,73 +1,74 @@
 # Unified autocomplete configuration.
 #
-# Top-level shape:
+# Preferred authoring shape:
 # context:
 #   <command-root>:
+#     argument_limit: <max-number-of-positional-arguments-to-suggest>
+#     examples:
+#       - value: <full-command>
+#         description: <what it does>
+#     pipe:
+#       enabled: true
+#       description: <pipe menu help text>
+#       insert: <inserted text>
+#       label: <optional display label>
 #     flags:
-#       - value: <flag-or-token>
+#       - value: <flag>
 #         description: <short help text>
-#     expects_value:
-#       - <flag-that-consumes-the-next-token>
-#     arg_hints:
-#       "<flag>":
-#         - value: <suggested-value>
-#           description: <short help text>
-#       "<terminal-flag>": []
-#       "__positional__":
-#         - value: <positional-placeholder-or-example>
-#           description: <short help text>
+#         takes_value: true
+#         closes: true
+#         value_hint:
+#           placeholder: <display-only placeholder>
+#           description: <what should be typed next>
+#         suggest:
+#           - value: <suggested-value>
+#             description: <short help text>
+#     arguments:
+#       - placeholder: <display-only placeholder>
+#         description: <what should be typed next>
+#     subcommands:
+#       - value: <subcommand>
+#         description: <short help text>
+#         takes_value: true
+#         closes: true
+#         insert: <optional inserted text>
+#         value_hint:
+#           placeholder: <display-only placeholder>
+#           description: <what should be typed next>
+#         suggest:
+#           - value: <suggested-value>
+#             description: <short help text>
 #
-# - flags:
-#   suggestions shown when the current token looks like a flag position,
-#   e.g. `nmap -` or `ffuf -`.
+# Readability notes:
+# - Keep related behavior together. If a flag takes a value, describe that
+#   under the flag instead of splitting it across multiple top-level keys.
+# - Use `arguments` for normal ordered argument slots such as `<host>` or
+#   `<target>`.
+# - Use `argument_limit` when a command should stop suggesting additional
+#   positional arguments after a fixed number of slots are filled, while still
+#   allowing flags and other non-positional hints.
+# - Use `subcommands` for command trees such as `session-token set`.
+# - Use `placeholder: "<...>"` for display-only guidance. The frontend shows
+#   these as hints and does not insert the literal placeholder text on Tab.
+# - Use `closes: true` for flags or subcommands that should suppress further
+#   autocomplete once accepted.
+# - `examples` appear while the user is still typing the command root.
 #
-# - expects_value:
-#   flags whose next token is a value slot rather than another flag slot.
-#   Example: `curl -H <cursor>` uses arg_hints["-H"] instead of showing more
-#   curl flags. Only list flags that genuinely consume a value here.
-#
-# - arg_hints:
-#   controls what is shown after a specific token has been typed and accepted:
-#   - a list of hint items: shown as value suggestions after that token
-#   - an empty list []: suppresses the dropdown entirely after that token —
-#     use this for terminal flags that accept no further input, such as -h,
-#     --help, and subcommands like `session-token clear`. When the previous
-#     token has an arg_hints entry (even an empty one), the dropdown closes
-#     rather than falling through to the generic flag or positional list.
-#   - the special key "__positional__": generic hints shown when the cursor is
-#     at a non-flag position and no flag-specific hint is taking priority.
-#
-# Authoring rules:
-# - Every known command root should have an entry, even if minimal (`command: {}`),
-#   so it is discoverable via prefix matching.
-# - Add flags for commands where flag suggestions add value.
-# - Use expects_value when the next token should be a value, not another flag.
-# - Use arg_hints["<flag>"]: [] for terminal flags (help flags, standalone
-#   subcommands) so the dropdown collapses after they are typed. Do not add
-#   these to expects_value — expects_value is only for flags that consume a
-#   value argument.
-# - Use arg_hints["__positional__"] for normal positional arguments (targets,
-#   hosts, URLs, domains, CIDR ranges). Omit it for commands that take no args.
-# - For arg_hints values, prefer concrete examples for prefix matching
-#   (`https://`, `/dev/null`) and placeholders for explanatory guidance
-#   (`<target>`, `<domain>`).
-# - Positional hints are shown alongside flags at `command ` so the required
-#   argument stays discoverable before typing begins.
-# - `pipe_command: true` marks entries that are also suggested after `command |`.
-# - `pipe_insert_value` overrides the inserted text (e.g. `wc -l`).
-# - `examples` is a list of full command invocations shown while the user is
-#   still typing the command root (before any trailing space). Accepting one
-#   replaces the entire input with the example. Use these to surface common
-#   invocation patterns for users who are unfamiliar with a command.
-#   Shape: `- value: <full-command>` / `description: <what it does>`
+# Diverse examples:
+# - `ping` shows a simple flag + argument command.
+# - `curl` shows starter values plus a persistent `<url>` placeholder.
+# - `session-token` shows a subcommand tree with `closes: true` and
+#   `value_hint`.
+# - `grep` and `wc` show pipe-stage entries.
 #
 # The container smoke test runs every example command defined here. Add or
 # remove examples to add or remove commands from the regression suite.
 
 context:
   grep:
-    pipe_command: true
-    pipe_description: Filter lines by pattern
+    pipe:
+      enabled: true
+      description: Filter lines by pattern
     flags:
       - value: -i
         description: Ignore case
@@ -75,61 +76,56 @@ context:
         description: Invert match
       - value: -E
         description: Extended regex
-    arg_hints:
-      "__positional__":
-        - value: "<pattern>"
-          description: Text or regex to match
-
+    arguments:
+      - placeholder: <pattern>
+        description: Text or regex to match
   head:
-    pipe_command: true
-    pipe_description: Show the first lines
+    pipe:
+      enabled: true
+      description: Show the first lines
     flags:
       - value: -n
         description: Show the first N lines
-    expects_value:
-      - -n
-    arg_hints:
-      "-n":
-        - value: "5"
-          description: Show the first 5 lines
-        - value: "10"
-          description: Show the first 10 lines
-        - value: "20"
-          description: Show the first 20 lines
-        - value: "50"
-          description: Show the first 50 lines
-
+        takes_value: true
+        suggest:
+          - value: '5'
+            description: Show the first 5 lines
+          - value: '10'
+            description: Show the first 10 lines
+          - value: '20'
+            description: Show the first 20 lines
+          - value: '50'
+            description: Show the first 50 lines
   tail:
-    pipe_command: true
-    pipe_description: Show the last lines
+    pipe:
+      enabled: true
+      description: Show the last lines
     flags:
       - value: -n
         description: Show the last N lines
-    expects_value:
-      - -n
-    arg_hints:
-      "-n":
-        - value: "5"
-          description: Show the last 5 lines
-        - value: "10"
-          description: Show the last 10 lines
-        - value: "20"
-          description: Show the last 20 lines
-        - value: "50"
-          description: Show the last 50 lines
-
+        takes_value: true
+        suggest:
+          - value: '5'
+            description: Show the last 5 lines
+          - value: '10'
+            description: Show the last 10 lines
+          - value: '20'
+            description: Show the last 20 lines
+          - value: '50'
+            description: Show the last 50 lines
   wc:
-    pipe_command: true
-    pipe_insert_value: "wc -l"
-    pipe_label: "wc -l"
-    pipe_description: Count lines
+    pipe:
+      enabled: true
+      description: Count lines
+      insert: wc -l
+      label: wc -l
     flags:
       - value: -l
         description: Count lines
-
   sort:
-    pipe_command: true
-    pipe_description: Sort lines
+    pipe:
+      enabled: true
+      description: Sort lines
     flags:
       - value: -r
         description: Reverse order
@@ -145,27 +141,27 @@ context:
         description: Numeric sort and deduplicate
       - value: -rnu
         description: Reverse numeric sort and deduplicate
-
   uniq:
-    pipe_command: true
-    pipe_description: Remove duplicate lines
+    pipe:
+      enabled: true
+      description: Remove duplicate lines
     flags:
       - value: -c
         description: Prefix each line with its occurrence count
-
   nmap:
     examples:
-      - value: "nmap -h"
+      - value: nmap -h
         description: Show help and usage
-      - value: "nmap -sV -p 80,443 ip.darklab.sh"
+      - value: nmap -sV -p 80,443 ip.darklab.sh
         description: Service version detection on web ports
-      - value: "nmap -A -T4 ip.darklab.sh"
+      - value: nmap -A -T4 ip.darklab.sh
         description: Aggressive scan with OS and service detection
-      - value: "nmap -Pn --top-ports 100 ip.darklab.sh"
+      - value: nmap -Pn --top-ports 100 ip.darklab.sh
         description: Top 100 ports, skip host discovery
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -sT
         description: TCP connect scan
       - value: -sV
@@ -174,10 +170,38 @@ context:
         description: Skip host discovery
       - value: -p
         description: Ports to scan
+        takes_value: true
+        suggest:
+          - placeholder: <ports>
+            description: Comma-separated ports or ranges
+          - value: 80,443
+            description: Common web ports
+          - value: 1-1000
+            description: First thousand TCP ports
       - value: --script
         description: Run NSE script or script category
+        takes_value: true
+        suggest:
+          - value: http-headers
+            description: Fetch HTTP response headers
+          - value: http-title
+            description: Fetch HTTP page title
+          - value: ssl-cert
+            description: Inspect the TLS certificate
+          - value: ssl-enum-ciphers
+            description: Enumerate supported TLS ciphers
+          - value: vuln
+            description: Run vulnerability-focused scripts
       - value: --top-ports
         description: Scan common ports
+        takes_value: true
+        suggest:
+          - placeholder: <number>
+            description: Number of top ports to scan
+          - value: '100'
+            description: Top hundred ports
+          - value: '1000'
+            description: Top thousand ports
       - value: -T4
         description: Faster timing template
       - value: -A
@@ -186,157 +210,117 @@ context:
         description: Do not resolve DNS names
       - value: -vv
         description: More verbose output
-    expects_value:
-      - -p
-      - --script
-      - --top-ports
-    arg_hints:
-      "-h": []
-      "-p":
-        - value: "80,443"
-          description: Common web ports
-        - value: "1-1000"
-          description: First thousand TCP ports
-        - value: "<ports>"
-          description: Comma-separated ports or ranges
-      "--script":
-        - value: "http-headers"
-          description: Fetch HTTP response headers
-        - value: "http-title"
-          description: Fetch HTTP page title
-        - value: "ssl-cert"
-          description: Inspect the TLS certificate
-        - value: "ssl-enum-ciphers"
-          description: Enumerate supported TLS ciphers
-        - value: "vuln"
-          description: Run vulnerability-focused scripts
-      "--top-ports":
-        - value: "100"
-          description: Top hundred ports
-        - value: "1000"
-          description: Top thousand ports
-        - value: "<number>"
-          description: Number of top ports to scan
-      "__positional__":
-        - value: "<target>"
-          description: Hostname, IP, or CIDR
-
+    arguments:
+      - placeholder: <target>
+        description: Hostname, IP, or CIDR
   ffuf:
     examples:
-      - value: "ffuf -h"
+      - value: ffuf -h
         description: Show help and usage
-      - value: "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+      - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
         description: Directory brute force with common wordlist
-      - value: "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -mc 200,301,302"
+      - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -mc 200,301,302
         description: Filter for successful and redirect responses
-      - value: "ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H \"Host: FUZZ.ip.darklab.sh\""
+      - value: 'ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H "Host: FUZZ.ip.darklab.sh"'
         description: Virtual host brute force with Host header injection
     flags:
       - value: -h
         description: Show help and usage
+        takes_value: true
+        closes: true
       - value: -u
         description: Target URL with FUZZ marker
+        takes_value: true
+        value_hint:
+          placeholder: <url-with-FUZZ>
+          description: Target URL including FUZZ
       - value: -w
         description: Wordlist path
+        takes_value: true
+        suggest:
+          - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+            description: Common web-content wordlist
       - value: -mc
         description: Match status codes
+        takes_value: true
       - value: -fc
         description: Filter status codes
+        takes_value: true
       - value: -H
         description: Add request header
+        takes_value: true
       - value: -t
         description: Concurrent threads
-    expects_value:
-      - -u
-      - -w
-      - -mc
-      - -fc
-      - -H
-      - -t
-    arg_hints:
-      "-h": []
-      "-u":
-        - value: "<url-with-FUZZ>"
-          description: Target URL including FUZZ
-      "-w":
-        - value: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
-          description: Common web-content wordlist
-      "__positional__":
-        - value: "<target-url>"
-          description: Usually provided through -u
-
+        takes_value: true
+    arguments:
+      - placeholder: <target-url>
+        description: Usually provided through -u
   openssl:
     examples:
-      - value: "openssl s_client -connect ip.darklab.sh:443 -quiet"
+      - value: openssl s_client -connect ip.darklab.sh:443 -quiet
         description: Inspect TLS connection and certificate
-      - value: "openssl s_client -connect ip.darklab.sh:443 -showcerts"
+      - value: openssl s_client -connect ip.darklab.sh:443 -showcerts
         description: Show full certificate chain
-    subcommands:
-      - value: s_client
-        description: Connect and inspect a TLS endpoint
-      - value: ciphers
-        description: List available cipher suites
     flags:
       - value: -connect
         description: Host and port to connect to (host:port)
+        takes_value: true
+        suggest:
+          - value: <host>:443
+            description: HTTPS port
+          - value: <host>:465
+            description: SMTPS port
+          - value: <host>:993
+            description: IMAPS port
       - value: -servername
         description: SNI hostname (required for virtual-hosted TLS)
+        takes_value: true
+        value_hint:
+          placeholder: <hostname>
+          description: SNI hostname matching the certificate
       - value: -showcerts
         description: Display the full certificate chain
       - value: -starttls
         description: Use STARTTLS for the specified protocol (smtp, ftp, imap, pop3)
+        takes_value: true
+        suggest:
+          - value: smtp
+            description: STARTTLS for SMTP (port 25 or 587)
+          - value: ftp
+            description: STARTTLS for FTP
+          - value: imap
+            description: STARTTLS for IMAP
+          - value: pop3
+            description: STARTTLS for POP3
       - value: -verify
         description: Set certificate verification depth
+        takes_value: true
       - value: -tls1_2
         description: Force TLS 1.2
       - value: -tls1_3
         description: Force TLS 1.3
       - value: -quiet
         description: Suppress session and certificate details
-    expects_value:
-      - -connect
-      - -servername
-      - -starttls
-      - -verify
-    arg_hints:
-      "-connect":
-        - value: "<host>:443"
-          description: HTTPS port
-        - value: "<host>:465"
-          description: SMTPS port
-        - value: "<host>:993"
-          description: IMAPS port
-      "-servername":
-        - value: "<hostname>"
-          description: SNI hostname matching the certificate
-      "-starttls":
-        - value: smtp
-          description: STARTTLS for SMTP (port 25 or 587)
-        - value: ftp
-          description: STARTTLS for FTP
-        - value: imap
-          description: STARTTLS for IMAP
-        - value: pop3
-          description: STARTTLS for POP3
-      "__positional__":
-        - value: "s_client -connect <host>:443"
-          description: Inspect TLS certificate and connection
-        - value: "ciphers -v"
-          description: List all supported cipher suites verbosely
-
+    arguments:
+      - value: s_client -connect <host>:443
+        description: Inspect TLS certificate and connection
+      - value: ciphers -v
+        description: List all supported cipher suites verbosely
   curl:
     examples:
-      - value: "curl -h"
+      - value: curl -h
         description: Show help and usage
-      - value: "curl -I https://ip.darklab.sh"
+      - value: curl -I https://ip.darklab.sh
         description: HEAD request — show response headers only
-      - value: "curl -sv https://ip.darklab.sh"
+      - value: curl -sv https://ip.darklab.sh
         description: Verbose — full request and response headers
-      - value: "curl -o /dev/null -w \"%{http_code}\" https://ip.darklab.sh"
+      - value: curl -o /dev/null -w "%{http_code}" https://ip.darklab.sh
         description: Print just the HTTP status code
     flags:
       - value: -h
         description: Show help and usage
+        takes_value: true
+        closes: true
       - value: -I
         description: HEAD request only
       - value: -s
@@ -345,61 +329,58 @@ context:
         description: Verbose request and response details
       - value: -o
         description: Write body to file
+        takes_value: true
+        suggest:
+          - value: /dev/null
+            description: Discard body and keep metadata
       - value: -w
         description: Write selected metadata after the transfer
+        takes_value: true
+        suggest:
+          - value: '"%{http_code}"'
+            description: Print the final HTTP status code
+          - value: '"%{remote_ip} %{http_code}"'
+            description: Print remote IP and status code
       - value: -H
         description: Add request header
+        takes_value: true
+        suggest:
+          - value: '"User-Agent: Mozilla/5.0"'
+            description: Example browser-style user agent
+          - value: '"Authorization: Bearer <token>"'
+            description: Example bearer token header
       - value: -L
         description: Follow redirects
       - value: -k
         description: Skip TLS verification
       - value: --max-time
         description: Maximum transfer time in seconds
-    expects_value:
-      - -o
-      - -w
-      - -H
-      - --max-time
-    arg_hints:
-      "-h": []
-      "-o":
-        - value: "/dev/null"
-          description: Discard body and keep metadata
-      "-w":
-        - value: "\"%{http_code}\""
-          description: Print the final HTTP status code
-        - value: "\"%{remote_ip} %{http_code}\""
-          description: Print remote IP and status code
-      "-H":
-        - value: "\"User-Agent: Mozilla/5.0\""
-          description: Example browser-style user agent
-        - value: "\"Authorization: Bearer <token>\""
-          description: Example bearer token header
-      "--max-time":
-        - value: "10"
-          description: Ten-second transfer limit
-      "__positional__":
-        - value: "https://"
-          description: Start an HTTP or HTTPS URL
-
+        takes_value: true
+        suggest:
+          - value: '10'
+            description: Ten-second transfer limit
+    arguments:
+      - placeholder: <url>
+        description: Target URL to request
   dig:
     examples:
-      - value: "dig -h"
+      - value: dig -h
         description: Show help and usage
-      - value: "dig darklab.sh +short"
+      - value: dig darklab.sh +short
         description: A record lookup, short output
-      - value: "dig MX darklab.sh +short"
+      - value: dig MX darklab.sh +short
         description: Mail exchanger records
-      - value: "dig @8.8.8.8 darklab.sh"
+      - value: dig @8.8.8.8 darklab.sh
         description: Query using Google's public resolver
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: +short
         description: Short answer output
       - value: +trace
         description: Trace delegation path
-      - value: "@8.8.8.8"
+      - value: '@8.8.8.8'
         description: Query a specific resolver
       - value: AXFR
         description: Attempt zone transfer
@@ -407,96 +388,87 @@ context:
         description: IPv6 address lookup
       - value: MX
         description: Mail exchanger lookup
-    arg_hints:
-      "-h": []
-      "__positional__":
-        - value: "<domain>"
-          description: Domain name to query
-
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to query
   nuclei:
     examples:
-      - value: "nuclei -h"
+      - value: nuclei -h
         description: Show help and usage
-      - value: "nuclei -u https://ip.darklab.sh -t http/"
+      - value: nuclei -u https://ip.darklab.sh -t http/
         description: Run HTTP detection templates
-      - value: "nuclei -u https://ip.darklab.sh -severity high,critical"
+      - value: nuclei -u https://ip.darklab.sh -severity high,critical
         description: Run only high and critical severity templates
-      - value: "nuclei -u https://ip.darklab.sh -t ssl/"
+      - value: nuclei -u https://ip.darklab.sh -t ssl/
         description: Run TLS/SSL detection templates
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -u
         description: Single target URL
+        takes_value: true
       - value: -l
         description: File with targets
+        takes_value: true
       - value: -t
         description: Template or template directory
+        takes_value: true
       - value: -severity
         description: Filter by severity
+        takes_value: true
+        suggest:
+          - value: low,medium,high,critical
+            description: Comma-separated severities
       - value: -tags
         description: Filter by tags
+        takes_value: true
       - value: -rl
         description: Rate limit requests
-    expects_value:
-      - -u
-      - -l
-      - -t
-      - -severity
-      - -tags
-      - -rl
-    arg_hints:
-      "-h": []
-      "-severity":
-        - value: "low,medium,high,critical"
-          description: Comma-separated severities
-      "__positional__":
-        - value: "<target>"
-          description: Usually provided through -u or -l
-
+        takes_value: true
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -u or -l
   ping:
     examples:
-      - value: "ping -h"
+      - value: ping -h
         description: Show help and usage
-      - value: "ping -c 4 darklab.sh"
+      - value: ping -c 4 darklab.sh
         description: Send 4 pings to a host
-      - value: "ping -i 0.5 -c 20 darklab.sh"
+      - value: ping -i 0.5 -c 20 darklab.sh
         description: Fast probe — 20 pings at half-second intervals
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -c
         description: Stop after count replies
+        takes_value: true
+        suggest:
+          - value: '4'
+            description: Send four probes
+          - value: '10'
+            description: Send ten probes
       - value: -i
         description: Wait interval seconds between probes
+        takes_value: true
+        suggest:
+          - value: '0.5'
+            description: Half-second probe interval
       - value: -W
         description: Per-packet timeout in seconds
+        takes_value: true
       - value: -w
         description: Deadline before ping exits
-    expects_value:
-      - -c
-      - -i
-      - -W
-      - -w
-    arg_hints:
-      "-h": []
-      "-c":
-        - value: "4"
-          description: Send four probes
-        - value: "10"
-          description: Send ten probes
-      "-i":
-        - value: "0.5"
-          description: Half-second probe interval
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or IP address to probe
-
+        takes_value: true
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP address to probe
   nc:
     examples:
-      - value: "nc -zv ip.darklab.sh 80"
+      - value: nc -zv ip.darklab.sh 80
         description: Check if port 80 is open
-      - value: "nc -zv ip.darklab.sh 443 80"
+      - value: nc -zv ip.darklab.sh 443 80
         description: Check multiple ports at once
     flags:
       - value: -z
@@ -505,23 +477,20 @@ context:
         description: Verbose connection results
       - value: -w
         description: Timeout before giving up
-    expects_value:
-      - -w
-    arg_hints:
-      "-w":
-        - value: "3"
-          description: Short timeout in seconds
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or IP followed by one or more ports
-
+        takes_value: true
+        suggest:
+          - value: '3'
+            description: Short timeout in seconds
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP followed by one or more ports
   nslookup:
     examples:
-      - value: "nslookup -type=A darklab.sh"
+      - value: nslookup -type=A darklab.sh
         description: IPv4 address lookup
-      - value: "nslookup -type=MX darklab.sh"
+      - value: nslookup -type=MX darklab.sh
         description: Mail exchanger lookup
-      - value: "nslookup -type=TXT darklab.sh"
+      - value: nslookup -type=TXT darklab.sh
         description: TXT record lookup
     flags:
       - value: -type=A
@@ -538,181 +507,174 @@ context:
         description: Canonical name lookup
       - value: -debug
         description: Print extra resolver details
-    arg_hints:
-      "__positional__":
-        - value: "<domain>"
-          description: Domain name to query
-
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to query
   host:
     examples:
-      - value: "host -t A darklab.sh"
+      - value: host -t A darklab.sh
         description: IPv4 address lookup
-      - value: "host -t MX darklab.sh"
+      - value: host -t MX darklab.sh
         description: Mail exchanger lookup
-      - value: "host -t NS darklab.sh"
+      - value: host -t NS darklab.sh
         description: Name server lookup
     flags:
       - value: -t
         description: Select DNS record type
-    expects_value:
-      - -t
-    arg_hints:
-      "-t":
-        - value: "A"
-          description: IPv4 address lookup
-        - value: "AAAA"
-          description: IPv6 address lookup
-        - value: "MX"
-          description: Mail exchanger lookup
-        - value: "TXT"
-          description: TXT record lookup
-        - value: "NS"
-          description: Name server lookup
-      "__positional__":
-        - value: "<domain>"
-          description: Domain name to query
-
+        takes_value: true
+        suggest:
+          - value: A
+            description: IPv4 address lookup
+          - value: AAAA
+            description: IPv6 address lookup
+          - value: MX
+            description: Mail exchanger lookup
+          - value: TXT
+            description: TXT record lookup
+          - value: NS
+            description: Name server lookup
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to query
   traceroute:
     examples:
-      - value: "traceroute --help"
+      - value: traceroute --help
         description: Show help and usage
-      - value: "traceroute -n ip.darklab.sh"
+      - value: traceroute -n ip.darklab.sh
         description: Trace route without hostname resolution
-      - value: "traceroute -m 30 ip.darklab.sh"
+      - value: traceroute -m 30 ip.darklab.sh
         description: Trace with a 30-hop maximum
     flags:
       - value: --help
         description: Show help and usage
+        closes: true
       - value: -n
         description: Do not resolve hop addresses
       - value: -m
         description: Set maximum hop count
+        takes_value: true
+        suggest:
+          - value: '30'
+            description: Common maximum hop count
       - value: -w
         description: Wait timeout per probe
+        takes_value: true
+        suggest:
+          - value: '2'
+            description: Two-second per-hop timeout
       - value: -q
         description: Number of probes per hop
+        takes_value: true
+        suggest:
+          - value: '3'
+            description: Three probes per hop
       - value: -f
         description: Set the first hop TTL
+        takes_value: true
+        suggest:
+          - value: '1'
+            description: Start probing from the first hop
       - value: -I
         description: Use ICMP ECHO probes
       - value: -T
         description: Use TCP SYN probes
-    expects_value:
-      - -f
-      - -m
-      - -w
-      - -q
-    arg_hints:
-      "--help": []
-      "-f":
-        - value: "1"
-          description: Start probing from the first hop
-      "-m":
-        - value: "30"
-          description: Common maximum hop count
-      "-w":
-        - value: "2"
-          description: Two-second per-hop timeout
-      "-q":
-        - value: "3"
-          description: Three probes per hop
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or IP to trace
-
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP to trace
   mtr:
     examples:
-      - value: "mtr -h"
+      - value: mtr -h
         description: Show help and usage
-      - value: "mtr -n ip.darklab.sh"
+      - value: mtr -n ip.darklab.sh
         description: Trace without hostname resolution
-      - value: "mtr -c 20 ip.darklab.sh"
+      - value: mtr -c 20 ip.darklab.sh
         description: Stop after 20 probes
-      - value: "mtr -n -c 20 ip.darklab.sh"
+      - value: mtr -n -c 20 ip.darklab.sh
         description: 20 probes, no DNS resolution
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -n
         description: Do not resolve hostnames
       - value: -c
         description: Stop after count pings
+        takes_value: true
+        suggest:
+          - value: '20'
+            description: Twenty probes before exit
       - value: -r
         description: Report mode summary
       - value: -w
         description: Wide report output
-    expects_value:
-      - -c
-    arg_hints:
-      "-h": []
-      "-c":
-        - value: "20"
-          description: Twenty probes before exit
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or IP to trace
-
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP to trace
   wget:
     examples:
-      - value: "wget -h"
+      - value: wget -h
         description: Show help and usage
-      - value: "wget --spider https://ip.darklab.sh"
+      - value: wget --spider https://ip.darklab.sh
         description: Check URL without downloading
-      - value: "wget -q -O /dev/null --server-response https://ip.darklab.sh"
+      - value: wget -q -O /dev/null --server-response https://ip.darklab.sh
         description: Show server response headers, discard body
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: --spider
         description: Check URL without downloading
       - value: -q
         description: Quiet output
       - value: -O
         description: Write output to a specific file
+        takes_value: true
+        suggest:
+          - value: /dev/null
+            description: Discard response body
       - value: --server-response
         description: Print server response headers
       - value: --timeout
         description: Network timeout in seconds
+        takes_value: true
+        suggest:
+          - value: '10'
+            description: Ten-second network timeout
       - value: --tries
         description: Number of retry attempts
+        takes_value: true
+        suggest:
+          - value: '1'
+            description: Single attempt only
       - value: --no-check-certificate
         description: Skip TLS certificate validation
-    expects_value:
-      - -O
-      - --timeout
-      - --tries
-    arg_hints:
-      "-h": []
-      "-O":
-        - value: "/dev/null"
-          description: Discard response body
-      "--timeout":
-        - value: "10"
-          description: Ten-second network timeout
-      "--tries":
-        - value: "1"
-          description: Single attempt only
-      "__positional__":
-        - value: "https://"
-          description: Start an HTTP or HTTPS URL
-
+    arguments:
+      - placeholder: <url>
+        description: Target URL to download or probe
   testssl:
     examples:
-      - value: "testssl --help"
+      - value: testssl --help
         description: Show help and usage
-      - value: "testssl --fast https://ip.darklab.sh"
+      - value: testssl --fast https://ip.darklab.sh
         description: Quick, lightweight TLS scan
-      - value: "testssl --severity HIGH https://ip.darklab.sh"
+      - value: testssl --severity HIGH https://ip.darklab.sh
         description: Report only high-severity findings
-      - value: "testssl --heartbleed https://ip.darklab.sh"
+      - value: testssl --heartbleed https://ip.darklab.sh
         description: Check for the Heartbleed vulnerability
     flags:
       - value: --help
         description: Show help and usage
+        closes: true
       - value: --fast
         description: Faster, lighter scan profile
       - value: --severity
         description: Restrict findings by severity
+        takes_value: true
+        suggest:
+          - value: HIGH
+            description: High-severity findings only
+          - value: LOW
+            description: Low-severity findings only
       - value: --full
         description: Full test suite
       - value: --sneaky
@@ -725,117 +687,110 @@ context:
         description: Check for POODLE
       - value: --beast
         description: Check for BEAST
-    expects_value:
-      - --severity
-    arg_hints:
-      "--help": []
-      "--severity":
-        - value: "HIGH"
-          description: High-severity findings only
-        - value: "LOW"
-          description: Low-severity findings only
-      "__positional__":
-        - value: "https://"
-          description: HTTPS target URL
-
+    arguments:
+      - placeholder: <url>
+        description: HTTPS target URL
   dnsrecon:
     examples:
-      - value: "dnsrecon -h"
+      - value: dnsrecon -h
         description: Show help and usage
-      - value: "dnsrecon -d darklab.sh -t std"
+      - value: dnsrecon -d darklab.sh -t std
         description: Standard DNS record enumeration
-      - value: "dnsrecon -d darklab.sh -t axfr"
+      - value: dnsrecon -d darklab.sh -t axfr
         description: Attempt zone transfer
-      - value: "dnsrecon -d darklab.sh -t brt"
+      - value: dnsrecon -d darklab.sh -t brt
         description: Brute-force subdomain enumeration
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -d
         description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
       - value: -t
         description: Discovery mode
+        takes_value: true
+        suggest:
+          - value: std
+            description: Standard DNS record checks
+          - value: axfr
+            description: Attempt zone transfer
+          - value: brt
+            description: Brute-force subdomains
+          - value: srv
+            description: Enumerate SRV records
+          - value: zonewalk
+            description: Attempt DNSSEC zone walk
+          - value: crt
+            description: Query certificate transparency data
       - value: -n
         description: Specific name server to query
+        takes_value: true
       - value: -D
         description: Wordlist for brute force mode
-    expects_value:
-      - -d
-      - -t
-      - -n
-      - -D
-    arg_hints:
-      "-h": []
-      "-d":
-        - value: "<domain>"
-          description: Target domain to enumerate
-      "-t":
-        - value: "std"
-          description: Standard DNS record checks
-        - value: "axfr"
-          description: Attempt zone transfer
-        - value: "brt"
-          description: Brute-force subdomains
-        - value: "srv"
-          description: Enumerate SRV records
-        - value: "zonewalk"
-          description: Attempt DNSSEC zone walk
-        - value: "crt"
-          description: Query certificate transparency data
-      "__positional__":
-        - value: "<domain>"
-          description: Usually provided through -d
-
+        takes_value: true
+    arguments:
+      - placeholder: <domain>
+        description: Usually provided through -d
   dnsenum:
     examples:
-      - value: "dnsenum -h"
+      - value: dnsenum -h
         description: Show help and usage
-      - value: "dnsenum --noreverse darklab.sh"
+      - value: dnsenum --noreverse darklab.sh
         description: Enumerate without reverse lookups
-      - value: "dnsenum --enum darklab.sh"
+      - value: dnsenum --enum darklab.sh
         description: Full enumeration set
-      - value: "dnsenum --dnsserver 8.8.8.8 darklab.sh"
+      - value: dnsenum --dnsserver 8.8.8.8 darklab.sh
         description: Enumerate using Google's public resolver
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: --noreverse
         description: Skip reverse lookups
       - value: --enum
         description: Run full enumeration set
       - value: --dnsserver
         description: Query a specific resolver
+        takes_value: true
+        suggest:
+          - value: 8.8.8.8
+            description: Example public resolver
       - value: --threads
         description: Number of worker threads
-    expects_value:
-      - --dnsserver
-      - --threads
-    arg_hints:
-      "-h": []
-      "--dnsserver":
-        - value: "8.8.8.8"
-          description: Example public resolver
-      "__positional__":
-        - value: "<domain>"
-          description: Domain name to enumerate
-
+        takes_value: true
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to enumerate
   dnsx:
     examples:
-      - value: "dnsx -h"
+      - value: dnsx -h
         description: Show help and usage
-      - value: "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+      - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
         description: Brute-force subdomains with a wordlist
-      - value: "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp"
+      - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp
         description: Brute-force subdomains and show DNS responses
-      - value: "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp"
+      - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp
         description: Filter for A records and show responses
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -d
         description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
       - value: -w
         description: Wordlist for brute force
+        takes_value: true
+        suggest:
+          - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            description: Common subdomain wordlist
       - value: -resp
         description: Show DNS responses
       - value: -a
@@ -844,95 +799,85 @@ context:
         description: Query CNAME records
       - value: -mx
         description: Query MX records
-    expects_value:
-      - -d
-      - -w
-    arg_hints:
-      "-h": []
-      "-d":
-        - value: "<domain>"
-          description: Target domain to enumerate
-      "-w":
-        - value: "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
-          description: Common subdomain wordlist
-      "__positional__":
-        - value: "<domain>"
-          description: Usually provided through -d
-
+    arguments:
+      - placeholder: <domain>
+        description: Usually provided through -d
   fierce:
     examples:
-      - value: "fierce -h"
+      - value: fierce -h
         description: Show help and usage
-      - value: "fierce --domain darklab.sh"
+      - value: fierce --domain darklab.sh
         description: Enumerate subdomains for a domain
-      - value: "fierce --domain darklab.sh --dns-servers 8.8.8.8"
+      - value: fierce --domain darklab.sh --dns-servers 8.8.8.8
         description: Enumerate using a specific resolver
-      - value: "fierce --domain darklab.sh --traverse 5"
+      - value: fierce --domain darklab.sh --traverse 5
         description: Set traversal depth to 5
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: --domain
         description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
       - value: --dns-servers
         description: Resolver or name server to use
+        takes_value: true
+        suggest:
+          - value: 8.8.8.8
+            description: Example resolver address
       - value: --traverse
         description: Maximum recursive traversal depth
-    expects_value:
-      - --domain
-      - --dns-servers
-      - --traverse
-    arg_hints:
-      "-h": []
-      "--domain":
-        - value: "<domain>"
-          description: Target domain to enumerate
-      "--dns-servers":
-        - value: "8.8.8.8"
-          description: Example resolver address
-
+        takes_value: true
   subfinder:
     examples:
-      - value: "subfinder -h"
+      - value: subfinder -h
         description: Show help and usage
-      - value: "subfinder -d darklab.sh"
+      - value: subfinder -d darklab.sh
         description: Discover subdomains for a domain
-      - value: "subfinder -d darklab.sh -silent"
+      - value: subfinder -d darklab.sh -silent
         description: Subdomain discovery with minimal output
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -d
         description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
       - value: -silent
         description: Minimal output
       - value: -recursive
         description: Recurse through discovered subdomains
       - value: -all
         description: Use all available sources
-    expects_value:
-      - -d
-    arg_hints:
-      "-h": []
-      "-d":
-        - value: "<domain>"
-          description: Target domain to enumerate
-
   pd-httpx:
     examples:
-      - value: "pd-httpx -h"
+      - value: pd-httpx -h
         description: Show help and usage
-      - value: "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect"
+      - value: pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect
         description: Full recon — title, status code, and tech fingerprint
-      - value: "pd-httpx -u https://ip.darklab.sh -status-code"
+      - value: pd-httpx -u https://ip.darklab.sh -status-code
         description: Check HTTP status code
-      - value: "pd-httpx -u https://ip.darklab.sh -follow-redirects"
+      - value: pd-httpx -u https://ip.darklab.sh -follow-redirects
         description: Follow and report redirects
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -u
         description: Single target URL
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target URL to probe
+        suggest:
+          - value: https://
+            description: Start an HTTP or HTTPS URL
       - value: -title
         description: Show page title
       - value: -status-code
@@ -941,183 +886,170 @@ context:
         description: Detect technologies
       - value: -follow-redirects
         description: Follow redirects
-    expects_value:
-      - -u
-    arg_hints:
-      "-h": []
-      "-u":
-        - value: "https://"
-          description: Start an HTTP or HTTPS URL
-
   nikto:
     examples:
-      - value: "nikto -h ip.darklab.sh -p 443 -ssl"
+      - value: nikto -h ip.darklab.sh -p 443 -ssl
         description: Scan HTTPS target on port 443
-      - value: "nikto -h ip.darklab.sh -Tuning 1"
+      - value: nikto -h ip.darklab.sh -Tuning 1
         description: Scan for interesting files only
-      - value: "nikto -h ip.darklab.sh -maxtime 120"
+      - value: nikto -h ip.darklab.sh -maxtime 120
         description: Time-limited scan of two minutes
     flags:
       - value: -h
         description: Target host or URL
+        takes_value: true
+        value_hint:
+          placeholder: <host>
+          description: Target host, hostname, or URL
       - value: -p
         description: Target port
+        takes_value: true
+        suggest:
+          - value: '443'
+            description: Common HTTPS port
+          - value: '8080'
+            description: Common alternate HTTP port
       - value: -ssl
         description: Force SSL mode
       - value: -Tuning
         description: Select tuning category set
+        takes_value: true
+        suggest:
+          - value: '1'
+            description: Interesting file checks
+          - value: '4'
+            description: Injection checks
       - value: -maxtime
         description: Maximum scan duration
-    expects_value:
-      - -h
-      - -p
-      - -Tuning
-      - -maxtime
-    arg_hints:
-      "-h":
-        - value: "<host>"
-          description: Target host, hostname, or URL
-      "-p":
-        - value: "443"
-          description: Common HTTPS port
-        - value: "8080"
-          description: Common alternate HTTP port
-      "-Tuning":
-        - value: "1"
-          description: Interesting file checks
-        - value: "4"
-          description: Injection checks
-
+        takes_value: true
   wpscan:
     examples:
-      - value: "wpscan -h"
+      - value: wpscan -h
         description: Show help and usage
-      - value: "wpscan --url https://ip.darklab.sh --enumerate vp"
+      - value: wpscan --url https://ip.darklab.sh --enumerate vp
         description: Enumerate vulnerable plugins
-      - value: "wpscan --url https://ip.darklab.sh --enumerate u"
+      - value: wpscan --url https://ip.darklab.sh --enumerate u
         description: Enumerate WordPress users
-      - value: "wpscan --url https://ip.darklab.sh --detection-mode aggressive"
+      - value: wpscan --url https://ip.darklab.sh --detection-mode aggressive
         description: Aggressive detection mode
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: --url
         description: Target WordPress URL
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target WordPress URL
+        suggest:
+          - value: https://
+            description: Target WordPress URL
       - value: --enumerate
         description: Enumerate selected object types
+        takes_value: true
+        suggest:
+          - value: p
+            description: Enumerate plugins
+          - value: u
+            description: Enumerate users
+          - value: t
+            description: Enumerate themes
+          - value: vp
+            description: Enumerate vulnerable plugins
+          - value: ap
+            description: Enumerate all plugins
       - value: --detection-mode
         description: Detection mode strategy
+        takes_value: true
+        suggest:
+          - value: aggressive
+            description: Aggressive detection mode
       - value: --force
         description: Scan even if WordPress is not detected
-    expects_value:
-      - --url
-      - --enumerate
-      - --detection-mode
-    arg_hints:
-      "-h": []
-      "--url":
-        - value: "https://"
-          description: Target WordPress URL
-      "--enumerate":
-        - value: "p"
-          description: Enumerate plugins
-        - value: "u"
-          description: Enumerate users
-        - value: "t"
-          description: Enumerate themes
-        - value: "vp"
-          description: Enumerate vulnerable plugins
-        - value: "ap"
-          description: Enumerate all plugins
-      "--detection-mode":
-        - value: "aggressive"
-          description: Aggressive detection mode
-
   gobuster:
     examples:
-      - value: "gobuster -h"
+      - value: gobuster -h
         description: Show help and usage
-      - value: "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+      - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
         description: Directory brute force with common wordlist
-      - value: "gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
+      - value: gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
         description: Virtual host brute force
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: dir
         description: Directory or file brute force mode
       - value: vhost
         description: Virtual host brute force mode
       - value: -u
         description: Target URL
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target base URL
+        suggest:
+          - value: https://
+            description: Target base URL
       - value: -w
         description: Wordlist path
+        takes_value: true
+        suggest:
+          - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+            description: Common web-content wordlist
+          - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            description: Common virtual-host wordlist
       - value: -x
         description: File extensions to append
+        takes_value: true
+        suggest:
+          - value: php,html,txt
+            description: Common extension list
       - value: -k
         description: Skip TLS certificate verification
-    expects_value:
-      - -u
-      - -w
-      - -x
-    arg_hints:
-      "-h": []
-      "-u":
-        - value: "https://"
-          description: Target base URL
-      "-w":
-        - value: "/usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
-          description: Common web-content wordlist
-        - value: "/usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt"
-          description: Common virtual-host wordlist
-      "-x":
-        - value: "php,html,txt"
-          description: Common extension list
-
   fping:
     examples:
-      - value: "fping -h"
+      - value: fping -h
         description: Show help and usage
-      - value: "fping -c 4 darklab.sh"
+      - value: fping -c 4 darklab.sh
         description: Send 4 probes with a summary
-      - value: "fping -s darklab.sh"
+      - value: fping -s darklab.sh
         description: Probe with summary stats only
-      - value: "fping -e darklab.sh"
+      - value: fping -e darklab.sh
         description: Show elapsed time per reply
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: -c
         description: Count and summary mode
+        takes_value: true
+        suggest:
+          - value: '4'
+            description: Send four probes
       - value: -s
         description: Print summary only
       - value: -e
         description: Show elapsed time
       - value: -t
         description: Timeout per target
-    expects_value:
-      - -c
-      - -t
-    arg_hints:
-      "-h": []
-      "-c":
-        - value: "4"
-          description: Send four probes
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or IP to probe
-
+        takes_value: true
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP to probe
   sslscan:
     examples:
-      - value: "sslscan -h"
+      - value: sslscan -h
         description: Show help and usage
-      - value: "sslscan ip.darklab.sh"
+      - value: sslscan ip.darklab.sh
         description: Full TLS scan of a host
-      - value: "sslscan --no-failed ip.darklab.sh"
+      - value: sslscan --no-failed ip.darklab.sh
         description: Scan but suppress failed cipher output
     flags:
       - value: -h
         description: Show help and usage
+        closes: true
       - value: --tls12
         description: Only test TLS 1.2
       - value: --tls13
@@ -1130,28 +1062,25 @@ context:
         description: Enable SSL implementation bug workarounds
       - value: --timeout
         description: Socket timeout in seconds
-    expects_value:
-      - --timeout
-    arg_hints:
-      "-h": []
-      "--timeout":
-        - value: "10"
-          description: Ten-second socket timeout
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or host:port to scan
-
+        takes_value: true
+        suggest:
+          - value: '10'
+            description: Ten-second socket timeout
+    arguments:
+      - placeholder: <host>
+        description: Hostname or host:port to scan
   sslyze:
     examples:
-      - value: "sslyze --help"
+      - value: sslyze --help
         description: Show help and usage
-      - value: "sslyze --certinfo ip.darklab.sh"
+      - value: sslyze --certinfo ip.darklab.sh
         description: Validate the certificate chain
-      - value: "sslyze --heartbleed ip.darklab.sh"
+      - value: sslyze --heartbleed ip.darklab.sh
         description: Test for the Heartbleed vulnerability
     flags:
       - value: --help
         description: Show help and usage
+        closes: true
       - value: --certinfo
         description: Retrieve and validate the certificate chain
       - value: --heartbleed
@@ -1170,21 +1099,19 @@ context:
         description: Run TLS 1.2 cipher suite scan
       - value: --tlsv1_3
         description: Run TLS 1.3 cipher suite scan
-    arg_hints:
-      "--help": []
-      "__positional__":
-        - value: "<host>"
-          description: Hostname or host:port to scan
-
+    arguments:
+      - placeholder: <host>
+        description: Hostname or host:port to scan
   wafw00f:
     examples:
-      - value: "wafw00f --help"
+      - value: wafw00f --help
         description: Show help and usage
-      - value: "wafw00f https://darklab.sh"
+      - value: wafw00f https://darklab.sh
         description: Check darklab.sh for a WAF
     flags:
       - value: --help
         description: Show help and usage
+        closes: true
       - value: -a
         description: Find all matching WAFs (do not stop at first)
       - value: -v
@@ -1193,348 +1120,326 @@ context:
         description: Disable automatic redirect following
       - value: -t
         description: Test for a specific WAF product
-    expects_value:
-      - -t
-    arg_hints:
-      "--help": []
-      "-t":
-        - value: "<waf-name>"
+        takes_value: true
+        value_hint:
+          placeholder: <waf-name>
           description: Specific WAF to test for (e.g. Cloudflare)
-      "__positional__":
-        - value: "https://"
-          description: Target URL to fingerprint
-
+    arguments:
+      - placeholder: <url>
+        description: Target URL to fingerprint
   naabu:
     examples:
-      - value: "naabu -help"
+      - value: naabu -help
         description: Show help and usage
-      - value: "naabu -host ip.darklab.sh -p 80,443"
+      - value: naabu -host ip.darklab.sh -p 80,443
         description: Scan web ports on a host
-      - value: "naabu -host ip.darklab.sh -silent"
+      - value: naabu -host ip.darklab.sh -silent
         description: Scan with minimal output
     flags:
       - value: -help
         description: Show help and usage
+        closes: true
       - value: -host
         description: Target host or IP
+        takes_value: true
+        value_hint:
+          placeholder: <host>
+          description: Target hostname or IP address
       - value: -p
         description: Ports or port ranges to scan
+        takes_value: true
+        suggest:
+          - value: 80,443
+            description: Common web ports
+          - value: 1-1000
+            description: First thousand ports
+          - value: '-'
+            description: All 65535 ports
       - value: -rate
         description: Packets per second rate limit
+        takes_value: true
+        suggest:
+          - value: '100'
+            description: Conservative rate limit
+          - value: '500'
+            description: Moderate rate limit
       - value: -silent
         description: Minimal output
       - value: -v
         description: Verbose output
       - value: -exclude-ports
         description: Ports to exclude from scan
-    expects_value:
-      - -host
-      - -p
-      - -rate
-      - -exclude-ports
-    arg_hints:
-      "-help": []
-      "-host":
-        - value: "<host>"
-          description: Target hostname or IP address
-      "-p":
-        - value: "80,443"
-          description: Common web ports
-        - value: "1-1000"
-          description: First thousand ports
-        - value: "-"
-          description: All 65535 ports
-      "-rate":
-        - value: "100"
-          description: Conservative rate limit
-        - value: "500"
-          description: Moderate rate limit
-      "__positional__":
-        - value: "<target>"
-          description: Usually provided through -host
-
+        takes_value: true
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -host
   katana:
     examples:
-      - value: "katana -help"
+      - value: katana -help
         description: Show help and usage
-      - value: "katana -u https://ip.darklab.sh -d 1 -silent"
+      - value: katana -u https://ip.darklab.sh -d 1 -silent
         description: Shallow crawl with minimal output
     flags:
       - value: -help
         description: Show help and usage
+        closes: true
       - value: -u
         description: Single target URL to crawl
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target URL to start crawling from
+        suggest:
+          - value: https://
+            description: Target URL to start crawling from
       - value: -d
         description: Maximum crawl depth
+        takes_value: true
+        suggest:
+          - value: '2'
+            description: Shallow crawl depth
+          - value: '3'
+            description: Moderate crawl depth
+          - value: '5'
+            description: Deep crawl
       - value: -jc
         description: Enable JavaScript parsing and crawling
       - value: -kf
         description: Crawl known files (robots.txt, sitemap.xml, etc.)
+        suggest:
+          - value: all
+            description: All known file types
       - value: -ef
         description: Exclude file extensions
+        takes_value: true
       - value: -ct
         description: Concurrency level
+        takes_value: true
       - value: -timeout
         description: Request timeout in seconds
+        takes_value: true
       - value: -silent
         description: Suppress banner and output headers
-    expects_value:
-      - -u
-      - -d
-      - -ef
-      - -ct
-      - -timeout
-    arg_hints:
-      "-help": []
-      "-u":
-        - value: "https://"
-          description: Target URL to start crawling from
-      "-d":
-        - value: "2"
-          description: Shallow crawl depth
-        - value: "3"
-          description: Moderate crawl depth
-        - value: "5"
-          description: Deep crawl
-      "-kf":
-        - value: "all"
-          description: All known file types
-      "__positional__":
-        - value: "<target>"
-          description: Usually provided through -u
-
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -u
   masscan:
     examples:
-      - value: "masscan --help"
+      - value: masscan --help
         description: Show help and usage
-      - value: "masscan -p 80,443 8.8.8.8"
+      - value: masscan -p 80,443 8.8.8.8
         description: Fast scan of web ports
     flags:
       - value: --help
         description: Show help and usage
+        closes: true
       - value: -p
         description: Ports or port ranges to scan
+        takes_value: true
+        suggest:
+          - value: 80,443
+            description: Common web ports
+          - value: 1-1000
+            description: First thousand ports
+          - value: 1-65535
+            description: Full port range
       - value: --rate
         description: Transmit rate in packets per second
+        takes_value: true
+        suggest:
+          - value: '500'
+            description: Conservative rate
+          - value: '1000'
+            description: Moderate rate
       - value: --banner
         description: Capture service banners
       - value: --exclude
         description: Exclude a host or range from scanning
-    expects_value:
-      - -p
-      - --rate
-      - --exclude
-    arg_hints:
-      "--help": []
-      "-p":
-        - value: "80,443"
-          description: Common web ports
-        - value: "1-1000"
-          description: First thousand ports
-        - value: "1-65535"
-          description: Full port range
-      "--rate":
-        - value: "500"
-          description: Conservative rate
-        - value: "1000"
-          description: Moderate rate
-      "__positional__":
-        - value: "<target>"
-          description: IP address or CIDR range
-
+        takes_value: true
+    arguments:
+      - placeholder: <target>
+        description: IP address or CIDR range
   rustscan:
     examples:
-      - value: "rustscan --help"
+      - value: rustscan --help
         description: Show help and usage
-      - value: "rustscan -a ip.darklab.sh -p 80,443"
+      - value: rustscan -a ip.darklab.sh -p 80,443
         description: Scan specific ports on a host
     flags:
       - value: --help
         description: Show help and usage
+        closes: true
       - value: -a
         description: Target address or IP
+        takes_value: true
+        value_hint:
+          placeholder: <host>
+          description: Target hostname or IP address
       - value: -p
         description: Specific ports to scan
+        takes_value: true
+        suggest:
+          - value: 80,443
+            description: Common web ports
       - value: --range
         description: Port range to scan
+        takes_value: true
+        suggest:
+          - value: 1-1000
+            description: First thousand ports
+          - value: 1-65535
+            description: Full port range
       - value: -b
         description: Batch size (ports scanned simultaneously)
+        takes_value: true
+        suggest:
+          - value: '500'
+            description: Conservative batch size
       - value: --ulimit
         description: File descriptor ulimit override
+        takes_value: true
       - value: -t
         description: Timeout per port in milliseconds
-    expects_value:
-      - -a
-      - -p
-      - --range
-      - -b
-      - --ulimit
-      - -t
-    arg_hints:
-      "--help": []
-      "-a":
-        - value: "<host>"
-          description: Target hostname or IP address
-      "-p":
-        - value: "80,443"
-          description: Common web ports
-      "--range":
-        - value: "1-1000"
-          description: First thousand ports
-        - value: "1-65535"
-          description: Full port range
-      "-b":
-        - value: "500"
-          description: Conservative batch size
-      "-t":
-        - value: "1500"
-          description: 1.5 second per-port timeout
-      "__positional__":
-        - value: "<target>"
-          description: Usually provided through -a
-
-  # ── Built-in and system utility commands ──────────────────────────────────
-
+        takes_value: true
+        suggest:
+          - value: '1500'
+            description: 1.5 second per-port timeout
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -a
   man:
-    arg_hints:
-      "__positional__":
-        - value: nmap
-          description: nmap manual page
-        - value: curl
-          description: curl manual page
-        - value: wget
-          description: wget manual page
-        - value: dig
-          description: dig manual page
-        - value: ping
-          description: ping manual page
-        - value: traceroute
-          description: traceroute manual page
-        - value: mtr
-          description: mtr manual page
-        - value: nc
-          description: nc manual page
-        - value: nslookup
-          description: nslookup manual page
-        - value: host
-          description: host manual page
-        - value: whois
-          description: whois manual page
-        - value: fping
-          description: fping manual page
-        - value: tcptraceroute
-          description: tcptraceroute manual page
-        - value: testssl
-          description: testssl manual page
-        - value: dnsrecon
-          description: dnsrecon manual page
-        - value: dnsenum
-          description: dnsenum manual page
-        - value: fierce
-          description: fierce manual page
-        - value: ps
-          description: ps manual page
-        - value: ls
-          description: ls manual page
-        - value: man
-          description: man manual page
-        - value: autocomplete
-          description: "built-in: explain context-aware autocomplete for known command roots"
-        - value: banner
-          description: "built-in: print the configured banner art"
-        - value: clear
-          description: "built-in: clear the current terminal tab output"
-        - value: date
-          description: "built-in: show the current server time"
-        - value: df
-          description: "built-in: show a compact filesystem summary"
-        - value: env
-          description: "built-in: show core environment values for this shell"
-        - value: faq
-          description: "built-in: show configured FAQ entries"
-        - value: fortune
-          description: "built-in: print a short operator-themed one-liner"
-        - value: free
-          description: "built-in: show a compact memory summary"
-        - value: groups
-          description: "built-in: show the shell group membership"
-        - value: help
-          description: "built-in: list all built-in commands"
-        - value: history
-          description: "built-in: list recent commands from this session"
-        - value: hostname
-          description: "built-in: show the configured shell instance name"
-        - value: id
-          description: "built-in: show the shell identity"
-        - value: ip
-          description: "built-in: show a minimal shell network interface view"
-        - value: jobs
-          description: "built-in: list active jobs for this session"
-        - value: last
-          description: "built-in: show recent completed runs with timestamps and exit codes"
-        - value: limits
-          description: "built-in: show configured runtime, history, and retention limits"
-        - value: pwd
-          description: "built-in: show the web shell workspace path"
-        - value: retention
-          description: "built-in: show retention and persisted-output settings"
-        - value: route
-          description: "built-in: show the shell routing table summary"
-        - value: session-token
-          description: "built-in: show session token status"
-        - value: shortcuts
-          description: "built-in: show current keyboard shortcuts"
-        - value: status
-          description: "built-in: show the current session and shell configuration summary"
-        - value: tty
-          description: "built-in: show the web terminal device path"
-        - value: type
-          description: "built-in: describe whether a command is built-in, installed, or missing"
-        - value: uname
-          description: "built-in: show the shell platform string"
-        - value: uptime
-          description: "built-in: show app uptime since process start"
-        - value: version
-          description: "built-in: show shell, app, Flask, and Python version details"
-        - value: which
-          description: "built-in: locate a built-in command or allowed runtime command"
-        - value: who
-          description: "built-in: show the current shell user and session"
-        - value: whoami
-          description: "built-in: describe this shell and link to the project README"
-        - value: "<command>"
-          description: Manual page for any allowed command
-
+    argument_limit: 1
+    arguments:
+      - value: nmap
+        description: nmap manual page
+      - value: curl
+        description: curl manual page
+      - value: wget
+        description: wget manual page
+      - value: dig
+        description: dig manual page
+      - value: ping
+        description: ping manual page
+      - value: traceroute
+        description: traceroute manual page
+      - value: mtr
+        description: mtr manual page
+      - value: nc
+        description: nc manual page
+      - value: nslookup
+        description: nslookup manual page
+      - value: host
+        description: host manual page
+      - value: whois
+        description: whois manual page
+      - value: fping
+        description: fping manual page
+      - value: tcptraceroute
+        description: tcptraceroute manual page
+      - value: testssl
+        description: testssl manual page
+      - value: dnsrecon
+        description: dnsrecon manual page
+      - value: dnsenum
+        description: dnsenum manual page
+      - value: fierce
+        description: fierce manual page
+      - value: ps
+        description: ps manual page
+      - value: ls
+        description: ls manual page
+      - value: man
+        description: man manual page
+      - value: autocomplete
+        description: 'built-in: explain context-aware autocomplete for known command roots'
+      - value: banner
+        description: 'built-in: print the configured banner art'
+      - value: clear
+        description: 'built-in: clear the current terminal tab output'
+      - value: date
+        description: 'built-in: show the current server time'
+      - value: df
+        description: 'built-in: show a compact filesystem summary'
+      - value: env
+        description: 'built-in: show core environment values for this shell'
+      - value: faq
+        description: 'built-in: show configured FAQ entries'
+      - value: fortune
+        description: 'built-in: print a short operator-themed one-liner'
+      - value: free
+        description: 'built-in: show a compact memory summary'
+      - value: groups
+        description: 'built-in: show the shell group membership'
+      - value: help
+        description: 'built-in: list all built-in commands'
+      - value: history
+        description: 'built-in: list recent commands from this session'
+      - value: hostname
+        description: 'built-in: show the configured shell instance name'
+      - value: id
+        description: 'built-in: show the shell identity'
+      - value: ip
+        description: 'built-in: show a minimal shell network interface view'
+      - value: jobs
+        description: 'built-in: list active jobs for this session'
+      - value: last
+        description: 'built-in: show recent completed runs with timestamps and exit codes'
+      - value: limits
+        description: 'built-in: show configured runtime, history, and retention limits'
+      - value: pwd
+        description: 'built-in: show the web shell workspace path'
+      - value: retention
+        description: 'built-in: show retention and persisted-output settings'
+      - value: route
+        description: 'built-in: show the shell routing table summary'
+      - value: session-token
+        description: 'built-in: show session token status'
+      - value: shortcuts
+        description: 'built-in: show current keyboard shortcuts'
+      - value: status
+        description: 'built-in: show the current session and shell configuration summary'
+      - value: tty
+        description: 'built-in: show the web terminal device path'
+      - value: type
+        description: 'built-in: describe whether a command is built-in, installed, or missing'
+      - value: uname
+        description: 'built-in: show the shell platform string'
+      - value: uptime
+        description: 'built-in: show app uptime since process start'
+      - value: version
+        description: 'built-in: show shell, app, Flask, and Python version details'
+      - value: which
+        description: 'built-in: locate a built-in command or allowed runtime command'
+      - value: who
+        description: 'built-in: show the current shell user and session'
+      - value: whoami
+        description: 'built-in: describe this shell and link to the project README'
+      - placeholder: <command>
+        description: Manual page for any allowed command
   ps:
     flags:
       - value: aux
         description: All processes with user and memory info
       - value: -ef
         description: All processes, full format
-
   df:
     flags:
       - value: -h
         description: Human-readable disk usage
-
   free:
     flags:
       - value: -h
         description: Human-readable memory usage
-
   uname:
     flags:
       - value: -a
         description: All system information
-
   ip:
-    arg_hints:
-      "__positional__":
-        - value: a
-          description: Show all network interfaces and addresses
-        - value: route
-          description: Show the kernel routing table
-
+    arguments:
+      - value: a
+        description: Show all network interfaces and addresses
+      - value: route
+        description: Show the kernel routing table
   ls:
     flags:
       - value: -la
@@ -1543,26 +1448,22 @@ context:
         description: Long listing with human-readable sizes
       - value: -l
         description: Long listing format
-
   which:
-    arg_hints:
-      "__positional__":
-        - value: curl
-          description: Path to curl
-        - value: "<command>"
-          description: Locate an installed command
-
+    argument_limit: 1
+    arguments:
+      - value: curl
+        description: Path to curl
+      - placeholder: <command>
+        description: Locate an installed command
   type:
-    arg_hints:
-      "__positional__":
-        - value: curl
-          description: Type of curl
-        - value: history
-          description: Type of history
-        - value: "<command>"
-          description: Describe a command's type
-
-  # Simple no-arg built-ins — registered so they are discoverable via prefix matching
+    argument_limit: 1
+    arguments:
+      - value: curl
+        description: Type of curl
+      - value: history
+        description: Type of history
+      - placeholder: <command>
+        description: Describe a command's type
   autocomplete: {}
   banner: {}
   clear: {}
@@ -1582,35 +1483,33 @@ context:
   retention: {}
   route: {}
   session-token:
-    expects_value:
-      - set
-      - revoke
-    arg_hints:
-      "set":
-        - value: "<token>"
+    subcommands:
+      - value: generate
+        description: Generate a new session token and save it to this browser
+        closes: true
+      - value: set
+        description: Activate an existing session token from another device
+        takes_value: true
+        value_hint:
+          placeholder: <token>
           description: Paste a tok_... token or UUID from another device
-      "revoke":
-        - value: "<token>"
+        insert: 'set '
+      - value: clear
+        description: Remove the session token and revert to an anonymous session
+        closes: true
+      - value: rotate
+        description: Generate a new token and migrate all history to it
+        closes: true
+      - value: list
+        description: Show the active session token and its creation date
+        closes: true
+      - value: revoke
+        description: Permanently invalidate a tok_ token on this server
+        takes_value: true
+        value_hint:
+          placeholder: <token>
           description: tok_ token to permanently invalidate on the server
-      "generate": []
-      "clear": []
-      "rotate": []
-      "list": []
-      "__positional__":
-        - value: generate
-          description: Generate a new session token and save it to this browser
-        - value: "set <token>"
-          insertValue: "set "
-          description: Activate an existing session token from another device
-        - value: clear
-          description: Remove the session token and revert to an anonymous session
-        - value: rotate
-          description: Generate a new token and migrate all history to it
-        - value: list
-          description: Show the active session token and its creation date
-        - value: "revoke <token>"
-          insertValue: "revoke "
-          description: Permanently invalidate a tok_ token on this server
+        insert: 'revoke '
   shortcuts: {}
   status: {}
   tty: {}

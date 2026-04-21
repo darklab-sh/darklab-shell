@@ -623,10 +623,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-             ]):
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
             resp = client.post("/run", json={"command": "echo hello"})
             _ = resp.get_data(as_text=True)
 
@@ -642,10 +639,7 @@ class TestRunLifecycleEvents:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-             ]):
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
             resp = client.post("/run", json={"command": "echo hello"})
             _ = resp.get_data(as_text=True)
 
@@ -705,10 +699,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-             ]), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]), \
              mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
             resp = client.post("/run", json={"command": "echo saved"})
             _ = resp.get_data(as_text=True)
@@ -725,7 +716,7 @@ class TestRunFailureEvents:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=RuntimeError("stream exploded")):
+             mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("stream exploded")):
             resp = client.post("/run", json={"command": "echo boom"})
             _ = resp.get_data(as_text=True)
 

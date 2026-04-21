@@ -295,7 +295,19 @@
     }
     if (!focusTarget && buttons.length) focusTarget = buttons[0].btn;
     if (focusTarget && typeof focusTarget.focus === 'function') {
-      try { focusTarget.focus(); } catch (_) { /* non-critical */ }
+      const applyFocus = () => {
+        const active = document.activeElement;
+        if (active && active !== focusTarget && typeof active.blur === 'function') {
+          try { active.blur(); } catch (_) { /* non-critical */ }
+        }
+        try { focusTarget.focus(); } catch (_) { /* non-critical */ }
+      };
+      // Real browsers can leave focus on the originating composer when a
+      // confirm is opened from a keydown path (e.g. Ctrl+C kill confirm).
+      // Reassert the chosen modal target on the next turn so Enter routes
+      // through the cancel-default contract instead of the prompt.
+      applyFocus();
+      setTimeout(applyFocus, 0);
     }
 
     return promise;

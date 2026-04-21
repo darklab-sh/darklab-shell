@@ -734,11 +734,35 @@ class TestShortcutsRoute:
 
     def test_matches_shortcuts_builtin_source(self):
         from fake_commands import get_current_shortcuts
-        direct = get_current_shortcuts()
+        direct = get_current_shortcuts(is_mac=False)
         client = get_client()
         data = json.loads(client.get("/shortcuts").data)
         assert data["sections"] == direct["sections"]
         assert data["note"] == direct["note"]
+
+    def test_non_mac_user_agent_renders_alt_prefix(self):
+        client = get_client()
+        client.environ_base["HTTP_USER_AGENT"] = (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        data = json.loads(client.get("/shortcuts").data)
+        keys = [item["key"] for section in data["sections"] for item in section["items"]]
+        assert "Alt+T" in keys
+        assert "Alt+Shift+C" in keys
+        assert not any(key.startswith("Option+") for key in keys)
+
+    def test_mac_user_agent_renders_option_prefix(self):
+        client = get_client()
+        client.environ_base["HTTP_USER_AGENT"] = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        )
+        data = json.loads(client.get("/shortcuts").data)
+        keys = [item["key"] for section in data["sections"] for item in section["items"]]
+        assert "Option+T" in keys
+        assert "Option+Shift+C" in keys
+        assert not any(key.startswith("Alt+") for key in keys)
 
 
 # ── /welcome/ascii ───────────────────────────────────────────────────────────

@@ -221,7 +221,7 @@
   // ── Recent list rendering ───────────────────────────────────────
   function renderRailRecent() {
     if (!railRecentBody) return;
-    const items = Array.isArray(global.cmdHistory) ? global.cmdHistory : [];
+    const items = Array.isArray(global.recentPreviewHistory) ? global.recentPreviewHistory : [];
     railRecentBody.replaceChildren();
     if (railRecentCount) railRecentCount.textContent = String(items.length);
 

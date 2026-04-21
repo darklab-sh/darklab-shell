@@ -12,7 +12,9 @@ import os
 import re
 import uuid
 import unittest.mock as mock
+from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta, timezone
+from typing import cast
 
 import pytest
 
@@ -46,30 +48,41 @@ def isolated_history_db(monkeypatch, tmp_path):
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
 class _FakeStdout:
-    def __init__(self, lines):
-        self._lines = list(lines)
+    def __init__(self, lines: Sequence[str]):
+        self._lines: list[str] = list(lines)
+        self.closed = False
 
-    def readline(self):
+    def readline(self) -> str:
         return self._lines.pop(0) if self._lines else ""
 
-    def close(self):
-        pass
+    def close(self) -> None:
+        self.closed = True
 
 
 class _FakeProc:
-    def __init__(self, lines=None, pid=4321, returncode=0):
+    def __init__(
+        self,
+        lines: Sequence[str] | None = None,
+        pid: int = 4321,
+        returncode: int | None = 0,
+        wait_returncode: int | None = None,
+    ):
         self.pid = pid
-        self.returncode = returncode
+        self.returncode: int | None = returncode
+        self._wait_returncode: int | None = returncode if wait_returncode is None else wait_returncode
         self.stdout = _FakeStdout(lines or [])
         self._poll_calls = 0
+        self.wait_calls = 0
 
-    def wait(self):
+    def wait(self, timeout: float | None = None) -> int | None:
+        self.wait_calls += 1
+        self.returncode = self._wait_returncode
         return self.returncode
 
-    def poll(self):
+    def poll(self) -> int | None:
         # Behave like a still-running proc until stdout is exhausted
         self._poll_calls += 1
-        if getattr(self.stdout, "_lines", []):
+        if self.stdout._lines:
             return None
         return self.returncode
 
@@ -94,10 +107,10 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "echo hello"})
             body = resp.get_data(as_text=True)
@@ -126,14 +139,14 @@ class TestRunStreaming:
         client = get_client()
         fake_proc = _FakeProc(lines=[""])
 
-        # First select() timeout => heartbeat, second => EOF break
+        # First readiness timeout => heartbeat, second => EOF break
         with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([], [], []),                  # heartbeat branch
-                 ([fake_proc.stdout], [], []),  # then EOF
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 False,                  # heartbeat branch
+                 True,  # then EOF
              ]), \
              mock.patch.dict("config.CFG", {"heartbeat_interval_seconds": 0}):
             resp = client.post("/run", json={"command": "sleep 1"})
@@ -152,9 +165,9 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "echo saved"}, headers={"X-Session-ID": "sess-save"})
             _ = resp.get_data(as_text=True)
@@ -172,11 +185,11 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "ping darklab.sh | grep ttl"}, headers={"X-Session-ID": "sess-grep"})
             body = resp.get_data(as_text=True)
@@ -203,11 +216,11 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "ping darklab.sh | grep -v ttl"})
             body = resp.get_data(as_text=True)
@@ -224,11 +237,11 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "ping darklab.sh | head -n 2"}, headers={"X-Session-ID": "sess-head"})
             body = resp.get_data(as_text=True)
@@ -254,11 +267,11 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "ping darklab.sh | tail -n 2"}, headers={"X-Session-ID": "sess-tail"})
             body = resp.get_data(as_text=True)
@@ -284,11 +297,11 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
+                 True,
              ]):
             resp = client.post("/run", json={"command": "ping darklab.sh | wc -l"}, headers={"X-Session-ID": "sess-wc"})
             body = resp.get_data(as_text=True)
@@ -358,9 +371,9 @@ class TestRunStreaming:
              mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
              mock.patch("blueprints.run.pid_register"), \
              mock.patch("blueprints.run.pid_pop"), \
-             mock.patch("blueprints.run.select.select", side_effect=[
-                 ([fake_proc.stdout], [], []),
-                 ([fake_proc.stdout], [], []),
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
              ]), \
              mock.patch("blueprints.run.db_connect", side_effect=Exception("db write failed")):
             resp = client.post("/run", json={"command": "echo saved"})
@@ -370,6 +383,78 @@ class TestRunStreaming:
         assert '"type": "started"' in body
         assert '"type": "output"' in body
         assert '"type": "exit"' in body
+
+    def test_run_waits_before_emitting_exit_code(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["done\n", ""], returncode=None, wait_returncode=0)
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = client.post("/run", json={"command": "echo done"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert '"type": "exit"' in body
+        assert '"code": 0' in body
+        assert fake_proc.wait_calls >= 1
+
+    def test_run_cleans_up_stdout_and_waits_when_streaming_errors(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["hello\n"], returncode=None, wait_returncode=0)
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=RuntimeError("boom")):
+            resp = client.post("/run", json={"command": "echo hi"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert '"type": "error"' in body
+        assert fake_proc.stdout.closed is True
+        assert fake_proc.wait_calls == 1
+
+    def test_run_disconnect_detaches_and_cleans_up_stdout(self):
+        fake_proc = _FakeProc(lines=["hello\n", ""], returncode=None, wait_returncode=0)
+
+        class _ImmediateThread:
+            def __init__(
+                self,
+                *,
+                target: Callable[[], None],
+                name: str | None = None,
+                daemon: bool | None = None,
+            ):
+                self.target = target
+
+            def start(self) -> None:
+                self.target()
+
+        with mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run.threading.Thread", _ImmediateThread), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            shell_app.app.config["RATELIMIT_ENABLED"] = False
+            from blueprints.run import run_command
+
+            with shell_app.app.test_request_context("/run", method="POST", json={"command": "echo hi"}):
+                resp = run_command()
+                if isinstance(resp, tuple):
+                    pytest.fail(f"Expected streaming Response, got error tuple: {resp!r}")
+                response_iter = cast(Iterator[str], resp.response)
+                next(response_iter)
+                close = getattr(response_iter, "close", None)
+                if close is not None:
+                    close()
+
+        assert fake_proc.stdout.closed is True
+        assert fake_proc.wait_calls == 1
 
     def test_fake_ls_streams_allowed_commands_and_persists_history(self):
         client = get_client()
@@ -475,11 +560,29 @@ class TestRunStreaming:
         assert "Terminal:\\n" in body
         assert "Tabs:\\n" in body
         assert "UI:\\n" in body
+        # Default (non-Mac) User-Agent renders Alt-prefixed chords.
         assert "Alt+T" in body
+        assert "Alt+Shift+C" in body
+        assert "Ctrl+U" in body
+        assert "Option+" not in body
+        assert "browser shortcuts (Command on macOS, Ctrl elsewhere)" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_shortcuts_renders_mac_keys_for_mac_user_agent(self):
+        client = get_client()
+        client.environ_base["HTTP_USER_AGENT"] = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        )
+
+        resp = client.post("/run", json={"command": "shortcuts"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Option+T" in body
         assert "Option+Shift+C" in body
         assert "Ctrl+U" in body
-        assert "browser Command shortcuts remain environment-dependent" in body
-        assert '"type": "exit"' in body
+        assert "Alt+" not in body
 
     def test_fake_banner_renders_ascii_art(self):
         client = get_client()
