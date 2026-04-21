@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 657
+- `vitest`: 666
 - `playwright`: 191
-- total: 1,690
+- total: 1,699
 
 This document is organized in two parts:
 
@@ -1340,6 +1340,22 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `resetCmdHistoryNav exits hist search mode if active` | Verifies that resetCmdHistoryNav exits hist search mode if active. |
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
+
+#### `mobile_running_indicator.test.js`
+
+Contract-layer coverage for the mobile running-indicator surface in `app/static/js/mobile_chrome.js` (the trailing chip and pair of edge-glow overlays that surface background-tab run state). The IIFE is re-loaded per test into a fresh `Function` scope with a synchronous `requestAnimationFrame` stub and `location.search` pre-set so the `?ri=off` / `?ri=0` kill switch (read once at init) can be exercised. iOS-Safari-specific behavior (cold smooth-scroll drop, momentum destabilization from sticky children) is covered by the Playwright suite.
+
+| Test | Description |
+| --- | --- |
+| `mounts the chip and both edge-glow overlays when enabled` | Verifies the `<button id="mobile-running-chip">` chip (with the `Cycle to next running tab` aria-label) and both `.tab-edge-glow-left` / `.tab-edge-glow-right` overlays are inserted on mount. |
+| `?ri=off kill switch skips mounting the chip and edge glows entirely` | Verifies that when the page is loaded with `?ri=off`, neither the chip nor the edge glows are mounted — the kill switch reads `location.search` once at IIFE init. |
+| `?ri=0 kill switch also skips mounting` | Verifies the `?ri=0` alias for the kill switch also suppresses the mount. |
+| `hides the chip when there are no running non-active tabs` | Verifies that with no running non-active tabs, the chip carries `u-hidden`. |
+| `shows the chip with a count that equals the number of running non-active tabs` | Verifies that the chip's `.mobile-running-count` renders the count of running non-active tabs (3 running + 1 idle/active → "3"). |
+| `excludes the active tab from the count even if it is running` | Verifies the active tab is excluded from the count even when itself running (3 running tabs, middle one active → "2"). |
+| `chip tap activates the next running non-active tab in tab-row order` | Verifies chip click invokes `activateTab(id, {focusComposer: false})` with the next running non-active tab id in tab-row order. |
+| `chip tap cycles through the running set and wraps around` | Verifies successive chip taps cycle through all running non-active tabs and wrap back to the first after the last. |
+| `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Verifies that when `body.mobile-terminal-mode` is absent, the chip carries `u-hidden` and the edge-glow overlays do not enter the `is-active` state. |
 
 #### `output.test.js`
 

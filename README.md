@@ -547,6 +547,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── autocomplete.test.js # dropdown filtering, placement, viewport clamping, active-item scroll, active-input-only accept
 │       │   ├── button_primitives.test.js # regression guard — scans app source and fails if any retired button class name reappears
 │       │   ├── button_primitives_allowlist.test.js # positive contract — scans HTML templates and fails if a button-like element uses a class outside the primitive family (with fixture-backed exceptions)
+│       │   ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
 │       │   ├── session.test.js     # session ID persistence, apiFetch() header injection
 │       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
