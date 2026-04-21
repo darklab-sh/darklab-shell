@@ -66,7 +66,7 @@ Full per-feature reference for darklab shell. See the [README](README.md) for th
 
 - Desktop rail's `Recent` section renders clickable chips that load a command into the prompt when tapped.
 - Mobile surfaces a persistent `Recent` peek row between the transcript and the composer showing a count plus a one-line preview; tapping opens a full pull-up recents sheet.
-- The mobile recents sheet lists recent runs as tappable rows with per-row copy / permalink / restore actions, search, filter chips (root / exit / date / starred), and a clear-all control.
+- The mobile recents sheet lists recent runs as tappable rows: tapping a row injects the command into the composer (matching the terminal up-arrow convention); per-row **restore** / **permalink** / **delete** action buttons, search, filter chips (root / exit / date / starred), and a clear-all control round out the sheet.
 - Both surfaces update live as commands are run.
 
 **Limits:** the most recent distinct commands only; hidden entirely until there is at least one command in history; entry count capped at `recent_commands_limit`.
@@ -390,8 +390,8 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 | Pill | Source | Notes |
 |------|--------|-------|
 | **STATUS** | Active tab's run state (`running` / `ok` / `fail` / `killed` / `idle`) | Coloured pill identical to the inline tab status dot |
-| **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed amber, `—` muted when no run has finished yet |
-| **RUNS** | Number of running tabs over total tabs | Amber while any tab is running, muted when no tabs are active |
+| **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed red, `—` muted when no run has finished yet; dims to muted while any tab is actively running |
+| **TABS** | Total tab count, with active-run annotation (`N · M active`) when any tab is running | Amber while any tab is running, muted when no tabs are active |
 | **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
 | **LATENCY** | Round-trip time to `/status` in ms | Green `<150ms`, amber `<500ms`, red `>=500ms` |
 | **MODE** | Current shell mode indicator | Reserved for future sandbox/lockdown modes |
@@ -494,7 +494,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 **Behavior:**
 
 - Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and label themselves from the last command run. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
-- The **⧖ history** button opens a slide-out drawer listing the last 50 completed runs with timestamps and exit codes. Click an entry to load its output into a new tab with the command shown as a styled prompt line. Each row has a toggleable **star** plus **copy** / **permalink** / **delete** actions. Starred runs list before unstarred ones regardless of age. Star state persists across sessions in `localStorage` keyed by command text.
+- The **⧖ history** button opens a slide-out drawer listing the last 50 completed runs with timestamps and exit codes. Clicking a row injects that command into the composer for re-run (matching the terminal up-arrow convention) and closes the drawer; each row also has a toggleable **star** plus **restore** / **permalink** / **delete** actions. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists across sessions in `localStorage` keyed by command text.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button (history drawer + mobile recents sheet) prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available, polls for completion, and swaps into the saved run output when it lands in history. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
@@ -507,7 +507,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 **Full-text search:** the history drawer supports full-text search across command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only. The search field placeholder reads "search commands and output". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete, and row actions keep the drawer open so you can work through multiple entries without repeated reopen churn.
 
-On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, line numbers, timestamps) and overlays (history, workflows, options, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
+On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (history, workflows, options, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
 ---
 
@@ -593,11 +593,11 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 - **Mobile composer dock** — a visible composer with its own Run button replaces the desktop inline input.
 - **Keyboard helper row** — touch targets above the keyboard provide `Home`, `End`, single-character left/right moves, word-left / word-right jumps, delete-word, and delete-line without needing a hardware keyboard.
-- **Recent peek + pull-up sheet** — an idle peek row between transcript and composer shows the recent-run count plus a one-line preview; tapping it opens a full-height recents sheet with search, filter chips (root / exit / date / starred), per-row copy/permalink/restore actions, and a clear-all control.
+- **Recent peek + pull-up sheet** — an idle peek row between transcript and composer shows the recent-run count plus a one-line preview; tapping it opens a full-height recents sheet with search, filter chips (root / exit / date / starred), per-row **restore** / **permalink** / **delete** actions, and a clear-all control. Tapping a row itself injects the command into the composer for re-run.
 - **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible.
 - **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions.
 - **Shared state** — desktop and mobile Run buttons stay in sync: both disable together for blank prompts and running tabs.
-- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (history, workflows, options, theme, FAQ, diag) that opens full-screen surfaces. `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (history, workflows, options, theme, FAQ, diag) that opens full-screen surfaces. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
 
 **Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
 

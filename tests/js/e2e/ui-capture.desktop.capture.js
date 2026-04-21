@@ -131,6 +131,27 @@ const scenes = [
     },
   },
   {
+    slug: 'confirm-modal-three-actions-stacked',
+    title: 'Main UI - confirmation modal with three stacked actions',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshHome(page, { themeName })
+      await page.evaluate(() => {
+        window.showConfirm({
+          title: 'Unsaved changes',
+          body: 'Keep editing, save, or discard the current transcript?',
+          actions: [
+            { id: 'save', role: 'primary', label: 'Save and close' },
+            { id: 'discard', role: 'destructive', label: 'Discard' },
+            { id: 'cancel', role: 'cancel', label: 'Keep editing' },
+          ],
+        })
+      })
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-actions].modal-actions-stacked')).toBeVisible()
+    },
+  },
+  {
     slug: 'save-menu-open',
     title: 'Main UI - save menu open',
     route: '/',
@@ -305,6 +326,16 @@ const scenes = [
       await freshHome(page, { themeName })
       await page.locator('.rail-nav [data-action="faq"]').click()
       await expect(page.locator('#faq-modal')).toBeVisible()
+    },
+  },
+  {
+    slug: 'shortcuts-overlay',
+    title: 'Main UI - keyboard shortcuts overlay',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshHome(page, { themeName })
+      await page.evaluate(() => window.showShortcutsOverlay && window.showShortcutsOverlay())
+      await expect(page.locator('#shortcuts-overlay.open')).toBeVisible()
     },
   },
   {

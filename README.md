@@ -518,6 +518,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── assets/                        # README media assets (demo videos)
 ├── tests/
 │   ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
+│   ├── ui-capture-scenes.md    # Reviewer hand-off manifest for the UI screenshot capture pack — per-scene "what to check" tables for design review
 │   ├── py/                     # Python / pytest tests
 │   │   ├── conftest.py         # pytest configuration (sets working directory and sys.path to app/)
 │   │   ├── fixtures/

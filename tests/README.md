@@ -187,7 +187,7 @@ scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
 scripts/capture_ui_screenshots.sh --theme all
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 ### Container Smoke Test
 
@@ -2189,7 +2189,7 @@ Desktop UI screenshot capture spec. Walks the desktop shell through a curated pa
 
 | Test | Description |
 | --- | --- |
-| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, line numbers/timestamps, snapshot/permalink/diag. |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
 
 #### `ui-capture.mobile.capture.js`
 
@@ -2197,7 +2197,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 | Test | Description |
 | --- | --- |
-| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states, sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
 
 ### Container Smoke Test Reference
 
