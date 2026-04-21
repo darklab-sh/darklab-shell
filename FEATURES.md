@@ -326,7 +326,7 @@ Browser-native combos like `Cmd+T`, `Cmd+W`, and `Ctrl+Tab` are intentionally tr
 
 The same shortcut reference is surfaced in two places in the shell:
 
-- press `?` from anywhere on the page to open a dedicated transparent keyboard-shortcuts overlay — including from the command prompt itself when it is empty. Once any text is present in the prompt (or any other input), `?` types normally so args like `curl "…?foo=bar"` are not interfered with. The handler also skips modifier chords (`Ctrl` / `Meta` / `Alt`) and the welcome-animation active state
+- press `?` from anywhere on the page to open the keyboard-shortcuts overlay — including from the command prompt itself when it is empty. Once any text is present in the prompt (or any other input), `?` types normally so args like `curl "…?foo=bar"` are not interfered with. The handler also skips modifier chords (`Ctrl` / `Meta` / `Alt`) and the welcome-animation active state
 - run `shortcuts` in the shell to print the same reference as a text dump inside the current tab
 
 Both surfaces read from the same canonical list in the backend (exposed to the browser via `GET /shortcuts`), so they cannot drift. The overlay lists the `?` binding itself as the first entry so the shortcut is self-documenting.
@@ -347,7 +347,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 **Limits:** stall detection fires after 45 seconds of silence per tab; each tab has its own stall timeout so concurrent runs don't interfere.
 
-**Configuration:** timestamp and line-number preferences persist in `localStorage`; both are off by default.
+**Configuration:** timestamp and line-number preferences persist in browser cookies; both are off by default.
 
 **Related files:** `app/static/js/runner.js` (SSE consumer + stall detection), `app/static/js/output.js` (prefix rendering + live-tail helper), `app/blueprints/run.py` (server-side SSE generator).
 
@@ -379,14 +379,14 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 - The bottom bar renders eleven live pills on desktop: the left cluster covers run state, connection, and identity; the right cluster carries the output actions (share, copy, save, clear, kill).
 - Pills start with a muted `—` placeholder at page load and transition to live values on the first poll.
-- Server state is polled via `GET /status` every 15 seconds; uptime is interpolated locally between polls so the pill never looks frozen; the UTC clock ticks once per second in the browser.
+- Server state is polled via `GET /status` on a visibility-aware cadence: every 3 seconds while the tab is visible and every 15 seconds while hidden. Uptime is interpolated locally between polls so the pill never looks frozen, and the clock ticks once per second in the browser.
 - Latency is measured client-side with `performance.now()` around the fetch call.
 - On narrow desktop widths the pill row falls back to horizontal overflow scrolling so the right-side HUD actions never get pushed off-screen.
 - Mobile hides the HUD entirely; per-tab status and exit codes remain visible inline next to the prompt echo, and the run-notifications toggle in the Options modal covers the background-watch use case.
 
 **Limits:** `/status` always returns 200 even when a component is degraded (reports `"down"` for that component) so HUD polling never flaps the UI or triggers SSE reconnect logic; `/health` remains the load-balancer contract and still returns 503 on degradation.
 
-**Configuration:** none — the HUD is not user-tunable. Run notifications (a related cross-tab feature) are configured from the Options modal.
+**Configuration:** the `CLOCK` pill mode is user-tunable from the Options modal (`UTC` or browser-local time). Local mode prefers the browser's short timezone label (for example `CDT`) and falls back to a GMT offset label when the browser cannot provide a stable abbreviation. Run notifications remain a separate Options-modal preference.
 
 **Related files:** `app/static/js/shell_chrome.js` (HUD build + polling), `app/blueprints/assets.py` (`GET /status`).
 
@@ -398,11 +398,11 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 | **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed red, `—` muted when no run has finished yet; dims to muted while any tab is actively running |
 | **TABS** | Total tab count, with active-run annotation (`N · M active`) when any tab is running | Amber while any tab is running, muted when no tabs are active |
 | **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
-| **LATENCY** | Round-trip time to `/status` in ms | Green `<150ms`, amber `<500ms`, red `>=500ms` |
+| **LATENCY** | Round-trip time to `/status` in ms | Green `<250ms`, amber `<500ms`, red `>=500ms` |
 | **MODE** | Current shell mode indicator | Reserved for future sandbox/lockdown modes |
 | **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
 | **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
-| **CLOCK** | Wall-clock `HH:MM:SS UTC` | Ticks every second in the browser |
+| **CLOCK** | Wall clock in `UTC` or browser-local time | Ticks every second in the browser; local mode prefers the browser's short timezone label and falls back to a GMT offset |
 | **DB** | SQLite connection state | `ONLINE` green, `OFFLINE` red |
 | **REDIS** | Redis connection state | `ONLINE` green, `OFFLINE` red, `N/A` muted when no Redis is configured |
 
@@ -835,12 +835,13 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Options Modal
 
-**Purpose:** per-browser display and sharing preferences (timestamps, line numbers, welcome intro, redaction default, run notifications), persisted via cookies and applied on every page load.
+**Purpose:** per-browser display and sharing preferences (timestamps, line numbers, HUD clock mode, welcome intro, redaction default, run notifications), persisted via cookies and applied on every page load.
 
 **Behavior:**
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
+- The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time.
 - The welcome-intro setting controls whether the welcome animation plays on first tab: full animated sequence, instant settle, or no welcome tab at all.
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast.
@@ -854,6 +855,7 @@ wget -q -O /dev/null --server-response https://example.com
 |---------|---------|-------------|
 | **Timestamps** | Off / Elapsed / Clock | Timestamp mode for output lines. Equivalent to the tabbar quick toggle |
 | **Line Numbers** | on / off | Sequential line numbers beside output and the live prompt. Equivalent to the tabbar toggle |
+| **HUD Clock** | UTC / Local Time | Timezone mode for the desktop HUD `CLOCK` pill |
 | **Welcome Intro** | Animated / Disable Animation / Remove Completely | Welcome animation behavior on first tab |
 | **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Default redaction choice for snapshot sharing |
 | **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time |

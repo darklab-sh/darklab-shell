@@ -490,7 +490,6 @@
     </div>
     <div class="faq-body shortcuts-body">
       <div id="shortcuts-list" class="shortcuts-list" aria-live="polite"></div>
-      <div id="shortcuts-note" class="shortcuts-note"></div>
     </div>
   </div>
 </div>
@@ -565,6 +564,15 @@
         </div>
       </div>
       <div class="faq-item">
+        <div class="faq-q">HUD Clock</div>
+        <div class="faq-a">
+          <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">
+            <option value="utc">UTC</option>
+            <option value="local">Local Time</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item">
         <div class="faq-q">Session Token</div>
         <div class="faq-a form-fieldset">
           <div class="options-session-token-desc">Carry your run history across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
@@ -579,12 +587,6 @@
             <button id="options-session-token-clear-btn" class="btn btn-destructive btn-compact" type="button">Clear</button>
           </div>
           <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
-        </div>
-      </div>
-      <div class="faq-item">
-        <div class="faq-q">Persistence</div>
-        <div class="faq-a">
-          These display and sharing preferences are saved in cookies for future sessions on this browser.
         </div>
       </div>
     </div>

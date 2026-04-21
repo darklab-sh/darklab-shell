@@ -738,7 +738,6 @@ class TestShortcutsRoute:
         client = get_client()
         data = json.loads(client.get("/shortcuts").data)
         assert data["sections"] == direct["sections"]
-        assert data["note"] == direct["note"]
 
     def test_non_mac_user_agent_renders_alt_prefix(self):
         client = get_client()

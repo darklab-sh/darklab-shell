@@ -1086,7 +1086,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | Test | Description |
 | --- | --- |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
-| `applies saved timestamp and line number preferences from cookies at startup` | Verifies that applies saved timestamp and line number preferences from cookies at startup. |
+| `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
 | `_setTsMode updates body classes and button labels` | _setTsMode updates body classes and button labels. |
 | `_setLnMode updates body classes and button labels` | _setLnMode updates body classes and button labels. |
 | `allows timestamps and line numbers to be enabled at the same time` | Verifies that allows timestamps and line numbers to be enabled at the same time. |
@@ -2155,7 +2155,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `each workflow step renders a chip and a per-step run button` | Verifies that each workflow step in the workflows modal renders a chip and a per-step run button with the matching `aria-label`. |
 | `step layout is a two-row grid with chip on row 1 and note on row 2` | Verifies that the workflow step layout is a CSS grid with `.workflow-step-main` on row 1 and `.workflow-step-note` on row 2. |
 | `clicking a step run button closes the modal and submits the command` | Verifies that clicking a workflow step run button closes the workflows modal and submits the step command. |
-| `persists theme, timestamps, and line number preferences across reload` | Verifies that persists theme, timestamps, and line number preferences across reload. |
+| `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
 
 #### `welcome.spec.js`
 

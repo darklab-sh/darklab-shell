@@ -565,7 +565,6 @@ class TestRunStreaming:
         assert "Alt+Shift+C" in body
         assert "Ctrl+U" in body
         assert "Option+" not in body
-        assert "browser shortcuts (Command on macOS, Ctrl elsewhere)" in body
         assert '"type": "exit"' in body
 
     def test_fake_shortcuts_renders_mac_keys_for_mac_user_agent(self):

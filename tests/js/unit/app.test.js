@@ -186,6 +186,10 @@ async function loadAppFns({
         <option value="raw">raw</option>
       </select>
       <input id="options-notify-toggle" type="checkbox" />
+      <select id="options-hud-clock-select">
+        <option value="utc">utc</option>
+        <option value="local">local</option>
+      </select>
       <div id="shell-input-row" data-mobile-label="$">
         <input id="cmd" />
       </div>
@@ -273,6 +277,7 @@ async function loadAppFns({
     optionsWelcomeSelect: document.getElementById('options-welcome-select'),
     optionsShareRedactionSelect: document.getElementById('options-share-redaction-select'),
     optionsNotifyToggle: document.getElementById('options-notify-toggle'),
+    optionsHudClockSelect: document.getElementById('options-hud-clock-select'),
     themeSelect: document.getElementById('theme-select'),
     tsBtn: document.getElementById('ts-btn'),
     lnBtn: document.getElementById('ln-btn'),
@@ -532,7 +537,9 @@ async function loadAppFns({
     getWelcomeIntroPreference,
     getShareRedactionDefaultPreference,
     getRunNotifyPreference,
+    getHudClockPreference,
     applyRunNotifyPreference,
+    applyHudClockPreference,
     syncOptionsControls,
     getComposerState,
     setComposerState,
@@ -647,13 +654,17 @@ describe('app helpers', () => {
     })
   })
 
-  it('applies saved timestamp and line number preferences from cookies at startup', async () => {
-    await loadAppFns({ cookies: { pref_timestamps: 'clock', pref_line_numbers: 'on' } })
+  it('applies saved timestamp, line number, and HUD clock preferences from cookies at startup', async () => {
+    const { getHudClockPreference } = await loadAppFns({
+      cookies: { pref_timestamps: 'clock', pref_line_numbers: 'on', pref_hud_clock: 'local' },
+    })
 
     expect(document.body.classList.contains('ts-clock')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
     expect(document.getElementById('ts-btn').textContent).toBe('timestamps: clock')
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
+    expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+    expect(getHudClockPreference()).toBe('local')
   })
 
   it('_setTsMode updates body classes and button labels', async () => {
@@ -3397,7 +3408,7 @@ describe('app helpers', () => {
   })
 
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
-    const { getWelcomeIntroPreference, getShareRedactionDefaultPreference } = await loadAppFns({
+    const { getWelcomeIntroPreference, getShareRedactionDefaultPreference, getHudClockPreference } = await loadAppFns({
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
@@ -3447,6 +3458,10 @@ describe('app helpers', () => {
     document
       .getElementById('options-share-redaction-select')
       .dispatchEvent(new Event('change', { bubbles: true }))
+    document.getElementById('options-hud-clock-select').value = 'local'
+    document
+      .getElementById('options-hud-clock-select')
+      .dispatchEvent(new Event('change', { bubbles: true }))
 
     expect(document.body.classList.contains('ts-elapsed')).toBe(true)
     expect(document.body.classList.contains('ln-on')).toBe(true)
@@ -3457,8 +3472,10 @@ describe('app helpers', () => {
     expect(document.cookie).toContain('pref_line_numbers=on')
     expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
     expect(document.cookie).toContain('pref_share_redaction_default=redacted')
+    expect(document.cookie).toContain('pref_hud_clock=local')
     expect(getWelcomeIntroPreference()).toBe('disable_animation')
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
+    expect(getHudClockPreference()).toBe('local')
   })
 
   it('renders backend-driven FAQ items with HTML answers and dynamic sections', async () => {

@@ -479,10 +479,11 @@
   // ── HUD metrics ─────────────────────────────────────────────────
   // Live-updating pills on the left side of the HUD. State is owned here;
   // setters are exposed on `global` so runner.js and session.js can push in.
-  const STATUS_POLL_MS = 15000;
-  const CLOCK_TICK_MS  = 1000;
-  const LAT_WARN_MS    = 150;
-  const LAT_BAD_MS     = 500;
+  const STATUS_POLL_VISIBLE_MS = 3000;
+  const STATUS_POLL_HIDDEN_MS  = 15000;
+  const CLOCK_TICK_MS          = 1000;
+  const LAT_WARN_MS            = 250;
+  const LAT_BAD_MS             = 500;
 
   const hudState = {
     lastExit: null,     // number | 'killed' | null
@@ -492,6 +493,7 @@
     db: null,           // 'ok' | 'down' | null
     redis: null,        // 'ok' | 'down' | 'none' | null
   };
+  let hudStatusPollTimer = null;
 
   function _setValueColor(el, variant) {
     if (!el) return;
@@ -522,6 +524,38 @@
     const d = new Date(Number.isFinite(ms) ? ms : Date.now());
     const pad = n => String(n).padStart(2, '0');
     return `${pad(d.getUTCHours())}:${pad(d.getUTCMinutes())}:${pad(d.getUTCSeconds())} UTC`;
+  }
+
+  function _formatOffsetLabel(minutesEastOfUtc) {
+    const totalMinutes = Number.isFinite(minutesEastOfUtc) ? minutesEastOfUtc : 0;
+    if (totalMinutes === 0) return 'UTC';
+    const sign = totalMinutes >= 0 ? '+' : '-';
+    const absMinutes = Math.abs(totalMinutes);
+    const hours = String(Math.floor(absMinutes / 60)).padStart(2, '0');
+    const minutes = String(absMinutes % 60).padStart(2, '0');
+    return `GMT${sign}${hours}:${minutes}`;
+  }
+
+  function _getLocalClockLabel(d) {
+    try {
+      const tzName = new Intl.DateTimeFormat([], { timeZoneName: 'short' })
+        .formatToParts(d)
+        .find(part => part.type === 'timeZoneName')
+        ?.value
+        ?.trim();
+      if (tzName && !/^GMT(?:[+-]\d{1,2}(?::\d{2})?)?$/i.test(tzName) && !/^UTC(?:[+-]\d{1,2}(?::\d{2})?)?$/i.test(tzName)) {
+        return tzName;
+      }
+    } catch (_) {
+      // Fall through to the numeric offset label below.
+    }
+    return _formatOffsetLabel(-d.getTimezoneOffset());
+  }
+
+  function _formatLocalClock(ms) {
+    const d = new Date(Number.isFinite(ms) ? ms : Date.now());
+    const pad = n => String(n).padStart(2, '0');
+    return `${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())} ${_getLocalClockLabel(d)}`;
   }
 
   function _renderLastExit() {
@@ -603,7 +637,21 @@
 
   function _renderClock() {
     if (!hudClockEl) return;
-    hudClockEl.textContent = _formatUtcClock(Date.now());
+    const mode = typeof global.getHudClockPreference === 'function'
+      ? global.getHudClockPreference()
+      : 'utc';
+    const now = Date.now();
+    hudClockEl.textContent = mode === 'local' ? _formatLocalClock(now) : _formatUtcClock(now);
+    if (mode === 'local') {
+      try {
+        const zone = Intl.DateTimeFormat().resolvedOptions().timeZone || 'browser local time';
+        hudClockEl.title = `Clock: local time (${zone}, ${_getLocalClockLabel(new Date(now))})`;
+      } catch (_) {
+        hudClockEl.title = 'Clock: local time';
+      }
+    } else {
+      hudClockEl.title = 'Clock: UTC';
+    }
     _setValueColor(hudClockEl, null);
   }
 
@@ -671,10 +719,25 @@
     _renderRedis();
   }
 
+  function _currentHudStatusPollMs() {
+    return document.visibilityState === 'visible'
+      ? STATUS_POLL_VISIBLE_MS
+      : STATUS_POLL_HIDDEN_MS;
+  }
+
+  function _startHudStatusPoll({ pollNow = false } = {}) {
+    if (hudStatusPollTimer) clearInterval(hudStatusPollTimer);
+    hudStatusPollTimer = setInterval(pollHudStatus, _currentHudStatusPollMs());
+    if (pollNow) pollHudStatus();
+  }
+
   // Cross-tab SESSION_ID changes fire the 'storage' event, so refresh there
   // as well as on every poll (cheap) so token rotations reflect immediately.
   window.addEventListener('storage', e => {
     if (e.key === 'session_token') _renderSession();
+  });
+  document.addEventListener('visibilitychange', () => {
+    _startHudStatusPoll({ pollNow: document.visibilityState === 'visible' });
   });
 
   // Hook setTabStatus so TABS and LAST EXIT re-render whenever any tab changes
@@ -731,8 +794,7 @@
   _renderDb();
   _renderRedis();
 
-  pollHudStatus();
-  setInterval(pollHudStatus, STATUS_POLL_MS);
+  _startHudStatusPoll({ pollNow: true });
   setInterval(() => { _renderClock(); _renderUptime(); _renderSession(); }, CLOCK_TICK_MS);
 
   // ── Init ─────────────────────────────────────────────────────────
@@ -748,6 +810,7 @@
   global.refreshHudActions = refreshHudActions;
   global.setHudKillVisible = _setHudKillVisible;
   global.setHudLastExit = setHudLastExit;
+  global.renderHudClock = _renderClock;
   global.toggleRailCollapsed = () => setCollapsed(!ui.collapsed);
 
 })(globalThis);

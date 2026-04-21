@@ -57,7 +57,6 @@ function closeShortcuts() {
 
 function renderShortcuts(data) {
   const listEl = document.getElementById('shortcuts-list');
-  const noteEl = document.getElementById('shortcuts-note');
   if (!listEl) return;
   listEl.textContent = '';
   const sections = Array.isArray(data && data.sections) ? data.sections : [];
@@ -85,7 +84,6 @@ function renderShortcuts(data) {
     sectionEl.appendChild(pairsEl);
     listEl.appendChild(sectionEl);
   }
-  if (noteEl) noteEl.textContent = (data && data.note) || '';
 }
 
 function setupMobileSheetDragClose() {
@@ -373,6 +371,9 @@ optionsShareRedactionSelect?.addEventListener('change', e => {
 });
 optionsNotifyToggle?.addEventListener('change', e => {
   applyRunNotifyPreference(e.target.checked ? 'on' : 'off');
+});
+optionsHudClockSelect?.addEventListener('change', e => {
+  applyHudClockPreference(e.target.value);
 });
 
 // Session token options panel — UI-native controls
@@ -715,6 +716,7 @@ applyTimestampPreference(getPreference('pref_timestamps') || 'off', false);
 applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
 applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
 applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
+applyHudClockPreference(getHudClockPreference(), false);
 syncOptionsControls();
 
 Promise.all([

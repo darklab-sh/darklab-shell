@@ -163,7 +163,7 @@ test.describe('options modal', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('persists theme, timestamps, and line number preferences across reload', async ({
+  test('persists theme, timestamps, line number, and HUD clock preferences across reload', async ({
     page,
   }) => {
     await page.locator('.rail-nav [data-action="theme"]').click()
@@ -175,11 +175,14 @@ test.describe('options modal', () => {
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
     await page.locator('#options-ts-select').selectOption('elapsed')
     await page.locator('#options-ln-toggle').check()
+    await page.locator('#options-hud-clock-select').selectOption('local')
     await page.locator('.options-close').click()
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+    await expect(page.locator('#hud-clock')).not.toContainText('UTC')
+    await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
 
     await page.reload()
     await page.locator('#cmd').waitFor()
@@ -187,5 +190,7 @@ test.describe('options modal', () => {
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+    await expect(page.locator('#hud-clock')).not.toContainText('UTC')
+    await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
   })
 })

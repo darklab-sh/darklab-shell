@@ -22,8 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
-- **HUD clock UTC / local-time toggle** — the HUD `CLOCK` pill always renders UTC. Add an Options preference that toggles between UTC and the browser's local timezone, persist the choice in the existing options cookie set, and make the pill label or tooltip reflect which mode is active.
-
 - **Capture/demo parity guardrails** — add a lightweight guardrail for the Playwright demo and UI-capture pipelines so the intended desktop/mobile viewport classes, seeded history shape, and production-like health state do not silently drift. At minimum, keep viewport/config parity explicit and fail fast when capture/demo assumptions diverge.
 
 - **History/session seed fixtures for visual flows** — formalise the seeded demo/capture history dataset as a named fixture so screenshot packs, demo recordings, and documentation screenshots stay stable across releases instead of depending on ad hoc generated history.
@@ -55,6 +53,59 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 - **Duplicated page bootstrap in Jinja templates** — `index.html`, `permalink_base.html`, and `diag.html` now share enough `<head>` and theme/bootstrap wiring that the duplication is real maintenance overhead. Factor the common bootstrap into a lightweight shared base before a fourth page type makes the drift worse.
 
 - **Cross-module UI event flow is still coupled through wrappers and observers** — `shell_chrome.js` and `mobile_chrome.js` currently mirror shared UI state by wrapping globals (`renderHistory`, `renderRailWorkflows`, `closeWorkflows`, `refreshHistoryPanel`, `setTabStatus`), and by using three `MutationObserver`s in `mobile_chrome.js` (`:107` on the status pill `class` attr, `:113` on the run-timer `characterData`, `:699` on the body `class` list) to mirror state changes they have no other way to hear about. Replace those ad hoc integrations with a small UI event bus or equivalent explicit publish/subscribe layer so cross-module synchronization does not depend on monkey-patching exported functions.
+
+- **PDF and HTML export inconsistencies**
+  - The PDF exporter is closer to the HTML exporter than it used to be, but the two paths still do not share enough rendering logic. Some differences are expected because jsPDF cannot reproduce browser layout perfectly, but there is still avoidable drift in wrapping, spacing, and metadata rendering that comes from the PDF helper taking its own shortcuts instead of consuming the same rendering contract as HTML.
+  - Current drift areas:
+    - ANSI and prompt-echo lines in PDF do not wrap like HTML output, so long colored output can diverge or run past the expected width.
+    - Wrapped PDF lines do not currently advance vertical layout as carefully as the HTML path, which risks overlap and late page breaks.
+    - The run-meta row and header spacing are rebuilt separately in `export_pdf.js` instead of reusing more of the HTML export semantics, so small visual drifts are easy to introduce.
+    - Theme/color sourcing in the PDF helper is simpler than the HTML helper and should be brought onto the same precedence model.
+    - The current tests prove the PDF helper does not throw and that basic branches render, but they do not yet pin enough parity-level behavior against the HTML export model.
+  - Improvement plan:
+    - **Phase 1: define the parity contract**
+      - Write down which parts must match across HTML and PDF:
+        - line ordering
+        - prefix gutter behavior
+        - prompt-echo styling semantics
+        - run-meta content and ordering
+        - theme token mapping
+        - wrapped-line visibility and pagination behavior
+      - Explicitly note which differences are acceptable because of jsPDF limitations:
+        - exact font family / kerning parity
+        - exact CSS flexbox layout
+        - exact text-shadow / glow treatment
+    - **Phase 2: share more data-preparation logic**
+      - Introduce a shared export-preparation layer that produces:
+        - prefix strings and prefix width
+        - line classification
+        - prompt-echo token splits
+        - run-meta token list
+      - Keep HTML and PDF as separate renderers, but make them consume the same prepared export model instead of rebuilding pieces independently.
+    - **Phase 3: fix PDF wrapping and pagination**
+      - Make ANSI-rendered and prompt-echo lines wrap within the same usable content width as the HTML export.
+      - Track wrapped line height correctly so `y` advancement and page-break checks reflect the actual rendered line count.
+      - Verify prefix-gutter width is applied consistently for wrapped lines so wrapped content aligns under its own content column rather than under the prefix.
+    - **Phase 4: reduce header and badge drift**
+      - Move run-meta badge/item preparation behind one shared builder so HTML and PDF use the same ordering and text casing.
+      - Bring the PDF helper onto the same theme-value precedence model as `ExportHtmlUtils` instead of relying only on computed CSS values from `documentElement`.
+      - Revisit header spacing constants after the shared metadata model is in place so visual tuning is applied once, not independently.
+    - **Phase 5: strengthen parity tests**
+      - Expand `export_pdf.test.js` so it verifies:
+        - wrapped output increments vertical layout correctly
+        - prompt-echo lines preserve the command-prefix split
+        - run-meta ordering matches the HTML helper
+        - prefix gutter width is stable across mixed prefix lengths
+        - theme-color resolution follows the same precedence contract as the HTML helper
+      - Add at least one higher-level integration test that compares HTML and PDF preparation output from the same input lines rather than testing each renderer in isolation.
+    - **Phase 6: final visual review**
+      - Run a manual visual comparison across:
+        - plain output
+        - ANSI-heavy output
+        - prompt-echo output
+        - prefixed output (timestamps / line numbers)
+        - long wrapped output
+      - Compare desktop-tab save, permalink save, and mobile save surfaces so all call sites are verified against the same rendering expectations.
 
 ## Ideas
 

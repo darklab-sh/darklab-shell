@@ -1411,15 +1411,15 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
   display: none;
   position: fixed;
   inset: 0;
-  background: color-mix(in srgb, var(--bg, #000) 55%, transparent);
+  background: var(--theme-overlay-backdrop-bg);
   z-index: 330;
   align-items: center;
   justify-content: center;
-  backdrop-filter: blur(2px);
+  backdrop-filter: blur(3px);
 }
 #shortcuts-overlay.open { display: flex; }
 #shortcuts-modal {
-  background: color-mix(in srgb, var(--theme-panel-bg) 82%, transparent);
+  background: var(--theme-faq-modal-bg);
   border: 1px solid var(--theme-panel-border);
   border-radius: 6px;
   width: min(1150px, 92vw);

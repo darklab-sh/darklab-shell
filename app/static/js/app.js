@@ -105,6 +105,7 @@ let _tabSessionPersistTimer = null;
 let _tabSessionRestoreInProgress = false;
 const _welcomeIntroModes = ['animated', 'disable_animation', 'remove'];
 const _shareRedactionDefaultModes = ['unset', 'redacted', 'raw'];
+const _hudClockModes = ['utc', 'local'];
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -433,6 +434,11 @@ function getRunNotifyPreference() {
   return getPreference('pref_run_notify') === 'on' ? 'on' : 'off';
 }
 
+function getHudClockPreference() {
+  const value = getPreference('pref_hud_clock');
+  return _hudClockModes.includes(value) ? value : 'utc';
+}
+
 async function applyRunNotifyPreference(mode, persist = true) {
   let nextMode = mode === 'on' ? 'on' : 'off';
   if (nextMode === 'on') {
@@ -450,6 +456,13 @@ async function applyRunNotifyPreference(mode, persist = true) {
   syncOptionsControls();
 }
 
+function applyHudClockPreference(mode, persist = true) {
+  const nextMode = _hudClockModes.includes(mode) ? mode : 'utc';
+  if (persist) setPreferenceCookie('pref_hud_clock', nextMode);
+  syncOptionsControls();
+  if (typeof globalThis.renderHudClock === 'function') globalThis.renderHudClock();
+}
+
 function syncOptionsControls() {
   const tsSelect = optionsTsSelect;
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
@@ -458,6 +471,7 @@ function syncOptionsControls() {
   if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
   if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
   if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
+  if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
 }
 
 function applyThemePreference(theme, persist = true) {
@@ -1653,11 +1667,6 @@ function _buildFaqLimitsContent(cfg) {
     list.appendChild(row);
   });
   frag.appendChild(list);
-
-  const note = document.createElement('span');
-  note.className = 'faq-limits-note';
-  note.textContent = 'These limits are configured by the operator of this instance.';
-  frag.appendChild(note);
   return frag;
 }
 

@@ -433,12 +433,6 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     ]
 
 
-_SHORTCUTS_NOTE = (
-    "Note: browser shortcuts (Command on macOS, Ctrl elsewhere) remain "
-    "environment-dependent."
-)
-
-
 def _is_mac_user_agent(user_agent: str | None) -> bool:
     if not user_agent:
         return False
@@ -485,7 +479,6 @@ def get_current_shortcuts(is_mac: bool | None = None) -> dict:
             }
             for title, items in _CURRENT_SHORTCUTS
         ],
-        "note": _SHORTCUTS_NOTE,
     }
 
 
@@ -507,8 +500,6 @@ def _run_fake_shortcuts() -> list[dict[str, str]]:
                     "fake-shortcut",
                 )
             )
-    lines.append(_output_line("", "fake-spacer"))
-    lines.append(_output_line(payload["note"], "fake-note"))
     return lines
 
 
