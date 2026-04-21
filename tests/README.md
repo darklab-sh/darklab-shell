@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 648
-- `playwright`: 186
-- total: 1,676
+- `vitest`: 666
+- `playwright`: 197
+- total: 1,705
 
 This document is organized in two parts:
 
@@ -187,7 +187,7 @@ scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
 scripts/capture_ui_screenshots.sh --theme all
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 ### Container Smoke Test
 
@@ -1241,6 +1241,21 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `no source file references retired class 'modal-secondary-neutral'` | Regression guard: fails if the retired `modal-secondary-neutral` class reappears in app source. |
 | `no source file references retired class 'search-toggle'` | Regression guard: fails if the retired `search-toggle` class reappears in app source. Uses token-boundary matching so `search-toggles` and `#search-toggle-btn` stay valid. |
 
+#### `button_primitives_allowlist.test.js`
+
+Positive counterpart to the negative blocklist in `button_primitives.test.js`. Each row below is one dynamically-generated test — the suite walks `app/templates/**.html` and emits one test per file, plus a fixture-validity test. Every `<button>`, `[role="button"]`, and `<a role="button">` in the scanned file must either carry an allowed primitive class (`btn`, `nav-item`, `close-btn`, `toggle-btn`, `kb-key`) or match a selector in `tests/js/fixtures/button_primitive_allowlist.json`. The allowlist fixture documents surfaces that deliberately opt out of the primitives (legacy or surface-specific class families).
+
+| Test | Description |
+| --- | --- |
+| `app/templates/diag.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the operator diagnostics page — currently emits no button-like elements, so the assertion short-circuits clean and pins that state (any future button added to `/diag` must go through a primitive or an allowlist entry). |
+| `app/templates/index.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the main app template — the surface that owns the desktop rail, tab bar, terminal chrome, mobile hamburger/recents sheets, and the five app-level modals. The bulk of the exception fixture exists because of this file. |
+| `app/templates/permalink.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink viewer — the `toggle-ln` / `toggle-ts` / `copy-txt` / `perm-save-btn` row uses `.btn .btn-secondary .btn-compact` directly, and the `save-txt` / `save-html` / `save-pdf` entries inside the save menu are covered by the `[data-action^="save-"]` exception. |
+| `app/templates/permalink_base.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink layout base — currently emits no button-like elements; pins that state. |
+| `app/templates/permalink_error.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the permalink error template — currently emits no button-like elements; pins that state. |
+| `app/templates/theme_vars_script.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the theme-variables script include — currently emits no button-like elements; pins that state. |
+| `app/templates/theme_vars_style.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the theme-variables style include — currently emits no button-like elements; pins that state. |
+| `fixture selectors are all syntactically valid` | Validates that every `exceptions[].selector` in the allowlist fixture is a parseable CSS selector — catches typos before they mask real regressions. |
+
 #### `config.test.js`
 
 | Test | Description |
@@ -1326,6 +1341,22 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
 
+#### `mobile_running_indicator.test.js`
+
+Contract-layer coverage for the mobile running-indicator surface in `app/static/js/mobile_chrome.js` (the trailing chip and pair of edge-glow overlays that surface background-tab run state). The IIFE is re-loaded per test into a fresh `Function` scope with a synchronous `requestAnimationFrame` stub and `location.search` pre-set so the `?ri=off` / `?ri=0` kill switch (read once at init) can be exercised. iOS-Safari-specific behavior (cold smooth-scroll drop, momentum destabilization from sticky children) is covered by the Playwright suite.
+
+| Test | Description |
+| --- | --- |
+| `mounts the chip and both edge-glow overlays when enabled` | Verifies the `<button id="mobile-running-chip">` chip (with the `Cycle to next running tab` aria-label) and both `.tab-edge-glow-left` / `.tab-edge-glow-right` overlays are inserted on mount. |
+| `?ri=off kill switch skips mounting the chip and edge glows entirely` | Verifies that when the page is loaded with `?ri=off`, neither the chip nor the edge glows are mounted — the kill switch reads `location.search` once at IIFE init. |
+| `?ri=0 kill switch also skips mounting` | Verifies the `?ri=0` alias for the kill switch also suppresses the mount. |
+| `hides the chip when there are no running non-active tabs` | Verifies that with no running non-active tabs, the chip carries `u-hidden`. |
+| `shows the chip with a count that equals the number of running non-active tabs` | Verifies that the chip's `.mobile-running-count` renders the count of running non-active tabs (3 running + 1 idle/active → "3"). |
+| `excludes the active tab from the count even if it is running` | Verifies the active tab is excluded from the count even when itself running (3 running tabs, middle one active → "2"). |
+| `chip tap activates the next running non-active tab in tab-row order` | Verifies chip click invokes `activateTab(id, {focusComposer: false})` with the next running non-active tab id in tab-row order. |
+| `chip tap cycles through the running set and wraps around` | Verifies successive chip taps cycle through all running non-active tabs and wrap back to the first after the last. |
+| `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Verifies that when `body.mobile-terminal-mode` is absent, the chip carries `u-hidden` and the edge-glow overlays do not enter the `is-active` state. |
+
 #### `output.test.js`
 
 | Test | Description |
@@ -1395,7 +1426,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `formats multi-minute durations without hours` | Verifies that formats multi-minute durations without hours. |
 | `formats exactly one hour` | Verifies that formats exactly one hour. |
 | `formats hour + minutes + seconds` | Verifies that formats hour + minutes + seconds. |
-| `accepts the narrow phase-1 grep form` | Verifies that accepts the narrow phase-1 grep form. |
+| `accepts the narrow synthetic grep form` | Verifies that accepts the narrow synthetic grep form. |
 | `accepts no-space pipe variants` | Verifies that accepts no-space pipe variants. |
 | `rejects unsupported shell operator forms` | Verifies that rejects unsupported shell operator forms. |
 | `accepts the narrow head/tail/wc forms` | Verifies that accepts the narrow head/tail/wc forms. |
@@ -1413,7 +1444,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
 | `doKill marks pendingKill when runId is not yet available` | Verifies that doKill marks pendingKill when runId is not yet available. |
 | `runCommand blocks shell operators client-side before calling the API` | Verifies that runCommand blocks shell operators client-side before calling the API. |
-| `runCommand allows phase-1 synthetic grep through to the API` | Verifies that runCommand allows phase-1 synthetic grep through to the API. |
+| `runCommand allows the narrow synthetic grep form through to the API` | Verifies that runCommand allows the narrow synthetic grep form through to the API. |
 | `runCommand allows other synthetic post-filters through to the API` | Verifies that runCommand allows other synthetic post-filters through to the API. |
 | `runCommand allows exact special built-in commands with shell punctuation through to the API` | Verifies that runCommand allows exact special built-in commands with shell punctuation through to the API. |
 | `runCommand on blank or whitespace input creates a new empty prompt line` | Verifies that runCommand on blank or whitespace input creates a new empty prompt line. |
@@ -1589,7 +1620,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `does nothing when el is null` | Verifies guard against missing element. |
 | `sets data-pressable-bound guard on successful bind` | Verifies the idempotency marker is set. |
 | `tolerates missing refocusComposerAfterAction on global` | Verifies bindPressable works before ui_helpers.js loads in a partial harness. |
-| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the post-Phase-2 dispose contract: a successful bind returns `{ dispose }`. |
+| `dispose > returns a handle exposing dispose() on successful bind` | Verifies the dispose contract: a successful bind returns `{ dispose }`. |
 | `dispose > returns null on guard-fail paths (missing onActivate, missing el, already bound)` | Verifies guard-fail paths consistently return null instead of undefined. |
 | `dispose > dispose() removes the click listener` | Verifies dispose unwinds the click listener so subsequent clicks are inert. |
 | `dispose > dispose() removes the keydown listener for non-native buttons` | Verifies dispose unwinds the Enter/Space keydown handler installed for role="button" surfaces. |
@@ -1718,6 +1749,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `returns null on a re-bind to the same container (idempotent)` | Verifies the data-focus-trap-bound guard prevents duplicate bindings. |
 | `dispose removes the keydown handler and clears the bound flag` | Verifies the disposable contract unwinds the listener and the idempotency marker. |
 | `skips hidden focusables inside the container` | Verifies `[hidden]` descendants are excluded from the focus list. |
+| `skips focusables with inline display:none (options-modal session-token buttons pattern)` | Verifies elements hidden via `style.display = 'none'` are excluded so Tab from the actual visible last focusable wraps instead of leaking past a non-focusable boundary element. |
 
 #### `ui_outside_click.test.js`
 
@@ -1891,6 +1923,16 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `FAQ question disclosure keeps aria-expanded in sync with the .faq-open class` | Verifies the bindDisclosure contract on a real FAQ item: aria-expanded and the `.faq-open` class toggle together across a full open/close/open cycle. |
 | `desktop rail section header disclosure keeps aria-expanded in sync with the .closed class (panel: null caller-owns-visibility)` | Verifies the bindDisclosure `panel: null` path where the caller owns class mutation: rail Workflows section header keeps aria-expanded in sync with the section's `.closed` class. |
 | `HUD save-menu: trigger toggles, inside-panel click stays open, outside click closes` | Verifies the bindOutsideClickClose contract on the HUD save-menu: trigger click toggles, inside-panel click stays open (helper treats inside clicks as non-dismissing), outside click at document.body dismisses. |
+| `each app-level modal card carries data-focus-trap-bound after startup wiring` | Asserts `setupModalFocusTraps()` in `controller.js` ran at boot — every app-level modal card (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal`) carries `data-focus-trap-bound="1"` so focus cannot fall through to the rail / tabs / HUD behind the backdrop. |
+| `FAQ modal wraps Tab and Shift+Tab at its card boundary` | Opens the FAQ modal, focuses the last focusable descendant of `#faq-modal`, presses Tab, and asserts focus wrapped to the first focusable; then presses Shift+Tab and asserts focus wrapped back to the last. |
+| `theme modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the theme selector modal `#theme-modal`. |
+| `options modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the options modal `#options-modal`. |
+| `workflows modal wraps Tab and Shift+Tab at its card boundary` | Same boundary-wrap assertion on the workflows modal `#workflows-modal`. |
+| `showConfirm focuses the role:cancel action by default so Enter defaults to cancel` | Opens a real `showConfirm({actions: [{role: 'cancel'}, {role: 'primary'}]})` and asserts `document.activeElement` carries `data-confirm-action-id="cancel"` — pins the Confirmation Dialog Contract's default-focus rule end-to-end against the mounted `#confirm-host`. |
+| `Escape dismisses the dialog and resolves with null via closeTopmostDismissible` | Pins that Escape on an open confirm routes through the real `closeTopmostDismissible`, hides the host, and resolves the `showConfirm()` promise with null. |
+| `stacks actions when the viewport narrows to <=480px` | Opens the confirm on a 1024-wide viewport (not stacked), resizes to 390-wide, and asserts `.modal-actions-stacked` lands on `[data-confirm-actions]` — covers both the initial apply path and the reactive matchMedia listener path. |
+| `stacks actions when there are 3 or more actions regardless of viewport` | Opens a 3-action confirm at desktop viewport and asserts `.modal-actions-stacked` is applied — the action-count branch of `_shouldStack()` is independent of viewport width. |
+| `onActivate keeps the dialog open when the callback returns false` | Wires an `onActivate` returning false on the primary action, clicks it twice, and asserts the modal stays visible and the callback ran twice — pins the gate-close contract so validation errors can stay on screen. |
 
 #### `kill.spec.js`
 
@@ -2061,6 +2103,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | Test | Description |
 | --- | --- |
 | `audit mobile surfaces across every installed theme` | Reusable theme audit tool — iterates every theme in `app/conf/themes/`, force-opens each mobile sheet, reads computed styles, and asserts WCAG contrast ratios with alpha compositing on ten representative pairs (`--text` / `--muted` / `--green` / `--amber` / `--red` / `--border-bright` over `--surface` and `--theme-panel-alt-bg`, plus the menu scrim and sub-menu radio states). Prints a per-theme contrast table and hard-fails only on pairs below 1.20. |
+| `semantic color contract: four semantic tokens stay perceptually distinct within each theme` | Walks every theme and asserts the four semantic tokens from THEME.md § Semantic Color Contract (`--amber` / `--red` / `--green` / `--muted`) stay perceptually distinct — pairwise CIELAB deltaE76 is computed for all 6 pairs, with a per-theme table printed and a hard gate at deltaE 10 (below that, two colors read as the same at a glance and the contract is broken). |
 
 #### `timestamps.spec.js`
 
@@ -2146,7 +2189,7 @@ Desktop UI screenshot capture spec. Walks the desktop shell through a curated pa
 
 | Test | Description |
 | --- | --- |
-| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, line numbers/timestamps, snapshot/permalink/diag. |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
 
 #### `ui-capture.mobile.capture.js`
 
@@ -2154,7 +2197,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 | Test | Description |
 | --- | --- |
-| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states, sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
 
 ### Container Smoke Test Reference
 

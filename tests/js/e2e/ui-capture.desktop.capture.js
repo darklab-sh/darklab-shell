@@ -131,6 +131,27 @@ const scenes = [
     },
   },
   {
+    slug: 'confirm-modal-three-actions-stacked',
+    title: 'Main UI - confirmation modal with three stacked actions',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshHome(page, { themeName })
+      await page.evaluate(() => {
+        window.showConfirm({
+          title: 'Unsaved changes',
+          body: 'Keep editing, save, or discard the current transcript?',
+          actions: [
+            { id: 'save', role: 'primary', label: 'Save and close' },
+            { id: 'discard', role: 'destructive', label: 'Discard' },
+            { id: 'cancel', role: 'cancel', label: 'Keep editing' },
+          ],
+        })
+      })
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-actions].modal-actions-stacked')).toBeVisible()
+    },
+  },
+  {
     slug: 'save-menu-open',
     title: 'Main UI - save menu open',
     route: '/',
@@ -308,6 +329,16 @@ const scenes = [
     },
   },
   {
+    slug: 'shortcuts-overlay',
+    title: 'Main UI - keyboard shortcuts overlay',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshHome(page, { themeName })
+      await page.evaluate(() => window.showShortcutsOverlay && window.showShortcutsOverlay())
+      await expect(page.locator('#shortcuts-overlay.open')).toBeVisible()
+    },
+  },
+  {
     slug: 'line-numbers-enabled',
     title: 'Main UI - line numbers enabled',
     route: '/',
@@ -328,7 +359,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommand(page, 'ping -c 4 127.0.0.1')
+      await runCommand(page, 'ping -c 4 darklab.sh')
       await page.locator('#ts-btn').click()
       await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
     },
@@ -339,7 +370,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommand(page, 'ping -c 4 127.0.0.1')
+      await runCommand(page, 'ping -c 4 darklab.sh')
       await page.locator('#ln-btn').click()
       await page.locator('#ts-btn').click()
       await expect(page.locator('body')).toHaveClass(/ln-on/)

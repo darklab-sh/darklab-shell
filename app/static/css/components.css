@@ -1398,8 +1398,8 @@ body #diag-btn:hover {
 }
 
 /* Star toggle — icon-only variant used by history and recents rows. Yellow
-   when pressed matches the Workstream D named exception (starred items use
-   amber regardless of otherwise strict semantic mapping). */
+   when pressed is a named exception to the semantic color mapping (starred
+   items use amber regardless). */
 .toggle-btn-star {
   border: none;
   padding: 2px 4px;

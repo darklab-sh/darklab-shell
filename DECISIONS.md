@@ -34,6 +34,10 @@ Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime
   - [Save Menu UX (save ▾ dropdown)](#save-menu-ux-save--dropdown)
   - [Native Share-Sheet for Permalink URLs](#native-share-sheet-for-permalink-urls)
   - [Dedicated Mobile Shell](#dedicated-mobile-shell)
+  - [Button Primitive Family](#button-primitive-family)
+  - [Disclosure Affordance Rules](#disclosure-affordance-rules)
+  - [Semantic Color Contract](#semantic-color-contract)
+  - [Confirmation Dialog Contract](#confirmation-dialog-contract)
 - [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned)
   - [Runtime Streaming and Process Lifecycle](#runtime-streaming-and-process-lifecycle)
   - [Container and Filesystem Behavior](#container-and-filesystem-behavior)
@@ -308,6 +312,30 @@ The current shape is intentional:
 The key architectural decision here is negative: the app no longer tries to outsmart the mobile browser with page-scroll correction or fixed full-shell keyboard choreography. Those experiments made the Firefox keyboard bug worse. The stable model is closer to a normal mobile document with a dedicated composer block at the bottom of the shell.
 
 This keeps the mobile surface structured without needing a separate frontend bundle or framework split, while preserving the simplified layout that fixed the Firefox mobile issue.
+
+### Button Primitive Family
+
+**Every pressable surface in the shell uses one of a small, allowlisted set of primitive classes (`.btn` with role + tone modifiers; `.nav-item`, `.close-btn`, `.toggle-btn`, `.kb-key`) rather than one-off component CSS.**
+
+The shell had accumulated bespoke button styles on individual surfaces (rail sections, the save menu, mobile chrome, the permalink header, confirmation modals) that drifted in padding, tone, focus outline, and press feedback. Each new surface learned the lesson slightly differently. The primitive family collapses that into one set of classes and one shared `bindPressable` helper, so new surfaces inherit the correct contract by default and the rare exception requires an explicit entry in `tests/js/fixtures/button_primitive_allowlist.json` with a reason. The rules and the allowed primitives are listed in [ARCHITECTURE.md § Button Primitive Family](ARCHITECTURE.md#button-primitive-family).
+
+### Disclosure Affordance Rules
+
+**Disclosure glyphs encode a fixed mapping between glyph and behavior: `▸`/`▾` for expand/collapse in place, `>` for drill-in navigation, static `▾` for dropdown triggers, no glyph for plain toggles. The glyph follows the actual behavior, not the visual hierarchy of the surface.**
+
+Early mobile surfaces used `>` on rows that opened a sub-sheet and on rows that expanded in place, because both "felt like going deeper." Users read the glyph as a consistent signal and got surprised when the two behaved differently. Pinning the glyph to the behavior — and naming the one meta-rule explicitly — kept the FAQ, rail section headers, mobile recents filter, and the save menu predictable as surfaces were added. `bindDisclosure` in `app/static/js/ui_disclosure.js` owns the expand/collapse variant so new disclosure sites pick up `aria-expanded` correctly by default. The full mapping is in [ARCHITECTURE.md § Disclosure Affordance Rules](ARCHITECTURE.md#disclosure-affordance-rules).
+
+### Semantic Color Contract
+
+**Theme colors are semantic, not decorative. Four tokens (`--amber`, `--red`, `--green`, `--muted`) have fixed meanings; surface CSS derives tuned variants via `color-mix()` from those tokens rather than hardcoding one-off colors.**
+
+The rules, the binary-not-graded principle, the `running`-is-yellow distinction, and the three documented exceptions (starred items, search-hit highlights, the macOS traffic-light minimize dot) all live in [THEME.md § Semantic Color Contract](THEME.md#semantic-color-contract). Moving the contract into the theme doc rather than the general architecture reference keeps theme authors and surface authors reading the same rule set, instead of two nearly-identical summaries drifting apart. [ARCHITECTURE.md § Semantic Color Contract](ARCHITECTURE.md#semantic-color-contract) carries a short pointer.
+
+### Confirmation Dialog Contract
+
+**Every destructive or mode-switching confirmation routes through one imperative primitive, `showConfirm()`, with role-based action ids, default focus on cancel, `bindFocusTrap` on the card, and stacked actions at narrow widths.**
+
+Confirmations were originally per-surface: the kill flow, history clear, history delete, the share-redaction toggle, and session-token migrations each hand-rolled their own markup, Escape handler, mobile-sheet binding, and focus management. Small inconsistencies (Enter activating confirm instead of cancel, Tab falling through to the rail behind the backdrop, the action row overflowing on narrow viewports) had to be fixed separately each time a new confirm shipped. `showConfirm()` in `app/static/js/ui_confirm.js` centralizes the contract so every confirmation inherits the same dismissal ordering, focus trap, and stacking behavior, and new destructive actions only choose copy, tone, and the role of each button. Full semantics are in [ARCHITECTURE.md § Confirmation Dialog Contract](ARCHITECTURE.md#confirmation-dialog-contract).
 
 ---
 

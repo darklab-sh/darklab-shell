@@ -145,10 +145,10 @@ test.describe('kill running command', () => {
   })
 
   test('Enter cancels kill while the kill confirmation modal is open', async ({ page }) => {
-    // Workstream B pinned decision: Enter defaults to the cancel action
-    // (safe, macOS/web convention). The primitive focuses the cancel
-    // button on open; the browser's native Enter-activates-focused-button
-    // then routes Enter through the cancel resolver.
+    // Enter defaults to the cancel action (safe, macOS/web convention).
+    // The primitive focuses the cancel button on open; the browser's
+    // native Enter-activates-focused-button then routes Enter through
+    // the cancel resolver.
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })

@@ -543,8 +543,8 @@ async function _doSessionMigration(fromId, toId, tabId) {
 }
 
 async function _seedLocalStorageStarsToServer() {
-  // Migrate any stars stored in localStorage (pre-Phase-2 or anonymous session)
-  // to the current server session, then clear the localStorage entry.
+  // Migrate any stars stored in localStorage (legacy or anonymous-session
+  // fallback) to the current server session, then clear the localStorage entry.
   // Only the successfully seeded commands are removed; any that fail are kept
   // in localStorage so they are not silently lost on a flaky network.
   let localStars;

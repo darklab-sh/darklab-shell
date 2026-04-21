@@ -140,7 +140,7 @@ If the work shipped as one commit or one coordinated change, use T2 long. If it 
 
 ### T3. Merge-request doc shape
 
-Use for `~/git_docs/*-merge-request.md`.
+Use for merge-request drafts.
 
 Required section contract (top-level headings):
 
@@ -260,7 +260,7 @@ Invariants:
 
 ### T7. Release-note entry shape
 
-Use for `~/git_docs/*-release-notes.md`.
+Use for release-note drafts.
 
 Shape:
 
@@ -332,10 +332,10 @@ Invariants:
 - Prefer short rules, tables, and lookup-oriented sections for theme tokens and authoring guidance.
 - Keep longer prose only where sequencing or resolution order matters.
 
-### `~/git_docs/*`
+### Merge-request and release-note drafts
 
-- Merge-request docs must keep the required MR section contract.
-- Release notes should stay user- and operator-facing, not turn into engineering change logs.
+- Merge-request drafts must keep the required MR section contract.
+- Release-note drafts should stay user- and operator-facing, not turn into engineering change logs.
 
 ---
 

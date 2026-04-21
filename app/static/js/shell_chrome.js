@@ -679,7 +679,7 @@
 
   // Hook setTabStatus so TABS and LAST EXIT re-render whenever any tab changes
   // state — LAST EXIT dims to muted while the active tab is running (stale
-  // metadata per the Workstream D semantic contract).
+  // metadata per the semantic color contract).
   if (typeof global.setTabStatus === 'function') {
     const originalSetTabStatus = global.setTabStatus;
     global.setTabStatus = function wrappedSetTabStatus(...args) {

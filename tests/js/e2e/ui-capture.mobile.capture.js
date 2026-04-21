@@ -107,6 +107,20 @@ const scenes = [
     },
   },
   {
+    slug: 'main-running-indicator-chip',
+    title: 'Main UI - running-indicator chip with two inactive running tabs',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshHome(page, { themeName })
+      await runLongCaptureCommandMobile(page)
+      await page.locator('#new-tab-btn').click()
+      await runLongCaptureCommandMobile(page)
+      await page.locator('#new-tab-btn').click()
+      await expect(page.locator('#mobile-running-chip')).toBeVisible()
+      await expect(page.locator('#mobile-running-chip .mobile-running-count')).toHaveText('2')
+    },
+  },
+  {
     slug: 'kill-confirmation-modal',
     title: 'Main UI - kill confirmation modal',
     route: '/',
@@ -168,7 +182,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommandMobile(page, 'ping -c 4 127.0.0.1')
+      await runCommandMobile(page, 'ping -c 4 darklab.sh')
       await page.evaluate(() => {
         if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed')
       })
@@ -181,7 +195,7 @@ const scenes = [
     route: '/',
     run: async (page, themeName) => {
       await freshHome(page, { themeName })
-      await runCommandMobile(page, 'ping -c 4 127.0.0.1')
+      await runCommandMobile(page, 'ping -c 4 darklab.sh')
       await page.evaluate(() => {
         if (typeof applyLineNumberPreference === 'function') applyLineNumberPreference('on')
         if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed')

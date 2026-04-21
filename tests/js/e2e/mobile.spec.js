@@ -313,9 +313,9 @@ test.describe('mobile menu', () => {
     await expect(page.locator('.tab-panel.active [data-action="permalink"]')).not.toBeFocused()
     await page.locator('.tab-panel.active [data-action="copy"]').click()
     await expect(page.locator('.tab-panel.active [data-action="copy"]')).not.toBeFocused()
-    // Clear moved into the hamburger menu on mobile (phase 4 item 2) — the
-    // per-tab clear button is hidden under `body.mobile-terminal-mode`, so
-    // exercising clear with the keyboard open now goes through the menu.
+    // Clear lives in the hamburger menu on mobile — the per-tab clear
+    // button is hidden under `body.mobile-terminal-mode`, so exercising
+    // clear with the keyboard open goes through the menu.
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu-sheet')).not.toHaveClass(/u-hidden/)
     await page.locator('#mobile-menu-sheet [data-menu-action="clear"]').click()
@@ -353,6 +353,7 @@ test.describe('mobile menu', () => {
   })
 
   test('closing a mobile tab does not leave the close button focused', async ({ page }) => {
+    await ensurePromptReady(page)
     await page.locator('#new-tab-btn').click()
     await runCommandMobile(page, 'hostname')
 
@@ -384,6 +385,7 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile tabs bar can overflow and scroll horizontally', async ({ page }) => {
+    await ensurePromptReady(page)
     const overflowCmds = ['hostname', 'date', 'uptime', 'whoami', 'version', 'fortune']
     for (let i = 0; i < 6; i++) {
       await page.locator('#new-tab-btn').click()
@@ -521,8 +523,15 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
 
-    // Tap the scrim (the canonical "outside the sheet" surface)
-    await page.locator('#mobile-menu-sheet-scrim').click()
+    // Tap the scrim (the canonical "outside the sheet" surface). The scrim is
+    // `position: fixed; inset: 0` so its bounding-box center is the viewport
+    // center, which sits behind the bottom-anchored menu sheet (z-index 101 >
+    // scrim's 100). A bare `.click()` targets that center and Playwright
+    // flags it as intercepted — repeatedly, because expander hover inside
+    // the sheet keeps mutating which element is under the pointer — until
+    // the 30s actionability timeout. Click near the top-left corner where
+    // the scrim is guaranteed to be unobstructed.
+    await page.locator('#mobile-menu-sheet-scrim').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#mobile-menu-sheet')).toBeHidden()
   })
 

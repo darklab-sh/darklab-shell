@@ -196,9 +196,9 @@
     flex: 1 1 auto;
     min-width: 0;
   }
-  /* ── Mobile tab bar (Phase 5) ──
+  /* ── Mobile tab bar ──
      Rounded-top pill tabs with drag grip, active-only close, and inset green
-     glow on active. See mobile_ui_refactor v2 handoff for the source design. */
+     glow on active. */
   body.mobile-terminal-mode .tabs-bar {
     background: var(--theme-panel-alt-bg);
     border-bottom: 1px solid var(--border-bright);
@@ -401,7 +401,7 @@
     -webkit-touch-callout: none;
   }
 
-  /* ── Running-state indicator (Phase 2 Workstream E prelude) ──
+  /* ── Running-state indicator ──
      The mobile status pill reflects only the active tab, so a long
      run on a backgrounded tab is otherwise invisible. Two signals
      cover this: a trailing chip that shows the count of running

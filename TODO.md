@@ -64,281 +64,138 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 - **Cross-module UI event flow is still coupled through wrappers and observers** — `shell_chrome.js` and `mobile_chrome.js` currently mirror shared UI state by wrapping globals (`renderHistory`, `renderRailWorkflows`, `closeWorkflows`, `refreshHistoryPanel`, `setTabStatus`), and by using three `MutationObserver`s in `mobile_chrome.js` (`:107` on the status pill `class` attr, `:113` on the run-timer `characterData`, `:699` on the body `class` list) to mirror state changes they have no other way to hear about. Replace those ad hoc integrations with a small UI event bus or equivalent explicit publish/subscribe layer so cross-module synchronization does not depend on monkey-patching exported functions.
 
-### Whole-App UI Review Follow-Through Plan
+### CHANGELOG.md v1.5 Regrouping Plan
 
-- **Goal** — turn the full-app UI review into an incremental implementation plan that fixes the highest-signal UX issues first, then consolidates repeated patterns into shared UI primitives and stronger visual semantics.
+- **Goal** — improve scanability of the very large `v1.5` section by grouping related entries under a small number of explicit sub-sections, without dropping detail or rewriting the underlying entry content.
 
-- **Source brief** — full rationale, review findings, guiding principles, and ownership notes live in `~/git_docs/ui_review_plan.md`. This TODO entry is the executable task list; consult the source when a phase bullet needs more context.
+- **Why this is needed**
+  - `v1.5` currently reads as one long flat stream, even when 4-10 adjacent entries are clearly part of the same initiative.
+  - The `v1.5` UI work is really one release-level initiative with three connected parts: the desktop UI refactor, the mobile UI refactor, and the later polish/consistency pass that addressed issues revealed by both refactors. As separate flat bullets, that story is fragmented and visually competes with unrelated fixes like `session-token revoke` or reverse-i-search regressions.
+  - Several other repeated themes also deserve grouping so readers can skim by initiative instead of reading every bullet in order.
 
-- **Gate** — after every phase, `python -m pytest tests/py/test_docs.py -q` (21/21) and `npm run lint:md` stay green. Design-system surfaces that change visually must be re-captured in the UI screenshot scenes so regressions are visible in the next design pack.
+- **Constraints**
+  - Keep the existing T1/T2/T7 structures from `DOCS_STANDARDS.md`; this is regrouping work, not compression work.
+  - Do not reduce technical detail inside the entries.
+  - Do not merge distinct entries into one giant umbrella unless the before/after/tests story is genuinely shared.
+  - Preserve release chronology inside each new group where it still helps tell the implementation story.
 
-- **Milestones** — the work ships as five sequential milestones. Each milestone is its own branch (`ui_review_milestone_N`) off `v1.5`, with commits per phase item completed, merged back to `v1.5` when the milestone is done.
+#### Phase 1 — Add sub-section structure to `v1.5`
 
-  - **Milestone 1 — trust, clarity, and consistency** (Phase 1 + Workstream E prelude)
-    - rail workflow title readability (Phase 1 item 1)
-    - desktop theme active-state indicator (Phase 1 item 3)
-    - history destructive-action hierarchy (Phase 1 item 2)
-    - disclosure-language rules documented and applied to the highest-traffic surfaces (Phase 1 item 4)
-    - mobile non-active running-state indicator (Phase 2 Workstream E prelude, shipped alongside Phase 1 because it is a trust fix, not just polish)
-    - That set addresses the sharpest issues from the review while establishing the design-system rules the rest of the cleanup depends on.
+- Add lightweight sub-heads inside `## [1.5]` so the current `### Added / Changed / Fixed / Removed` blocks are not the only navigation layer.
+- Use a small number of stable group labels rather than many tiny buckets.
+- Preferred shape:
+  - `UI Overhaul`
+  - `Keyboard Shortcuts and Discoverability`
+  - `Visual QA, Demo, and Capture Pipeline`
+  - `Session Identity and History`
+  - `Search, Autocomplete, and Prompt UX`
+  - `Mobile Shell and Sheet Behavior`
+  - `Testing, CI, and Smoke Infrastructure`
+  - `Documentation and Structure`
 
-  - **Milestone 2 — shared system primitives** (Phase 2 Workstreams A–D; E shipped in milestone 1)
-    - button hierarchy and destructive semantics (Workstream A)
-    - confirmation-dialog primitive (Workstream B)
-    - themed desktop form controls (Workstream C)
-    - color-semantics audit (Workstream D)
+#### Phase 2 — Regroup the full `v1.5` UI initiative as one umbrella
 
-  - **Milestone 3 — desktop surface polish** (Phase 3)
-    - rail collapsed-state behavior, snapshot metadata hierarchy, status-bar wording, compact dialog spacing, workflow modal usability, save-menu copy, permalink prompt consistency, diagnostics page clarity, toolbar and discoverability polish.
+- Pull all three UI efforts under one explicit parent grouping instead of treating them as separate top-level initiatives mixed through the full `### Added` / `### Changed` / `### Fixed` stream.
+- Preferred umbrella shape:
+  - `Desktop UI Refactor`
+  - `Mobile UI Refactor`
+  - `UI Polish and Consistency`
+- The guiding rule is release narrative over exact commit chronology: entries should live where they best explain the user-facing `v1.5` UI story, even if that means some unrelated smaller fixes sit above or below the umbrella section.
+- Within the umbrella:
+  - keep desktop-refactor entries together
+  - keep mobile-refactor entries together
+  - keep the later polish / consistency / contract-hardening items together
+- Do not use milestone, phase, or branch-language headings in the changelog structure. Group by what changed from the reader’s perspective, not by how the work was implemented.
+- Keep the individual entries intact; this is grouping work, not content merge or chronology rewrite.
 
-  - **Milestone 4 — mobile surface polish** (Phase 4)
-    - history-sheet clarity, delete-all confirmation on narrow screens, main terminal action-row density, filter-chip affordance clarity, mobile menu toggle ergonomics, mobile search clarity.
+#### Phase 3 — Regroup the keyboard/discoverability work
 
-  - **Milestone 5 — cross-cutting review and follow-through** (Phase 5)
-    - audit new patterns against UI screenshot capture scenes, update theme audits and interaction-contract tests where new semantics become a shared contract, reflect finalized design-system rules in `FEATURES.md` / `ARCHITECTURE.md` / `DECISIONS.md` as appropriate.
+- Group the three related `### Added` entries:
+  - `Alt+/ FAQ shortcut plus tooltip audit`
+  - `Desktop chrome keyboard shortcuts`
+  - `Dedicated keyboard-shortcuts overlay with a single source of truth`
+- Present them as one `Keyboard Shortcuts and Discoverability` subsection with the three entries underneath.
+- Keep the later shortcut-reference cleanup/grouping entries in the same broad area if they remain in `### Changed`.
 
-- **Open product decisions** — resolve these before coding the related phase items so the work does not churn mid-implementation. Decisions are grouped by the phase they gate; resolved decisions carry an inline `Decision:` line.
-  - **Phase 1 decisions**
-    - **Rail strategy** — wrap workflow titles, widen the expanded rail, or tooltip-only fallback? (gates Phase 1 item 1)
-      - Decision: Wrap workflow titles
-    - **Wrap line cap** — wrap to two lines maximum with truncation beyond, or allow unlimited wrapping? Pinning this prevents an unusually long custom workflow from breaking rail rhythm later. (gates Phase 1 item 1)
-      - Decision: Wrap to two lines maximum. After two lines, truncate with ... and a hover tool-tip with full text.
-    - **History actions** — overflow menu, or always-visible delete with destructive styling? (gates Phase 1 item 2)
-      - Decision: always visible delete with destructive styling
-    - **Destructive styling treatment** — red text, red icon, red on hover only, or ghost button with red label? Same treatment must apply to desktop history rows, mobile history cards, and the delete-all entry point so all three share one visual contract. (gates Phase 1 item 2)
-      - Decision: current button container with red border (and red label text), shared across desktop rows and mobile cards. Same format on delete-all
-    - **Theme active-state vehicle** — visual card treatment alone, or also a textual `active` label/badge? Decide before the audit so all shipped themes get the same treatment in one pass. (gates Phase 1 item 3)
-      - Decision: Visual card treatment alone
-    - **Disclosure-rule boundary cases** — for the `▸/▾` (expand/collapse) vs `>` (drill-in/navigation) rule, how do these edge cases resolve: menu rows that open a sheet (drill-in or expand?), popovers and dropdowns (glyph or none?), and composite cases (a drill-in row whose sheet contains expand/collapse subsections)? Without this the audit will produce inconsistent calls. (gates Phase 1 item 4)
-      - Meta-rule: glyph follows actual behavior, not visual hierarchy. Apply this rule to resolve every disclosure-language question; the cases below are concrete applications of it.
-      - Menu rows that open a sheet: Use `>` (sheets count as navigation to a new surface).
-      - Popovers and dropdowns: rotating `▾` (permitted only on dropdown/popover triggers; not interchangeable with `▸/▾` block disclosure).
-      - Composite cases: glyph must match actual behavior. If a row expands inline, use `▾`; if it navigates to a new surface, use `>`. Audit and fix per row — likely a small set (e.g. the mobile menu `timestamps` row swaps `›` → `▾` because it expands an inline submenu rather than navigating).
-      - Toggle rows take no disclosure glyph; the toggle state label (`off` / `on`) is the affordance (e.g. the mobile menu `line numbers` row drops its `›`).
-  - **Phase 2 decisions**
-    - **Mobile running-state treatment** — header pill augmentation, hamburger badge, or dedicated jump-to-running affordance? (gates Phase 2 Workstream E)
-      - Decision: tab-bar edge glow + docked running-count chip on the tab bar. The pulsing edge fade signals that a running tab is scrolled off-screen and indicates which direction to scroll; the docked chip (e.g. `● 2`) appears only when background tabs are running and taps to jump to the next running tab. The header status pill is left untouched and remains the canonical run-state surface for the active tab.
-    - **Chip placement** — leading or trailing edge of the tab bar? Trailing matches notification-badge convention; leading lands earlier in the natural reading sweep. (gates Phase 2 Workstream E)
-      - Decision: Trailing edge of the tab bar
-    - **Chip count semantics** — does the count include the active tab if it is also running, or only background tabs? Background-only avoids double-signalling what the pill already shows. (gates Phase 2 Workstream E)
-      - Decision: all running non-active tabs
-    - **Chip tap behavior** — cycle through running tabs on repeated taps, or always jump to a fixed target (oldest-running, or nearest-off-screen)? Cycling scales with many runs; fixed-target is more predictable. (gates Phase 2 Workstream E)
-      - Decision: Cycle through running tabs in order of their tab row placement.
-    - **Button role tokens** — do the four roles (`primary` / `secondary` / `ghost` / `destructive`) reuse existing CSS variables, or introduce new role tokens? Affects every theme file and downstream theme contributions. (gates Phase 2 Workstream A)
-      - Decision: introduce new role tokens (`--btn-primary-bg`, `--btn-primary-fg`, `--btn-destructive-bg`, etc.) that default to existing theme vars where a reasonable mapping exists. Pure reuse forces the role system to inherit whatever semantic looseness the theme vars currently have; pure-new balloons the theme surface. Layered tokens (new names, default-to-existing values) give migration headroom without doubling theme files.
-    - **Button class naming convention** — composable (`btn btn-primary btn-danger`) vs pre-composed (`btn btn-primary-danger`, mirroring today's `modal-primary-danger`)? Affects every template and every theme-override selector downstream. (gates Phase 2 Workstream A)
-      - Decision: composable `btn btn-{role} btn-{tone}`. Pre-composed explodes combinatorially (4 roles × 3–4 tones) and makes later additions painful; composable is idiomatic, matches how the rest of the codebase layers classes, and lets tone live independently of role in markup.
-    - **Button tone palette** — keep `warning` as a distinct tone from `danger`, or fold caution into the yellow tier from Workstream D? Today's modal classes encode `-accent` / `-neutral` / `-warning` / `-danger`. (gates Phase 2 Workstream A)
-      - Decision: three tones — `accent` (themed, default on primary), `warning` (yellow, reversible destructive / caution), `danger` (red, irreversible). Drop `neutral` because the `ghost` role already covers no-emphasis. Aligns 1:1 with Workstream D's color semantics.
-    - **Reversible-destructive tier** — is "reversible destructive / caution" its own role (`cautious-destructive`), a tone on existing roles (`destructive warning`), or absorbed into `destructive`? Pinning this decides how delete-non-favorites, clear-output, and similar differ visually from kill / delete-all. (gates Phase 2 Workstreams A + D)
-      - Decision: tone, not role. `destructive warning` = reversible (delete-non-favorites, clear-output); `destructive danger` = irreversible (kill, delete-all). Keeps the role list at four and gives destructive two visual weights without inventing a fifth role.
-    - **Disabled and loading states** — define one shared disabled treatment for every role, and a loading/spinner state for primary actions that trigger async work (run, kill, delete)? Without this pinned, each workstream reimplements. (gates Phase 2 Workstream A)
-      - Decision: yes — one disabled treatment (reduced opacity + `cursor: not-allowed` + `aria-disabled`) uniformly applied, and a loading state only on `primary` and `destructive` primary (spinner replaces label). `ghost` and `secondary` skip loading state.
-    - **Icon-only button variants** — does every role permit icon-only rendering, or is icon-only reserved for `ghost` + the dedicated `close-btn` primitive? (gates Phase 2 Workstream A)
-      - Decision: allow icon-only on `ghost` only (plus `close-btn`). `primary`, `secondary`, and `destructive` always render a label — prevents unlabeled destructive buttons, which are a known usability hazard.
-    - **Button size scale** — single size, or a sm/md/lg scale? Modal footers and history-row actions currently use visibly different heights. (gates Phase 2 Workstream A)
-      - Decision: two sizes — default (modal footers, terminal action row, chrome toolbar) and compact (history-row actions, mobile sheet chips, inline row actions). Avoid a third tier until a concrete third use case appears.
-    - **Confirmation primitive scope** — does the new primitive replace the current modal helper, or wrap it? Determines whether kill, history-delete, and share-redaction confirmations migrate in one PR or incrementally. (gates Phase 2 Workstream B)
-      Decision: Replace it. And all modular code needs to be implemented via the helpers where possible for easy re-use in the future.
-    - **Type-to-confirm gate** — do any destructive confirmations require typing a word (`DELETE`) to commit, or is destructive styling + explicit label ("Kill", "Delete All") sufficient? (gates Phase 2 Workstream B)
-      - Decision: no type-to-confirm. The operator population will read it as friction and the destructive styling + unambiguous button label already communicates gravity. Revisit only if an action with wider blast radius than single-run deletion is ever added.
-    - **Default-focus policy in confirmation dialogs** — Enter defaults to the destructive action, or to cancel? Affects keyboard ergonomics and accidental commits. (gates Phase 2 Workstream B)
-      - Decision: Enter defaults to cancel (safe action). Destructive commit requires an explicit click or explicit tab-to-focus-then-Enter. Matches macOS and long-standing web convention.
-    - **Mobile stacked-button layout trigger** — when does the confirmation primitive switch from side-by-side to stacked buttons? Viewport breakpoint, button-count threshold, or always-stack on mobile? (gates Phase 2 Workstream B)
-      - Decision: stack when viewport ≤ 480px OR when the dialog hosts 3+ actions at any width. 480px tracks the existing mobile-terminal-mode breakpoint; 3+ actions visually crowd side-by-side on any screen.
-    - **Desktop form controls** — fully custom desktop selects and checkboxes, or minimal restyle of native controls first? (gates Phase 2 Workstream C)
-      - Decision: minimal restyle of native controls first
-    - **Scope of form-control types in Milestone 2** — Workstream C names `select` + `checkbox`. What about radio, textarea, number input, range, text input? Without an explicit scope, each field relitigated per surface. (gates Phase 2 Workstream C)
-      - Decision: include `select`, `checkbox`, and `radio` in Milestone 2. Defer `textarea`, `text input`, `number input`, `range` — none are used in the Options modal (the Milestone 2 target surface), so deferring keeps scope bounded without creating visible gaps.
-    - **Native-limit acceptance for `<select>`** — minimal restyle can't touch the open dropdown list in most browsers. Accept that for Milestone 2, or graduate to a full custom select? (gates Phase 2 Workstream C)
-      - Decision: accept native dropdown rendering in Milestone 2. Custom select popovers are a high-effort, high-maintenance primitive (keyboard nav, focus trap, screen-reader support); the closed-state trigger is where ~95% of the legibility problem lives.
-    - **Per-theme legibility bar for custom controls** — minimum contrast and state-visibility threshold a custom select or checkbox must hit across every shipped theme, set up front so themes do not need to be revisited per workstream. (gates Phase 2 Workstream C)
-      - Decision: adopt WCAG AA (4.5:1 text, 3:1 UI) for label/value text on controls, and require visible focus outline + checked/hover state distinct from resting state across every shipped theme. Run the existing theme capture pack against the Options modal as verification.
-    - **Color-semantics yellow scope** — does the new "yellow = caution / reversible / expiring" rule force a token rename across themes, or only a usage audit on existing tokens? Renaming touches every theme; usage-only is local. (gates Phase 2 Workstream D)
-      - Decision: usage audit only in Milestone 2 — keep existing yellow tokens, fix the violations (snapshot metadata, diagnostics values, misapplied warning-like metadata). Defer a token rename to Phase 5 or a follow-up milestone; the rename adds churn without buying a user-visible improvement now.
-    - **Dim token identity** — "dim = neutral metadata" needs a concrete value. Dedicated theme var, foreground alpha, or dedicated gray? (gates Phase 2 Workstream D)
-      - Decision: reuse the existing `--muted` token (already defined per-theme as a dedicated gray, already controls its own dim-to-foreground relationship). The earlier draft of this decision called for a new `--theme-fg-dim` token, but on implementation `--muted` was found to already satisfy the contract (per-theme, decoupled from foreground alpha), so a parallel token would have been pure duplication. Rule: "dim" in the semantic color contract maps to `--muted`. Foreground-with-alpha remains rejected because alpha renders inconsistently against themed panels vs terminal background.
-    - **Severity tiers within a semantic color** — binary (color = semantic) or subtle vs strong tiers per color? (gates Phase 2 Workstream D)
-      - Decision: binary. If a surface needs a softer treatment (e.g. dim snapshot expiry), use the dim token plus the semantic color on the label only, not a second intensity tier. Keeps the color system teachable: one color, one meaning.
-    - **Per-theme guarantee for semantic colors** — must every shipped theme implement red / yellow / green / dim distinctly, or may themes collapse caution into danger? (gates Phase 2 Workstream D)
-      - Decision: all four must be distinct in every shipped theme. Collapsing caution into danger defeats the Workstream D audit's purpose (reversible vs irreversible). Add a theme-audit step to Phase 5 verifying distinctness.
-    - **Token source of truth (cross-cutting)** — where do the new button-role and color-semantic tokens live? In the existing theme files, a new `design-tokens.css`, or derived from base theme vars? (gates Phase 2 Workstreams A + D)
-      - Decision: extend the existing theme files. Add the new semantic tokens alongside current theme vars, referencing base tokens where a clean mapping exists. Avoids introducing a new file type and keeps each theme self-contained.
-    - **Workstream ordering inside Milestone 2** — ship A → B → C → D sequentially, or one consolidated refactor? B depends on A; A's warning tone depends on D; C is independent. (gates Milestone 2 sequencing)
-      - Decision: D (color semantics) → A (buttons, which consume D's tones) → B (confirmation primitive, which consumes A) → C (form controls, independent, may run in parallel with any of the above). Each ships as its own commit inside the Milestone 2 branch; merge back to `v1.5` when all four are done.
-    - **Theme-validation cadence (cross-cutting)** — validate across all shipped themes before merging each workstream, or ship against the default theme and validate others post-hoc? (gates Phase 2 Workstreams A + C + D)
-      - Decision: validate across all shipped themes before merging each workstream. Re-running the existing per-theme capture scenes is cheap; post-hoc validation means a theme-specific regression costs a re-investigation of already-merged work.
-  - **Phase 3 decisions**
-    - **Workflow execution** — `run` per step only, or `run` plus `run all` in the same pass? (gates Phase 3 workflow-modal item)
-      - Decision: Run per step only because the workflow commands are only examples. Unless we add inputs into the workflow form such as "target" or "domain", a run all wouldn't make sense.
-    - **Rail collapsed-state auto-switch** — when both rail sections are collapsed, auto-switch to the skinny icon rail, or stay as-is? Behavior change vs visual-only. (gates Phase 3 rail collapsed-state item)
-      - Decision (proposed): stay as-is — keep section collapse and rail collapse as two independent affordances. The skinny icon rail is already reachable via the explicit `«` toggle in `rail-collapse-btn`; auto-switching on section collapse couples two orthogonal user intents (hide section content vs. shrink the whole rail) and would make section collapse a hidden secondary way to toggle the rail. Phase 3 scope here is limited to making the collapsed-section state communicate navigation clearly (section headers still readable, section chev still rotates), not adding implicit mode transitions.
-    - **Snapshot metadata critical set** — which fields stay emphasized in the snapshot header (expiry only, or also redaction mode / share state)? (gates Phase 3 snapshot metadata item)
-      - Decision (proposed): expiry stays emphasized (`--text`); redaction mode kept visible but muted (`--muted`) with its semantic color only when non-default (i.e., amber `--amber` when redacted, since "caution / reversible" = the viewer is seeing a filtered view of the original output); share state drops to `--muted` unconditionally (it's derivable from context — you're looking at a share snapshot, so `shared` is implicit). Rationale aligns with the Workstream D contract: time-critical state gets emphasis, contextual flags get dim, and only the state that carries a warning semantic reaches for a semantic color.
-    - **Status-bar wording** — concrete replacements for `RUNS 1 / 2`; and during an active run, does `LAST EXIT` dim, relabel, or hide? (gates Phase 3 status-bar item)
-      - Decision (proposed): the `RUNS` pill is actually counting tabs (`running / total` in `shell_chrome.js::_renderRuns`), not lifetime run count — rename the pill label to `TABS` and render as `TABS 2 · 1 active` when any tab is running, `TABS 2` when none are. The "1 / 2" numerator/denominator ambiguity goes away and the label matches what the number actually measures. `LAST EXIT` during an active run: dim to `--muted` (keep label and value in place, lower contrast). Don't relabel — "LAST EXIT" is still accurate during a new run since it describes the prior run's exit. Don't hide — collapsing/re-showing the pill jitters the HUD layout every time a run starts or ends. Dim matches the Workstream D contract (stale metadata = muted).
-    - **Save-menu labels** — concrete new wording to replace `txt / html / pdf` (e.g. `Plain text` / `Themed page` / `PDF`)? (gates Phase 3 save-menu item)
-      - Decision (proposed): `Plain text` · `Themed HTML` · `PDF document`. Symmetric format-noun across all three; avoids `Themed page` (ambiguous — web page? app page?) and avoids bare `PDF` (drops the format/extension cue that the other two carry). Extensions stay implied by the label rather than appended in parens, since the save-as dialog already shows and lets the user edit the extension.
-    - **Permalink prompt fidelity** — preserve full prompt identity on permalink pages, or keep the reduced echo? Yes/no decision; affects snapshot HTML output. (gates Phase 3 permalink prompt item)
-      - Decision: Preserve full prompt identity. The prompt is completely synthetic and is not based on actual user or command details. It's an instance defined setting that is purely cosmetic.
-    - **Diagnostics split axis** — which buckets does the activity section split into (counts vs status vs config, or some other axis)? (gates Phase 3 diagnostics item)
-      - Decision: split the single mixed `Activity` card into two sibling sections — **Activity** (time-window run counts: last hour / today / this week / all-time) and **Outcomes** (success / failed / incomplete). A broader three-way split (Counts / Status / Config) was considered but rejected: the existing top-level cards (Database, Redis, Vendor Assets, Config) already carry the Status and Config axes independently with their own headings, so folding them into the Activity split would duplicate structure. The axis that was genuinely mixed was inside the Activity card itself — time-bucket counts in the left column, outcome counts in the right column under one heading. The chosen split isolates those two concept types under their own headings while leaving the live-status cards untouched, and preserves the existing Workstream D semantic color usage (diag-ok / diag-fail remain on the outcome-count rows only). The generated-at timestamp lives under the diag header (not inside a card) so it annotates the whole page rather than one section.
-  - **Phase 4 decisions**
-    - **Mobile menu toggle conversion** — convert line-numbers and timestamps from drill-in rows to direct toggles, or keep them as drill-in rows? Changes the menu's interaction model. (gates Phase 4 mobile menu item)
-    - **Mobile action-row trim** — confirm `clear` moves to the menu; decide whether any other action (copy, share, save) also moves. (gates Phase 4 main terminal action-row item)
-    - **Mobile search layout** — single row with a counter, or secondary row for advanced toggles when width is tight? (gates Phase 4 mobile search item)
-  - **Phase 5 decisions**
-    - **Documentation home for finalized rules** — pick the default home (`FEATURES.md`, `ARCHITECTURE.md`, or `DECISIONS.md`) for the durable design-system rules established in Phases 1–2: button roles, disclosure language, color semantics, and confirmation primitive contract. Pinning this now prevents each workstream from re-litigating where its rules live. (gates Phase 5)
+#### Phase 4 — Regroup the capture/demo/visual-review work
 
-#### Phase 1 — Must-fix clarity issues
+- Group these entries under a `Visual QA, Demo, and Capture Pipeline` subsection:
+  - `UI screenshot capture pipeline for design review, theming, and visual QA`
+  - Milestone 5 Phase 5 item 1 capture-scene audit
+  - `Demo recording viewports bumped to larger, more modern screen sizes`
+  - any adjacent capture/demo-only fixes that are really pipeline maintenance rather than product behavior
+- Treat the capture pipeline as one evolving initiative rather than separate isolated bullets.
 
-- **Desktop rail workflow title truncation**
-  - Decide between three treatments: two-line wrapping, wider expanded rail, or fallback truncation with tooltip support.
-  - Audit built-in workflow names against the current rail width and identify which titles currently read as broken rather than intentionally abbreviated.
-  - Implement the chosen rail treatment and verify the rail still feels balanced with both `Recent` and `Workflows` expanded.
-  - Add coverage for long workflow names in desktop UI capture scenes so truncation regressions are visible in design packs.
+#### Phase 5 — Regroup the session/history identity work
 
-- **History action hierarchy on desktop and mobile**
-  - Re-rank history-row actions so destructive actions no longer compete visually with safe utility actions.
-  - Prototype an overflow/action-sheet treatment for `permalink` and `delete`, keeping `copy` as the primary visible action.
-  - Apply the same hierarchy rules to desktop history rows and mobile history cards/sheets.
-  - Revisit delete-all entry points so destructive actions remain discoverable without reading as peer-primary actions.
+- Create one `Session Identity and History` subsection for the long cluster that currently spans:
+  - persistent session tokens
+  - server-side starred commands
+  - history drawer filtering/full-text search
+  - reconnect active runs after reload
+  - session restore for tabs and drafts
+  - later `session-token` fixes and migration-count fixes
+  - history star sync / bulk-clear sync / stale star fallback fixes
+- Keep identity, migration, stars, history persistence, and restore continuity together so readers can follow the session-model story in one place.
 
-- **Desktop theme modal active-state indicator**
-  - Mirror the stronger active-theme treatment already present on mobile.
-  - Add an explicit selected-state indicator on desktop cards, optionally with a small `active` label or badge.
-  - Verify selected-theme clarity across both desktop and mobile theme pickers in all shipped themes.
+#### Phase 6 — Regroup the search/autocomplete/prompt UX work
 
-- **Disclosure affordance unification**
-  - Standardize disclosure icon language: `▸/▾` for expand-collapse, `>` only for drill-in or navigation.
-  - Audit FAQ, rail section headers, save menus, mobile menu rows, and any remaining popovers/dropdowns that still imply a different disclosure contract.
-  - Update icons, affordance spacing, and any paired labels/tooltips so users can infer the interaction type from the affordance alone.
+- Create one `Search, Autocomplete, and Prompt UX` subsection spanning:
+  - more bash-like tab completion
+  - context-aware autocomplete
+  - pipe-stage autocomplete
+  - search/full-text output search
+  - reverse-i-search fixes
+  - search-bar visibility and search-helper regressions
+  - composer/prompt-state-drive refactor bullets where they are primarily prompt UX rather than architecture
+- Keep all hist-search, autocomplete, and prompt-entry behavior close together instead of scattering them across Added/Fixed/Changed with unrelated infra entries between them.
 
-#### Phase 2 — Shared system workstreams
+#### Phase 7 — Regroup the mobile-shell behavior work
 
-- **Workstream A: button hierarchy and destructive semantics**
-  - Ship a closed set of five button primitives that every clickable control in the app must map to — no surface-scoped one-offs:
-    - `btn` with role × tone: roles `primary` / `secondary` / `ghost` / `destructive`; tones compose with role where needed (e.g. a primary destructive). Reserve `primary` for the dominant action in a cluster; use `ghost` for low-emphasis utilities; `destructive` must never read as a safe peer-primary action.
-    - `nav-item` — sidebar rail items and mobile menu rows (navigation, not CTA). Replaces `rail-nav-item` and `menu-item` / `menu-subitem`.
-    - `close-btn` — the single icon-close primitive. Replaces `faq-close`, `workflows-close`, `shortcuts-close`, `theme-close`, `options-close`, `history-panel-close`, `search-close-btn`, and `sheet-close`.
-    - `toggle-btn` — pressed-state controls driven by `aria-pressed`. Replaces `search-toggle` and `menu-item-toggle`-style usage.
-    - `kb-key` — mobile on-screen keyboard strip (input surrogate, kept distinct from CTA buttons).
-  - Audit current usage across history rows, modal actions, toolbar buttons, rail/menu actions, terminal action rows, mobile sheets, and panel headers. Map every existing class (`term-action-btn`, `chrome-btn`, `modal-primary` + tone suffixes, `modal-secondary` + tone suffixes, `history-action-btn`, `sheet-clear-btn`, `tabs-scroll-btn`, `rail-collapse-btn`, `diag-back-btn`, `history-panel-clear-all`, `history-filter-clear-btn`, `history-mobile-filters-toggle`, the eight `*-close` classes) onto exactly one of the five primitives.
-  - Treat surface-scoped remnants as defects: after migration, no template or JS-created button should carry a class outside the five primitives (plus layout/positioning classes). Add a lint or grep-based guard to catch regressions.
-  - Apply the same role system to mobile action sheets and confirmation dialogs.
+- Create one `Mobile Shell and Sheet Behavior` subsection for the repeated mobile-only cluster:
+  - mobile shell rebuild and shell polish
+  - mobile keyboard/helper/composer fixes
+  - mobile bottom-sheet / drag-handle unification
+  - mobile search close affordance
+  - mobile output-wrap, timer, follow-tail, and running-indicator-adjacent fixes
+- Keep purely mobile UI behavior separate from the broader desktop/UI-review milestone group so the changelog is readable by platform concern.
 
-- **Workstream B: confirmation-dialog primitive**
-  - Standardize one confirmation-dialog pattern with title, body copy, destructive level, and 1–3 actions.
-  - Normalize sentence-case labels, button placement, spacing, and destructive emphasis.
-  - Support desktop modal layout and mobile stacked-button/narrow-width behavior from the same primitive.
-  - Migrate kill, history delete, share-redaction, and other destructive confirmations onto the same pattern.
+#### Phase 8 — Regroup test/CI/infrastructure maintenance
 
-- **Workstream C: themed desktop form controls**
-  - Design app-native themed `select` and `checkbox` treatments for desktop surfaces.
-  - Apply them first in the Options modal.
-  - Keep native select behavior on mobile unless the themed treatment proves clearly better there too.
-  - Confirm the controls remain legible across all shipped themes.
+- Create one `Testing, CI, and Smoke Infrastructure` subsection that collects:
+  - JavaScript testing framework addition
+  - dependency/version check items
+  - CI jobs for dependency drift and container smoke tests
+  - Container Smoke Test DinD, corpus, timeout, resume, and rate-limit bypass changes
+  - test-only helpers and e2e flake fixes that are not user-facing product changes
+- The goal is to stop these from fragmenting the product-facing changelog narrative.
 
-- **Workstream D: color-semantics audit**
-  - Write explicit semantic color rules:
-    - yellow = caution / reversible destructive / expiring / in-progress (running, live, pending)
-    - red = destructive / kill / error / irreversible
-    - green = completed success / enabled / current-focus (the "done/selected" tier, distinct from in-progress)
-    - dim = neutral metadata
-  - Named exceptions (universal conventions that override strict semantic mapping): starred items (yellow star icon), search-hit highlights (yellow highlight), macOS-style window-control minimize button (amber, decorative chrome).
-  - Audit high-visibility violations first, especially snapshot metadata, diagnostics values, and warning-like metadata that currently overuse yellow.
-  - Update component docs or theme guidance where semantic usage needs to be pinned.
+#### Phase 9 — Regroup documentation/meta work
 
-- **Workstream E: mobile running-state visibility**
-  - Add a system-level mobile indicator when any non-active tab is running.
-  - Evaluate candidate treatments: header badge, hamburger badge, running-tab jump target, or running-count pill.
-  - Keep the desktop model largely unchanged unless a small parity/clarity tweak is justified.
-  - Verify the mobile state model no longer reads as globally idle while another tab is still running.
+- Create one `Documentation and Structure` subsection that collects:
+  - Documentation Structure Refactor
+  - `DOCS_STANDARDS.md` adoption
+  - doc map / standards / structure references
+  - changelog-only or docs-only cleanup entries that are currently mixed with product changes
+- Keep pure documentation work visible, but not interleaved with runtime UX features.
 
-#### Phase 3 — Desktop surface polish
+#### Phase 10 — Final consistency pass
 
-- **Rail collapsed-state behavior**
-  - Evaluate whether the rail should auto-switch to the skinny icon rail when both sections are collapsed.
-  - Confirm the collapsed state still communicates available navigation clearly.
-
-- **Snapshot metadata hierarchy**
-  - Keep expiry emphasized.
-  - Dim non-critical metadata so the snapshot header reads as information hierarchy instead of flat emphasis.
-
-- **Status-bar wording clarity**
-  - Revisit ambiguous labels like `RUNS 1 / 2`.
-  - Decide whether `LAST EXIT` should dim or relabel while an active run is still in progress.
-
-- **Compact dialog spacing**
-  - Tighten body-to-action spacing and action alignment in smaller modals.
-  - Recheck narrow-width dialog rhythm after the shared confirmation primitive lands.
-
-- **Workflow modal usability**
-  - Add per-step `run` affordances.
-  - Align step columns and spacing so multi-step workflows scan more cleanly.
-
-- **Save-menu copy clarity**
-  - Reword `txt / html / pdf` into more descriptive save actions.
-  - Optionally strengthen the visual attachment cue between the trigger and the menu.
-
-- **Permalink prompt consistency**
-  - Decide whether permalink pages should preserve the full prompt identity rather than a reduced prompt echo.
-  - Apply only if it aligns with product intent across normal runs and snapshots.
-
-- **Diagnostics page clarity**
-  - Split activity sections by concept where the page currently mixes counts and status in one block.
-  - Add a generated-at timestamp.
-  - Align diagnostics coloring with the color-semantics audit above.
-
-- **Toolbar and discoverability polish**
-  - Improve autocomplete selected-row visibility.
-  - Highlight substring matches in reverse search.
-  - Add tooltips for icon-only rail or toolbar states where needed.
-  - Explain starred-first grouping in history if the resulting ordering is otherwise unclear.
-  - Revisit decorative traffic-light controls if they remain non-functional visual chrome.
-
-#### Phase 4 — Mobile surface polish
-
-- **History-sheet clarity**
-  - Add stronger card separation or subtle background grouping.
-  - Surface relative timestamps on mobile history rows where they improve scanability.
-
-- **Delete-all confirmation on narrow screens**
-  - Stack buttons vertically when narrow-width layouts would otherwise compress the action row too aggressively.
-  - Keep action emphasis aligned with the shared confirmation primitive.
-
-- **Main terminal action-row density**
-  - Reduce visible action count on narrow devices.
-  - Likely move `clear` into the menu rather than keeping it in the always-visible row.
-
-- **Filter-chip affordance clarity**
-  - Make removable chips visibly removable in both expanded and collapsed filter states.
-  - Verify the chip affordance remains clear inside the mobile history/search flow.
-
-- **Mobile menu toggle ergonomics**
-  - Reassess whether line numbers and timestamps should remain drill-in rows or become direct toggles.
-  - Keep any sub-menu behavior aligned with the disclosure-affordance rules from Phase 1.
-
-- **Mobile search clarity**
-  - Add a visible match counter.
-  - Recheck search-state visibility when combined with active filters or chips.
-
-#### Phase 5 — Cross-cutting review and follow-through
-
-- Audit all new patterns against UI screenshot capture scenes and demo-recording outputs so visual regressions are caught in the design-review pipeline.
-- Update theme audits or interaction-contract tests where the new semantics become part of a shared contract.
-- Reflect any finalized design-system rules in `FEATURES.md`, `ARCHITECTURE.md`, or `DECISIONS.md` if the changes establish durable UI behavior rather than one-off polish.
-- **Allowlist-style button-primitive contract test.** The existing `tests/js/unit/button_primitives.test.js` is a negative blocklist (retired class names cannot reappear). Add a positive contract test that scans `app/templates` and `app/static/js` for button-like surfaces (`<button>` / `role="button"` / `<a class="...">` acting as a CTA) and fails if a button-like element uses a class outside the allowed primitive family (`btn`, `nav-item`, `close-btn`, `toggle-btn`, `kb-key`) plus an explicit exception list. Starting exceptions to encode: `tab-close` (documented permanent exception — circular chrome, per-theme tokens, parent-hover opacity), and any Workstream A deferred classes that remain unmigrated at the time this test lands (`rail-nav-item`, `rail-collapse-btn`, `tabs-scroll-btn`, `chrome-btn`, `history-action-btn`, `sheet-clear-btn`) so the test is accurate today and the exception list shrinks as each deferred class migrates. Raised by the `ui_review.md` Milestone 2 review.
-- **Focus trap for the remaining modal surfaces.** `bindFocusTrap` from `app/static/js/ui_focus_trap.js` was introduced alongside Milestone 3 Phase 3 item 4 and installed on `#confirm-host` only. The four other desktop modals — `#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal` — currently let Tab fall through to the document behind the backdrop. Adopt the shared helper on each modal's open/close lifecycle so keyboard focus stays contained. Scope per modal: one `bindFocusTrap(...)` call on open, one `dispose()` on close. Raised during Milestone 3 Phase 3 item 4 review.
-- **jsdom regression coverage for the mobile running-indicator contract layer.** `app/static/js/mobile_chrome.js::121+` ships meaningful state logic (chip visibility, chip count, tab cycling, `?ri=off` kill switch, edge-glow sync on mutation / resize / scroll) with zero automated coverage. iOS-Safari-specific behaviors (cold-container smooth-scroll drop, momentum-scroll destabilization from sticky/absolute children) cannot run in jsdom, but the contract layer can: mount / unmount, chip renders N when N non-active tabs are running, chip tap activates next running tab in tab-row order, `?ri=off` skips the mount entirely, edge glow sync coordinates from `.tabs-bar.getBoundingClientRect()` when the mocked bar is scrolled. One new `tests/js/unit/mobile_running_indicator.test.js` with ~8 cases. Raised by the `ui_review.md` Milestone 1 review.
+- Re-check that each grouped subsection is still internally coherent and not just “things that happened nearby.”
+- Avoid duplicating entries across groups; pick the primary narrative home for each item.
+- Prefer a few strong groupings over exhaustive taxonomy.
+- Accept that strict commit order may be softened inside the `UI Overhaul` umbrella when that produces a clearer release narrative; do not force unrelated small fixes into the middle of the UI story just to preserve chronology.
+- Re-read `v1.5` top-to-bottom after regrouping to confirm:
+  - the desktop refactor, mobile refactor, and follow-through work now read as one coherent `v1.5` UI initiative
+  - the session/history story is easier to follow
+  - capture/demo/test-infra work no longer interrupts product-facing UX narratives
+  - section headings improve navigation instead of adding noise
 
 ### ARCHITECTURE.md Restructure Plan
 
 - **Goal** — reorganize `ARCHITECTURE.md` around clearer conceptual clusters without reducing technical depth, flattening request-flow narratives, or breaking useful reference sections that already work well.
 
-- **Source brief** — full rationale, problem diagnosis, proposed 14-section order, and the minimal-regrouping fallback live in `~/git_docs/architecture_restructure.md`. This TODO entry is the executable task list; consult the source when a phase bullet needs more context.
-
-- **Gate** — after every phase, `python -m pytest tests/py/test_docs.py -q` (21/21) and `npm run lint:md` stay green. Cross-doc references from `README.md`, `FEATURES.md`, `DECISIONS.md`, `tests/README.md`, and `~/git_docs/*` are re-checked before a phase is marked complete.
+- **Gate** — after every phase, `python -m pytest tests/py/test_docs.py -q` (21/21) and `npm run lint:md` stay green. Cross-doc references from `README.md`, `FEATURES.md`, `DECISIONS.md`, and `tests/README.md` are re-checked before a phase is marked complete.
 
 - **Constraints** — preservation contract honored across all phases:
   - keep the current level of technical detail
@@ -515,7 +372,7 @@ The restructure is successful if:
 - state, persistence, and reload continuity read as one coherent model
 - logging, status, health, and diagnostics read as one observability story
 - the document remains as detailed as it is today, just easier to navigate
-- the doc gate (`tests/py/test_docs.py`, 21/21) and `npm run lint:md` stay green, and cross-doc references from `README.md`, `FEATURES.md`, `DECISIONS.md`, `tests/README.md`, and `~/git_docs/*` still resolve
+- the doc gate (`tests/py/test_docs.py`, 21/21) and `npm run lint:md` stay green, and cross-doc references from `README.md`, `FEATURES.md`, `DECISIONS.md`, and `tests/README.md` still resolve
 
 ---
 

@@ -13,6 +13,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 - [Primary Request Flows](#primary-request-flows)
 - [HTTP Route Inventory](#http-route-inventory)
 - [Front-end Architecture](#front-end-architecture)
+- [Frontend Design System](#frontend-design-system)
 - [Back-end Architecture](#back-end-architecture)
 - [Run Lifecycle](#run-lifecycle)
 - [State And Persistence](#state-and-persistence)
@@ -265,7 +266,7 @@ Modular frontend with no build step. `index.html` is the HTML shell — no inlin
 
 **CSS composition.** CSS is split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, `shell-chrome.css`, and `mobile.css`.
 
-**Desktop shell chrome.** `shell-chrome.css` and its companion `static/js/shell_chrome.js` own the left rail (app title, recent commands, workflows, history, options, theme, FAQ, diag, version footer), the tabbar row, and the bottom HUD bar (eleven live status pills — STATUS, LAST EXIT, RUNS, TRANSPORT, LATENCY, MODE, SESSION, UPTIME, CLOCK, DB, REDIS — plus the `share snapshot / copy / save ▾ / clear` actions and the kill button).
+**Desktop shell chrome.** `shell-chrome.css` and its companion `static/js/shell_chrome.js` own the left rail (app title, recent commands, workflows, history, options, theme, FAQ, diag, version footer), the tabbar row, and the bottom HUD bar (eleven live status pills — STATUS, LAST EXIT, TABS, TRANSPORT, LATENCY, MODE, SESSION, UPTIME, CLOCK, DB, REDIS — plus the `share snapshot / copy / save ▾ / clear` actions and the kill button).
 
 **HUD runtime.** Polls `GET /status` every 15 seconds, measures round-trip latency client-side via `performance.now()`, interpolates server uptime locally between polls, and ticks a UTC wall clock once per second. The `SESSION` pill reflects the active session identity and updates via a `storage` event listener so cross-tab token switches are picked up without a reload. `LAST EXIT` is updated from `runner.js` on every SSE `exit` event and on kill through the `setHudLastExit(code)` global.
 
@@ -314,7 +315,7 @@ This split keeps browser editing semantics predictable without relying on `conte
 
 Each tab is an object: `{ id, label, command, runId, runStart, exitCode, rawLines, killed, pendingKill, st, draftInput }`.
 
-- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when clicking history entries (if a matching tab already exists, that tab is activated)
+- `command` — the command associated with this tab, set both when the user runs a command directly and when a tab is created by loading a run from the history drawer; used for dedup when the history drawer's `restore` action button is pressed (if a matching tab already exists, that tab is activated instead of creating a new one). Row clicks on history entries take the re-run path instead — they inject the command into the composer and do not touch the tab set.
 - `runId` — the UUID from the SSE `started` message, used for kill requests
 - `runStart` — `Date.now()` timestamp set *after* the `$ cmd` prompt line is appended, so the prompt line itself has no elapsed timestamp
 - `rawLines` — array of `{text, cls, tsC, tsE}` objects storing the pre-`ansi_up` text with ANSI codes intact; `tsC` is the clock time (`HH:MM:SS`), `tsE` is the elapsed offset (`+12.3s`) relative to `runStart`. Used for permalink generation and HTML export
@@ -348,6 +349,56 @@ Command editing is split into separate state machines rather than one overloaded
 The structured autocomplete path is intentionally token-aware rather than shell-aware. It inspects command root, current token, and prior tokens to decide whether a suggestion should replace the whole input or only the active token. That preserves the classic-shell feel for long scanner commands without turning the frontend into a general shell parser.
 
 Synthetic post-filters also sit on a distinct path before the normal shell-operator denial logic. `parse_synthetic_postfilter()` in `commands.py` recognizes one narrow `command | helper ...` stage for `grep`, `head`, `tail`, and `wc -l`, validates only the base command, and the `/run` stream applies the selected helper before lines are emitted or persisted. That keeps shell-like helpers app-native without reopening general shell piping or chaining.
+
+---
+
+## Frontend Design System
+
+This section is the single home for the finalized cross-cutting UI rules that apply to every pressable surface, disclosure, color decision, and modal in the shell. Each subsection states the rule, names the shared primitive that enforces it, and points at the owning helper module or theme contract. Rationale and historical context for each rule live in [DECISIONS.md § Frontend Decisions](DECISIONS.md#frontend-decisions).
+
+### Button Primitive Family
+
+Every clickable surface in the shell uses one of a small, allowlisted set of primitive classes. The primary pressable primitive is `.btn`, composed with one role modifier and at most one tone modifier:
+
+- **Role modifiers** (mutually exclusive): `.btn-primary`, `.btn-secondary`, `.btn-ghost`. Role controls the visual weight of the button — primary is the main action in a group, secondary is the alternate, ghost is a low-weight inline action.
+- **Tone modifiers** (mutually exclusive, optional): `.btn-danger`, `.btn-warning`. Tone overlays a semantic color from the theme contract. A tone without a role is not valid.
+
+Four non-`btn` pressable primitives exist for surfaces that are structurally not buttons but still need consistent pressable behavior: `.nav-item` (rail/tab navigation), `.close-btn` (modal and sheet close controls), `.toggle-btn` (on/off switches with no destructive semantics), and `.kb-key` (keyboard-key glyphs in help copy). New pressable surfaces must pick one of these primitives rather than introducing one-off classes.
+
+All pressable primitives route through `bindPressable` in `app/static/js/ui_pressable.js` so click + Enter/Space activation, press-style timing, and composer-refocus behavior stay consistent. A jsdom contract test (`tests/js/unit/button_primitives_allowlist.test.js`) enumerates every `<button>` / `[role="button"]` in the rendered shell and fails CI on any element that does not carry one of the allowed class families; exceptions are listed in `tests/js/fixtures/button_primitive_allowlist.json` with a short reason per entry.
+
+### Disclosure Affordance Rules
+
+Disclosure glyphs in the shell encode a fixed mapping between glyph and behavior. The meta-rule is: **the glyph follows the actual behavior, not the visual hierarchy**. A surface that opens in place is never marked with a drill-in glyph even if it looks like a list row, and a row that navigates away is never marked with a chevron even if it visually resembles an expandable group.
+
+| Glyph | Behavior | Example |
+|-------|----------|---------|
+| `▸` / `▾` | Expand/collapse in place. Glyph indicates state: `▸` closed, `▾` open. | FAQ items, rail section headers, mobile recents advanced-filter toggle |
+| `>` | Drill-in. Opens a different surface or navigates to another view. | Sheet rows that open a sub-sheet |
+| `▾` (static) | Dropdown trigger. Always shown as `▾`; the glyph is a type label, not a state indicator. | `save ▾`, mobile header menus |
+| (no glyph) | Toggle or non-navigational action. No disclosure semantics. | `.toggle-btn`, run-tab pill |
+
+The expand/collapse case is owned by `bindDisclosure` in `app/static/js/ui_disclosure.js`, which wires `aria-expanded`, panel visibility, and the pressable contract in one call. Callers supply the trigger and panel; they do not manage `aria-expanded` by hand.
+
+### Semantic Color Contract
+
+Theme colors in the shell are semantic, not decorative. Every theme exposes four semantic tokens — `--amber` (caution / in-progress), `--red` (destructive / error), `--green` (completed success / enabled), `--muted` (neutral metadata) — and every UI decision that reaches for one of these colors must match the semantic meaning of that token rather than picking on visual taste. Themes control the exact visual tone of each token; the mapping from token to meaning is fixed.
+
+Full rules, the allowed exceptions (starred items, search-hit highlights, decorative macOS traffic-light chrome), and the `color-mix()`-in-theme-file pattern for surface-local tuning live in [THEME.md § Semantic Color Contract](THEME.md#semantic-color-contract). That document is the source of truth — this section does not restate the rules.
+
+### Confirmation Dialog Contract
+
+Every destructive or mode-switching confirmation in the shell — kill, history-delete, history-clear, share-redaction, session-token set/migrate, delete-all — goes through a single imperative primitive, `showConfirm()` in `app/static/js/ui_confirm.js`. Surfaces do not hand-roll confirm markup, do not wire their own Escape handler, and do not manage their own backdrop.
+
+The contract:
+
+- **One at a time.** A second `showConfirm()` call while another is open is rejected. The shell never stacks confirms.
+- **Role-based action ids.** Each action carries `role: 'primary' | 'secondary' | 'ghost' | 'cancel'` and an optional `tone: 'danger' | 'warning'`. `role` drives the button primitive class (`btn-primary` / `btn-secondary` / `btn-ghost`); `tone` adds the destructive overlay. Callers receive the id of the activated action, or `null` for cancel.
+- **Default focus on cancel.** For confirmations, the cancel action is focused on open so browser native Enter-activates-focused-button makes `Enter === cancel`. Callers with a form input in the `content` slot can override via `defaultFocus`.
+- **Focus is trapped inside the card.** `bindFocusTrap` in `app/static/js/ui_focus_trap.js` keeps Tab / Shift+Tab cycling between the card's focusable descendants so keyboard focus cannot fall through to the rail, tabs, or HUD behind the backdrop while a modal is open. Every modal surface in the shell uses this helper: `#confirm-host` binds per-open because its card content changes between shows, and the four app-level modals (`#options-modal`, `#theme-modal`, `#faq-modal`, `#workflows-modal`) bind once at startup via `setupModalFocusTraps()` in `controller.js` because their DOM is persistent.
+- **Dismissal is layered.** `bindDismissible` at `level: 'modal'` owns Escape + backdrop click. `bindMobileSheet` owns the drag-down-to-close handle on mobile. Both resolve the promise with `null` so callers cannot accidentally treat dismissal as confirmation.
+- **Actions stack at narrow widths.** The action row adds `.modal-actions-stacked` when the viewport is ≤480px or the action count is ≥3. A `matchMedia` listener keeps the class reactive to resize while the modal is open.
+- **Gate via `onActivate`.** An action can supply `onActivate` to run validation before close. Returning a falsy value (or a Promise resolving to one) keeps the modal open so form errors stay on screen; any truthy return closes and resolves with the action id.
 
 ---
 
@@ -729,9 +780,9 @@ The test stack is intentionally split into three layers:
 Current totals:
 
 - `pytest`: 842
-- `vitest`: 648
-- `playwright`: 186
-- total: 1,676
+- `vitest`: 666
+- `playwright`: 197
+- total: 1,705
 
 ### Testing Architecture
 

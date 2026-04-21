@@ -41,7 +41,7 @@ describe('_formatElapsed', () => {
 })
 
 describe('_isSyntheticGrepCommand', () => {
-  it('accepts the narrow phase-1 grep form', () => {
+  it('accepts the narrow synthetic grep form', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl')).toBe(true)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -iv ttl')).toBe(true)
     expect(_isSyntheticGrepCommand("ping darklab.sh | grep -E 'ttl|time'")).toBe(true)
@@ -492,7 +492,7 @@ describe('runner helpers', () => {
     expect(status.className).toBe('status-pill fail')
   })
 
-  it('runCommand allows phase-1 synthetic grep through to the API', () => {
+  it('runCommand allows the narrow synthetic grep form through to the API', () => {
     const apiFetch = vi.fn(() =>
       Promise.resolve({
         ok: true,

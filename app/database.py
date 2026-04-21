@@ -235,7 +235,7 @@ def _migrate_schema(conn):
     except sqlite3.OperationalError:
         pass
 
-    # starred_commands table — added in v1.5 Phase 2
+    # starred_commands table — per-session command stars, keyed by session_id
     try:
         conn.execute("""
             CREATE TABLE IF NOT EXISTS starred_commands (

@@ -19,9 +19,9 @@
 //     toggle() calls — not on the initial sync, so callers don't pay
 //     side-effect cost just from binding)
 //
-// Intentionally out of scope (Phase 4): outside-click dismiss, Escape-
-// to-close, scrim-backed modals, sheet coordination. Those are separate
-// behaviors with their own dismissal ordering and are handled by the
+// Intentionally out of scope: outside-click dismiss, Escape-to-close,
+// scrim-backed modals, sheet coordination. Those are separate behaviors
+// with their own dismissal ordering and are handled by the
 // dismissible-surface helpers.
 (function (global) {
   'use strict';

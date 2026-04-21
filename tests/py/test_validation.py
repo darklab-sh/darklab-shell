@@ -210,7 +210,7 @@ class TestSyntheticGrepParsing:
     def test_rejects_unsupported_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -n ttl")
         assert spec is None
-        assert err == "Synthetic grep supports only -i, -v, and -E in phase 1."
+        assert err == "Synthetic grep supports only -i, -v, and -E."
 
     def test_rejects_extra_operands(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep ttl file.txt")
@@ -261,7 +261,7 @@ class TestSyntheticPostFilterParsing:
     def test_rejects_invalid_head_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | head -n")
         assert spec is None
-        assert err == "Synthetic head supports only `-n <count>` or `-<count>` in phase 1."
+        assert err == "Synthetic head supports only `-n <count>` or `-<count>`."
 
     def test_rejects_non_numeric_tail_count(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -n five")
@@ -271,7 +271,7 @@ class TestSyntheticPostFilterParsing:
     def test_rejects_wc_modes_other_than_line_count(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | wc -c")
         assert spec is None
-        assert err == "Synthetic wc supports only `wc -l` in phase 1."
+        assert err == "Synthetic wc supports only `wc -l`."
 
     def test_parses_sort_default(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort")
@@ -300,7 +300,7 @@ class TestSyntheticPostFilterParsing:
     def test_rejects_invalid_sort_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -x")
         assert spec is None
-        assert err == "Synthetic sort supports only -r, -n, and -u flags in phase 1."
+        assert err == "Synthetic sort supports only -r, -n, and -u flags."
 
     def test_parses_uniq_default(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq")
@@ -316,7 +316,7 @@ class TestSyntheticPostFilterParsing:
     def test_rejects_invalid_uniq_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq -d")
         assert spec is None
-        assert err == "Synthetic uniq supports only -c in phase 1."
+        assert err == "Synthetic uniq supports only -c."
 
 
 # ── Deny prefix (!) ───────────────────────────────────────────────────────────
