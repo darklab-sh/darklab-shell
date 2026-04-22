@@ -25,6 +25,7 @@ import { dirname, resolve, join } from 'path'
 import { fileURLToPath } from 'url'
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
+import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
@@ -237,6 +238,15 @@ test('demo-mobile', async ({ page }) => {
   // capture.paused is set by freezeFrame() while it's stamping duplicate frames.
   const capture = { done: false, paused: false, idx: 0, loop: null }
 
+  await page.route('**/history', async (route) => {
+    if (route.request().method() !== 'GET') return route.continue()
+    await route.fulfill({
+      status: 200,
+      contentType: 'application/json',
+      body: JSON.stringify(buildVisualHistoryPayload(route.request().url())),
+    })
+  })
+
   // ── Boot ──────────────────────────────────────────────────────────────────
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   // With isMobile: false, Chromium does not simulate the mobile browser chrome
@@ -262,64 +272,6 @@ test('demo-mobile', async ({ page }) => {
       body.mobile-terminal-mode { padding-top: 6px !important; }
     `
     document.head.appendChild(style)
-  })
-
-  // Mock the history API so the drawer shows a realistic full list regardless
-  // of how many commands were run during this recording session. Without this
-  // the panel renders short because only 2 entries exist in the container DB.
-  // DELETE requests are passed through so the in-session runs are preserved.
-  await page.route('**/history', async (route) => {
-    if (route.request().method() !== 'GET') return route.continue()
-    const now = Date.now()
-    const mk = (id, cmd, exitCode, ageMs) => ({
-      id,
-      command: cmd,
-      exit_code: exitCode,
-      started: new Date(now - ageMs).toISOString(),
-      full_output_available: false,
-    })
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({
-        runs: [
-          mk(1, 'nslookup -type=A darklab.sh', 0, 2 * 60_000),
-          mk(2, 'ping -i 0.5 -c 50 darklab.sh', 0, 5 * 60_000),
-          mk(3, 'curl -s https://api.ipify.org', 0, 1 * 3_600_000),
-          mk(4, 'dig @8.8.8.8 darklab.sh A', 0, 2 * 3_600_000),
-          mk(5, 'host -t A darklab.sh', 0, 3 * 3_600_000),
-          mk(6, 'openssl s_client -connect darklab.sh:443', 0, 4 * 3_600_000),
-          mk(7, 'whois darklab.sh', 0, 5 * 3_600_000),
-          mk(8, 'traceroute darklab.sh', 0, 6 * 3_600_000),
-          mk(9, 'nmap -p 80,443 darklab.sh', 0, 12 * 3_600_000),
-          mk(10, 'curl -I https://darklab.sh', 0, 18 * 3_600_000),
-          mk(11, 'mtr --report darklab.sh', 0, 24 * 3_600_000),
-          mk(12, 'dig +short darklab.sh MX', 0, 30 * 3_600_000),
-          mk(13, 'curl -sv https://darklab.sh 2>&1', 0, 36 * 3_600_000),
-          mk(14, 'nmap -sV -p 22,80,443 darklab.sh', 0, 42 * 3_600_000),
-          mk(15, 'dig darklab.sh NS', 0, 48 * 3_600_000),
-          mk(16, 'ping -c 10 darklab.sh', 0, 54 * 3_600_000),
-          mk(17, 'openssl s_client -connect darklab.sh:443 -showcerts', 0, 60 * 3_600_000),
-          mk(18, 'host -t MX darklab.sh', 0, 66 * 3_600_000),
-          mk(19, 'curl -o /dev/null -w "%{http_code}" https://darklab.sh', 0, 72 * 3_600_000),
-          mk(20, 'nslookup -type=MX darklab.sh', 0, 78 * 3_600_000),
-          mk(21, 'traceroute -n darklab.sh', 1, 84 * 3_600_000),
-          mk(22, 'whois 104.21.0.1', 0, 90 * 3_600_000),
-        ],
-        roots: [
-          'curl',
-          'dig',
-          'host',
-          'mtr',
-          'nmap',
-          'nslookup',
-          'openssl',
-          'ping',
-          'traceroute',
-          'whois',
-        ],
-      }),
-    })
   })
 
   await expect(page.locator('#mobile-composer')).toBeVisible()

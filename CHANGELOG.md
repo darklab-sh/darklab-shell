@@ -56,6 +56,18 @@ All notable changes to darklab shell are documented here.
     - `ui_capture_shared.js` now runs those guardrails during `freshHome(...)`, so every desktop/mobile screenshot scene uses the same startup contract instead of a mix of guarded and unguarded resets.
     - `demo.spec.js` and `demo.mobile.spec.js` now assert the same desktop/mobile contract at startup, so README demo recordings fail immediately if their config or runtime assumptions drift.
   - **Tests:** validated by the dedicated `npx playwright test --list --config ...` demo/capture configs plus the shared guardrail wiring in `demo.spec.js`, `demo.mobile.spec.js`, `ui-capture.desktop.capture.js`, and `ui-capture.mobile.capture.js`.
+- **Named visual-history fixture for demo and capture flows** — the visual Playwright pipelines now use a shared named history fixture instead of separate small mocks and hard-coded seed counts.
+  - **Why:** demo recordings and screenshot capture both depended on “realistic enough” history, but the data shape was split across inline route mocks and ad hoc seeding flags. That made the mobile demo easy to under-seed and left the new pagination controls underrepresented in visual outputs.
+  - **What:**
+    - `scripts/seed_history.py` now exposes a named `visual-flows` fixture preset, and `scripts/playwright/run_e2e_server.sh` seeds capture slots from that preset instead of repeating `--count/--days/--star/--seed` literals.
+    - The capture fixture volume is now large enough to exercise pagination in both the desktop history drawer and the mobile recents sheet.
+    - New `tests/js/e2e/visual_history_fixture.js` builds the shared demo-history payload with paginated `/history` response metadata, so desktop and mobile demo recordings use the same fixture shape instead of separate 22-row inline mocks.
+    - `demo.mobile.spec.js` now installs the `/history` route before `page.goto()` so the mobile shell cannot hydrate from the real tiny history before the fixture is active.
+  - **Tests:** validated by the dedicated `npx playwright test --list --config ...` demo/capture configs plus successful end-to-end demo and capture wrapper runs against the new fixture.
+- **Mobile tab-strip edge glows now activate as soon as a running tab is partially clipped** — the glow no longer waits for the whole running tab to disappear past the left or right edge.
+  - **Why:** when a running non-active tab was only barely visible in the mobile tab strip, its status cue was already effectively lost, but the old logic still treated that tab as “visible enough” and left the edge glow off.
+  - **What:** the mobile running-indicator sync in `mobile_chrome.js` now treats a running tab as off-screen on a side when any portion of its rect crosses that edge threshold, not only when the full tab is beyond the tab-bar bounds.
+  - **Tests:** `tests/js/unit/mobile_running_indicator.test.js` now includes a boundary case proving the left and right edge glows activate when running tabs are only partially clipped.
 
 ### Changed
 

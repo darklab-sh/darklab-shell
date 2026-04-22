@@ -230,8 +230,8 @@
       const node = tabsBarEl.querySelector(`.tab[data-id="${t.id}"]`);
       if (!node) continue;
       const r = node.getBoundingClientRect();
-      if (r.right < barRect.left + 4) leftActive = true;
-      else if (r.left > barRect.right - 4) rightActive = true;
+      if (r.left < barRect.left + 4) leftActive = true;
+      if (r.right > barRect.right - 4) rightActive = true;
     }
     edgeGlowLeftEl.classList.toggle('is-active', leftActive);
     edgeGlowRightEl.classList.toggle('is-active', rightActive);

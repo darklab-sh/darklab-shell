@@ -22,8 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
-- **History/session seed fixtures for visual flows** — formalise the seeded demo/capture history dataset as a named fixture so screenshot packs, demo recordings, and documentation screenshots stay stable across releases instead of depending on ad hoc generated history.
-
 - **Persist user options with session tokens** — session tokens currently preserve command history and session identity, but user-facing options still reset outside the current browser scope. Extend the session-token data model so saved options can live in the database and follow the user's restored session across browsers and devices.
 
 - **Confirmation modal before clearing the session token** — the `clear` built-in command and the clear button both discard the current session token immediately. If the user has not saved the token elsewhere, it cannot be recovered, and all history associated with it becomes inaccessible. Gate the action behind a confirmation modal that makes the consequence explicit and offers a "copy token to clipboard" action so the user can save it before confirming. The modal should not appear for no-token sessions (nothing to lose) and should not block the clear path once the user confirms.

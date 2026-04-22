@@ -207,6 +207,62 @@ describe('mobile running-state indicator', () => {
     expect(chip.querySelector('.mobile-running-count').textContent).toBe('2')
   })
 
+  it('activates the edge glow when a running non-active tab is only partially clipped off-screen', () => {
+    ctx = mountModule({
+      tabs: [
+        { id: 'tab-a', st: 'running' },
+        { id: 'tab-b', st: 'running' },
+        { id: 'tab-c', st: 'idle' },
+      ],
+      activeTabId: 'tab-c',
+    })
+
+    const tabsBar = document.getElementById('tabs-bar')
+    const tabA = tabsBar.querySelector('.tab[data-id="tab-a"]')
+    const tabB = tabsBar.querySelector('.tab[data-id="tab-b"]')
+    const tabC = tabsBar.querySelector('.tab[data-id="tab-c"]')
+
+    tabsBar.getBoundingClientRect = () => ({
+      left: 100,
+      right: 300,
+      top: 0,
+      bottom: 32,
+      width: 200,
+      height: 32,
+    })
+    tabA.getBoundingClientRect = () => ({
+      left: 96,
+      right: 156,
+      top: 0,
+      bottom: 32,
+      width: 60,
+      height: 32,
+    })
+    tabB.getBoundingClientRect = () => ({
+      left: 250,
+      right: 304,
+      top: 0,
+      bottom: 32,
+      width: 54,
+      height: 32,
+    })
+    tabC.getBoundingClientRect = () => ({
+      left: 180,
+      right: 240,
+      top: 0,
+      bottom: 32,
+      width: 60,
+      height: 32,
+    })
+
+    document.dispatchEvent(new CustomEvent('app:tab-status-changed', {
+      detail: { id: 'tab-a', status: 'running', activeTabId: 'tab-c' },
+    }))
+
+    expect(document.querySelector('.tab-edge-glow-left').classList.contains('is-active')).toBe(true)
+    expect(document.querySelector('.tab-edge-glow-right').classList.contains('is-active')).toBe(true)
+  })
+
   it('chip tap activates the next running non-active tab in tab-row order', () => {
     const activateTab = vi.fn()
     ctx = mountModule({

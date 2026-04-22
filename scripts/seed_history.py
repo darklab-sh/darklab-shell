@@ -54,6 +54,15 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 
+VISUAL_HISTORY_FIXTURES = {
+    "visual-flows": {
+        "count": 240,
+        "days": 30,
+        "star": 24,
+        "seed": 4242,
+    },
+}
+
 
 def _resolve_db_path() -> str:
     """Mirror app/database.py's DB_PATH resolution without importing it.
@@ -609,9 +618,14 @@ def main() -> int:
     ident.add_argument("--uuid", help="anonymous UUID session id")
     ident.add_argument("--new-token", action="store_true", help="generate a new tok_ token")
 
-    parser.add_argument("--count", type=int, default=70, help="number of runs to insert (default: 70)")
-    parser.add_argument("--days", type=int, default=7, help="spread runs across the last N days (default: 7)")
-    parser.add_argument("--star", type=int, default=4, help="star this many distinct seeded commands (default: 4, 0 to skip)")
+    parser.add_argument(
+        "--fixture",
+        choices=sorted(VISUAL_HISTORY_FIXTURES.keys()),
+        help="named seed fixture profile",
+    )
+    parser.add_argument("--count", type=int, default=None, help="number of runs to insert")
+    parser.add_argument("--days", type=int, default=None, help="spread runs across the last N days")
+    parser.add_argument("--star", type=int, default=None, help="star this many distinct seeded commands (0 to skip)")
     parser.add_argument("--seed", type=int, default=None, help="optional RNG seed for reproducible runs")
     parser.add_argument(
         "--allow-host-write",
@@ -624,20 +638,31 @@ def main() -> int:
     )
     args = parser.parse_args()
 
-    if args.count <= 0:
+    defaults = VISUAL_HISTORY_FIXTURES.get(args.fixture, {
+        "count": 70,
+        "days": 7,
+        "star": 4,
+        "seed": None,
+    })
+    count = args.count if args.count is not None else defaults["count"]
+    days = args.days if args.days is not None else defaults["days"]
+    star = args.star if args.star is not None else defaults["star"]
+    seed = args.seed if args.seed is not None else defaults["seed"]
+
+    if count <= 0:
         sys.exit("--count must be > 0")
-    if args.star < 0:
+    if star < 0:
         sys.exit("--star must be >= 0")
-    if args.days <= 0:
+    if days <= 0:
         sys.exit("--days must be > 0")
 
     _guard_host_write_to_project_data(args.allow_host_write)
     _require_schema()
 
-    rng = random.Random(args.seed)
+    rng = random.Random(seed)
     session_id, new_token = resolve_session(args)
-    commands = seed_runs(session_id, args.count, args.days, rng)
-    starred = seed_stars(session_id, commands, args.star, rng) if args.star else []
+    commands = seed_runs(session_id, count, days, rng)
+    starred = seed_stars(session_id, commands, star, rng) if star else []
 
     print(f"database:       {DB_PATH}")
     print(f"session_id:     {session_id}")
@@ -645,7 +670,9 @@ def main() -> int:
         print("  (new token — save this in localStorage as session_token to use it)")
     print(f"inserted runs:  {len(commands)}")
     print(f"distinct cmds:  {len(set(commands))}")
-    print(f"time span:      last {args.days} days")
+    print(f"time span:      last {days} days")
+    if args.fixture:
+        print(f"fixture:        {args.fixture}")
     if starred:
         print(f"starred:        {len(starred)}")
         for cmd in starred:

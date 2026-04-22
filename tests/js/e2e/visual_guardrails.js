@@ -45,7 +45,7 @@ export async function assertVisualFlowGuardrails(
     }
 
     const status = await requestJson('/status')
-    const history = await requestJson('/history')
+    const history = await requestJson('/history?include_total=1&page_size=1')
     return {
       devicePixelRatio: window.devicePixelRatio,
       maxTouchPoints: navigator.maxTouchPoints || 0,
@@ -53,7 +53,10 @@ export async function assertVisualFlowGuardrails(
       mobileTerminalMode: document.body.classList.contains('mobile-terminal-mode'),
       sessionToken,
       status,
-      historyRuns: Array.isArray(history.runs) ? history.runs.length : 0,
+      historyRuns: Math.max(
+        0,
+        Number(history.total_count ?? history.runs?.length ?? 0) || 0,
+      ),
       historyRoots: Array.isArray(history.roots) ? history.roots.length : 0,
     }
   })

@@ -510,7 +510,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
-│   ├── seed_history.py         # Populates history.db with ~70 realistic runs under a UUID or tok_ session for user-testing the history drawer, search, filters, and token migration
+│   ├── seed_history.py         # Populates history.db with realistic runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
 │   ├── record_demo.sh          # Records the desktop demo video — health-checks container, runs Playwright, stitches frames with ffmpeg
@@ -569,6 +569,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │           ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
 │           ├── helpers.js      # runCommand/openHistory helpers
 │           ├── visual_guardrails.js # Shared demo/capture startup assertions for viewport, health, token, and seeded-history parity
+│           ├── visual_history_fixture.js # Shared paginated /history fixture payload used by desktop and mobile demo recordings
 │           ├── welcome.helpers.js # shared welcome-route fixtures and setup for split welcome specs
 │           ├── autocomplete.spec.js # autocomplete dropdown coverage — context-aware suggestions, pipe-stage hints, accept paths
 │           ├── commands.spec.js # command execution, denial, and status rendering

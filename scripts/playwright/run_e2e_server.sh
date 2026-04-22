@@ -34,11 +34,9 @@ cd "$APP_DIR"
 if [[ "$SLOT" == capture-* ]]; then
   APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" -c "import database" >/dev/null
   APP_DATA_DIR="$DATA_DIR" "$PYTHON_BIN" "$REPO_ROOT/scripts/seed_history.py" \
+    --fixture visual-flows \
     --token "$CAPTURE_SESSION_TOKEN" \
-    --count 48 \
-    --days 14 \
-    --star 8 \
-    --seed 4242 >/dev/null
+    >/dev/null
 fi
 
 APP_FAKE_REDIS="0"

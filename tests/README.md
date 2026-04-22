@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 856
-- `vitest`: 695
+- `vitest`: 696
 - `playwright`: 198
-- total: 1,749
+- total: 1,750
 
 This document is organized in two parts:
 
@@ -178,6 +178,8 @@ Wrappers health-check the container, set `RUN_DEMO=1`, run the spec, and stitch 
 
 Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
 
+Both demo specs also read from one named visual-history fixture in `tests/js/e2e/visual_history_fixture.js`, which returns realistic paginated `/history` payloads with enough rows to keep the history drawer and mobile recents sheet in their pagination state during recordings.
+
 ### UI Screenshot Capture
 
 Standalone Playwright specs that generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). Guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only via the wrapper:
@@ -192,6 +194,8 @@ scripts/capture_ui_screenshots.sh --theme all
 The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
+
+Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags.
 
 ### Container Smoke Test
 
@@ -1383,7 +1387,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
 
-#### `mobile_running_indicator.test.js` (11 tests)
+#### `mobile_running_indicator.test.js` (12 tests)
 
 Contract-layer coverage for the mobile running-indicator surface in `app/static/js/mobile_chrome.js` (the trailing chip and pair of edge-glow overlays that surface background-tab run state). The IIFE is re-loaded per test into a fresh `Function` scope with a synchronous `requestAnimationFrame` stub and `location.search` pre-set so the `?ri=off` / `?ri=0` kill switch (read once at init) can be exercised. iOS-Safari-specific behavior (cold smooth-scroll drop, momentum destabilization from sticky children) is covered by the Playwright suite.
 
@@ -1396,6 +1400,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `hides the chip when there are no running non-active tabs` | Verifies that with no running non-active tabs, the chip carries `u-hidden`. |
 | `shows the chip with a count that equals the number of running non-active tabs` | Verifies that the chip's `.mobile-running-count` renders the count of running non-active tabs (3 running + 1 idle/active → "3"). |
 | `excludes the active tab from the count even if it is running` | Verifies the active tab is excluded from the count even when itself running (3 running tabs, middle one active → "2"). |
+| `activates the edge glow when a running non-active tab is only partially clipped off-screen` | Verifies that the left and right edge glows activate once a running non-active tab is even partially clipped past the tab-strip boundary, not only when the full tab is off-screen. |
 | `chip tap activates the next running non-active tab in tab-row order` | Verifies chip click invokes `activateTab(id, {focusComposer: false})` with the next running non-active tab id in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Verifies successive chip taps cycle through all running non-active tabs and wrap back to the first after the last. |
 | `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Verifies that when `body.mobile-terminal-mode` is absent, the chip carries `u-hidden` and the edge-glow overlays do not enter the `is-active` state. |
