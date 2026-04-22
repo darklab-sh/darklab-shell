@@ -996,6 +996,54 @@ function _exportPrefix(line, zeroBasedIndex) {
   return parts.join(' ');
 }
 
+function _normalizeTabTranscriptLine(line) {
+  if (typeof line === 'string') {
+    return { text: line, cls: '', tsC: '', tsE: '' };
+  }
+  if (line && typeof line.text === 'string') {
+    return {
+      text: line.text,
+      cls: String(line.cls || ''),
+      tsC: String(line.tsC || ''),
+      tsE: String(line.tsE || ''),
+    };
+  }
+  return null;
+}
+
+function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } = {}) {
+  return (Array.isArray(lines) ? lines : [])
+    .map(_normalizeTabTranscriptLine)
+    .filter(line => {
+      if (!line) return false;
+      if (!stripTruncationNotices) return true;
+      return !/^\[(?:preview|tab output) truncated/i.test(String(line.text || ''));
+    });
+}
+
+function _buildTabExportModel(tab, { createdText = null } = {}) {
+  const rawLines = _normalizeTabTranscriptLines(tab && tab.rawLines);
+  const appName = APP_CONFIG.app_name || 'darklab shell';
+  const normalizedCreatedText = String(
+    createdText || new Date().toLocaleString()
+  );
+  return {
+    appName,
+    title: String(tab && tab.label || ''),
+    metaLine: ExportHtmlUtils.buildExportMetaLine({
+      label: tab && tab.label,
+      createdText: normalizedCreatedText,
+    }),
+    runMeta: {
+      exitCode: tab ? tab.exitCode : null,
+      duration: null,
+      lines: `${rawLines.length} lines`,
+      version: APP_CONFIG.version || null,
+    },
+    rawLines,
+  };
+}
+
 // ── HTML snapshot export ──
 async function exportTabHtml(id) {
   const t = getTab(id);
@@ -1006,30 +1054,20 @@ async function exportTabHtml(id) {
     return;
   }
   try {
-    const appName = APP_CONFIG.app_name || 'darklab shell';
-    const exportedAt = new Date().toLocaleString();
-    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(t.rawLines, {
+    const exportModel = _buildTabExportModel(t);
+    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: (line, i) => _exportPrefix(line, i),
       ansiToHtml: (text) => ansi_up.ansi_to_html(text),
     });
-    const runMeta = {
-      exitCode: t.exitCode,
-      duration: null,
-      lines: `${t.rawLines.length} lines`,
-      version: APP_CONFIG.version || null,
-    };
     const [fontFacesCss, exportCss] = await Promise.all([
       ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
       ExportHtmlUtils.fetchTerminalExportCss().catch(() => ''),
     ]);
     const html = ExportHtmlUtils.buildTerminalExportHtml({
-      appName,
-      title: t.label,
-      metaLine: ExportHtmlUtils.buildExportMetaLine({
-        label: t.label,
-        createdText: exportedAt,
-      }),
-      runMeta,
+      appName: exportModel.appName,
+      title: exportModel.title,
+      metaLine: exportModel.metaLine,
+      runMeta: exportModel.runMeta,
       linesHtml,
       prefixWidth,
       fontFacesCss,
@@ -1038,7 +1076,7 @@ async function exportTabHtml(id) {
     const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
-    a.download = `${appName}-${ExportHtmlUtils.exportTimestamp()}.html`;
+    a.download = `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`;
     a.click();
     URL.revokeObjectURL(a.href);
   } catch {
@@ -1067,28 +1105,18 @@ async function exportTabPdf(id) {
   }
   try {
     const { jsPDF } = window.jspdf;
-    const appName = APP_CONFIG.app_name || 'darklab shell';
-    const exportedAt = new Date().toLocaleString();
-    const runMeta = {
-      exitCode: t.exitCode,
-      duration: null,
-      lines: `${t.rawLines.length} lines`,
-      version: APP_CONFIG.version || null,
-    };
+    const exportModel = _buildTabExportModel(t);
     const doc = await ExportPdfUtils.buildTerminalExportPdf({
       jsPDF,
-      appName,
-      metaLine: ExportHtmlUtils.buildExportMetaLine({
-        label: t.label,
-        createdText: exportedAt,
-      }),
-      runMeta,
-      rawLines: t.rawLines,
+      appName: exportModel.appName,
+      metaLine: exportModel.metaLine,
+      runMeta: exportModel.runMeta,
+      rawLines: exportModel.rawLines,
       getPrefix: (line, i) => _exportPrefix(line, i),
       ansiToHtml: (text) => ansi_up.ansi_to_html(text),
     });
     const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
-    doc.save(`${appName}-${ts}.pdf`);
+    doc.save(`${exportModel.appName}-${ts}.pdf`);
   } catch {
     showToast('Failed to export pdf', 'error');
   } finally {
@@ -1145,25 +1173,8 @@ function startTabRename(id, labelEl) {
   });
 }
 
-function _cloneShareLine(line) {
-  if (typeof line === 'string') {
-    return { text: line, cls: '', tsC: '', tsE: '' };
-  }
-  if (line && typeof line.text === 'string') {
-    return {
-      text: line.text,
-      cls: String(line.cls || ''),
-      tsC: String(line.tsC || ''),
-      tsE: String(line.tsE || ''),
-    };
-  }
-  return null;
-}
-
 function _shareLinesWithoutTruncationNotices(lines) {
-  return (Array.isArray(lines) ? lines : [])
-    .map(_cloneShareLine)
-    .filter(line => line && !/^\[(?:preview|tab output) truncated/i.test(String(line.text || '')));
+  return _normalizeTabTranscriptLines(lines, { stripTruncationNotices: true });
 }
 
 function _extractLatestFullRunShareContent(tab, fullRun) {
