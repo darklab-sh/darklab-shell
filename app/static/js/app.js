@@ -909,7 +909,7 @@ function handleChromeShortcut(e) {
     if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) {
       hideHistoryPanel();
     } else {
-      document.getElementById('hist-btn')?.click();
+      if (typeof toggleHistoryPanelSurface === 'function') toggleHistoryPanelSurface(true);
     }
     e.preventDefault();
     return true;
@@ -1800,7 +1800,7 @@ function renderFaqItems(items) {
   wireFaqCommandChips(faqBody);
 }
 
-function renderWorkflowItems(items) {
+function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
   const body = document.querySelector('.workflows-body');
   if (!body) return;
   body.innerHTML = '';
@@ -1868,7 +1868,7 @@ function renderWorkflowItems(items) {
   wireFaqCommandChips(body);
   wireWorkflowStepRunButtons(body);
 
-  if (typeof emitUiEvent === 'function') {
+  if (emitCatalogEvent && typeof emitUiEvent === 'function') {
     emitUiEvent('app:workflows-rendered', {
       items: list.slice(),
     });

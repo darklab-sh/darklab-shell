@@ -299,7 +299,7 @@
     const item = allWorkflows[idx];
     if (!item) return;
     if (typeof renderWorkflowItems === 'function') {
-      renderWorkflowItems([item]);
+      renderWorkflowItems([item], { emitCatalogEvent: false });
     }
     if (typeof openWorkflows === 'function') {
       openWorkflows();
@@ -309,24 +309,30 @@
   }
 
   // ── Nav menu ─────────────────────────────────────────────────────
-  // Proxy clicks to the original header buttons so all existing wiring
-  // (toggle behavior, overlay close coordination, focus handling) runs.
-  const NAV_PROXY = {
-    history: 'hist-btn',
-    options: 'options-btn',
-    theme: 'theme-btn',
-    faq: 'faq-btn',
-  };
+  // The visible rail is the desktop source of truth. Route clicks directly
+  // into the shared action layer instead of proxying through hidden header
+  // buttons.
   railNav?.addEventListener('click', e => {
     const item = e.target.closest?.('[data-action]');
     if (!item) return;
     const action = item.dataset.action;
     if (action === 'diag') return; // native <a> navigation
     e.preventDefault();
-    const targetId = NAV_PROXY[action];
-    if (!targetId) return;
-    const target = document.getElementById(targetId);
-    if (target) target.click();
+    if (action === 'history' && typeof global.toggleHistoryPanelSurface === 'function') {
+      global.toggleHistoryPanelSurface();
+      return;
+    }
+    if (action === 'options' && typeof global.openOptions === 'function') {
+      global.openOptions();
+      return;
+    }
+    if (action === 'theme' && typeof global.openThemeSelector === 'function') {
+      global.openThemeSelector();
+      return;
+    }
+    if (action === 'faq' && typeof global.openFaq === 'function') {
+      global.openFaq();
+    }
   });
 
   // ── HUD: status cell toggle (debug affordance; safe no-op elsewhere) ──

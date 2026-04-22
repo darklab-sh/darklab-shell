@@ -404,11 +404,11 @@ test.describe('mobile menu', () => {
     await expect.poll(async () => tabsBar.evaluate((el) => el.scrollLeft)).toBeGreaterThan(0)
   })
 
-  test('hamburger button is visible and desktop header buttons are hidden at mobile width', async ({
+  test('hamburger button is visible and legacy desktop header button DOM is absent at mobile width', async ({
     page,
   }) => {
     await expect(page.locator('#hamburger-btn')).toBeVisible()
-    await expect(page.locator('#header-btns')).toBeHidden()
+    await expect(page.locator('#header-btns')).toHaveCount(0)
   })
 
   test('clicking the hamburger opens the mobile menu', async ({ page }) => {

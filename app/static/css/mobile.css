@@ -119,7 +119,6 @@
   }
   .history-row::-webkit-scrollbar { display: none; }
   .history-label { flex: 0 0 auto; }
-  .header-btns { display: none; }
   .terminal-bar-btns { display: none; }
   #hamburger-btn { display: block; }
   #mobile-header-actions { display: none; }

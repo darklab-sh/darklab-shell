@@ -180,12 +180,6 @@ body .hist-chip {
 }
 
 body .hist-chip-overflow { color: var(--theme-chip-overflow-text); }
-body #faq-btn,
-body #theme-btn,
-body #options-btn,
-body #hist-btn,
-body #workflows-btn,
-body #diag-btn,
 body #search-toggle-btn,
 body #ts-btn,
 body #ln-btn {
@@ -198,12 +192,6 @@ body #hamburger-btn {
   border-color: transparent;
   color: var(--theme-toolbar-button-text);
 }
-body #faq-btn:hover,
-body #theme-btn:hover,
-body #options-btn:hover,
-body #hist-btn:hover,
-body #workflows-btn:hover,
-body #diag-btn:hover,
 body #search-toggle-btn:hover,
 body #ts-btn:hover,
 body #ln-btn:hover {
@@ -903,34 +891,6 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   border-color: var(--border-bright);
 }
 .history-action-btn:hover { color: var(--green); border-color: var(--green-dim); }
-
-body #hist-btn,
-body #faq-btn,
-body #theme-btn,
-body #options-btn,
-body #workflows-btn,
-body #diag-btn {
-  background: color-mix(in srgb, var(--theme-toolbar-button-bg) 58%, color-mix(in srgb, var(--surface) 96%, transparent));
-  border: 1px solid color-mix(in srgb, var(--border-bright) 94%, transparent);
-  color: color-mix(in srgb, var(--muted) 74%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 5px 11px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background 0.2s, box-shadow 0.2s;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 2%, transparent);
-}
-body #hist-btn:hover,
-body #faq-btn:hover,
-body #theme-btn:hover,
-body #options-btn:hover,
-body #workflows-btn:hover,
-body #diag-btn:hover {
-  border-color: color-mix(in srgb, var(--green-dim) 86%, var(--border-bright));
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 9%, transparent);
-}
 
 #search-toggle-btn, #ts-btn, #ln-btn {
   background: color-mix(in srgb, var(--theme-toolbar-button-bg) 72%, color-mix(in srgb, var(--surface) 92%, transparent));

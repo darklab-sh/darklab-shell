@@ -92,6 +92,15 @@ All notable changes to darklab shell are documented here.
 
 #### Mobile Sheets, Options Surface, and Navigation Cleanup
 
+- **Desktop rail now owns desktop navigation directly** — the visible rail is no longer a proxy layer for hidden header buttons.
+  - **Why:** the desktop rail had become the real UI surface, but history/options/theme/FAQ actions still routed through hidden `hist-btn` / `options-btn` / `theme-btn` / `faq-btn` relay elements so older controller wiring could be reused. That left dead DOM, dead CSS, and one more place for desktop behavior to drift.
+  - **What:**
+    - `shell_chrome.js` rail actions now call the shared open/close helpers directly (`openOptions()`, `openThemeSelector()`, `openFaq()`, `toggleHistoryPanelSurface()`).
+    - the hidden desktop header-button DOM was removed from `app/templates/index.html`.
+    - `dom.js`, `controller.js`, and the old header-button CSS blocks were trimmed to remove the legacy relay layer.
+    - the remaining desktop history keyboard shortcut path now opens the history panel through the shared helper instead of clicking a removed hidden button.
+  - **Tests:** `tests/js/unit/app.test.js` was updated to exercise the shared action helpers directly where appropriate, and `tests/js/e2e/ui.spec.js` still passes against the visible desktop rail (`11 passed`).
+
 - **Mobile sheets now share one structural contract instead of per-ID scaffolding** — the options, FAQ, workflows, shortcuts, and confirm surfaces now rely on shared `.mobile-sheet-overlay` / `.mobile-sheet-surface` structure plus mobile-specific overrides instead of each carrying its own overlay/surface boilerplate.
   - **Why:** the old setup mixed shared modal rules with per-surface ID rules, which made mobile sheet regressions easy to introduce and left redundant CSS behind after the bottom-sheet refactor.
   - **What:**
@@ -106,7 +115,7 @@ All notable changes to darklab shell are documented here.
 
 - **Options now appears before history in both visible navigation surfaces** — the desktop rail and the mobile menu overlay group were reordered so `options` precedes `history`.
   - **Why:** the visible desktop navigation is the rail, not the old header-button row, and the mobile menu should match that order.
-  - **What:** `app/templates/index.html` now renders `options` before `history` in the mobile menu group and in the desktop rail. The legacy hidden header buttons were also reordered to stay consistent with the current desktop proxy wiring.
+  - **What:** `app/templates/index.html` now renders `options` before `history` in the mobile menu group and in the desktop rail.
 
 #### UI Overhaul
 

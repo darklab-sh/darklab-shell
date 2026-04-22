@@ -68,6 +68,13 @@ async function loadAppFns({
     <button id="ln-btn"></button>
     <button id="history-close"></button>
     <button id="hist-clear-all-btn"></button>
+    <nav class="rail-nav" id="rail-nav">
+      <button class="rail-nav-item" data-action="options" type="button"></button>
+      <button class="rail-nav-item" data-action="history" type="button"></button>
+      <button class="rail-nav-item" data-action="theme" type="button"></button>
+      <button class="rail-nav-item" data-action="faq" type="button"></button>
+      <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag"></a>
+    </nav>
     <div id="mobile-shell" aria-hidden="true">
       <div id="mobile-shell-chrome"></div>
       <div id="mobile-shell-transcript"></div>
@@ -416,8 +423,6 @@ async function loadAppFns({
       updateNewTabBtn: () => {},
       createTab: createTabOverride,
       runWelcome: () => {},
-      closeFaq: () => {},
-      openFaq: () => {},
       cmdInput,
       runBtn: document.getElementById('run-btn'),
       shellInputRow: document.getElementById('shell-input-row'),
@@ -541,6 +546,9 @@ async function loadAppFns({
     applyRunNotifyPreference,
     applyHudClockPreference,
     syncOptionsControls,
+    openOptions,
+    openThemeSelector,
+    openFaq,
     getComposerState,
     setComposerState,
     resetComposerState,
@@ -771,7 +779,7 @@ describe('app helpers', () => {
   })
 
   it('opens the theme selector from the theme button', async () => {
-    await loadAppFns({
+    const { openThemeSelector } = await loadAppFns({
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
@@ -796,7 +804,7 @@ describe('app helpers', () => {
       },
     })
 
-    document.getElementById('theme-btn').click()
+    openThemeSelector()
     await new Promise((resolve) => setTimeout(resolve, 0))
     expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
     expect(document.querySelector('#theme-select .theme-card-active')).toBe(document.activeElement)
@@ -998,7 +1006,7 @@ describe('app helpers', () => {
   })
 
   it('shows an empty state when no themes are registered and falls back to the baked-in dark palette', async () => {
-    await loadAppFns({
+    const { openThemeSelector } = await loadAppFns({
       themeRegistry: {
         current: null,
         themes: [],
@@ -1007,7 +1015,7 @@ describe('app helpers', () => {
 
     expect(document.body.dataset.theme).toBe('dark')
 
-    document.getElementById('theme-btn').click()
+    openThemeSelector()
     expect(document.getElementById('theme-overlay').classList.contains('open')).toBe(true)
     expect(document.getElementById('theme-select').textContent).toContain('No themes available')
   })
@@ -1046,10 +1054,10 @@ describe('app helpers', () => {
   })
 
   it('refocuses the terminal input after closing the FAQ modal', async () => {
-    const { cmdInput } = await loadAppFns()
+    const { cmdInput, openFaq } = await loadAppFns()
     const faqOverlay = document.getElementById('faq-overlay')
 
-    document.getElementById('faq-btn').click()
+    openFaq()
     expect(faqOverlay.classList.contains('open')).toBe(true)
 
     document.querySelector('.faq-close').click()
@@ -1057,7 +1065,7 @@ describe('app helpers', () => {
     expect(cmdInput.focus).toHaveBeenCalled()
 
     cmdInput.focus.mockClear()
-    document.getElementById('faq-btn').click()
+    openFaq()
     faqOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(faqOverlay.classList.contains('open')).toBe(false)
     expect(cmdInput.focus).toHaveBeenCalled()
@@ -1087,18 +1095,20 @@ describe('app helpers', () => {
     document.body.innerHTML = `
       <header><h1></h1></header>
       <button id="ts-btn"></button>
-      <button id="theme-btn"></button>
-      <button id="faq-btn"></button>
       <button id="hamburger-btn"></button>
       <button id="new-tab-btn"></button>
       <button id="search-toggle-btn"></button>
       <button id="run-btn"></button>
       <button id="search-prev"></button>
       <button id="search-next"></button>
-      <button id="hist-btn"></button>
       <button id="ln-btn"></button>
       <button id="history-close"></button>
       <button id="hist-clear-all-btn"></button>
+      <nav class="rail-nav" id="rail-nav">
+        <button class="rail-nav-item" data-action="history" type="button"></button>
+        <button class="rail-nav-item" data-action="theme" type="button"></button>
+        <button class="rail-nav-item" data-action="faq" type="button"></button>
+      </nav>
       <div id="faq-limits-text"></div>
       <div id="faq-allowed-text"></div>
       <div id="mobile-menu-sheet" class="menu-sheet u-hidden">
@@ -3077,22 +3087,22 @@ describe('app helpers', () => {
   })
 
   it('opens and closes the FAQ overlay through the wired controls', async () => {
-    await loadAppFns()
+    const { openFaq } = await loadAppFns()
     const faqOverlay = document.getElementById('faq-overlay')
 
-    document.getElementById('faq-btn').click()
+    openFaq()
     expect(faqOverlay.classList.contains('open')).toBe(true)
 
     faqOverlay.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     expect(faqOverlay.classList.contains('open')).toBe(false)
 
-    document.getElementById('faq-btn').click()
+    openFaq()
     document.querySelector('.faq-close').click()
     expect(faqOverlay.classList.contains('open')).toBe(false)
   })
 
   it('closes the theme overlay and refocuses the terminal on Escape', async () => {
-    await loadAppFns({
+    const { openThemeSelector } = await loadAppFns({
       mobileTouch: false,
       themeRegistry: {
         current: {
@@ -3113,7 +3123,7 @@ describe('app helpers', () => {
     })
     const themeOverlay = document.getElementById('theme-overlay')
 
-    document.getElementById('theme-btn').click()
+    openThemeSelector()
     expect(themeOverlay.classList.contains('open')).toBe(true)
 
     document.body.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }))
@@ -3122,14 +3132,14 @@ describe('app helpers', () => {
   })
 
   it('does not refocus the mobile composer when closing options', async () => {
-    const { getVisibleComposerInput } = await loadAppFns({
+    const { getVisibleComposerInput, openOptions } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const overlay = document.getElementById('options-overlay')
     const visibleInput = getVisibleComposerInput()
     visibleInput.focus.mockClear()
 
-    document.getElementById('options-btn').click()
+    openOptions()
     expect(overlay.classList.contains('open')).toBe(true)
 
     document.querySelector('.options-close').click()
@@ -3144,14 +3154,14 @@ describe('app helpers', () => {
   })
 
   it('blurs the visible mobile composer when opening options', async () => {
-    const { getVisibleComposerInput, restoreViewport } = await loadAppFns({
+    const { getVisibleComposerInput, openOptions, restoreViewport } = await loadAppFns({
       mobileViewport: { height: 500, offsetTop: 0 },
     })
     const overlay = document.getElementById('options-overlay')
     const visibleInput = getVisibleComposerInput()
     document.body.classList.add('mobile-terminal-mode')
 
-    document.getElementById('options-btn').click()
+    openOptions()
 
     expect(overlay.classList.contains('open')).toBe(true)
     expect(visibleInput.blur).toHaveBeenCalled()
@@ -3160,9 +3170,9 @@ describe('app helpers', () => {
   })
 
   it('hides rotate/clear/copy session token buttons when no token is set — desktop open', async () => {
-    await loadAppFns()  // no session_token in localStorage
+    const { openOptions } = await loadAppFns()  // no session_token in localStorage
 
-    document.getElementById('options-btn').click()
+    openOptions()
 
     expect(document.getElementById('options-session-token-rotate-btn').style.display).toBe('none')
     expect(document.getElementById('options-session-token-clear-btn').style.display).toBe('none')
@@ -3453,7 +3463,7 @@ describe('app helpers', () => {
       },
     })
 
-    document.getElementById('theme-btn').click()
+    document.querySelector('.rail-nav [data-action="theme"]').click()
     document
       .getElementById('theme-select')
       .querySelector('[data-theme-name="theme_light_olive"]')
@@ -3461,7 +3471,7 @@ describe('app helpers', () => {
     document
       .getElementById('theme-overlay')
       .dispatchEvent(new MouseEvent('click', { bubbles: true }))
-    document.getElementById('options-btn').click()
+    document.querySelector('.rail-nav [data-action="options"]').click()
     document.getElementById('options-ts-select').value = 'elapsed'
     document
       .getElementById('options-ts-select')
@@ -3593,14 +3603,13 @@ describe('app helpers', () => {
       return Promise.resolve({ json: () => Promise.resolve({}) })
     })
 
-    await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
+    const { openFaq } = await loadAppFns({ apiFetch, mobileViewport: { height: 500, offsetTop: 0 } })
     await new Promise((resolve) => setImmediate(resolve))
 
     const mobileCmdInput = document.getElementById('mobile-cmd')
-    const faqBtn = document.getElementById('faq-btn')
     const chip = document.querySelector('.allowed-chip')
 
-    faqBtn.click()
+    openFaq()
     expect(mobileCmdInput.blur).toHaveBeenCalled()
 
     chip.click()

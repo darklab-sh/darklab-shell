@@ -565,30 +565,6 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 .hist-chip-overflow { color: var(--green); }
 
-/* ── Header utility buttons ── */
-#faq-btn,
-#theme-btn,
-#options-btn,
-#workflows-btn,
-#diag-btn {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 1px;
-  padding: 4px 12px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
-  text-decoration: none;
-}
-#faq-btn:hover,
-#theme-btn:hover,
-#options-btn:hover,
-#workflows-btn:hover,
-#diag-btn:hover { border-color: var(--green-dim); color: var(--green); }
-
 /* ── Modals ── */
 .modal-overlay,
 .mobile-sheet-overlay,
