@@ -34,6 +34,30 @@ function makeExportHtmlUtilsMock() {
     ),
     exportTimestamp: vi.fn(() => '2025-01-15T10-30-00'),
     buildExportMetaLine: vi.fn(({ label, createdText }) => `${label} · ${createdText}`),
+    normalizeExportTranscriptLines: vi.fn((lines) => lines),
+    normalizeExportRunMeta: vi.fn((runMeta) => {
+      if (!runMeta) return null
+      return {
+        exitCode: runMeta.exitCode !== undefined ? runMeta.exitCode : runMeta.exit_code,
+        duration: runMeta.duration || null,
+        lines: runMeta.lines || null,
+        version: runMeta.version || null,
+      }
+    }),
+    buildExportDocumentModel: vi.fn(({ appName, title, label, createdText, runMeta, rawLines }) => ({
+      appName,
+      title,
+      metaLine: `${label} · ${createdText}`,
+      runMeta: runMeta
+        ? {
+            exitCode: runMeta.exitCode !== undefined ? runMeta.exitCode : runMeta.exit_code,
+            duration: runMeta.duration || null,
+            lines: runMeta.lines || null,
+            version: runMeta.version || null,
+          }
+        : null,
+      rawLines,
+    })),
     buildExportLinesHtml: vi.fn(() => ({ linesHtml: '<span>line</span>', prefixWidth: 0 })),
     buildTerminalExportHtml: vi.fn(() => '<html>export</html>'),
     fetchTerminalExportCss: vi.fn(() => Promise.resolve('.export{}')),
@@ -484,16 +508,19 @@ describe('data-action dispatch', () => {
       created: '2025-01-15T10:30:00Z',
       createdDisplay: '2026-04-22 02:39:24 UTC',
     })
-    mocks.ExportHtmlUtils.buildExportMetaLine = vi.fn(({ label, createdText }) => `${label} · ${createdText}`)
     const btn = document.createElement('button')
     btn.dataset.action = 'save-html'
     el.container.appendChild(btn)
     btn.click()
     await new Promise((r) => setTimeout(r, 0))
 
-    expect(mocks.ExportHtmlUtils.buildExportMetaLine).toHaveBeenCalledWith({
+    expect(mocks.ExportHtmlUtils.buildExportDocumentModel).toHaveBeenCalledWith({
+      appName: 'testapp',
+      title: 'ping -i 0.5 -c 20 darklab.sh',
       label: 'ping -i 0.5 -c 20 darklab.sh',
       createdText: '2026-04-22 02:39:24 UTC',
+      runMeta: null,
+      rawLines: lines,
     })
     expect(mocks.ExportHtmlUtils.buildTerminalExportHtml.mock.calls[0][0].metaLine)
       .toBe('ping -i 0.5 -c 20 darklab.sh · 2026-04-22 02:39:24 UTC')
@@ -520,16 +547,19 @@ describe('data-action dispatch', () => {
       created: '2025-01-15T10:30:00Z',
       createdDisplay: '2026-04-22 02:39:24 UTC',
     })
-    mocks.ExportHtmlUtils.buildExportMetaLine = vi.fn(({ label, createdText }) => `${label} · ${createdText}`)
     const btn = document.createElement('button')
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
     await Promise.resolve()
 
-    expect(mocks.ExportHtmlUtils.buildExportMetaLine).toHaveBeenCalledWith({
+    expect(mocks.ExportHtmlUtils.buildExportDocumentModel).toHaveBeenCalledWith({
+      appName: 'testapp',
+      title: 'ping -i 0.5 -c 20 darklab.sh',
       label: 'ping -i 0.5 -c 20 darklab.sh',
       createdText: '2026-04-22 02:39:24 UTC',
+      runMeta: null,
+      rawLines: lines,
     })
     expect(mocks.ExportPdfUtils.buildTerminalExportPdf.mock.calls[0][0].metaLine)
       .toBe('ping -i 0.5 -c 20 darklab.sh · 2026-04-22 02:39:24 UTC')

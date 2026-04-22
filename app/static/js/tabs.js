@@ -997,6 +997,9 @@ function _exportPrefix(line, zeroBasedIndex) {
 }
 
 function _normalizeTabTranscriptLine(line) {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLine === 'function') {
+    return ExportHtmlUtils.normalizeExportTranscriptLine(line);
+  }
   if (typeof line === 'string') {
     return { text: line, cls: '', tsC: '', tsE: '' };
   }
@@ -1012,6 +1015,9 @@ function _normalizeTabTranscriptLine(line) {
 }
 
 function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } = {}) {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function') {
+    return ExportHtmlUtils.normalizeExportTranscriptLines(lines, { stripTruncationNotices: stripTruncationNotices });
+  }
   return (Array.isArray(lines) ? lines : [])
     .map(_normalizeTabTranscriptLine)
     .filter(line => {
@@ -1022,11 +1028,24 @@ function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } 
 }
 
 function _buildTabExportModel(tab, { createdText = null } = {}) {
+  const normalizedCreatedText = String(createdText || new Date().toLocaleString());
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
+    return ExportHtmlUtils.buildExportDocumentModel({
+      appName: APP_CONFIG.app_name || 'darklab shell',
+      title: String(tab && tab.label || ''),
+      label: tab && tab.label,
+      createdText: normalizedCreatedText,
+      runMeta: {
+        exitCode: tab ? tab.exitCode : null,
+        duration: null,
+        lines: `${_normalizeTabTranscriptLines(tab && tab.rawLines).length} lines`,
+        version: APP_CONFIG.version || null,
+      },
+      rawLines: tab && tab.rawLines,
+    });
+  }
   const rawLines = _normalizeTabTranscriptLines(tab && tab.rawLines);
   const appName = APP_CONFIG.app_name || 'darklab shell';
-  const normalizedCreatedText = String(
-    createdText || new Date().toLocaleString()
-  );
   return {
     appName,
     title: String(tab && tab.label || ''),

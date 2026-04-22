@@ -12,14 +12,18 @@
   var transcriptModel = pd.transcript || {};
   var exportModel = pd.export || {};
   var headerModel = pd.header || {};
-  var lines = transcriptModel.lines || pd.lines || [];
+  var lines = window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function'
+    ? ExportHtmlUtils.normalizeExportTranscriptLines(transcriptModel.lines || pd.lines || [])
+    : (transcriptModel.lines || pd.lines || []);
   var hasTimestampMetadata = transcriptModel.hasTimestampMetadata || pd.hasTimestampMetadata || false;
   var appName = exportModel.appName || pd.appName || headerModel.appName || '';
   var label = exportModel.label || pd.label || '';
   var created = exportModel.created || pd.created || '';
   var createdDisplay = exportModel.createdDisplay || pd.createdDisplay || headerModel.createdDisplay || '';
   var fontFacesCss = exportModel.fontFacesCss || pd.fontFacesCss || '';
-  var permalinkMeta = exportModel.runMeta || pd.permalinkMeta || null;
+  var permalinkMeta = window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportRunMeta === 'function'
+    ? ExportHtmlUtils.normalizeExportRunMeta(exportModel.runMeta || pd.permalinkMeta || null)
+    : (exportModel.runMeta || pd.permalinkMeta || null);
 
   var ansiUp = new AnsiUp();
   ansiUp.use_classes = false;
@@ -147,29 +151,27 @@
   }
 
   function saveHtml() {
-    var result = ExportHtmlUtils.buildExportLinesHtml(lines, {
+    var exportModel = ExportHtmlUtils.buildExportDocumentModel({
+      appName: appName,
+      title: label,
+      label: label,
+      createdText: createdDisplay || created,
+      runMeta: permalinkMeta,
+      rawLines: lines,
+    });
+    var result = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
       getPrefix: function (entry, i) { return formatPrefix(i + 1, entry); },
       ansiToHtml: function (text) { return ansiUp.ansi_to_html(text); },
     });
     var linesHtml = result.linesHtml;
     var prefixWidth = result.prefixWidth;
 
-    var runMeta = permalinkMeta ? {
-      exitCode: permalinkMeta.exitCode !== undefined ? permalinkMeta.exitCode : permalinkMeta.exit_code,
-      duration: permalinkMeta.duration || null,
-      lines:    permalinkMeta.lines    || null,
-      version:  permalinkMeta.version  || null,
-    } : null;
-
     ExportHtmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
       var html = ExportHtmlUtils.buildTerminalExportHtml({
-        appName: appName,
-        title: label,
-        metaLine: ExportHtmlUtils.buildExportMetaLine({
-          label: label,
-          createdText: createdDisplay || created,
-        }),
-        runMeta: runMeta,
+        appName: exportModel.appName,
+        title: exportModel.title,
+        metaLine: exportModel.metaLine,
+        runMeta: exportModel.runMeta,
         linesHtml: linesHtml,
         prefixWidth: prefixWidth,
         fontFacesCss: fontFacesCss,
@@ -186,23 +188,22 @@
   async function savePdf() {
     if (!window.jspdf) { alert('PDF library not loaded'); return; }
     var jsPDF = window.jspdf.jsPDF;
-    var runMeta = permalinkMeta ? {
-      exitCode: permalinkMeta.exitCode !== undefined ? permalinkMeta.exitCode : permalinkMeta.exit_code,
-      duration: permalinkMeta.duration || null,
-      lines:    permalinkMeta.lines    || null,
-      version:  permalinkMeta.version  || null,
-    } : null;
+    var exportModel = ExportHtmlUtils.buildExportDocumentModel({
+      appName: appName,
+      title: label,
+      label: label,
+      createdText: createdDisplay || created,
+      runMeta: permalinkMeta,
+      rawLines: lines,
+    });
     var ansiUpPdf = new AnsiUp();
     ansiUpPdf.use_classes = false;
     var doc = await ExportPdfUtils.buildTerminalExportPdf({
       jsPDF: jsPDF,
-      appName: appName,
-      metaLine: ExportHtmlUtils.buildExportMetaLine({
-        label: label,
-        createdText: createdDisplay || created,
-      }),
-      runMeta: runMeta,
-      rawLines: lines,
+      appName: exportModel.appName,
+      metaLine: exportModel.metaLine,
+      runMeta: exportModel.runMeta,
+      rawLines: exportModel.rawLines,
       getPrefix: function (entry, i) { return formatPrefix(i + 1, entry); },
       ansiToHtml: function (text) { return ansiUpPdf.ansi_to_html(text); },
     });

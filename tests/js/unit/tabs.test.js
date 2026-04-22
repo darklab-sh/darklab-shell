@@ -865,6 +865,14 @@ describe('tabs helpers', () => {
     window.ExportHtmlUtils = {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
+      normalizeExportTranscriptLines: (lines) => lines,
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
       buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
       fetchTerminalExportCss: () => Promise.resolve(''),
@@ -1042,6 +1050,14 @@ describe('tabs helpers', () => {
     window.ExportHtmlUtils = {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
+      normalizeExportTranscriptLines: (lines) => lines,
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
       buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
       fetchTerminalExportCss: () => Promise.resolve(''),
@@ -1073,6 +1089,13 @@ describe('tabs helpers', () => {
 
   it('exportTabHtml shows a toast when the tab has no lines', async () => {
     window.ExportHtmlUtils = {
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
       buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
       fetchTerminalExportCss: () => Promise.resolve(''),
