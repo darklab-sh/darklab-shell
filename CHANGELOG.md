@@ -79,7 +79,17 @@ All notable changes to darklab shell are documented here.
     - browser-rendered export surfaces no longer force uppercase on the command/meta line, preserving case-sensitive flags and command text.
     - PDF header spacing, run-meta badge geometry, output-panel border drawing, and empty-line handling were tightened so PDF follows the permalink/saved-HTML baseline more closely without pretending jsPDF can be pixel-identical to the browser.
     - fully empty raw lines with no prefix are now skipped in PDF so the exported transcript does not gain blank rows that are absent in permalink/share pages and saved HTML.
-  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; current Vitest total is now 694 and the combined documented suite total is 1,747.
+  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; the current documented totals are 695 Vitest tests and 1,749 combined tests.
+
+- **Render/export de-duplication completed across permalink/share pages and save surfaces** — the remaining export drift was no longer about separate routes; it was about parallel page/bootstrap and transcript-preparation layers that had survived behind otherwise shared rendering helpers.
+  - **Why:** `/history/<run_id>` and `/share/<id>` already shared the same live frontend, and the main-shell save actions already shared `ExportHtmlUtils` / `ExportPdfUtils`, but the permalink template context, `window.PermData` bootstrap, tab export preparation, and permalink export preparation were still rebuilding the same concepts in different places.
+  - **What:**
+    - permalink/share pages now bootstrap one normalized `page_model` from `app/permalinks.py` instead of scattering parallel template variables into Jinja and `window.PermData`
+    - `permalink.html` and `permalink_base.html` now render from that shared page model, including header copy, run-meta, JSON link, and extra actions
+    - `ExportHtmlUtils` now owns shared export-document normalization helpers for transcript lines and run meta (`normalizeExportTranscriptLines`, `normalizeExportRunMeta`, `buildExportDocumentModel`)
+    - `tabs.js` export/share paths and `permalink.js` save-html/save-pdf paths now consume the same export-document model rather than rebuilding transcript and meta preparation independently
+    - the permalink error page keeps a safe title fallback in the shared base template without reintroducing the older parallel data plumbing
+  - **Tests:** targeted validation with `npm run test:unit -- tests/js/unit/permalink.test.js tests/js/unit/export_pdf.test.js tests/js/unit/tabs.test.js` (`101 passed`) and `python3 -m pytest -q tests/py/test_routes.py -k "history or share or permalink or snapshot"` (`57 passed`).
 
 #### CI Image Drift Guardrails
 
@@ -89,6 +99,9 @@ All notable changes to darklab shell are documented here.
     - `.gitlab-ci.yml` now declares `CI_DEFAULT_IMAGE`, `CI_PYTHON_E2E_IMAGE`, `CI_NODE_IMAGE`, and `CI_DOCKER_IMAGE` once in the top-level `variables:` block and reuses them in every `image:` field.
     - `scripts/check_versions.sh --docker-only` now reports both the production Docker base image from `Dockerfile` and the CI runner images from `.gitlab-ci.yml` instead of only the production image.
     - Docker tag parsing in the version-check helper now accepts common major-only tags such as `docker:27` and `node:22-slim`, so CI image checks no longer fall into an “unsupported tag format” bucket.
+- **Self-hosted Docker build jobs now use the host Docker socket again** — the temporary switch back to `docker:27-dind` restored portability after a daemon-connectivity failure, but it also discarded the self-hosted runner's cross-job Docker layer cache and pushed build times back toward full cold builds.
+  - **What:** `container-smoke-test` and `docker-build` now point back at `unix:///var/run/docker.sock` with `DOCKER_TLS_CERTDIR=\"\"`, matching the self-hosted runner's socket mount configuration.
+  - **Why:** this restores the host-daemon layer cache on the self-hosted runner, which is the reason those jobs previously dropped from roughly 20 minutes to a few minutes after the first warm build.
 
 #### Mobile Sheets, Options Surface, and Navigation Cleanup
 

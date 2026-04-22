@@ -258,13 +258,13 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 
 **Problem:** Save/export had rendering logic in multiple places. `exportTabHtml` in `tabs.js`, `saveHtml` in `permalink.html`, and the PDF surfaces in both files each built their own line rendering, CSS, and document structure. Every visual fix required edits in two or more places. The PDF surfaces were especially fragile because they were structurally identical but unlinked.
 
-**Solution:** `export_html.js` was introduced as the single source of truth for the browser-rendered export model, exposing `window.ExportHtmlUtils`. It owns line preparation, meta-line formatting, header-model preparation, export-header HTML, inline export CSS, and embedded-font CSS for self-contained HTML downloads. Both the main-shell save path and the permalink/share save path now consume those helpers.
+**Solution:** `export_html.js` was introduced as the single source of truth for the browser-rendered export model, exposing `window.ExportHtmlUtils`. It owns line preparation, transcript normalization, run-meta normalization, meta-line formatting, export-document preparation, header-model preparation, export-header HTML, inline export CSS, and embedded-font CSS for self-contained HTML downloads. Both the main-shell save path and the permalink/share save path now consume those helpers.
 
 **Follow-through:** PDF rendering was extracted into `export_pdf.js` as `window.ExportPdfUtils`, so the two PDF call sites no longer carry duplicated rendering logic. The current split is deliberate:
 - `ExportHtmlUtils` owns the shared browser export semantics and acts as the baseline for permalink/share live pages plus saved HTML
 - `ExportPdfUtils` remains a separate renderer because jsPDF cannot reproduce browser layout exactly, but it consumes the same prepared header/meta/line model so PDF visual drift is bounded to renderer limitations rather than duplicated business logic
 
-**Current drift risk:** the largest remaining export risk is not duplicated PDF code anymore; it is the seam between server-rendered permalink/share page bootstrap and the client-side export model. That broader render/export de-duplication work is tracked in `TODO.md`.
+**Server/page-model follow-through:** permalink/share pages now bootstrap one normalized `page_model` from `app/permalinks.py`, and both the Jinja template layer and `permalink.js` consume that same shape. That keeps the live permalink/share page and the saved export surfaces aligned without reintroducing duplicated page-bootstrap variables.
 
 ### Client-Side PDF Export (jsPDF)
 

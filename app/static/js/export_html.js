@@ -62,6 +62,58 @@
     return trimmedLabel || trimmedCreated;
   }
 
+  function normalizeExportTranscriptLine(line) {
+    if (typeof line === 'string') {
+      return { text: line, cls: '', tsC: '', tsE: '' };
+    }
+    if (line && typeof line.text === 'string') {
+      return {
+        text: line.text,
+        cls: String(line.cls || ''),
+        tsC: String(line.tsC || ''),
+        tsE: String(line.tsE || ''),
+      };
+    }
+    return null;
+  }
+
+  function normalizeExportTranscriptLines(lines, { stripTruncationNotices = false } = {}) {
+    return (Array.isArray(lines) ? lines : [])
+      .map(normalizeExportTranscriptLine)
+      .filter((line) => {
+        if (!line) return false;
+        if (!stripTruncationNotices) return true;
+        return !/^\[(?:preview|tab output) truncated/i.test(String(line.text || ''));
+      });
+  }
+
+  function normalizeExportRunMeta(runMeta) {
+    if (!runMeta) return null;
+    return {
+      exitCode: runMeta.exitCode !== undefined ? runMeta.exitCode : runMeta.exit_code,
+      duration: runMeta.duration || null,
+      lines: runMeta.lines || null,
+      version: runMeta.version || null,
+    };
+  }
+
+  function buildExportDocumentModel({
+    appName = '',
+    title = '',
+    label = '',
+    createdText = '',
+    runMeta = null,
+    rawLines = [],
+  }) {
+    return {
+      appName: String(appName || ''),
+      title: String(title || ''),
+      metaLine: buildExportMetaLine({ label, createdText }),
+      runMeta: normalizeExportRunMeta(runMeta),
+      rawLines: normalizeExportTranscriptLines(rawLines),
+    };
+  }
+
   function getThemeExportVars() {
     const registryCurrent = window.ThemeRegistry
       && window.ThemeRegistry.current
@@ -296,6 +348,10 @@ ${linesHtml}
   window.ExportHtmlUtils = {
     exportTimestamp,
     buildExportMetaLine,
+    normalizeExportTranscriptLine,
+    normalizeExportTranscriptLines,
+    normalizeExportRunMeta,
+    buildExportDocumentModel,
     escapeExportHtml,
     renderExportPromptEcho,
     buildExportLinesHtml,

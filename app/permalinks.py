@@ -137,6 +137,61 @@ def _format_duration(started: str, finished: str) -> str | None:
         return None
 
 
+def _build_export_meta_line(label: str, created_text: str) -> str:
+    trimmed_label = str(label or "").strip()
+    trimmed_created = str(created_text or "").strip()
+    if trimmed_label and trimmed_created:
+        return f"{trimmed_label} · {trimmed_created}"
+    return trimmed_label or trimmed_created
+
+
+def _normalize_permalink_run_meta(meta: dict | None) -> dict | None:
+    if not meta:
+        return None
+    return {
+        "exitCode": meta.get("exit_code"),
+        "duration": meta.get("duration") or None,
+        "lines": meta.get("lines") or None,
+        "version": meta.get("version") or None,
+    }
+
+
+def _build_permalink_run_meta_items(run_meta: dict | None) -> list[dict]:
+    if not run_meta:
+        return []
+    items = []
+    exit_code = run_meta.get("exitCode")
+    if exit_code is not None:
+        items.append({
+            "kind": "badge",
+            "tone": "ok" if exit_code == 0 else "fail",
+            "text": f"exit {exit_code}",
+        })
+    if run_meta.get("duration"):
+        items.append({"kind": "item", "text": str(run_meta["duration"])})
+    if run_meta.get("lines"):
+        items.append({"kind": "item", "text": str(run_meta["lines"])})
+    if run_meta.get("version"):
+        items.append({"kind": "item", "text": f"v{run_meta['version']}"})
+    return items
+
+
+def _build_permalink_header_model(
+    app_name: str,
+    label: str,
+    created_display: str,
+    run_meta: dict | None,
+    expiry_html: str,
+) -> dict:
+    return {
+        "appName": app_name,
+        "metaLine": _build_export_meta_line(label, created_display),
+        "runMetaItems": _build_permalink_run_meta_items(run_meta),
+        "expiryHtml": expiry_html,
+        "createdDisplay": created_display,
+    }
+
+
 def _expiry_note(created: str) -> str:
     """Return an HTML snippet showing how long until this permalink expires."""
     retention = CFG.get("permalink_retention_days", 0)
@@ -170,28 +225,43 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
     created_fmt = created[:19].replace("T", " ") + " UTC"
+    expiry_html = _expiry_note(created)
+    run_meta = _normalize_permalink_run_meta(meta)
+    header_model = _build_permalink_header_model(
+        app_name=app_name,
+        label=label,
+        created_display=created_fmt,
+        run_meta=run_meta,
+        expiry_html=expiry_html,
+    )
+    page_model = {
+        "header": header_model,
+        "transcript": {
+            "lines": normalized_lines,
+            "hasTimestampMetadata": has_timestamp_metadata,
+        },
+        "export": {
+            "appName": app_name,
+            "label": label,
+            "created": created,
+            "createdDisplay": created_fmt,
+            "fontFacesCss": _font_face_css(embed=True),
+            "runMeta": run_meta,
+        },
+        "actions": {
+            "jsonUrl": json_url,
+            "extraActions": extra_actions or [],
+        },
+    }
 
     return {
         "page_title": f"{app_name} — {title}",
-        "app_name": app_name,
         "current_theme": theme_entry,
         "current_theme_css": theme_entry["vars"],
         "theme_registry": {"current": theme_entry, "themes": THEME_REGISTRY},
-        "label": label,
-        "created_fmt": created_fmt,
-        "created_json": json.dumps(created),
-        "expiry_html": _expiry_note(created),
-        "json_url": json_url,
-        "extra_actions": extra_actions or [],
-        "lines_json": json.dumps(normalized_lines),
-        "has_timestamp_metadata": has_timestamp_metadata,
-        "toggle_ts_disabled": not has_timestamp_metadata,
-        "app_name_json": json.dumps(app_name),
-        "label_json": json.dumps(label),
-        "font_faces_css": _font_face_css(embed=True),
         "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
-        "meta": meta,
-        "meta_json": json.dumps(meta),
+        "page_model": page_model,
+        "page_model_json": json.dumps(page_model),
     }
 
 

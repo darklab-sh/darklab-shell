@@ -1,27 +1,32 @@
 {% extends "permalink_base.html" %}
 
 {% block header_meta %}
-  <div class="export-meta">{{ label }} · {{ created_fmt }}</div>
-  {% if meta %}
+  {% if page_model.header.metaLine %}
+  <div class="export-meta">{{ page_model.header.metaLine }}</div>
+  {% endif %}
+  {% if page_model.header.runMetaItems %}
   <div class="export-run-meta">
-    {% if meta.exit_code is not none %}<span class="meta-badge {% if meta.exit_code == 0 %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">exit {{ meta.exit_code }}</span>{% endif %}
-    {% if meta.duration %}<span class="meta-item">{{ meta.duration }}</span>{% endif %}
-    {% if meta.lines %}<span class="meta-item">{{ meta.lines }}</span>{% endif %}
-    {% if meta.version %}<span class="meta-item">v{{ meta.version }}</span>{% endif %}
+    {% for item in page_model.header.runMetaItems %}
+      {% if item.kind == 'badge' %}
+      <span class="meta-badge {% if item.tone == 'ok' %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">{{ item.text }}</span>
+      {% else %}
+      <span class="meta-item">{{ item.text }}</span>
+      {% endif %}
+    {% endfor %}
   </div>
   {% endif %}
-  {% if expiry_html %}
-    <div class="permalink-expiry">{{ expiry_html | safe }}</div>
+  {% if page_model.header.expiryHtml %}
+    <div class="permalink-expiry">{{ page_model.header.expiryHtml | safe }}</div>
   {% endif %}
 {% endblock %}
 
 {% block header_actions %}
-  {% for action in extra_actions %}
+  {% for action in page_model.actions.extraActions %}
     <a class="btn btn-secondary btn-compact" href="{{ action.href }}">{{ action.label }}</a>
   {% endfor %}
   <button class="btn btn-secondary btn-compact" id="toggle-ln">line numbers: off</button>
-  <button class="btn btn-secondary btn-compact" id="toggle-ts"{% if toggle_ts_disabled %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
-  <a class="btn btn-secondary btn-compact" href="{{ json_url }}">view json</a>
+  <button class="btn btn-secondary btn-compact" id="toggle-ts"{% if not page_model.transcript.hasTimestampMetadata %} disabled title="timestamps unavailable for this permalink"{% endif %}>timestamps: off</button>
+  <a class="btn btn-secondary btn-compact" href="{{ page_model.actions.jsonUrl }}">view json</a>
   <button class="btn btn-secondary btn-compact" data-action="copy-txt">copy</button>
   <div class="save-menu-wrap save-menu-down" id="perm-save-wrap">
     <button class="btn btn-secondary btn-compact" id="perm-save-btn">save</button>
@@ -42,15 +47,6 @@
 
 {% block scripts %}
 <script>
-  window.PermData = {
-    lines:               {{ lines_json | safe }},
-    hasTimestampMetadata: {{ has_timestamp_metadata | tojson }},
-    appName:             {{ app_name_json | safe }},
-    label:               {{ label_json | safe }},
-    created:             {{ created_json | safe }},
-    createdDisplay:      {{ created_fmt | tojson }},
-    fontFacesCss:        {{ font_faces_css | tojson }},
-    permalinkMeta:       {{ meta_json | safe }},
-  };
+  window.PermData = {{ page_model_json | safe }};
 </script>
 {% endblock %}

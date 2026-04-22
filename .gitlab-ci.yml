@@ -171,10 +171,8 @@ dependency-version-check:
 container-smoke-test:
   stage: build
   image: $CI_DOCKER_IMAGE
-  services:
-    - docker:27-dind
   variables:
-    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
   before_script:
     - apk add --no-cache python3 py3-pytest py3-yaml docker-cli-compose
@@ -190,10 +188,8 @@ container-smoke-test:
 docker-build:
   stage: build
   image: $CI_DOCKER_IMAGE
-  services:
-    - docker:27-dind
   variables:
-    DOCKER_HOST: "tcp://docker:2375"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
   before_script: []
