@@ -248,22 +248,19 @@ def _permalink_context(title, label, created, content_lines, json_url, extra_act
             "fontFacesCss": _font_face_css(embed=True),
             "runMeta": run_meta,
         },
+        "actions": {
+            "jsonUrl": json_url,
+            "extraActions": extra_actions or [],
+        },
     }
 
     return {
         "page_title": f"{app_name} — {title}",
-        "app_name": app_name,
         "current_theme": theme_entry,
         "current_theme_css": theme_entry["vars"],
         "theme_registry": {"current": theme_entry, "themes": THEME_REGISTRY},
-        "label": label,
-        "created_fmt": created_fmt,
-        "json_url": json_url,
-        "extra_actions": extra_actions or [],
-        "has_timestamp_metadata": has_timestamp_metadata,
-        "toggle_ts_disabled": not has_timestamp_metadata,
         "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
-        "header_model": header_model,
+        "page_model": page_model,
         "page_model_json": json.dumps(page_model),
     }
 

@@ -22,7 +22,7 @@
 <body class="permalink-page" data-theme="{{ current_theme.name }}">
 <header class="export-header">
   <div class="export-header-copy">
-    <h1 class="export-title">{{ app_name }}</h1>
+    <h1 class="export-title">{{ page_model.header.appName if page_model is defined else app_name }}</h1>
     {% block header_meta %}{% endblock %}
   </div>
   <div class="permalink-actions">

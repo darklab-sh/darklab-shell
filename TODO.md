@@ -46,111 +46,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Technical Debt
 
-- **Render/export de-duplication across main UI, permalink, snapshot, HTML, and PDF**
-  - The current system looks like many separate surfaces, but the real maintenance problem is smaller and more structural:
-    - `/history/<run_id>` and `/share/<id>` already share the same live-page frontend (`permalink_base.html` + `permalink.html` + `permalink.js`)
-    - main-shell export buttons share `ExportHtmlUtils` / `ExportPdfUtils`
-    - drift still happens because the shared pieces stop one layer too late: page bootstrap, header modeling, transcript normalization, and export preparation are still rebuilt in parallel in Python templates, page JS, and export helpers
-  - Merge the old Jinja bootstrap debt into this plan instead of tracking it separately. The duplicated permalink/bootstrap wiring in `index.html`, `permalink_base.html`, and `diag.html` is part of the same underlying problem: too many surfaces still assemble their own page/export model instead of consuming one normalized one.
-  - Current drift / duplication areas:
-    - `permalink.html` still hand-renders the live permalink header while `export_html.js` separately builds the saved-HTML header
-    - permalink/share pages bootstrap many parallel template variables into `window.PermData` instead of one normalized page/export model
-    - main-tab export uses tab `rawLines` directly, while permalink/share pages first pass through `_normalize_permalink_lines(...)`
-    - prompt-echo treatment is split across:
-      - `_prompt_echo_text(...)` in Python
-      - `renderExportPromptEcho(...)` in HTML export
-      - `buildPdfLineSegments(...)` in PDF export
-    - run-meta content is built separately on the server for permalink/share pages and in the client for main-tab export
-    - theme/font/bootstrap plumbing is still split between:
-      - Jinja page bootstrap
-      - live permalink JS
-      - HTML export helpers
-      - PDF export helpers
-  - Concrete visual findings to preserve while refactoring:
-    - HTML export spacing is the preferred baseline for the header meta line
-    - command text in the header should remain case-true, not forced uppercase
-    - PDF should remain a best-effort renderer against the shared browser baseline, not a separately styled surface
-    - permalink page and saved HTML should be browser-exact parity targets wherever practical
-  - Implementation plan:
-    - **Phase 1: define the real surface map and parity contract**
-      - Document the true renderer families so future work targets the real seams:
-        - live permalink/share page renderer
-        - main-shell saved HTML export
-        - permalink/share saved HTML export
-        - main-shell PDF export
-        - permalink/share PDF export
-      - Write down which concerns must be shared vs allowed to differ:
-        - shared: header model, line normalization rules, prompt-echo semantics, run-meta ordering, theme-token precedence
-        - allowed to differ: route-specific data acquisition, snapshot redaction flow, jsPDF layout limits
-      - Keep this split explicit:
-        - browser-exact parity targets: live permalink/share page ↔ saved HTML
-        - best-effort parity target: PDF ↔ shared browser baseline
-    - **Phase 2: unify permalink/share/bootstrap data modeling**
-      - Replace the current scatter of template variables in `permalink.html` with one normalized bootstrap model for:
-        - header
-        - transcript lines
-        - export context
-        - page actions / capability flags
-      - Fold the old “Duplicated page bootstrap in Jinja templates” work into this step:
-        - factor shared `<head>` / theme / bootstrap wiring out of `index.html`, `permalink_base.html`, and `diag.html`
-        - keep the shared base lightweight, but remove repeated theme/bootstrap assembly before a fourth page type adds more drift
-      - Make `/history` and `/share` continue to use the same frontend, but with a cleaner server-provided model instead of parallel injected fields
-    - **Phase 3: introduce one canonical export/transcript preparation layer**
-      - Define one normalized transcript/export-preparation model that can be consumed by:
-        - live permalink/share rendering
-        - main-shell saved HTML
-        - permalink/share saved HTML
-        - main-shell PDF
-        - permalink/share PDF
-      - The shared preparation layer should own:
-        - prompt-echo insertion / splitting rules
-        - spacer / blank-line behavior
-        - prefix strings and prefix width
-        - line-class normalization
-        - run-meta token ordering
-        - header token/content model
-      - Keep renderers separate, but stop letting each one reinterpret raw line data independently
-    - **Phase 4: unify browser-rendered header structure**
-      - Eliminate the duplicated live-permalink-vs-saved-HTML header assembly by moving both onto the same semantic header model
-      - Make permalink/share live pages and saved HTML render the same:
-        - app name treatment
-        - command/timestamp line
-        - run-meta ordering
-        - spacing/grouping
-      - Use saved HTML spacing as the browser baseline unless a stronger reason emerges during implementation
-    - **Phase 5: keep PDF as a separate renderer but a shared-model consumer**
-      - PDF should continue to render independently, but only from the same prepared transcript/header model used by browser surfaces
-      - Keep PDF-specific responsibilities isolated to:
-        - font embedding/fallback
-        - line wrapping/pagination
-        - geometric drawing of borders/badges
-      - Prevent PDF from rebuilding header semantics, prompt-echo semantics, or line-normalization rules on its own
-    - **Phase 6: align run-meta and export metadata ownership**
-      - Decide which metadata belongs to the prepared export model vs route-only/server-only concerns
-      - Move shared run-meta preparation behind one builder so:
-        - permalink/share live pages
-        - main-shell HTML/PDF export
-        - permalink/share HTML/PDF export
-        all use the same ordering and casing rules
-      - Leave route-specific differences explicit:
-        - run permalink can show duration/full-output context
-        - snapshot permalink can omit unavailable metadata without inventing placeholders
-    - **Phase 7: strengthen anti-drift tests**
-      - Add tests that compare the same source input across:
-        - live permalink/share header model
-        - saved HTML header model
-        - PDF-preparation model
-      - Add tests specifically for normalization drift:
-        - prompt-echo handling
-        - empty/spacer line handling
-        - prefix gutter alignment
-        - run-meta ordering
-      - Keep PDF tests focused on “consumes the shared model correctly” rather than re-testing browser layout details it cannot match exactly
-    - **Phase 8: final cleanup and deletion**
-      - Remove dead bootstrap duplication left behind in Jinja templates once the shared base/model is live
-      - Remove redundant header-building code that only existed to bridge old permalink/export paths
-      - Remove any now-obsolete one-off normalization helpers once all live/export surfaces consume the canonical preparation layer
-
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
@@ -215,7 +110,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 | Environment capability hints | L–M | M | Pre-run hints have lower per-use value than post-run summaries |
 | Interactive PTY mode | M | H | Full PTY + WebSocket architecture for a small allowlisted set |
 | Plugin-style helper command registry | L | M | Internal quality; revisit when fake-command layer needs more structure |
-| Lightweight Jinja base template | L | L | Third page type now exists (`diag.html`); three templates share the same `<head>` bootstrap |
 
 ---
 

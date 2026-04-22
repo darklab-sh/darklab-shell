@@ -79,7 +79,17 @@ All notable changes to darklab shell are documented here.
     - browser-rendered export surfaces no longer force uppercase on the command/meta line, preserving case-sensitive flags and command text.
     - PDF header spacing, run-meta badge geometry, output-panel border drawing, and empty-line handling were tightened so PDF follows the permalink/saved-HTML baseline more closely without pretending jsPDF can be pixel-identical to the browser.
     - fully empty raw lines with no prefix are now skipped in PDF so the exported transcript does not gain blank rows that are absent in permalink/share pages and saved HTML.
-  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; current Vitest total is now 694 and the combined documented suite total is 1,747.
+  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; the current documented totals are 695 Vitest tests and 1,749 combined tests.
+
+- **Render/export de-duplication completed across permalink/share pages and save surfaces** — the remaining export drift was no longer about separate routes; it was about parallel page/bootstrap and transcript-preparation layers that had survived behind otherwise shared rendering helpers.
+  - **Why:** `/history/<run_id>` and `/share/<id>` already shared the same live frontend, and the main-shell save actions already shared `ExportHtmlUtils` / `ExportPdfUtils`, but the permalink template context, `window.PermData` bootstrap, tab export preparation, and permalink export preparation were still rebuilding the same concepts in different places.
+  - **What:**
+    - permalink/share pages now bootstrap one normalized `page_model` from `app/permalinks.py` instead of scattering parallel template variables into Jinja and `window.PermData`
+    - `permalink.html` and `permalink_base.html` now render from that shared page model, including header copy, run-meta, JSON link, and extra actions
+    - `ExportHtmlUtils` now owns shared export-document normalization helpers for transcript lines and run meta (`normalizeExportTranscriptLines`, `normalizeExportRunMeta`, `buildExportDocumentModel`)
+    - `tabs.js` export/share paths and `permalink.js` save-html/save-pdf paths now consume the same export-document model rather than rebuilding transcript and meta preparation independently
+    - the permalink error page keeps a safe title fallback in the shared base template without reintroducing the older parallel data plumbing
+  - **Tests:** targeted validation with `npm run test:unit -- tests/js/unit/permalink.test.js tests/js/unit/export_pdf.test.js tests/js/unit/tabs.test.js` (`101 passed`) and `python3 -m pytest -q tests/py/test_routes.py -k "history or share or permalink or snapshot"` (`57 passed`).
 
 #### CI Image Drift Guardrails
 
