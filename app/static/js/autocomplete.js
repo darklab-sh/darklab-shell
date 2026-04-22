@@ -81,13 +81,32 @@ function _autocompleteTokenContext(value, cursorPos) {
 function _autocompletePipeContext(value, cursorPos) {
   const text = String(value || '');
   const cursor = Math.max(0, Math.min(typeof cursorPos === 'number' ? cursorPos : text.length, text.length));
-  const pipeIndex = text.indexOf('|');
-  if (pipeIndex < 0 || cursor <= pipeIndex) return null;
-  if (text.indexOf('|', pipeIndex + 1) !== -1) return null;
+  const firstPipeIndex = text.indexOf('|');
+  if (firstPipeIndex < 0 || cursor <= firstPipeIndex) return null;
 
-  const baseCommand = text.slice(0, pipeIndex).trim();
+  const baseCommand = text.slice(0, firstPipeIndex).trim();
   if (!baseCommand) return null;
 
+  const shellControlRe = /(^|[\s|])(?:&&|\|\||;|;;|>>?|<|&)(?=$|\s)/;
+  if (shellControlRe.test(baseCommand)) return null;
+
+  const stageSection = text.slice(firstPipeIndex + 1, cursor);
+  const fullStageSection = text.slice(firstPipeIndex + 1);
+  const rawStages = fullStageSection.split('|');
+  const completedStageCount = stageSection.split('|').length - 1;
+  const priorStages = rawStages.slice(0, completedStageCount);
+  const invalidPriorStage = priorStages.some((stage) => {
+    const stageText = String(stage || '').trim();
+    if (!stageText || shellControlRe.test(stageText)) return true;
+    const stageRoot = stageText.split(/\s+/, 1)[0].toLowerCase();
+    const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+    const spec = registry[stageRoot];
+    return !spec || !spec.pipe_command;
+  });
+  if (invalidPriorStage) return null;
+
+  const pipeIndex = text.lastIndexOf('|', cursor - 1);
+  if (pipeIndex < 0) return null;
   const stageOffset = pipeIndex + 1;
   const stageText = text.slice(stageOffset);
   const stageCursor = Math.max(0, cursor - stageOffset);

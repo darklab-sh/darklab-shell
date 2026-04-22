@@ -176,6 +176,10 @@ class TestAllowlist:
         ok, _ = _check("PING google.com")
         assert ok
 
+    def test_chained_synthetic_pipe_helpers_allowed(self):
+        ok, _ = _check("ping darklab.sh | grep ttl | wc -l")
+        assert ok
+
 
 class TestSyntheticGrepParsing:
     def test_parses_basic_synthetic_grep(self):
@@ -183,24 +187,28 @@ class TestSyntheticGrepParsing:
         assert err is None
         assert spec is not None
         assert spec["base_command"] == "ping darklab.sh"
-        assert spec["pattern"] == "ttl"
-        assert spec["ignore_case"] is False
-        assert spec["invert_match"] is False
-        assert spec["extended"] is False
+        assert spec["kind"] == "grep"
+        assert spec["stages"] == [{
+            "kind": "grep",
+            "pattern": "ttl",
+            "ignore_case": False,
+            "invert_match": False,
+            "extended": False,
+        }]
 
     def test_parses_combined_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -iv ttl")
         assert err is None
         assert spec is not None
-        assert spec["ignore_case"] is True
-        assert spec["invert_match"] is True
+        assert spec["stages"][0]["ignore_case"] is True
+        assert spec["stages"][0]["invert_match"] is True
 
     def test_parses_extended_regex_pattern(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -E 'ttl|time'")
         assert err is None
         assert spec is not None
-        assert spec["extended"] is True
-        assert spec["pattern"] == "ttl|time"
+        assert spec["stages"][0]["extended"] is True
+        assert spec["stages"][0]["pattern"] == "ttl|time"
 
     def test_rejects_missing_pattern(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | grep -i")
@@ -223,40 +231,39 @@ class TestSyntheticPostFilterParsing:
         spec, err = parse_synthetic_postfilter("ping darklab.sh | head")
         assert err is None
         assert spec is not None
-        assert spec == {
-            "kind": "head",
-            "count": 10,
-            "base_command": "ping darklab.sh",
-        }
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["kind"] == "head"
+        assert spec["stages"] == [{"kind": "head", "count": 10}]
 
     def test_parses_tail_with_explicit_count(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -n 25")
         assert err is None
         assert spec is not None
-        assert spec == {
-            "kind": "tail",
-            "count": 25,
-            "base_command": "ping darklab.sh",
-        }
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["kind"] == "tail"
+        assert spec["stages"] == [{"kind": "tail", "count": 25}]
 
     def test_parses_wc_line_count(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | wc -l")
         assert err is None
         assert spec is not None
-        assert spec == {
-            "kind": "wc_l",
-            "base_command": "ping darklab.sh",
-        }
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["kind"] == "wc_l"
+        assert spec["stages"] == [{"kind": "wc_l"}]
 
     def test_parses_head_with_short_count_flag(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | head -5")
         assert err is None
-        assert spec == {"kind": "head", "count": 5, "base_command": "ping darklab.sh"}
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["stages"] == [{"kind": "head", "count": 5}]
 
     def test_parses_tail_with_short_count_flag(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | tail -20")
         assert err is None
-        assert spec == {"kind": "tail", "count": 20, "base_command": "ping darklab.sh"}
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["stages"] == [{"kind": "tail", "count": 20}]
 
     def test_rejects_invalid_head_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | head -n")
@@ -276,26 +283,30 @@ class TestSyntheticPostFilterParsing:
     def test_parses_sort_default(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort")
         assert err is None
-        assert spec == {"kind": "sort", "reverse": False, "numeric": False, "unique": False,
-                        "base_command": "ping darklab.sh"}
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["kind"] == "sort"
+        assert spec["stages"] == [{"kind": "sort", "reverse": False, "numeric": False, "unique": False}]
 
     def test_parses_sort_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -rn")
         assert err is None
         assert spec is not None
-        assert spec["reverse"] is True and spec["numeric"] is True and spec["unique"] is False
+        stage = spec["stages"][0]
+        assert stage["reverse"] is True and stage["numeric"] is True and stage["unique"] is False
 
     def test_parses_sort_unique(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -u")
         assert err is None
         assert spec is not None
-        assert spec["unique"] is True
+        assert spec["stages"][0]["unique"] is True
 
     def test_parses_sort_all_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -rnu")
         assert err is None
         assert spec is not None
-        assert spec["reverse"] is True and spec["numeric"] is True and spec["unique"] is True
+        stage = spec["stages"][0]
+        assert stage["reverse"] is True and stage["numeric"] is True and stage["unique"] is True
 
     def test_rejects_invalid_sort_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | sort -x")
@@ -305,18 +316,32 @@ class TestSyntheticPostFilterParsing:
     def test_parses_uniq_default(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq")
         assert err is None
-        assert spec == {"kind": "uniq", "count": False, "base_command": "ping darklab.sh"}
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["kind"] == "uniq"
+        assert spec["stages"] == [{"kind": "uniq", "count": False}]
 
     def test_parses_uniq_count(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq -c")
         assert err is None
         assert spec is not None
-        assert spec["count"] is True
+        assert spec["stages"][0]["count"] is True
 
     def test_rejects_invalid_uniq_flags(self):
         spec, err = parse_synthetic_postfilter("ping darklab.sh | uniq -d")
         assert spec is None
         assert err == "Synthetic uniq supports only -c."
+
+    def test_parses_chained_synthetic_helpers(self):
+        spec, err = parse_synthetic_postfilter("ping darklab.sh | grep ttl | wc -l")
+        assert err is None
+        assert spec is not None
+        assert spec["base_command"] == "ping darklab.sh"
+        assert spec["kind"] == "grep"
+        assert spec["stages"] == [
+            {"kind": "grep", "pattern": "ttl", "ignore_case": False, "invert_match": False, "extended": False},
+            {"kind": "wc_l"},
+        ]
 
 
 # ── Deny prefix (!) ───────────────────────────────────────────────────────────

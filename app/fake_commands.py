@@ -380,6 +380,8 @@ def _run_fake_help() -> list[dict[str, str]]:
         ("head", "command | head -n <count>  e.g. ping darklab.sh | head -n 5"),
         ("tail", "command | tail -n <count>  e.g. ping darklab.sh | tail -n 5"),
         ("wc -l", "command | wc -l  e.g. ping darklab.sh | wc -l"),
+        ("sort", "command | sort -u  e.g. ping darklab.sh | sort -u"),
+        ("uniq", "command | uniq -c  e.g. ping darklab.sh | uniq -c"),
     ]
     pipe_width = max(len(name) for name, _ in pipe_examples)
     lines = [_output_line("Built-in commands:", "fake-section")]
@@ -388,7 +390,7 @@ def _run_fake_help() -> list[dict[str, str]]:
     lines.extend([
         _output_line("", "fake-spacer"),
         _output_line("Commands with built-in pipe support:", "fake-section"),
-        _output_line("  Use one supported pipe stage after a command.", "fake-help-note"),
+        _output_line("  Chain supported helpers like grep, head, tail, wc -l, sort, and uniq after a command.", "fake-help-note"),
     ])
     for name, example in pipe_examples:
         lines.append(_output_line(f"  {name:<{pipe_width}}  {example}", "fake-help-row"))
@@ -741,7 +743,10 @@ def _run_fake_autocomplete() -> list[dict[str, str]]:
         _output_line("Autocomplete:", "fake-section"),
         _output_line("Tab expands shared prefixes before it cycles suggestions.", "fake-plain"),
         _output_line("Known command roots can suggest flags, values, and positional hints.", "fake-plain"),
-        _output_line("Built-in pipe support can also suggest grep, head, tail, and wc -l after `command |`.", "fake-plain"),
+        _output_line(
+            "Built-in pipe support can also suggest grep, head, tail, wc -l, sort, and uniq after `command |`.",
+            "fake-plain",
+        ),
     ]
 
 

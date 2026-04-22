@@ -1488,14 +1488,17 @@ context:
         description: Generate a new session token and save it to this browser
         closes: true
       - value: set
-        description: Activate an existing session token from another device
+        description: Activate an existing session token from another device with a terminal migration confirm when needed
         takes_value: true
         value_hint:
           placeholder: <token>
           description: Paste a tok_... token or UUID from another device
         insert: 'set '
+      - value: copy
+        description: Copy the active session token to the clipboard
+        closes: true
       - value: clear
-        description: Remove the session token and revert to an anonymous session
+        description: Confirm before removing the active session token and reverting to an anonymous session
         closes: true
       - value: rotate
         description: Generate a new token and migrate all history to it

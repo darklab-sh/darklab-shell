@@ -145,11 +145,11 @@ Critically, the identity switch (`localStorage.setItem` + `updateSessionId`) onl
 
 The `storage` event fires in every same-origin tab that did NOT make the change. `session.js` registers a listener that calls `SESSION_ID = e.newValue || _sessionUuid` when `e.key === 'session_token'`. This means tabs that are already open pick up a token change immediately without a reload — they won't keep sending a stale `X-Session-ID` after another tab runs `session-token set/clear/rotate`. The listener intentionally does not call `updateSessionId()` (which reads back from `localStorage`) because `e.newValue` already carries the new value directly, and `localStorage` reads in another tab may not yet reflect the change on some browsers.
 
-Header sync alone is not sufficient, though. Passive tabs also need to refresh session-scoped UI such as recent-command chips, server-backed starred state, history results, and the options-panel token status. The current listener therefore also calls `reloadSessionHistory()` and `_updateOptionsSessionTokenStatus()` when those helpers are present, so visible UI follows the new session identity instead of lagging behind it.
+Header sync alone is not sufficient, though. Passive tabs also need to refresh session-scoped UI such as recent-command chips, server-backed starred state, history results, saved Options state, and the options-panel token status. The current listener therefore also calls `reloadSessionHistory()`, `loadSessionPreferences()`, and `_updateOptionsSessionTokenStatus()` when those helpers are present, so visible UI follows the new session identity instead of lagging behind it.
 
 **4. Session-token subcommands are intercepted client-side; bare `session-token` is not**
 
-`generate`, `set`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present.
+`generate`, `set`, `copy`, `clear`, `rotate`, `list`, and `revoke` are intercepted in `submitCommand()` after `addToHistory()` and never reach the server. This keeps sensitive token values out of the server command log. Bare `session-token` (status only) passes to the server as a normal fake command so the server-side rendering path handles the output consistently with other status commands. The intercept check is `cmd.trim().toLowerCase().startsWith('session-token ')` — the trailing space ensures it only fires when a subcommand is present. Token-bearing local history entries are masked before storage so the local history/recents surfaces stay useful without echoing raw token values.
 
 **5. Revocation is enforced at the API layer, not just client-side**
 
@@ -329,7 +329,7 @@ The theme selector is the deliberate exception. It keeps a dedicated full-screen
 
 **The Options modal is shared across device classes, but the mobile sheet hides settings whose effect is desktop-specific (`HUD Clock`, `Run Notifications`).**
 
-Not every preference belongs equally on every surface. `HUD Clock` controls the desktop HUD `CLOCK` pill, and run notifications are treated as a desktop-oriented “tab not in focus” affordance rather than a core mobile workflow. Leaving both rows visible on mobile made the Options sheet noisier without adding useful handheld behavior. The underlying preferences still live in the same cookie-backed frontend layer, but the mobile presentation now omits those rows so the sheet stays focused on settings that matter on phones.
+Not every preference belongs equally on every surface. `HUD Clock` controls the desktop HUD `CLOCK` pill, and run notifications are treated as a desktop-oriented “tab not in focus” affordance rather than a core mobile workflow. Leaving both rows visible on mobile made the Options sheet noisier without adding useful handheld behavior. The underlying preferences still live in the same shared session-scoped/browser-cached preference layer, but the mobile presentation now omits those rows so the sheet stays focused on settings that matter on phones.
 
 ### Button Primitive Family
 

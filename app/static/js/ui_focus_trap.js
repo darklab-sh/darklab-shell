@@ -5,12 +5,17 @@
 // Tab falls through to the document behind the backdrop and cycles into
 // rail / tab / HUD buttons the user cannot see or interact with.
 //
-// bindFocusTrap(container) installs one keydown listener on `container`;
-// on Tab (or Shift+Tab), it computes the container's currently focusable
-// descendants and wraps focus at the start/end of the list. Focus movement
-// inside the container (Tab between two buttons in the middle) is left to
-// the browser so native Tab behavior still applies; the helper only acts
-// at the boundary to keep focus contained.
+// bindFocusTrap(container, opts) installs one keydown listener on
+// `container`; on Tab (or Shift+Tab), it computes the container's currently
+// focusable descendants and wraps focus at the start/end of the list. Focus
+// movement inside the container (Tab between two buttons in the middle) is
+// left to the browser so native Tab behavior still applies; the helper only
+// acts at the boundary to keep focus contained.
+//
+// When opts.arrowKeys is true, ArrowRight / ArrowDown advance through the
+// current focus order and ArrowLeft / ArrowUp reverse through it. This is
+// intentionally opt-in because some modal surfaces contain text inputs and
+// selects where arrow keys should retain their native editing behavior.
 //
 // Shape follows bindPressable / bindDismissible: one function, element +
 // optional opts, idempotent via data-focus-trap-bound, returns a disposable.
@@ -53,28 +58,57 @@
     return nodes.filter(_isVisible);
   }
 
-  function bindFocusTrap(container) {
+  function bindFocusTrap(container, opts) {
     if (!container) return null;
     if (container.dataset && container.dataset.focusTrapBound === '1') return null;
     if (container.dataset) container.dataset.focusTrapBound = '1';
+    const arrowKeysEnabled = !!(opts && opts.arrowKeys);
 
     const keydownHandler = (e) => {
-      if (e.key !== 'Tab') return;
       const list = _focusables(container);
       if (list.length === 0) return;
+      const active = document.activeElement;
       const first = list[0];
       const last = list[list.length - 1];
-      const active = document.activeElement;
-      if (e.shiftKey) {
-        if (active === first || !container.contains(active)) {
-          e.preventDefault();
-          if (typeof last.focus === 'function') last.focus();
+
+      if (e.key === 'Tab') {
+        if (e.shiftKey) {
+          if (active === first || !container.contains(active)) {
+            e.preventDefault();
+            if (typeof last.focus === 'function') last.focus();
+          }
+        } else {
+          if (active === last || !container.contains(active)) {
+            e.preventDefault();
+            if (typeof first.focus === 'function') first.focus();
+          }
         }
+        return;
+      }
+
+      if (!arrowKeysEnabled) return;
+      if (e.altKey || e.ctrlKey || e.metaKey || e.shiftKey) return;
+      if (
+        e.key !== 'ArrowRight'
+        && e.key !== 'ArrowDown'
+        && e.key !== 'ArrowLeft'
+        && e.key !== 'ArrowUp'
+      ) return;
+
+      const currentIndex = list.indexOf(active);
+      const movingForward = e.key === 'ArrowRight' || e.key === 'ArrowDown';
+      let nextIndex = 0;
+      if (currentIndex !== -1) {
+        nextIndex = movingForward
+          ? (currentIndex + 1) % list.length
+          : (currentIndex - 1 + list.length) % list.length;
       } else {
-        if (active === last || !container.contains(active)) {
-          e.preventDefault();
-          if (typeof first.focus === 'function') first.focus();
-        }
+        nextIndex = movingForward ? 0 : list.length - 1;
+      }
+      const next = list[nextIndex];
+      if (next && typeof next.focus === 'function') {
+        e.preventDefault();
+        next.focus();
       }
     };
 

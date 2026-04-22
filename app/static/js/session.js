@@ -31,6 +31,9 @@ let SESSION_ID = localStorage.getItem('session_token') || _sessionUuid;
 // localStorage — avoids a page reload to apply the new identity.
 function updateSessionId(newId) {
   SESSION_ID = newId || localStorage.getItem('session_token') || _sessionUuid;
+  if (typeof loadSessionPreferences === 'function') {
+    loadSessionPreferences().catch(() => {});
+  }
 }
 
 // Keep SESSION_ID current in other open tabs when session_token changes in
@@ -42,6 +45,7 @@ window.addEventListener('storage', (e) => {
   if (e.key === 'session_token') {
     SESSION_ID = e.newValue || _sessionUuid;
     if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+    if (typeof loadSessionPreferences === 'function') loadSessionPreferences().catch(() => {});
     if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
   }
 });

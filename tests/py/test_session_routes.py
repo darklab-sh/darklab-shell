@@ -124,6 +124,14 @@ class TestSessionMigrate:
                 (session_id,),
             ).fetchone()[0]
 
+    def _seed_preferences(self, session_id, preferences):
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, datetime('now'))",
+                (session_id, json.dumps(preferences, sort_keys=True)),
+            )
+            conn.commit()
+
     def test_returns_200_with_valid_request(self):
         client = get_client()
         from_id = "migrate-from-valid-test"
@@ -335,6 +343,53 @@ class TestSessionMigrate:
         data = json.loads(resp.data)
         # Only 2 commands were actually inserted (the 1 already present was skipped)
         assert data["migrated_stars"] == 2
+
+    def test_migrates_session_preferences_when_destination_has_none(self):
+        client = get_client()
+        from_id = "migrate-prefs-from-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        prefs = {"pref_theme_name": "theme_light_blue", "pref_timestamps": "clock"}
+        self._seed_preferences(from_id, prefs)
+
+        client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+
+        with sqlite3.connect(DB_PATH) as conn:
+            src = conn.execute(
+                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                (from_id,),
+            ).fetchone()
+            dst = conn.execute(
+                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                (to_id,),
+            ).fetchone()
+        assert src is None
+        assert json.loads(dst[0]) == prefs
+
+    def test_migrate_keeps_existing_destination_session_preferences(self):
+        client = get_client()
+        from_id = "migrate-prefs-src-" + __import__("uuid").uuid4().hex[:8]
+        to_id = str(__import__("uuid").uuid4())
+        src_prefs = {"pref_theme_name": "theme_light_blue", "pref_timestamps": "clock"}
+        dst_prefs = {"pref_theme_name": "darklab_obsidian.yaml", "pref_timestamps": "off"}
+        self._seed_preferences(from_id, src_prefs)
+        self._seed_preferences(to_id, dst_prefs)
+
+        client.post(
+            "/session/migrate",
+            json={"from_session_id": from_id, "to_session_id": to_id},
+            headers={"X-Session-ID": from_id},
+        )
+
+        with sqlite3.connect(DB_PATH) as conn:
+            dst = conn.execute(
+                "SELECT preferences FROM session_preferences WHERE session_id = ?",
+                (to_id,),
+            ).fetchone()
+        assert json.loads(dst[0]) == dst_prefs
 
 
 # ── /session/run-count ────────────────────────────────────────────────────────
@@ -622,6 +677,54 @@ class TestSessionTokenInfo:
         data = json.loads(client.get("/session/token/info", headers={"X-Session-ID": token}).data)
         assert data["token"] is None
         assert data["created"] is None
+
+
+# ── /session/preferences ──────────────────────────────────────────────────────
+
+class TestSessionPreferences:
+    def test_returns_empty_preferences_when_none_saved(self):
+        client = get_client()
+        session_id = "prefs-empty-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.get("/session/preferences", headers={"X-Session-ID": session_id})
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["preferences"] == {}
+        assert data["updated"] is None
+
+    def test_persists_and_returns_current_session_preferences(self):
+        client = get_client()
+        session_id = "prefs-save-" + __import__("uuid").uuid4().hex[:8]
+        payload = {
+            "preferences": {
+                "pref_theme_name": "theme_light_blue",
+                "pref_timestamps": "clock",
+                "pref_run_notify": "on",
+            }
+        }
+        save_resp = client.post("/session/preferences", json=payload, headers={"X-Session-ID": session_id})
+        assert save_resp.status_code == 200
+
+        get_resp = client.get("/session/preferences", headers={"X-Session-ID": session_id})
+        data = json.loads(get_resp.data)
+        assert data["preferences"] == payload["preferences"]
+        assert data["updated"]
+
+    def test_ignores_unknown_session_preference_keys(self):
+        client = get_client()
+        session_id = "prefs-filter-" + __import__("uuid").uuid4().hex[:8]
+        resp = client.post(
+            "/session/preferences",
+            json={
+                "preferences": {
+                    "pref_theme_name": "theme_light_blue",
+                    "pref_unknown": "x",
+                }
+            },
+            headers={"X-Session-ID": session_id},
+        )
+        assert resp.status_code == 200
+        data = json.loads(resp.data)
+        assert data["preferences"] == {"pref_theme_name": "theme_light_blue"}
 
 
 # ── /session/token/revoke ─────────────────────────────────────────────────────

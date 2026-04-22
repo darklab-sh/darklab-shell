@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 856
-- `vitest`: 696
+- `pytest`: 864
+- `vitest`: 726
 - `playwright`: 198
-- total: 1,750
+- total: 1,788
 
 This document is organized in two parts:
 
@@ -833,6 +833,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_run_filters_output_through_synthetic_head` | Checks that synthetic head limits the persisted transcript to the first matching lines. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_tail` | Checks that synthetic tail persists only the buffered trailing lines once the run completes. |
 | `TestRunStreaming.test_run_filters_output_through_synthetic_wc_line_count` | Checks that synthetic `wc -l` replaces the transcript with the final line-count output. |
+| `TestRunStreaming.test_run_filters_output_through_chained_synthetic_helpers` | Checks that chained synthetic helpers stream and persist the final post-processed output instead of the intermediate lines. |
 | `TestRunStreaming.test_run_rejects_invalid_synthetic_grep_regex` | Checks that invalid synthetic `grep -E` regexes fail as user-facing errors. |
 | `TestRunStreaming.test_run_emits_timeout_notice_when_command_exceeds_limit` | Checks that run emits timeout notice when command exceeds limit. |
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
@@ -916,6 +917,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionMigrate.test_migrate_returns_migrated_stars_count` | Checks that the response includes a `migrated_stars` count. |
 | `TestSessionMigrate.test_migrate_stars_no_duplicates_in_destination` | Checks that stars already present in the destination are not duplicated after migration. |
 | `TestSessionMigrate.test_migrate_returns_only_newly_inserted_star_count` | Checks that `migrated_stars` reflects INSERT rowcount (newly written rows) rather than DELETE rowcount — so overlapping stars in the destination do not inflate the reported count. |
+| `TestSessionMigrate.test_migrates_session_preferences_when_destination_has_none` | Checks that a source session's saved preference snapshot moves to the destination session when the destination has no saved preferences yet. |
+| `TestSessionMigrate.test_migrate_keeps_existing_destination_session_preferences` | Checks that migration does not overwrite a destination session's existing saved preference snapshot. |
 | `TestSessionRunCount.test_returns_zero_for_empty_session` | Checks that `/session/run-count` returns `{"count": 0}` for a session with no runs. |
 | `TestSessionRunCount.test_returns_true_count` | Checks that the endpoint returns the exact number of seeded run rows for the session. |
 | `TestSessionRunCount.test_is_uncapped_beyond_history_panel_limit` | Checks that 75 seeded runs are all counted — confirming the endpoint is not capped by `history_panel_limit` (50). |
@@ -944,6 +947,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestSessionTokenRevoke.test_rejects_missing_token_field` | Checks that a 400 is returned when the `token` field is absent from the revoke request. |
 | `TestSessionTokenRevoke.test_can_revoke_own_current_token` | Checks that revoking the caller's own active token (passed in both body and header) is permitted. |
 | `TestSessionTokenRevoke.test_second_revoke_returns_404` | Checks that attempting to revoke an already-revoked token returns 404. |
+| `TestSessionPreferences.test_returns_empty_preferences_when_none_saved` | Checks that `GET /session/preferences` returns an empty normalized preference payload when the session has no stored preferences yet. |
+| `TestSessionPreferences.test_persists_and_returns_current_session_preferences` | Checks that `POST /session/preferences` stores the current session's normalized preference snapshot and `GET` returns it back. |
+| `TestSessionPreferences.test_ignores_unknown_session_preference_keys` | Checks that unknown keys are dropped before session preferences are stored or returned. |
 
 #### `test_output_search.py`
 
@@ -1029,6 +1035,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestAllowlist.test_prefix_must_have_space` | Checks that prefix must have space. |
 | `TestAllowlist.test_unrestricted_when_no_file` | Checks that unrestricted when no file. |
 | `TestAllowlist.test_case_insensitive` | Checks case insensitive handling. |
+| `TestAllowlist.test_chained_synthetic_pipe_helpers_allowed` | Checks that chained allowlisted synthetic helpers remain permitted while arbitrary pipes stay blocked. |
 | `TestSyntheticGrepParsing.test_parses_basic_synthetic_grep` | Checks that the basic synthetic grep form is parsed into a base command plus grep options. |
 | `TestSyntheticGrepParsing.test_parses_combined_flags` | Checks that combined `-iv` synthetic grep flags are accepted. |
 | `TestSyntheticGrepParsing.test_parses_extended_regex_pattern` | Checks that `-E` synthetic grep patterns are parsed correctly. |
@@ -1051,6 +1058,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `TestSyntheticPostFilterParsing.test_parses_uniq_default` | Checks that `uniq` with no flags produces a spec with `count` false. |
 | `TestSyntheticPostFilterParsing.test_parses_uniq_count` | Checks that `uniq -c` sets `count` true. |
 | `TestSyntheticPostFilterParsing.test_rejects_invalid_uniq_flags` | Checks that unsupported uniq flags (e.g. `-d`) are rejected. |
+| `TestSyntheticPostFilterParsing.test_parses_chained_synthetic_helpers` | Checks that multiple synthetic helper stages are parsed into one ordered pipeline spec sharing the same base command. |
 | `TestDenyPrefix.test_deny_takes_priority` | Checks deny takes priority handling. |
 | `TestDenyPrefix.test_allow_still_works_without_denied_flag` | Checks that allow still works without denied flag. |
 | `TestDenyPrefix.test_deny_exact_match` | Checks deny exact match handling. |
@@ -1098,11 +1106,13 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | --- | --- |
 | `applies the saved theme at startup` | Verifies that applies the saved theme at startup. |
 | `applies saved timestamp, line number, and HUD clock preferences from cookies at startup` | Verifies that applies saved timestamp, line number, and HUD clock preferences from cookies at startup. |
+| `applies saved session preferences on startup over stale local cookies` | Verifies that session-scoped preferences loaded from `/session/preferences` override stale browser-local cookies during boot. |
+| `switches the visible prompt into confirmation mode when requested` | Verifies that the composer prompt swaps from the normal shell prompt to the transcript-owned `[yes/no]:` confirmation prompt while a terminal confirm is pending. |
 | `_setTsMode updates body classes and button labels` | _setTsMode updates body classes and button labels. |
 | `_setLnMode updates body classes and button labels` | _setLnMode updates body classes and button labels. |
 | `allows timestamps and line numbers to be enabled at the same time` | Verifies that allows timestamps and line numbers to be enabled at the same time. |
 | `refocuses the terminal input after toggling timestamps and line numbers` | Verifies that refocuses the terminal input after toggling timestamps and line numbers. |
-| `ts-toggle expands the inline sub-menu without closing the sheet` | Verifies that the mobile menu `ts-toggle` row flips `aria-expanded` and reveals the sub-menu without dismissing the menu sheet. |
+| `ts-toggle does not close the mobile sheet (disclosure in mobile_chrome.js owns the submenu toggle)` | Verifies that the mobile menu `ts-toggle` row leaves the sheet open while the disclosure logic in `mobile_chrome.js` owns the submenu state. |
 | `ts-set applies the selected mode and closes the sheet` | Verifies that tapping a `ts-set` sub-menu row applies the chosen timestamps mode (off/elapsed/clock) and closes the menu sheet. |
 | `clear cancels welcome, clears the active tab preserving run state, and closes the sheet` | Verifies that the mobile menu `clear` entry routes through `cancelWelcome(activeTabId)` + `clearTab(activeTabId, { preserveRunState: true })` and closes the menu sheet. |
 | `opens the theme selector from the theme button` | Verifies that opens the theme selector from the theme button. |
@@ -1172,6 +1182,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input` | Verifies that keeps the mobile composer scrolled to the caret when edit-bar navigation moves through long input. |
 | `uses Ctrl+C to open kill confirm when active tab is running` | Verifies that uses Ctrl+C to open kill confirm when active tab is running. |
 | `uses Ctrl+C to jump to a new prompt line when no command is running` | Verifies that uses Ctrl+C to jump to a new prompt line when no command is running. |
+| `uses Ctrl+C to cancel a pending terminal confirmation before opening a fresh prompt` | Verifies that a pending transcript-owned yes/no confirm consumes `Ctrl+C` as a cancel action before the normal fresh-prompt interrupt path runs. |
 | `supports Alt+T to create a new tab from the terminal prompt` | Verifies that supports Alt+T to create a new tab from the terminal prompt. |
 | `supports macOS Option+T to create a new tab via physical key code` | Verifies that supports macOS Option+T to create a new tab via physical key code. |
 | `supports Alt+W to close the active tab` | Verifies that supports Alt+W to close the active tab. |
@@ -1205,7 +1216,10 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `applies session-token set on explicit skip without running migration` | Verifies that the Set-token flow still applies the token when the user explicitly chooses `Skip`, without calling `/session/migrate`. |
 | `opens the session-token set confirm without relying on a Node global binding` | Verifies that the Set-token button opens its confirm flow in a browser-like environment where the Node-only `global` binding does not exist. |
 | `aborts generated-token activation when the migration prompt is dismissed` | Verifies that dismissing the migration confirm during Generate aborts activation and does not switch the active token. |
-| `persists options changes through cookies and syncs quick-toggle state` | Verifies that persists options changes through cookies and syncs quick-toggle state. |
+| `opens a destructive confirm before clearing the active session token` | Verifies that clearing an active session token first opens the shared destructive confirm with copy and clear actions. |
+| `lets the user copy the session token from the clear confirm without clearing it` | Verifies that the clear confirm can copy the active token while leaving the session unchanged. |
+| `clears the session token only after confirming the destructive action` | Verifies that the active session token is only removed after the destructive clear action is explicitly confirmed. |
+| `persists options changes through cookies and syncs quick-toggle state` | Verifies that option changes update cookies, quick-toggle UI, and the persisted `/session/preferences` snapshot together. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
 | `loads FAQ command chips into the visible mobile composer and refocuses it` | Verifies that loads FAQ command chips into the visible mobile composer and refocuses it. |
 | `loads custom FAQ chips into the prompt with the same command-chip behavior` | Verifies that loads custom FAQ chips into the prompt with the same command-chip behavior. |
@@ -1252,6 +1266,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `suggests built-in pipe commands after a supported command pipe` | Verifies that typing a piped command can switch autocomplete into the narrow built-in pipe stage. |
 | `returns pipe-stage flag hints for grep` | Verifies that the built-in pipe stage can expose contextual `grep` flags such as `-i`, `-v`, and `-E`. |
 | `returns pipe-stage count hints after head -n and wc flag hints after wc space` | Verifies that pipe-stage value hints work for `head -n` and that `wc ` narrows correctly to `-l`. |
+| `suggests another built-in helper after an earlier pipe helper stage` | Verifies that autocomplete can continue offering allowlisted helpers after an existing helper stage such as `help \| grep ttl \| `. |
+| `returns chained pipe-stage flag and value hints from the last helper stage` | Verifies that chained helper pipelines still expose flag and value hints from the last helper stage rather than the earlier stages. |
+| `does not offer chained pipe autocomplete after an invalid earlier stage` | Verifies that multi-pipe autocomplete fails closed when an earlier stage is not an allowlisted helper. |
 | `mousedown on a suggestion accepts it without blurring the input` | Verifies that mousedown on a suggestion accepts it without blurring the input. |
 | `positions dropdown above when space below is tight and preserves item order` | Verifies that positions dropdown above when space below is tight and preserves item order. |
 | `keeps the above-mode dropdown pinned to the prompt as the item count shrinks` | Verifies that a desktop autocomplete dropdown opened above the prompt keeps the same bottom offset as its item count shrinks, instead of drifting farther away from the prompt. |
@@ -1333,6 +1350,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `after load, _getStarred returns server data and localStorage is ignored` | Verifies that loadStarredFromServer populates the cache and that any leftover localStorage value is not surfaced. |
 | `hydrates unique recent commands from server history and enables navigation` | Verifies that hydrates unique recent commands from server history and enables navigation. |
 | `restores the typed draft after navigating through hydrated history` | Verifies that restores the typed draft after navigating through hydrated history. |
+| `emits a history-rendered event when hydrated history becomes empty` | Verifies that clearing the hydrated history still emits the rail-refresh event so empty-state recents surfaces repaint instead of keeping stale commands. |
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
 | `limits visible recent chips on mobile and appends an overflow chip` | Verifies that limits visible recent chips on mobile and appends an overflow chip. |
 | `drops one more desktop chip if the overflow chip itself wraps` | Verifies that drops one more desktop chip if the overflow chip itself wraps. |
@@ -1479,6 +1497,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `formats hour + minutes + seconds` | Verifies that formats hour + minutes + seconds. |
 | `accepts the narrow synthetic grep form` | Verifies that accepts the narrow synthetic grep form. |
 | `accepts no-space pipe variants` | Verifies that accepts no-space pipe variants. |
+| `accepts chained synthetic pipe helpers` | Verifies that chained allowlisted pipe helpers are still treated as the narrow synthetic post-filter path. |
 | `rejects unsupported shell operator forms` | Verifies that rejects unsupported shell operator forms. |
 | `accepts the narrow head/tail/wc forms` | Verifies that accepts the narrow head/tail/wc forms. |
 | `rejects unsupported forms` | Verifies that rejects unsupported forms. |
@@ -1505,7 +1524,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `runCommand handles a 500 response as a friendly server error` | Verifies that runCommand handles a 500 response as a friendly server error. |
 | `runCommand handles a 403 response as a denied command` | Verifies that runCommand handles a 403 response as a denied command. |
 | `runCommand handles a 429 response as rate limited` | Verifies that runCommand handles a 429 response as rate limited. |
-| `adds successful commands to the preview recents but not failed commands` | Verifies that only successful exits update the success-only recents preview list. |
+| `adds commands to the preview recents even when they exit non-zero` | Verifies that valid commands still update the preview recents when they finish with a non-zero exit status. |
+| `does not add unsupported fake commands to the preview recents` | Verifies that obvious fake-command typos are excluded from preview recents even though real non-zero commands are kept. |
 | `runCommand dismisses the mobile keyboard after a successful submit` | Verifies that runCommand dismisses the mobile keyboard after a successful submit. |
 | `runCommand cancels and clears welcome output when the active tab owns welcome` | Verifies that runCommand cancels and clears welcome output when the active tab owns welcome. |
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
@@ -1536,6 +1556,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `blocks token activation when /session/token/verify throws a network error` | Verifies that blocks token activation when /session/token/verify throws a network error. |
 | `blocks token activation when verify returns ok but exists is false` | Verifies that blocks token activation when verify returns ok but exists is false. |
 | `skips verify entirely for UUID-format tokens` | Verifies that skips verify entirely for UUID-format tokens. |
+| `defers the success copy until after the migration answer is accepted` | Verifies that `session-token set` does not print its success lines before the migration question is resolved. |
 | `does nothing when pref is off` | Verifies that does nothing when pref is off. |
 | `does nothing when Notification is not available` | Verifies that does nothing when Notification is not available. |
 | `does nothing when permission is not granted` | Verifies that does nothing when permission is not granted. |
@@ -1543,6 +1564,16 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `fires with non-zero exit code in body for failed run` | Verifies that fires with non-zero exit code in body for failed run. |
 | `fires with killed status and elapsed in body when run is killed` | Verifies that fires with killed status and elapsed in body when run is killed. |
 | `shows only the command root in the title, not arguments` | Verifies that shows only the command root in the title, not arguments. |
+| `opens a terminal yes/no confirmation before clearing the token` | Verifies that `session-token clear` opens a transcript-owned confirmation prompt instead of clearing immediately. |
+| `clears the token only after answering yes to the terminal confirmation` | Verifies that `session-token clear` removes the active token only after an explicit `yes` answer. |
+| `leaves the session token untouched when the user answers no` | Verifies that answering `no` leaves the active session token unchanged. |
+| `treats Ctrl+C as no and cancels the clear confirmation` | Verifies that `Ctrl+C` cancels the terminal clear-confirm prompt and leaves the token untouched. |
+| `copies the active token to the clipboard from the terminal` | Verifies that `session-token copy` copies the active token and reports success without exposing the raw value. |
+| `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
+| `prints success only after a skipped migration answer and does not store yes/no in command history` | Verifies that explicitly skipping migration still applies the token, delays the success copy until that answer, and keeps the yes/no response out of command history. |
+| `keeps the pending prompt open on invalid answers` | Verifies that invalid terminal-confirm answers re-prompt on a new line instead of silently defaulting to yes or no. |
+| `treats Ctrl+C as cancel and aborts the session-token set flow` | Verifies that `Ctrl+C` during the `session-token set` migration prompt cancels the whole flow instead of applying the token with migration skipped. |
+| `uses the uncapped session run-count endpoint for migration prompts` | Verifies that session-token migration prompts use the uncapped `/session/run-count` value instead of the paginated `/history` slice. |
 
 #### `search.test.js`
 
@@ -1583,8 +1614,10 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `storage event from another tab reverts SESSION_ID to UUID when token is cleared` | Verifies that a `storage` event clearing `session_token` in another tab reverts `SESSION_ID` to the UUID fallback. |
 | `storage event for an unrelated key does not change SESSION_ID` | Verifies that `storage` events for keys other than `session_token` have no effect on `SESSION_ID`. |
 | `storage event calls reloadSessionHistory when available to refresh passive tab UI` | Verifies that storage event calls reloadSessionHistory when available to refresh passive tab UI. |
+| `updateSessionId reloads session preferences when the helper is available` | Verifies that runtime session switches trigger `loadSessionPreferences()` so the active option set follows the new session identity. |
 | `storage event calls _updateOptionsSessionTokenStatus when available` | Verifies that storage event calls _updateOptionsSessionTokenStatus when available. |
-| `storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent` | Verifies that storage event does not throw when reloadSessionHistory and _updateOptionsSessionTokenStatus are absent. |
+| `storage event calls loadSessionPreferences when available` | Verifies that passive-tab `session_token` changes trigger `loadSessionPreferences()` so session-scoped options refresh without a reload. |
+| `storage event does not throw when reloadSessionHistory, loadSessionPreferences, and _updateOptionsSessionTokenStatus are absent` | Verifies that the passive-tab session-sync path stays safe even when the optional history, preference, and token-status refresh helpers are not present. |
 
 #### `state.test.js`
 
@@ -1789,8 +1822,9 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `keeps the modal open when onActivate throws synchronously` | Verifies a sync throw in onActivate is caught and the modal stays open so callers can surface errors inline. |
 | `keeps the modal open when an async onActivate rejects` | Verifies a rejected async onActivate is caught and the modal stays open. |
 | `focuses an explicit Node passed as defaultFocus, overriding role:cancel` | Verifies a Node passed as `defaultFocus` receives focus on open instead of the cancel button. |
-| `focus trap > traps Tab from the last action button back to the first` | Verifies the focus-trap wraps Tab forward inside the confirm modal instead of escaping to the document. |
-| `focus trap > traps Shift+Tab from the first action button back to the last` | Verifies the focus-trap wraps Shift+Tab backward inside the confirm modal. |
+| `wraps Tab from the last action back to the first` | Verifies the focus-trap wraps Tab forward inside the confirm modal instead of escaping to the document. |
+| `wraps Shift+Tab from the first action back to the last` | Verifies the focus-trap wraps Shift+Tab backward inside the confirm modal. |
+| `cycles confirm actions with ArrowRight/ArrowDown and ArrowLeft/ArrowUp` | Verifies confirmation modals opt into arrow-key focus cycling that follows and reverses the same action order as Tab. |
 
 #### `ui_focus_trap.test.js`
 
@@ -1804,6 +1838,10 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `dispose removes the keydown handler and clears the bound flag` | Verifies the disposable contract unwinds the listener and the idempotency marker. |
 | `skips hidden focusables inside the container` | Verifies `[hidden]` descendants are excluded from the focus list. |
 | `skips focusables with inline display:none (options-modal session-token buttons pattern)` | Verifies elements hidden via `style.display = 'none'` are excluded so Tab from the actual visible last focusable wraps instead of leaking past a non-focusable boundary element. |
+| `does not intercept arrow keys unless explicitly enabled` | Verifies the shared trap leaves arrow-key behavior alone on normal modal surfaces unless callers opt in. |
+| `cycles forward with ArrowRight and ArrowDown when arrow keys are enabled` | Verifies opt-in arrow-key mode advances focus through the current trap order. |
+| `cycles backward with ArrowLeft and ArrowUp when arrow keys are enabled` | Verifies opt-in arrow-key mode reverses focus through the current trap order. |
+| `wraps arrow-key navigation when arrow keys are enabled` | Verifies arrow-key mode wraps at both ends of the focus order instead of leaking focus out of the trap. |
 
 #### `ui_outside_click.test.js`
 

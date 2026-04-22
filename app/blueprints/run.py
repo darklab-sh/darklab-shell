@@ -244,7 +244,7 @@ def _fake_run_response(original_command, session_id, client_ip):
     return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
 
 
-class _SyntheticPostFilterProcessor:
+class _SyntheticPostFilterStageProcessor:
     """Apply one narrow app-native post-filter stage without enabling pipes."""
 
     def __init__(self, spec):
@@ -364,6 +364,37 @@ class _SyntheticPostFilterProcessor:
         return []
 
 
+class _SyntheticPostFilterProcessor:
+    """Apply one or more narrow app-native post-filter stages in order."""
+
+    def __init__(self, spec):
+        self.spec = spec or {}
+        stages = self.spec.get("stages") if isinstance(self.spec, dict) else None
+        if stages:
+            self.stages = [_SyntheticPostFilterStageProcessor(stage) for stage in stages]
+        else:
+            self.stages = [_SyntheticPostFilterStageProcessor(self.spec)]
+
+    def process_output_line(self, line: str) -> list[str]:
+        lines = [line]
+        for stage in self.stages:
+            next_lines = []
+            for current in lines:
+                next_lines.extend(stage.process_output_line(current))
+            lines = next_lines
+        return lines
+
+    def finalize_output_lines(self) -> list[str]:
+        lines: list[str] = []
+        for stage in self.stages:
+            next_lines = []
+            for current in lines:
+                next_lines.extend(stage.process_output_line(current))
+            next_lines.extend(stage.finalize_output_lines())
+            lines = next_lines
+        return lines
+
+
 # ── Routes ────────────────────────────────────────────────────────────────────
 
 @run_bp.route("/run", methods=["POST"])
@@ -395,9 +426,11 @@ def run_command():
         return jsonify({"error": postfilter_error}), 403
     execution_command = postfilter_spec["base_command"] if postfilter_spec else original_command
     if postfilter_spec:
+        stage_kinds = [stage.get("kind") for stage in postfilter_spec.get("stages", []) if stage.get("kind")]
         log.debug("CMD_PIPE", extra={
             "ip": client_ip, "session": session_id,
-            "cmd": original_command, "kind": postfilter_spec.get("kind"),
+            "cmd": original_command,
+            "kind": " -> ".join(stage_kinds) if stage_kinds else postfilter_spec.get("kind"),
         })
     try:
         postfilter = _SyntheticPostFilterProcessor(postfilter_spec)

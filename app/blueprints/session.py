@@ -2,6 +2,7 @@
 Session token routes: session token generation and session history migration.
 """
 
+import json
 import logging
 import secrets
 from datetime import datetime, timezone
@@ -14,6 +15,32 @@ from helpers import get_client_ip, get_session_id
 log = logging.getLogger("shell")
 
 session_bp = Blueprint("session", __name__)
+
+_SESSION_PREFERENCE_KEYS = {
+    "pref_theme_name",
+    "pref_timestamps",
+    "pref_line_numbers",
+    "pref_welcome_intro",
+    "pref_share_redaction_default",
+    "pref_run_notify",
+    "pref_hud_clock",
+}
+
+
+def _normalize_session_preferences(raw):
+    if not isinstance(raw, dict):
+        return {}
+    prefs = {}
+    for key, value in raw.items():
+        if key not in _SESSION_PREFERENCE_KEYS:
+            continue
+        if not isinstance(value, str):
+            value = str(value or "")
+        value = value.strip()
+        if not value:
+            continue
+        prefs[key] = value
+    return prefs
 
 
 @session_bp.route("/session/token/generate")
@@ -71,9 +98,9 @@ def session_token_revoke():
     Accepts ``{"token": "tok_..."}`` in the request body.  The token must carry a
     ``tok_`` prefix and must exist in ``session_tokens``; any other value returns a
     4xx error.  On success the token is deleted and can no longer be used as a
-    named session identity.  Associated run history, snapshots, and starred commands
-    remain in the database under the now-orphaned session ID; they are not deleted
-    and are not migrated.
+    named session identity.  Associated run history, snapshots, starred commands,
+    and saved session preferences remain in the database under the now-orphaned
+    session ID; they are not deleted and are not migrated.
 
     Possession of the token value is the only authorization check — there is no
     higher-level ownership model.  If the caller is revoking their own current
@@ -176,7 +203,16 @@ def session_migrate():
             (to_session_id, from_session_id),
         )
         conn.execute(
+            "INSERT OR IGNORE INTO session_preferences (session_id, preferences, updated) "
+            "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ?",
+            (to_session_id, from_session_id),
+        )
+        conn.execute(
             "DELETE FROM starred_commands WHERE session_id = ?",
+            (from_session_id,),
+        )
+        conn.execute(
+            "DELETE FROM session_preferences WHERE session_id = ?",
             (from_session_id,),
         )
         conn.commit()
@@ -200,6 +236,41 @@ def session_migrate():
         "migrated_snapshots": migrated_snapshots,
         "migrated_stars": migrated_stars,
     })
+
+
+@session_bp.route("/session/preferences")
+def session_preferences_get():
+    """Return the saved preference snapshot for the current session."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT preferences, updated FROM session_preferences WHERE session_id = ?",
+            (session_id,),
+        ).fetchone()
+    if not row:
+        return jsonify({"preferences": {}, "updated": None})
+    try:
+        prefs = _normalize_session_preferences(json.loads(row["preferences"] or "{}"))
+    except json.JSONDecodeError:
+        prefs = {}
+    return jsonify({"preferences": prefs, "updated": row["updated"]})
+
+
+@session_bp.route("/session/preferences", methods=["POST"])
+def session_preferences_save():
+    """Persist the current session's full preference snapshot."""
+    data = request.get_json(silent=True) or {}
+    prefs = _normalize_session_preferences(data.get("preferences"))
+    updated = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
+    session_id = get_session_id()
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, ?) "
+            "ON CONFLICT(session_id) DO UPDATE SET preferences = excluded.preferences, updated = excluded.updated",
+            (session_id, json.dumps(prefs, sort_keys=True), updated),
+        )
+        conn.commit()
+    return jsonify({"ok": True, "preferences": prefs, "updated": updated})
 
 
 @session_bp.route("/session/run-count")

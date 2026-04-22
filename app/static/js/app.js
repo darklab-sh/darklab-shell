@@ -1,6 +1,38 @@
 // ── Desktop UI module ──
 // Shared helpers for keyboard shortcuts, overlays, and mobile-layout glue.
 
+const _defaultDesktopPromptLabel = (() => {
+  if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return '';
+  return String(shellPromptWrap.querySelector('.prompt-prefix')?.textContent || '');
+})();
+const _defaultMobilePromptLabel = (() => {
+  if (typeof mobileComposerRow === 'undefined' || !mobileComposerRow) return '$';
+  return String(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent || '$');
+})();
+let _composerPromptMode = null;
+
+function _applyComposerPromptMode() {
+  const isConfirm = _composerPromptMode === 'confirm';
+  const desktopLabel = isConfirm ? '[yes/no]:' : _defaultDesktopPromptLabel;
+  const mobileLabel = isConfirm ? '[yes/no]:' : _defaultMobilePromptLabel;
+  const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
+    ? shellPromptWrap.querySelector('.prompt-prefix')
+    : null;
+  if (promptPrefix) promptPrefix.textContent = desktopLabel;
+  if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
+    shellPromptWrap.classList.toggle('shell-prompt-confirm', isConfirm);
+  }
+  const mobilePromptLabel = typeof mobileComposerRow !== 'undefined' && mobileComposerRow
+    ? mobileComposerRow.querySelector('.mobile-prompt-label')
+    : null;
+  if (mobilePromptLabel) mobilePromptLabel.textContent = mobileLabel;
+}
+
+function setComposerPromptMode(mode = null) {
+  _composerPromptMode = mode === 'confirm' ? 'confirm' : null;
+  _applyComposerPromptMode();
+}
+
 function syncShellPrompt() {
   // The visible prompt is rendered from shared composer state instead of from
   // the hidden input directly, so selection/caret state stays correct across
@@ -404,6 +436,16 @@ function dismissMobileKeyboardAfterSubmit() {
 }
 
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const _sessionPreferenceKeys = [
+  'pref_theme_name',
+  'pref_timestamps',
+  'pref_line_numbers',
+  'pref_welcome_intro',
+  'pref_share_redaction_default',
+  'pref_run_notify',
+  'pref_hud_clock',
+];
+let _sessionPreferenceOverrides = null;
 
 function getPreferenceCookie(name) {
   const prefix = `${name}=`;
@@ -415,9 +457,163 @@ function setPreferenceCookie(name, value) {
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${PREF_COOKIE_MAX_AGE}; SameSite=Lax`;
 }
 
+function _primePreferenceValue(name, value) {
+  setPreferenceCookie(name, value);
+  if (_sessionPreferenceOverrides && Object.prototype.hasOwnProperty.call(_sessionPreferenceOverrides, name)) {
+    _sessionPreferenceOverrides[name] = value;
+  }
+}
+
 function getPreference(name) {
+  if (_sessionPreferenceOverrides && Object.prototype.hasOwnProperty.call(_sessionPreferenceOverrides, name)) {
+    return _sessionPreferenceOverrides[name];
+  }
   const value = getPreferenceCookie(name);
   return value ? decodeURIComponent(value) : '';
+}
+
+function _defaultSessionPreferences() {
+  const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
+  return {
+    pref_theme_name: defaultTheme,
+    pref_timestamps: 'off',
+    pref_line_numbers: 'off',
+    pref_welcome_intro: 'animated',
+    pref_share_redaction_default: 'unset',
+    pref_run_notify: 'off',
+    pref_hud_clock: 'utc',
+  };
+}
+
+function _normalizeSessionPreferences(raw) {
+  const defaults = _defaultSessionPreferences();
+  const prefs = { ...defaults };
+  const source = (raw && typeof raw === 'object') ? raw : {};
+  if (typeof source.pref_theme_name === 'string' && source.pref_theme_name.trim()) {
+    prefs.pref_theme_name = source.pref_theme_name.trim();
+  }
+  if (_tsModes.includes(source.pref_timestamps)) prefs.pref_timestamps = source.pref_timestamps;
+  if (source.pref_line_numbers === 'on' || source.pref_line_numbers === 'off') {
+    prefs.pref_line_numbers = source.pref_line_numbers;
+  }
+  if (_welcomeIntroModes.includes(source.pref_welcome_intro)) {
+    prefs.pref_welcome_intro = source.pref_welcome_intro;
+  }
+  if (_shareRedactionDefaultModes.includes(source.pref_share_redaction_default)) {
+    prefs.pref_share_redaction_default = source.pref_share_redaction_default;
+  }
+  if (source.pref_run_notify === 'on' || source.pref_run_notify === 'off') {
+    prefs.pref_run_notify = source.pref_run_notify;
+  }
+  if (_hudClockModes.includes(source.pref_hud_clock)) {
+    prefs.pref_hud_clock = source.pref_hud_clock;
+  }
+  return prefs;
+}
+
+function _sessionPreferenceCacheKey(sessionId = SESSION_ID) {
+  return `session_pref_cache:${sessionId || ''}`;
+}
+
+function _readCachedSessionPreferences(sessionId = SESSION_ID) {
+  try {
+    const raw = localStorage.getItem(_sessionPreferenceCacheKey(sessionId));
+    if (!raw) return null;
+    return _normalizeSessionPreferences(JSON.parse(raw));
+  } catch (_) {
+    return null;
+  }
+}
+
+function _cacheSessionPreferences(prefs, sessionId = SESSION_ID) {
+  try {
+    localStorage.setItem(_sessionPreferenceCacheKey(sessionId), JSON.stringify(prefs));
+  } catch (_) {}
+}
+
+function _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage = true } = {}) {
+  _sessionPreferenceKeys.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(prefs, key)) {
+      setPreferenceCookie(key, prefs[key]);
+    }
+  });
+  if (writeThemeToLocalStorage && prefs.pref_theme_name) {
+    localStorage.setItem('theme', prefs.pref_theme_name);
+  }
+}
+
+function _buildCurrentSessionPreferenceSnapshot() {
+  const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
+  const currentThemeName = (document.body && document.body.dataset && document.body.dataset.theme)
+    || _savedThemeName()
+    || defaultTheme;
+  return _normalizeSessionPreferences({
+    pref_theme_name: currentThemeName,
+    pref_timestamps: typeof tsMode === 'string' ? tsMode : 'off',
+    pref_line_numbers: typeof lnMode === 'string' ? lnMode : 'off',
+    pref_welcome_intro: getWelcomeIntroPreference(),
+    pref_share_redaction_default: getShareRedactionDefaultPreference(),
+    pref_run_notify: getRunNotifyPreference(),
+    pref_hud_clock: getHudClockPreference(),
+  });
+}
+
+async function _persistCurrentSessionPreferences() {
+  const prefs = _buildCurrentSessionPreferenceSnapshot();
+  _sessionPreferenceOverrides = prefs;
+  _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage: false });
+  _cacheSessionPreferences(prefs);
+  const resp = await apiFetch('/session/preferences', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preferences: prefs }),
+  });
+  if (resp && resp.ok === false) {
+    let detail = '';
+    try {
+      const data = await resp.json();
+      detail = data && data.error ? `: ${data.error}` : '';
+    } catch (_) {}
+    throw new Error(`failed to save session preferences${detail}`);
+  }
+  return prefs;
+}
+
+async function loadSessionPreferences() {
+  const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
+  const defaults = _defaultSessionPreferences();
+  const localFallback = sessionId && !sessionId.startsWith('tok_')
+    ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
+    : null;
+  let prefs = null;
+  try {
+    const resp = await apiFetch('/session/preferences');
+    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const remote = _normalizeSessionPreferences(data && data.preferences);
+    if (data && data.preferences && Object.keys(data.preferences).length) {
+      prefs = remote;
+    }
+  } catch (err) {
+    logClientError('failed to load /session/preferences', err);
+  }
+  if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
+  if (!prefs) prefs = localFallback;
+  if (!prefs) prefs = defaults;
+  _sessionPreferenceOverrides = prefs;
+  _writePreferenceSnapshotToStorage(prefs);
+  _cacheSessionPreferences(prefs, sessionId);
+  applyThemePreference(prefs.pref_theme_name, false);
+  applyTimestampPreference(prefs.pref_timestamps, false);
+  applyLineNumberPreference(prefs.pref_line_numbers, false);
+  applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
+  applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
+  applyHudClockPreference(prefs.pref_hud_clock, false);
+  if (typeof applyRunNotifyPreference === 'function') {
+    await applyRunNotifyPreference(prefs.pref_run_notify, false);
+  }
+  syncOptionsControls();
+  return prefs;
 }
 
 function getWelcomeIntroPreference() {
@@ -441,7 +637,7 @@ function getHudClockPreference() {
 
 async function applyRunNotifyPreference(mode, persist = true) {
   let nextMode = mode === 'on' ? 'on' : 'off';
-  if (nextMode === 'on') {
+  if (persist && nextMode === 'on') {
     if (typeof Notification === 'undefined') {
       nextMode = 'off';
     } else if (Notification.permission === 'denied') {
@@ -452,13 +648,21 @@ async function applyRunNotifyPreference(mode, persist = true) {
       if (result !== 'granted') nextMode = 'off';
     }
   }
-  if (persist) setPreferenceCookie('pref_run_notify', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_run_notify', nextMode);
+    try { await _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist run notify preference', err); }
+  } else {
+    _primePreferenceValue('pref_run_notify', nextMode);
+  }
   syncOptionsControls();
 }
 
 function applyHudClockPreference(mode, persist = true) {
   const nextMode = _hudClockModes.includes(mode) ? mode : 'utc';
-  if (persist) setPreferenceCookie('pref_hud_clock', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_hud_clock', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
+  }
   syncOptionsControls();
   if (typeof globalThis.renderHudClock === 'function') globalThis.renderHudClock();
 }
@@ -481,26 +685,38 @@ function applyThemePreference(theme, persist = true) {
 function applyTimestampPreference(mode, persist = true) {
   const nextMode = _tsModes.includes(mode) ? mode : 'off';
   _setTsMode(nextMode);
-  if (persist) setPreferenceCookie('pref_timestamps', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_timestamps', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist timestamp preference', err); }
+  }
   syncOptionsControls();
 }
 
 function applyLineNumberPreference(mode, persist = true) {
   const nextMode = mode === 'on' ? 'on' : 'off';
   _setLnMode(nextMode);
-  if (persist) setPreferenceCookie('pref_line_numbers', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_line_numbers', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist line-number preference', err); }
+  }
   syncOptionsControls();
 }
 
 function applyWelcomeIntroPreference(mode, persist = true) {
   const nextMode = _welcomeIntroModes.includes(mode) ? mode : 'animated';
-  if (persist) setPreferenceCookie('pref_welcome_intro', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_welcome_intro', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist welcome-intro preference', err); }
+  }
   syncOptionsControls();
 }
 
 function applyShareRedactionDefaultPreference(mode, persist = true) {
   const nextMode = _shareRedactionDefaultModes.includes(mode) ? mode : 'unset';
-  if (persist) setPreferenceCookie('pref_share_redaction_default', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_share_redaction_default', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist share-redaction preference', err); }
+  }
   syncOptionsControls();
 }
 
@@ -1438,8 +1654,7 @@ function _applyThemePreviewVars(target, vars) {
 
 function _persistThemeEntry(entry) {
   if (!entry) return;
-  setPreferenceCookie('pref_theme_name', entry.name);
-  localStorage.setItem('theme', entry.name);
+  try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist theme preference', err); }
 }
 
 function _savedThemeName() {

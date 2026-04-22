@@ -7,10 +7,11 @@
 const _stalledTimeouts = new Map();
 let _activeRunPollTimer = null;
 
-// Pending session migration: set when the user runs 'session-token generate'
-// or 'session-token set' and the current session has existing runs.  The next
-// command typed is treated as the yes/no answer to the migration prompt.
-let _pendingSessionMigration = null;
+// Pending terminal confirmation: used by transcript-owned yes/no flows such as
+// session-token migration and token-clear confirmation. While set, the next
+// typed answer is consumed as part of the active script-style prompt instead of
+// as a normal shell command.
+let _pendingTerminalConfirm = null;
 
 function _resetStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
@@ -396,67 +397,86 @@ function _parseSyntheticPostFilterCommand(cmd) {
     match = re.exec(cmd);
   }
   if (!tokens.length) return null;
-  if (tokens.filter(token => token === '|').length !== 1) return null;
   if (tokens.some(token => ['&&', '||', ';', ';;', '>', '>>', '<', '&'].includes(token))) return null;
-  const pipeIndex = tokens.indexOf('|');
-  const stageTokens = tokens.slice(pipeIndex + 1);
-  if (pipeIndex <= 0 || !stageTokens.length) return null;
-  const helper = String(stageTokens[0]).toLowerCase();
+  const pipeIndexes = tokens
+    .map((token, index) => (token === '|' ? index : -1))
+    .filter(index => index !== -1);
+  if (!pipeIndexes.length || pipeIndexes[0] <= 0) return null;
 
-  if (helper === 'grep') {
-    let patternSeen = false;
-    for (const token of stageTokens.slice(1)) {
-      if (!patternSeen && /^-[^-]/.test(token)) {
-        for (const flag of token.slice(1)) {
-          if (!['i', 'v', 'E'].includes(flag)) return null;
+  function parseStage(stageTokens) {
+    if (!stageTokens.length) return null;
+    const helper = String(stageTokens[0]).toLowerCase();
+
+    if (helper === 'grep') {
+      let patternSeen = false;
+      for (const token of stageTokens.slice(1)) {
+        if (!patternSeen && /^-[^-]/.test(token)) {
+          for (const flag of token.slice(1)) {
+            if (!['i', 'v', 'E'].includes(flag)) return null;
+          }
+          continue;
         }
-        continue;
+        if (patternSeen) return null;
+        patternSeen = true;
       }
-      if (patternSeen) return null;
-      patternSeen = true;
+      return patternSeen ? { kind: 'grep' } : null;
     }
-    return patternSeen ? { kind: 'grep' } : null;
-  }
 
-  if (helper === 'head' || helper === 'tail') {
-    if (stageTokens.length === 1) return { kind: helper };
-    if (stageTokens.length === 2 && /^-\d+$/.test(stageTokens[1])) {
-      return { kind: helper, count: Number(stageTokens[1].slice(1)) };
+    if (helper === 'head' || helper === 'tail') {
+      if (stageTokens.length === 1) return { kind: helper };
+      if (stageTokens.length === 2 && /^-\d+$/.test(stageTokens[1])) {
+        return { kind: helper, count: Number(stageTokens[1].slice(1)) };
+      }
+      if (stageTokens.length !== 3 || stageTokens[1] !== '-n' || !/^\d+$/.test(stageTokens[2])) {
+        return null;
+      }
+      return { kind: helper, count: Number(stageTokens[2]) };
     }
-    if (stageTokens.length !== 3 || stageTokens[1] !== '-n' || !/^\d+$/.test(stageTokens[2])) {
+
+    if (helper === 'wc') {
+      if (stageTokens.length === 2 && stageTokens[1] === '-l') {
+        return { kind: 'wc_l' };
+      }
       return null;
     }
-    return { kind: helper, count: Number(stageTokens[2]) };
-  }
 
-  if (helper === 'wc') {
-    if (stageTokens.length === 2 && stageTokens[1] === '-l') {
-      return { kind: 'wc_l' };
-    }
-    return null;
-  }
-
-  if (helper === 'sort') {
-    if (stageTokens.length === 1) return { kind: 'sort' };
-    if (stageTokens.length === 2) {
-      const flag = stageTokens[1];
-      if (/^-[rnu]+$/.test(flag) && new Set(flag.slice(1)).size === flag.length - 1) {
-        const chars = new Set(flag.slice(1));
-        if ([...chars].every(c => 'rnu'.includes(c))) {
-          return { kind: 'sort', reverse: chars.has('r'), numeric: chars.has('n'), unique: chars.has('u') };
+    if (helper === 'sort') {
+      if (stageTokens.length === 1) return { kind: 'sort' };
+      if (stageTokens.length === 2) {
+        const flag = stageTokens[1];
+        if (/^-[rnu]+$/.test(flag) && new Set(flag.slice(1)).size === flag.length - 1) {
+          const chars = new Set(flag.slice(1));
+          if ([...chars].every(c => 'rnu'.includes(c))) {
+            return { kind: 'sort', reverse: chars.has('r'), numeric: chars.has('n'), unique: chars.has('u') };
+          }
         }
       }
+      return null;
     }
+
+    if (helper === 'uniq') {
+      if (stageTokens.length === 1) return { kind: 'uniq' };
+      if (stageTokens.length === 2 && stageTokens[1] === '-c') return { kind: 'uniq', count: true };
+      return null;
+    }
+
     return null;
   }
 
-  if (helper === 'uniq') {
-    if (stageTokens.length === 1) return { kind: 'uniq' };
-    if (stageTokens.length === 2 && stageTokens[1] === '-c') return { kind: 'uniq', count: true };
-    return null;
+  const stages = [];
+  let stageStart = pipeIndexes[0] + 1;
+  for (const pipeIndex of pipeIndexes.slice(1).concat(tokens.length)) {
+    const stageTokens = tokens.slice(stageStart, pipeIndex);
+    const stage = parseStage(stageTokens);
+    if (!stage) return null;
+    stages.push(stage);
+    stageStart = pipeIndex + 1;
   }
 
-  return null;
+  return {
+    kind: stages[0] ? stages[0].kind : null,
+    stages,
+  };
 }
 
 function _isSyntheticPostFilterCommand(cmd) {
@@ -511,6 +531,21 @@ function _isSessionTokenSubcommand(cmd) {
   return lower.startsWith('session-token ');
 }
 
+function _historySafeCommand(cmd) {
+  const value = String(cmd || '').trim();
+  if (!value) return '';
+  return value.replace(
+    /\b(session-token\s+(?:set|revoke)\s+)(tok_[A-Za-z0-9]+|[0-9a-f]{8}-[0-9a-f-]{28,})\b/i,
+    (_match, prefix, token) => `${prefix}${maskSessionToken(token)}`,
+  );
+}
+
+function _recordSuccessfulLocalCommand(cmd) {
+  if (typeof addToRecentPreview !== 'function') return;
+  const value = _historySafeCommand(cmd);
+  if (value) addToRecentPreview(value);
+}
+
 async function _doSessionMigration(fromId, toId, tabId) {
   // Use an explicit fetch (not apiFetch) so X-Session-ID is the OLD session ID
   // regardless of what SESSION_ID has been updated to.
@@ -529,7 +564,7 @@ async function _doSessionMigration(fromId, toId, tabId) {
     const data = await resp.json().catch(() => ({}));
     if (resp.ok && data.ok) {
       appendLine(
-        `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), ${data.migrated_stars ?? 0} starred command(s)`,
+        `migrated — ${data.migrated_runs} run(s), ${data.migrated_snapshots} snapshot(s), ${data.migrated_stars ?? 0} starred command(s), and saved user options when the destination had none`,
         '', tabId
       );
       succeeded = true;
@@ -576,6 +611,49 @@ async function _seedLocalStorageStarsToServer() {
   if (typeof loadStarredFromServer === 'function') await loadStarredFromServer();
 }
 
+function _setPendingTerminalConfirm(config) {
+  _pendingTerminalConfirm = config || null;
+  if (typeof setComposerPromptMode === 'function') {
+    setComposerPromptMode(_pendingTerminalConfirm ? 'confirm' : null);
+  }
+}
+
+function hasPendingTerminalConfirm() {
+  return !!_pendingTerminalConfirm;
+}
+
+function cancelPendingTerminalConfirm(tabId = activeTabId) {
+  if (!_pendingTerminalConfirm) return false;
+  const pending = _pendingTerminalConfirm;
+  const promptTabId = pending.tabId || tabId || activeTabId;
+  _setPendingTerminalConfirm(null);
+  const cancelHandler = typeof pending.onCancel === 'function'
+    ? pending.onCancel
+    : (typeof pending.onNo === 'function' ? pending.onNo : null);
+  Promise.resolve(cancelHandler ? cancelHandler() : undefined).catch((err) => {
+    appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+    setStatus('fail');
+  });
+  refocusComposerAfterAction();
+  return true;
+}
+
+function _appendSessionTokenSetLines(token, tabId) {
+  appendLine(`session token set: ${maskSessionToken(token)}`, '', tabId);
+  appendLine('reload other tabs to apply the new session token', '', tabId);
+}
+
+function _clearVisibleSessionHistoryState() {
+  if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
+}
+
+async function _activateSessionTokenIdentity(token) {
+  localStorage.setItem('session_token', token);
+  updateSessionId(token);
+  await _seedLocalStorageStarsToServer();
+  if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+}
+
 async function _sessionTokenGenerate(tabId) {
   const oldSessionId = SESSION_ID;
   try {
@@ -592,11 +670,8 @@ async function _sessionTokenGenerate(tabId) {
     // Check run count on old session before switching identity.
     let runCount = 0;
     try {
-      const histResp = await apiFetch('/history');
-      if (histResp.ok) {
-        const histData = await histResp.json();
-        runCount = (histData.runs || []).length;
-      }
+      const countResp = await apiFetch('/session/run-count');
+      if (countResp.ok) runCount = (await countResp.json()).count || 0;
     } catch (_) {}
 
     appendLine(`session token generated:  ${maskSessionToken(newToken)}`, '', tabId);
@@ -608,14 +683,37 @@ async function _sessionTokenGenerate(tabId) {
       // Defer identity switch until the user answers the migration prompt so a
       // failed /session/migrate does not strand runs on the old session while
       // the active identity is already the new token.
-      appendLine(`you have ${runCount} run(s) in your previous session. migrate history to your new session token? [yes/no]`, '', tabId);
-      _pendingSessionMigration = { from: oldSessionId, to: newToken };
+      appendLine(`you have ${runCount} run(s) in your previous session. migrate history to your new session token?`, '', tabId);
+      _setPendingTerminalConfirm({
+        tabId,
+        onYes: async () => {
+          const migrated = await _doSessionMigration(oldSessionId, newToken, tabId);
+          if (migrated) {
+            localStorage.setItem('session_token', newToken);
+            updateSessionId(newToken);
+            await _seedLocalStorageStarsToServer();
+            if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+            _recordSuccessfulLocalCommand('session-token generate');
+          }
+          setStatus('idle');
+        },
+        onNo: async () => {
+          localStorage.setItem('session_token', newToken);
+          updateSessionId(newToken);
+          await _seedLocalStorageStarsToServer();
+          if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+          _recordSuccessfulLocalCommand('session-token generate');
+          appendLine('History migration skipped.', '', tabId);
+          setStatus('idle');
+        },
+      });
       setStatus('idle');
     } else {
       localStorage.setItem('session_token', newToken);
       updateSessionId(newToken);
       await _seedLocalStorageStarsToServer();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+      _recordSuccessfulLocalCommand('session-token generate');
       setStatus('ok');
     }
   } catch (err) {
@@ -672,45 +770,94 @@ async function _sessionTokenSet(value, tabId) {
   // Check current session's run count before switching identity.
   let runCount = 0;
   try {
-    const histResp = await apiFetch('/history');
-    if (histResp.ok) {
-      const histData = await histResp.json();
-      runCount = (histData.runs || []).length;
-    }
+    const countResp = await apiFetch('/session/run-count');
+    if (countResp.ok) runCount = (await countResp.json()).count || 0;
   } catch (_) {}
-
-  appendLine(`session token set: ${maskSessionToken(value)}`, '', tabId);
-  appendLine('reload other tabs to apply the new session token', '', tabId);
 
   if (runCount > 0) {
     // Defer identity switch until the user answers the migration prompt so a
     // failed /session/migrate does not strand runs on the old session while
     // the active identity is already the new token.
-    appendLine(`you have ${runCount} run(s) in your current session. migrate history to this session token? [yes/no]`, '', tabId);
-    _pendingSessionMigration = { from: oldSessionId, to: value };
+    appendLine(`you have ${runCount} run(s) in your current session. migrate history to this session token?`, '', tabId);
+    _setPendingTerminalConfirm({
+      tabId,
+      onYes: async () => {
+        const migrated = await _doSessionMigration(oldSessionId, value, tabId);
+        if (migrated) {
+          await _activateSessionTokenIdentity(value);
+          _appendSessionTokenSetLines(value, tabId);
+          _recordSuccessfulLocalCommand(`session-token set ${value}`);
+        }
+        setStatus('idle');
+      },
+      onNo: async () => {
+        await _activateSessionTokenIdentity(value);
+        _appendSessionTokenSetLines(value, tabId);
+        _recordSuccessfulLocalCommand(`session-token set ${value}`);
+        appendLine('History migration skipped.', '', tabId);
+        setStatus('idle');
+      },
+      onCancel: async () => {
+        appendLine('Session token set canceled.', '', tabId);
+        setStatus('idle');
+      },
+    });
     setStatus('idle');
   } else {
-    localStorage.setItem('session_token', value);
-    updateSessionId(value);
-    await _seedLocalStorageStarsToServer();
-    if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+    await _activateSessionTokenIdentity(value);
+    _appendSessionTokenSetLines(value, tabId);
+    _recordSuccessfulLocalCommand(`session-token set ${value}`);
     setStatus('ok');
   }
 }
 
-function _sessionTokenClear(tabId) {
+async function _sessionTokenCopy(tabId) {
+  const token = localStorage.getItem('session_token');
+  if (!token) {
+    appendLine('no session token is set — already using an anonymous session', '', tabId);
+    setStatus('idle');
+    return;
+  }
+  try {
+    await copyTextToClipboard(token);
+    appendLine(`session token copied to clipboard: ${maskSessionToken(token)}`, '', tabId);
+    _recordSuccessfulLocalCommand('session-token copy');
+    setStatus('ok');
+  } catch (err) {
+    appendLine('[error] failed to copy the session token to clipboard', 'exit-fail', tabId);
+    logClientError('session-token copy', err);
+    setStatus('fail');
+  }
+}
+
+async function _sessionTokenClear(tabId) {
   if (!localStorage.getItem('session_token')) {
     appendLine('no session token is set — already using an anonymous session', '', tabId);
     setStatus('idle');
     return;
   }
-  localStorage.removeItem('session_token');
-  const uuid = localStorage.getItem('session_id') || SESSION_ID;
-  updateSessionId(uuid);
-  if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-  appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
-  appendLine('your session token data remains in the server database', '', tabId);
-  setStatus('ok');
+  appendLine('warning: clearing the active session token removes it from this browser', 'notice', tabId);
+  appendLine("run 'session-token copy' first if you want to save the current token before clearing it", 'notice', tabId);
+  appendLine('clear the active session token and revert to an anonymous session?', '', tabId);
+  _setPendingTerminalConfirm({
+    tabId,
+    onYes: async () => {
+      localStorage.removeItem('session_token');
+      const uuid = localStorage.getItem('session_id') || SESSION_ID;
+      updateSessionId(uuid);
+      _clearVisibleSessionHistoryState();
+      if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+      appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
+      appendLine('your session token data remains in the server database', '', tabId);
+      _recordSuccessfulLocalCommand('session-token clear');
+      setStatus('ok');
+    },
+    onNo: async () => {
+      appendLine('Session token clear canceled.', '', tabId);
+      setStatus('idle');
+    },
+  });
+  setStatus('idle');
 }
 
 async function _sessionTokenRotate(tabId) {
@@ -750,10 +897,11 @@ async function _sessionTokenRotate(tabId) {
 
     appendLine(`session token rotated: ${maskSessionToken(newToken)}`, '', tabId);
     appendLine(
-      `migrated — ${migrateData.migrated_runs} run(s), ${migrateData.migrated_snapshots} snapshot(s), ${migrateData.migrated_stars ?? 0} starred command(s)`,
+      `migrated — ${migrateData.migrated_runs} run(s), ${migrateData.migrated_snapshots} snapshot(s), ${migrateData.migrated_stars ?? 0} starred command(s), and saved user options when the destination had none`,
       '', tabId
     );
     appendLine('old session token is now inactive — reload other tabs to use the new token', '', tabId);
+    _recordSuccessfulLocalCommand('session-token rotate');
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -783,6 +931,7 @@ async function _sessionTokenList(tabId) {
       appendLine(kv('status', 'anonymous (no session token set)'), 'fake-kv', tabId);
       appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'fake-kv', tabId);
     }
+    _recordSuccessfulLocalCommand('session-token list');
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -820,11 +969,13 @@ async function _sessionTokenRevoke(token, tabId) {
       localStorage.removeItem('session_token');
       const uuid = localStorage.getItem('session_id') || SESSION_ID;
       updateSessionId(uuid);
+      _clearVisibleSessionHistoryState();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
       appendLine(`reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
     } else {
       appendLine('token removed from server — any device using it is now on an empty anonymous session', '', tabId);
     }
+    _recordSuccessfulLocalCommand(`session-token revoke ${token}`);
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -839,11 +990,13 @@ async function _handleSessionTokenCommand(cmd, tabId) {
   appendCommandEcho(cmd);
   if (sub === 'generate') {
     await _sessionTokenGenerate(tabId);
+  } else if (sub === 'copy') {
+    await _sessionTokenCopy(tabId);
   } else if (sub === 'set') {
     const value = parts.slice(2).join(' ').trim();
     await _sessionTokenSet(value, tabId);
   } else if (sub === 'clear') {
-    _sessionTokenClear(tabId);
+    await _sessionTokenClear(tabId);
   } else if (sub === 'rotate') {
     await _sessionTokenRotate(tabId);
   } else if (sub === 'list') {
@@ -853,7 +1006,7 @@ async function _handleSessionTokenCommand(cmd, tabId) {
     await _sessionTokenRevoke(value, tabId);
   } else {
     appendLine(`session-token: unknown subcommand '${sub}'`, 'exit-fail', tabId);
-    appendLine('usage: session-token [generate | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
+    appendLine('usage: session-token [generate | copy | set <value> | clear | rotate | list | revoke <token>]', '', tabId);
     setStatus('fail');
   }
 }
@@ -876,35 +1029,27 @@ function submitCommand(rawCmd) {
     return true;
   }
 
-  // Intercept yes/no answer to a pending session migration prompt
-  if (_pendingSessionMigration) {
+  // Intercept yes/no answer to a pending terminal confirmation prompt.
+  if (_pendingTerminalConfirm) {
     const answer = cmd.trim().toLowerCase();
-    const pending = _pendingSessionMigration;
-    _pendingSessionMigration = null;
-    addToHistory(cmd);
-    appendCommandEcho(cmd);
+    const pending = _pendingTerminalConfirm;
+    const promptTabId = pending.tabId || activeTabId;
+    appendCommandEcho(cmd, promptTabId);
+    if (answer !== 'yes' && answer !== 'y' && answer !== 'no' && answer !== 'n') {
+      appendLine('please answer yes or no', 'notice', promptTabId);
+      return true;
+    }
+    _setPendingTerminalConfirm(null);
     if (answer === 'yes' || answer === 'y') {
-      // _doSessionMigration returns true on success; switch identity only then
-      // so a failed migrate leaves the old session active rather than stranding
-      // the user on the new token with their runs still on the old session.
-      _doSessionMigration(pending.from, pending.to, activeTabId).then(async (migrated) => {
-        if (migrated) {
-          localStorage.setItem('session_token', pending.to);
-          updateSessionId(pending.to);
-          await _seedLocalStorageStarsToServer();
-          if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-        }
-        setStatus('idle');
+      Promise.resolve(typeof pending.onYes === 'function' ? pending.onYes() : undefined).catch((err) => {
+        appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+        setStatus('fail');
       });
     } else {
-      // User declined migration — switch to new token without migrating runs.
-      localStorage.setItem('session_token', pending.to);
-      updateSessionId(pending.to);
-      _seedLocalStorageStarsToServer().then(() => {
-        if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
+      Promise.resolve(typeof pending.onNo === 'function' ? pending.onNo() : undefined).catch((err) => {
+        appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
+        setStatus('fail');
       });
-      appendLine('History migration skipped.', '', activeTabId);
-      setStatus('idle');
     }
     return true;
   }
@@ -943,7 +1088,7 @@ function submitCommand(rawCmd) {
     return false;
   }
 
-  addToHistory(cmd);
+  addToHistory(_historySafeCommand(cmd));
 
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.
@@ -1028,12 +1173,13 @@ function submitCommand(rawCmd) {
           if (part.startsWith('data: ')) {
             try {
               const msg = JSON.parse(part.slice(6));
-              if (msg.type === 'started') {
-                const t = getTab(tabId);
-                if (t) {
-                  t.runId = msg.run_id;
-                  t.historyRunId = msg.run_id;
-                  t.reconnectedRun = false;
+                if (msg.type === 'started') {
+                  const t = getTab(tabId);
+                  if (t) {
+                    t.runId = msg.run_id;
+                    t.historyRunId = msg.run_id;
+                    t.unknownCommand = false;
+                    t.reconnectedRun = false;
                   if (t.pendingKill) {
                     // Kill was requested before runId was available — send it now
                     t.pendingKill = false;
@@ -1054,6 +1200,10 @@ function submitCommand(rawCmd) {
                 const t = getTab(tabId);
                 if (t) t.syntheticClear = true;
               } else if (msg.type === 'output') {
+                const t = getTab(tabId);
+                if (t && typeof msg.text === 'string' && /^Unsupported fake command: /.test(msg.text)) {
+                  t.unknownCommand = true;
+                }
                 msg.text.split('\n').forEach((line, i, arr) => {
                   if (i < arr.length - 1 || line) appendLine(line, msg.cls || '', tabId);
                 });
@@ -1093,13 +1243,13 @@ function submitCommand(rawCmd) {
                   if (!(t && t.syntheticClear)) appendLine(`[process exited with code 0${dur}]`, 'exit-ok', tabId);
                   if (tabId === activeTabId) setStatus('ok');
                   setTabStatus(tabId, 'ok');
-                  if (typeof addToRecentPreview === 'function' && t && t.command) {
-                    addToRecentPreview(t.command);
-                  }
                 } else {
                   appendLine(`[process exited with code ${msg.code}${dur}]`, 'exit-fail', tabId);
                   if (tabId === activeTabId) setStatus('fail');
                   setTabStatus(tabId, 'fail');
+                }
+                if (typeof addToRecentPreview === 'function' && t && t.command && !t.unknownCommand) {
+                  addToRecentPreview(t.command);
                 }
                 if (t) t.syntheticClear = false;
                 _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);

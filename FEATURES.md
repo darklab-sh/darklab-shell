@@ -212,7 +212,7 @@ session-token:
       description: Generate a new session token
       closes: true
     - value: clear
-      description: Remove the active session token
+      description: Remove the active session token after confirmation
       closes: true
 ```
 
@@ -410,15 +410,15 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ## Built-In Pipe Support
 
-**Purpose:** a narrow app-native pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`) that keeps common post-filter use cases available without enabling general shell piping or redirection.
+**Purpose:** narrow app-native pipe helpers (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`) that keep common post-filter use cases available without enabling general shell piping or redirection.
 
 **Behavior:**
 
-- One supported pipe stage per command; the filtered view is what appears in the terminal, history, permalinks, and exports for that run.
+- One or more supported helper stages can be chained in a single command; the final filtered view is what appears in the terminal, history, permalinks, and exports for that run.
 - Autocomplete understands the narrow pipe stage and can guide `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` after `command |`.
 - Arbitrary pipes, chaining, and redirection remain blocked at the command-validation layer.
 
-**Limits:** only the six stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) but stages cannot be chained.
+**Limits:** only the six helper stages above are recognised. Combinable flags are supported within a stage (e.g. `sort -rn`) and supported stages can be chained together (e.g. `command | grep pattern | wc -l`).
 
 **Configuration:** none — the supported stage set is hard-coded in `app/commands.py`.
 
@@ -442,6 +442,8 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 - `command | sort -rn` (flags combinable)
 - `command | uniq`
 - `command | uniq -c`
+- `command | grep pattern | wc -l`
+- `command | sort -u | uniq -c`
 
 ---
 
@@ -818,15 +820,15 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Theme Selector
 
-**Purpose:** live theme picker backed by the named variants under `app/conf/themes/`, with the choice persisted in `localStorage` and applied to the shell, permalink pages, and HTML exports.
+**Purpose:** live theme picker backed by the named variants under `app/conf/themes/`, with the choice persisted as part of the active session preference snapshot and cached locally for reload continuity.
 
 **Behavior:**
 
 - Click **◑ theme** in the desktop rail (or the **☰** menu on mobile) to open the theme selector modal.
-- Picking a variant applies it immediately and saves the choice in `localStorage` so it persists across sessions on the same browser.
+- Picking a variant applies it immediately and saves the choice into the current session's preference snapshot, while also caching it locally so reloads stay fast.
 - The selected theme applies to the live shell, permalink pages, and HTML exports — so shared links render in the author's theme context when opened fresh.
 
-**Limits:** theme selection is per-browser (not per-user on the server); clearing browser storage reverts to the default theme.
+**Limits:** anonymous UUID sessions keep their own browser-local theme choice, while named session tokens restore the saved theme across browsers and devices. Clearing browser storage removes the local cache but does not erase a named session token's saved theme on the server.
 
 **Configuration:** theme variants live under `app/conf/themes/`; see [THEME.md](THEME.md) for authoring details (variable names, fallbacks, and how a new variant is registered).
 
@@ -836,7 +838,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 ## Options Modal
 
-**Purpose:** per-browser display and sharing preferences (timestamps, line numbers, HUD clock mode, welcome intro, redaction default, run notifications), persisted via cookies and applied on every page load.
+**Purpose:** display and sharing preferences (timestamps, line numbers, HUD clock mode, welcome intro, redaction default, run notifications) that follow the active session identity while still caching locally for fast reloads.
 
 **Behavior:**
 
@@ -846,9 +848,9 @@ wget -q -O /dev/null --server-response https://example.com
 - The welcome-intro setting controls whether the welcome animation plays on first tab: full animated sequence, instant settle, or no welcome tab at all.
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
 - Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
-- Preferences are stored in browser cookies and applied on every page load; they persist across sessions on the same device.
+- Preferences are stored server-side per session and mirrored into browser cookies/local storage for reload continuity, so a named session token restores the same option set across browsers and devices.
 
-**Limits:** preferences are per-browser (not synced across devices); clearing cookies reverts to defaults. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
+**Limits:** anonymous UUID sessions remain browser-local by design, so only named session tokens carry preferences across devices. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
 
 **Configuration:**
 
@@ -899,26 +901,27 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 
 ## Session Tokens
 
-**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, and starred commands follow an operator across browsers and workstations without introducing a login layer.
+**Purpose:** optional persistent named identity (`tok_<32 hex>`) so run history, snapshots, starred commands, and saved user options follow an operator across browsers and workstations without introducing a login layer.
 
 **Behavior:**
 
-- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`. A session token replaces that identity with a persistent `tok_<32 hex>` so run history, snapshots, and starred commands follow the operator across browsers and workstations.
+- By default each browser gets an anonymous UUID stored in `localStorage` under `session_id`. A session token replaces that identity with a persistent `tok_<32 hex>` so run history, snapshots, starred commands, theme choice, and other saved Options settings follow the operator across browsers and workstations.
 - Tokens are generated server-side as `tok_` + 32 lowercase hex characters (36 chars total, cryptographically random) and recorded in the `session_tokens` table.
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
-- Changing the token in one tab propagates to all open tabs via the `storage` event — recent chips, starred state, history drawer, and the options-panel masked display all refresh without a reload.
-- All `session-token` subcommands are intercepted client-side and never reach the server, so token values are not written to the command log.
+- Changing the token in one tab propagates to all open tabs via the `storage` event — recent chips, starred state, history drawer, session-scoped preferences, and the options-panel masked display all refresh without a reload.
+- All `session-token` subcommands are intercepted client-side and never reach the server, so token values are not written to the server command log. Token-bearing variants that are kept in the local command history are masked before they are stored or shown in recent-command surfaces.
 
 **Terminal commands:**
 
 - `session-token` (no subcommand) — prints current status: active token in masked form or "anonymous session".
-- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, and starred commands. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
-- `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history; verification failures fail closed rather than silently switching to an empty session.
-- `session-token clear` — removes `session_token` from `localStorage` and reverts to the anonymous UUID session. Server-side history remains and can be reclaimed with `session-token set`.
-- `session-token rotate` — generates a new token, migrates all runs/snapshots to it, then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
+- `session-token generate` — requests a new token and offers to migrate the current session's runs, snapshots, starred commands, and saved user options when the destination token has no saved preferences yet. The token becomes active only after a successful migration; declining migration activates it as a fresh named session; migration failure leaves the old session active.
+- `session-token set <token>` — adopts an existing token. UUIDs are always accepted; `tok_...` values must already exist on this server. The migration prompt is offered if the current session has history; answering `no` skips migration and still applies the token, while `Ctrl+C` cancels the whole set flow.
+- `session-token copy` — copies the active token to the clipboard without printing the raw token in the terminal.
+- `session-token clear` — opens a terminal-owned yes/no confirmation, removes `session_token` from `localStorage` only after explicit confirmation, and reverts to the anonymous UUID session. `Ctrl+C` cancels the clear flow. Server-side session data remains and can be reclaimed with `session-token set`.
+- `session-token rotate` — generates a new token, migrates all runs, snapshots, starred commands, and saved user options (when the destination has no saved preferences yet), then switches. The switch is **atomic** — migration failure aborts the rotation and keeps the old token active. Old token is retired on success.
 - `session-token list` — calls `GET /session/token/info` and shows the active token in masked form with its creation date (or "anonymous session").
-- `session-token revoke <token>` — permanently deletes the given token via `POST /session/token/revoke`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, and starred rows for the revoked token are not deleted but become unreachable.
+- `session-token revoke <token>` — permanently deletes the given token via `POST /session/token/revoke`. If the revoked token is the active one, the client clears `localStorage` and falls back to the anonymous UUID session. Runs, snapshots, starred rows, and saved preference rows for the revoked token are not deleted but become unreachable.
 
 **Options panel buttons:**
 
@@ -926,16 +929,17 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 |---|---|---|
 | **Generate** | No token active | Generates a new token; copies it to the clipboard with a toast |
 | **Set** | No token active | Opens a modal to paste an existing token from another device |
-| **Rotate** | Token active | Generates a new token, migrates history, copies the new token |
-| **Clear** | Token active | Removes the active token and reverts to the anonymous session |
+| **Copy** | Token active | Copies the active token to the clipboard |
+| **Rotate** | Token active | Generates a new token, migrates session data, copies the new token |
+| **Clear** | Token active | Opens a destructive confirm, optionally copies the token, then reverts to the anonymous session |
 
-If a session has run history, a migration confirmation modal is shown before Generate/Set/Rotate (same prompt as the terminal commands). `list` and `revoke` remain terminal-only.
+If a session has run history, the terminal flows (`generate`, `set`, `clear`) use transcript-owned yes/no prompts; the Options panel uses the shared modal confirm primitive for its own set/clear actions. `list` and `revoke` remain terminal-only.
 
 **Limits:** there is no user-facing authentication — possession of the token is sufficient access. `POST /session/migrate` requires the `from_session_id` body field to match the caller's `X-Session-ID` header (mismatch returns 403), so a migration call can only move the caller's own data.
 
-**Configuration:** no config keys — token issuance is always enabled. Token scope currently covers runs, snapshots, and starred commands.
+**Configuration:** no config keys — token issuance is always enabled. Token scope currently covers runs, snapshots, starred commands, and saved user options.
 
-**Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*` and `/session/migrate` routes), `app/database.py` (`session_tokens` and `starred_commands` tables).
+**Related files:** `app/static/js/session.js` (client-side token flow + cross-tab `storage` sync), `app/blueprints/session.py` (`/session/token/*`, `/session/preferences`, and `/session/migrate` routes), `app/database.py` (`session_tokens`, `session_preferences`, and `starred_commands` tables).
 
 ---
 

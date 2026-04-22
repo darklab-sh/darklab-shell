@@ -243,7 +243,7 @@
     // otherwise Tab falls through to the document and starts cycling into
     // rail / tab / HUD buttons behind the backdrop.
     if (typeof global.bindFocusTrap === 'function' && _card) {
-      state.focusTrapHandle = global.bindFocusTrap(_card);
+      state.focusTrapHandle = global.bindFocusTrap(_card, { arrowKeys: true });
     }
 
     // Escape + backdrop via bindDismissible.

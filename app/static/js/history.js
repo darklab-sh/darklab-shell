@@ -518,9 +518,22 @@ function _applyDesktopChipOverflow() {
   }
 }
 
+function _emitHistoryRendered() {
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:history-rendered', {
+      cmdHistory: Array.isArray(cmdHistory) ? cmdHistory.slice() : [],
+      recentPreviewHistory: Array.isArray(recentPreviewHistory) ? recentPreviewHistory.slice() : [],
+    });
+  }
+}
+
 function renderHistory() {
   while (histRow.children.length > 1) histRow.removeChild(histRow.lastChild);
-  if (!cmdHistory.length) { hideHistoryRow(); return; }
+  if (!cmdHistory.length) {
+    hideHistoryRow();
+    _emitHistoryRendered();
+    return;
+  }
   showHistoryRow();
 
   const starred = _getStarred();
@@ -571,12 +584,7 @@ function renderHistory() {
     _applyDesktopChipOverflow();
   }
 
-  if (typeof emitUiEvent === 'function') {
-    emitUiEvent('app:history-rendered', {
-      cmdHistory: Array.isArray(cmdHistory) ? cmdHistory.slice() : [],
-      recentPreviewHistory: Array.isArray(recentPreviewHistory) ? recentPreviewHistory.slice() : [],
-    });
-  }
+  _emitHistoryRendered();
 }
 
 // Re-measure chip overflow when the window is resized on desktop.

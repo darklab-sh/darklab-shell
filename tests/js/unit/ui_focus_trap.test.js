@@ -37,6 +37,14 @@ function tabEvent({ shift = false } = {}) {
   })
 }
 
+function arrowEvent(key) {
+  return new KeyboardEvent('keydown', {
+    key,
+    bubbles: true,
+    cancelable: true,
+  })
+}
+
 describe('bindFocusTrap', () => {
   let g
 
@@ -144,5 +152,67 @@ describe('bindFocusTrap', () => {
     card.dispatchEvent(ev)
     expect(ev.defaultPrevented).toBe(true)
     expect(document.activeElement).toBe(first)
+  })
+
+  it('does not intercept arrow keys unless explicitly enabled', () => {
+    const card = makeCard({ buttons: 2 })
+    const [first] = card.querySelectorAll('button')
+    g.bindFocusTrap(card)
+    first.focus()
+    const ev = arrowEvent('ArrowRight')
+    card.dispatchEvent(ev)
+    expect(ev.defaultPrevented).toBe(false)
+    expect(document.activeElement).toBe(first)
+  })
+
+  it('cycles forward with ArrowRight and ArrowDown when arrow keys are enabled', () => {
+    const card = makeCard({ buttons: 3 })
+    const [first, middle, last] = card.querySelectorAll('button')
+    g.bindFocusTrap(card, { arrowKeys: true })
+    first.focus()
+
+    const right = arrowEvent('ArrowRight')
+    card.dispatchEvent(right)
+    expect(right.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(middle)
+
+    const down = arrowEvent('ArrowDown')
+    card.dispatchEvent(down)
+    expect(down.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('cycles backward with ArrowLeft and ArrowUp when arrow keys are enabled', () => {
+    const card = makeCard({ buttons: 3 })
+    const [first, middle, last] = card.querySelectorAll('button')
+    g.bindFocusTrap(card, { arrowKeys: true })
+    middle.focus()
+
+    const left = arrowEvent('ArrowLeft')
+    card.dispatchEvent(left)
+    expect(left.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+
+    const up = arrowEvent('ArrowUp')
+    card.dispatchEvent(up)
+    expect(up.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(last)
+  })
+
+  it('wraps arrow-key navigation when arrow keys are enabled', () => {
+    const card = makeCard({ buttons: 2 })
+    const [first, last] = card.querySelectorAll('button')
+    g.bindFocusTrap(card, { arrowKeys: true })
+    last.focus()
+
+    const forward = arrowEvent('ArrowRight')
+    card.dispatchEvent(forward)
+    expect(forward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(first)
+
+    const backward = arrowEvent('ArrowLeft')
+    card.dispatchEvent(backward)
+    expect(backward.defaultPrevented).toBe(true)
+    expect(document.activeElement).toBe(last)
   })
 })

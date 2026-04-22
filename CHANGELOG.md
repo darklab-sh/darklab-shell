@@ -8,6 +8,19 @@ All notable changes to darklab shell are documented here.
 
 ### Added
 
+#### Session-Scoped Preferences
+
+- **User options now follow session tokens across browsers and devices** — session tokens previously carried command history, stars, and snapshots, but the Options modal still behaved like a browser-local preference layer even after a named session was restored somewhere else.
+  - **Why:** the session-token model was already the app's durable user identity. Leaving theme, timestamps, line numbers, welcome-intro mode, snapshot-redaction default, run-notification mode, and HUD clock mode behind in browser cookies meant a restored session still felt partially split-brain.
+  - **What:**
+    - Added a new `session_preferences` SQLite table storing a normalized preference snapshot per session ID.
+    - Added `GET /session/preferences` and `POST /session/preferences` so the browser can hydrate and persist the current session's preference set without inventing a second identity model.
+    - `loadSessionPreferences()` now runs during boot and on runtime session switches, so `session-token generate/set/clear/rotate/revoke` and cross-tab `storage`-event updates refresh the active preference set instead of leaving stale browser-local settings behind.
+    - Existing browser cookies/local storage remain as the local cache/fallback layer, but named sessions now restore their saved options when reopened on another browser or workstation.
+    - `POST /session/migrate` now migrates saved preferences together with runs, stars, and snapshots, while still letting an already-configured destination session keep its own preference snapshot.
+    - Passive preference hydration no longer triggers browser notification permission prompts; notification permission is only requested when the user explicitly enables the setting.
+  - **Tests:** new backend coverage in `tests/py/test_session_routes.py` for `session_preferences` read/write and migration behavior, plus new browser coverage in `tests/js/unit/app.test.js` and `tests/js/unit/session.test.js` for startup hydration and session-switch preference reloads.
+
 #### Keyboard Reference and Tab Strip Polish
 
 - **`Alt+/` FAQ shortcut plus tooltip audit across every chrome button** — the FAQ overlay was the last chrome surface without a keyboard path, and several chrome buttons had no tooltip coverage.
@@ -88,6 +101,22 @@ All notable changes to darklab shell are documented here.
     - dead bridge exports such as `renderRailWorkflows`, `refreshHudActions`, `setHudKillVisible`, and `setHudLastExit` were removed from the shell-chrome layer because the owning modules now publish the state changes directly.
   - **Tests:** `tests/js/unit/mobile_running_indicator.test.js` now verifies the mobile running-indicator resync path through tab lifecycle events rather than DOM mutation observers; targeted unit sweep: `tests/js/unit/mobile_running_indicator.test.js`, `tests/js/unit/button_primitives_runtime.test.js`, `tests/js/unit/tabs.test.js`, `tests/js/unit/history.test.js`, and `tests/js/unit/app.test.js` all pass (`261 passed`).
 
+#### Session Token Safety
+
+- **Clearing a session token now requires a destructive confirm with a copy action** — the Options `Clear` button and the `session-token clear` built-in no longer discard the active token immediately.
+  - **Why:** if the token had not been saved elsewhere, clearing it made the session effectively unrecoverable from the app and immediately hid the history tied to it from that browser.
+  - **What:** the Options-panel clear action now routes through the shared `showConfirm()` primitive with `Cancel` as the default focused action, a `Copy token` action that keeps the modal open after copying, and a destructive `Clear token` action that performs the actual clear only after confirmation. The terminal `session-token clear` flow now uses an in-transcript yes/no prompt with the same destructive semantics. No confirm appears when no token is active because the clear controls are not shown in that state.
+  - **Tests:** `app.test.js` covers the destructive confirm, copy-without-clearing, and confirmed-clear flows; `runner.test.js` covers the command-path confirm and cancel behavior.
+- **`session-token` CLI flows now use terminal-native confirms, add `copy`, and keep masked local history** — the session-token command family no longer straddles three different interaction models.
+  - **Why:** the earlier implementation mixed UI modals, transcript prompts, and hidden history rules in a way that made the command feel unlike the rest of the shell. It also treated exit-code `0` as a proxy for “valid command,” which incorrectly dropped real non-zero commands such as help-style exits from recent history.
+  - **What:** `session-token clear` now uses a transcript-owned `[yes/no]:` prompt with `Ctrl+C` canceling back to the shell; `session-token set` uses the same prompt model but treats explicit `no` as “skip migration and continue” while `Ctrl+C` aborts the whole set flow. A new `session-token copy` command copies the active token without printing the raw value. Token-bearing local history entries (`set`, `revoke`) are masked before storage, successful session-token commands now appear in recent-command surfaces, real commands remain in recent history even when they exit non-zero, and only unsupported/unknown fake commands are excluded. Snapshot counts were removed from the user-facing migration copy for now because snapshot links remain directly usable even outside the active session.
+
+#### Built-In Pipe Support
+
+- **Built-in pipe helpers can now be chained in one command** — narrow helpers like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq` no longer stop at a single stage.
+  - **Why:** common post-processing flows such as `command | grep pattern | wc -l` were still being blocked even though every individual stage was already allowlisted and app-native.
+  - **What:** the shared synthetic post-filter parser now accepts multiple allowlisted helper stages after the base command, and the runtime applies each helper stage in order while keeping the same metacharacter blocking, allowlist checks, and persisted-output behavior as the single-stage path. Unsupported helpers or invalid stage syntax still fail closed.
+
 #### Export Parity and Shared Save Rendering
 
 - **Permalink/share pages, saved HTML, and PDF now follow one tighter export model** — the export surfaces were visually close but still drifting in typography, spacing, and transcript treatment because the shared logic stopped one layer too late.
@@ -100,7 +129,7 @@ All notable changes to darklab shell are documented here.
     - browser-rendered export surfaces no longer force uppercase on the command/meta line, preserving case-sensitive flags and command text.
     - PDF header spacing, run-meta badge geometry, output-panel border drawing, and empty-line handling were tightened so PDF follows the permalink/saved-HTML baseline more closely without pretending jsPDF can be pixel-identical to the browser.
     - fully empty raw lines with no prefix are now skipped in PDF so the exported transcript does not gain blank rows that are absent in permalink/share pages and saved HTML.
-  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; the current documented totals are 695 Vitest tests and 1,749 combined tests.
+  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`.
 
 - **Render/export de-duplication completed across permalink/share pages and save surfaces** — the remaining export drift was no longer about separate routes; it was about parallel page/bootstrap and transcript-preparation layers that had survived behind otherwise shared rendering helpers.
   - **Why:** `/history/<run_id>` and `/share/<id>` already shared the same live frontend, and the main-shell save actions already shared `ExportHtmlUtils` / `ExportPdfUtils`, but the permalink template context, `window.PermData` bootstrap, tab export preparation, and permalink export preparation were still rebuilding the same concepts in different places.

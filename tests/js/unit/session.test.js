@@ -165,6 +165,19 @@ describe('session.js', () => {
     expect(fetchCalls[0][1].headers['X-Session-ID']).toBe('tok_newtoken1234567890abcdef12345678')
   })
 
+  it('updateSessionId reloads session preferences when the helper is available', () => {
+    const loadSessionPreferences = vi.fn(() => Promise.resolve())
+    const { updateSessionId } = loadSession({
+      storageData: { session_id: 'original-uuid' },
+    })
+    window.loadSessionPreferences = loadSessionPreferences
+
+    updateSessionId('tok_newtoken1234567890abcdef12345678')
+
+    expect(loadSessionPreferences).toHaveBeenCalled()
+    delete window.loadSessionPreferences
+  })
+
   it('maskSessionToken masks a tok_ token showing only the first 4 hex chars', () => {
     const { maskSessionToken } = loadSession()
 
@@ -243,6 +256,22 @@ describe('session.js', () => {
 
     expect(reloadSessionHistory).toHaveBeenCalled()
     delete window.reloadSessionHistory
+  })
+
+  it('storage event calls loadSessionPreferences when available', () => {
+    const loadSessionPreferences = vi.fn(() => Promise.resolve())
+    loadSession({ storageData: { session_id: 'uuid-a' } })
+    window.loadSessionPreferences = loadSessionPreferences
+
+    window.dispatchEvent(
+      new StorageEvent('storage', {
+        key: 'session_token',
+        newValue: 'tok_newtoken1234567890abcdef12345678',
+      }),
+    )
+
+    expect(loadSessionPreferences).toHaveBeenCalled()
+    delete window.loadSessionPreferences
   })
 
   it('storage event calls _updateOptionsSessionTokenStatus when available', () => {

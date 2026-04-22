@@ -10,6 +10,10 @@ const { _isSyntheticWcLineCountCommand } = fromScript(
 )
 const { _isSyntheticSortCommand } = fromScript('app/static/js/runner.js', '_isSyntheticSortCommand')
 const { _isSyntheticUniqCommand } = fromScript('app/static/js/runner.js', '_isSyntheticUniqCommand')
+const { _isSyntheticPostFilterCommand } = fromScript(
+  'app/static/js/runner.js',
+  '_isSyntheticPostFilterCommand',
+)
 
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
@@ -52,11 +56,17 @@ describe('_isSyntheticGrepCommand', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh|grep -i ttl')).toBe(true)
   })
 
+  it('accepts chained synthetic pipe helpers', () => {
+    expect(_isSyntheticPostFilterCommand('ping darklab.sh | grep ttl | wc -l')).toBe(true)
+    expect(_isSyntheticPostFilterCommand('ping darklab.sh | grep ttl | sort | uniq')).toBe(true)
+  })
+
   it('rejects unsupported shell operator forms', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | cat')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep -n ttl')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl file.txt')).toBe(false)
     expect(_isSyntheticGrepCommand('ping darklab.sh || grep ttl')).toBe(false)
+    expect(_isSyntheticPostFilterCommand('ping darklab.sh | grep ttl | cat')).toBe(false)
   })
 })
 
@@ -143,6 +153,14 @@ function loadRunnerFns({
   welcomeOwnsTab = () => false,
   clearTab: clearTabOverride = null,
   showToast: showToastOverride = null,
+  confirmClearSessionToken: confirmClearSessionTokenOverride = null,
+  setComposerPromptMode: setComposerPromptModeOverride = null,
+  copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
+  updateSessionId: updateSessionIdOverride = vi.fn(),
+  reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
+  hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
+  sessionId = 'session-old',
+  localStorageEntries = {},
   dismissMobileKeyboardAfterSubmit = () => {},
   maybeMountDeferredPrompt = vi.fn(),
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1')),
@@ -191,6 +209,9 @@ function loadRunnerFns({
   const historyPanel = document.getElementById('history-panel')
   const tabsBar = document.getElementById('tabs-bar')
   const tabPanels = document.getElementById('tab-panels')
+  const storage = new MemoryStorage()
+  const sessionStore = new MemoryStorage()
+  Object.entries(localStorageEntries).forEach(([key, value]) => storage.setItem(key, value))
   cmdInput.value = cmdValue
   Object.defineProperty(cmdInput, 'focus', { configurable: true, value: vi.fn() })
   cmdInput.blur = vi.fn()
@@ -243,6 +264,18 @@ function loadRunnerFns({
       appendLine,
       appendCommandEcho,
       apiFetch,
+      localStorage: storage,
+      sessionStorage: sessionStore,
+      SESSION_ID: sessionId,
+      maskSessionToken: (token) => {
+        if (typeof token !== 'string' || !token) return '(none)'
+        if (token.startsWith('tok_')) return `tok_${token.slice(4, 8)}••••••••`
+        return `${token.slice(0, 8)}••••••••`
+      },
+      copyTextToClipboard: copyTextToClipboardOverride,
+      updateSessionId: updateSessionIdOverride,
+      reloadSessionHistory: reloadSessionHistoryOverride,
+      hydrateCmdHistory: hydrateCmdHistoryOverride,
       createTab,
       clearTab,
       cancelWelcome,
@@ -250,6 +283,12 @@ function loadRunnerFns({
       requestWelcomeSettle: () => {},
       refreshHistoryPanel: () => {},
       showToast,
+      ...(confirmClearSessionTokenOverride
+        ? { confirmClearSessionToken: confirmClearSessionTokenOverride }
+        : {}),
+      ...(setComposerPromptModeOverride
+        ? { setComposerPromptMode: setComposerPromptModeOverride }
+        : {}),
       dismissMobileKeyboardAfterSubmit,
       _maybeMountDeferredPrompt: maybeMountDeferredPrompt,
       restoreHistoryRunIntoTab,
@@ -279,6 +318,8 @@ function loadRunnerFns({
     submitComposerCommand,
     submitVisibleComposerCommand,
     interruptPromptLine,
+    hasPendingTerminalConfirm,
+    cancelPendingTerminalConfirm,
     runCommand,
     restoreActiveRunsAfterReload,
     pollActiveRunsAfterReload,
@@ -294,11 +335,14 @@ function loadRunnerFns({
     cmdInput,
     runBtn,
     status,
+    storage,
     setTabLabel,
     clearTab,
     cancelWelcome,
     showToast,
     interruptPromptLine: fns.interruptPromptLine,
+    hasPendingTerminalConfirm: fns.hasPendingTerminalConfirm,
+    cancelPendingTerminalConfirm: fns.cancelPendingTerminalConfirm,
     maybeMountDeferredPrompt,
     restoreHistoryRunIntoTab,
   }
@@ -519,7 +563,7 @@ describe('runner helpers', () => {
     expect(status.className).not.toBe('status-pill fail')
   })
 
-  it('adds successful commands to the preview recents but not failed commands', async () => {
+  it('adds commands to the preview recents even when they exit non-zero', async () => {
     let readCount = 0
     const addToRecentPreview = vi.fn()
     const apiFetch = vi.fn(() =>
@@ -589,6 +633,46 @@ describe('runner helpers', () => {
     })
 
     failedHarness.runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(addToRecentPreview).toHaveBeenCalledWith('ping -c 1 nope.darklab')
+  })
+
+  it('does not add unsupported fake commands to the preview recents', async () => {
+    let readCount = 0
+    const addToRecentPreview = vi.fn()
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        body: {
+          getReader: () => ({
+            read: vi.fn(() => {
+              readCount += 1
+              if (readCount === 1) {
+                return Promise.resolve({
+                  done: false,
+                  value: new TextEncoder().encode(
+                    'data: {"type":"started","run_id":"run-3"}\n\n' +
+                    'data: {"type":"output","text":"Unsupported fake command: pign darklab.sh"}\n\n' +
+                    'data: {"type":"exit","code":1,"elapsed":"0.1"}\n\n',
+                  ),
+                })
+              }
+              return Promise.resolve({ done: true })
+            }),
+          }),
+        },
+      }),
+    )
+    const { runCommand } = loadRunnerFns({
+      cmdValue: 'pign darklab.sh',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      addToRecentPreview,
+    })
+
+    runCommand()
     await Promise.resolve()
     await Promise.resolve()
 
@@ -1379,6 +1463,411 @@ describe('_sessionTokenSet verify failure behavior', () => {
 
     const verifyCalls = apiFetch.mock.calls.filter(([url]) => url === '/session/token/verify')
     expect(verifyCalls).toHaveLength(0)
+  })
+
+  it('defers the success copy until after the migration answer is accepted', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/token/verify') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ exists: true }),
+        })
+      }
+      if (url === '/session/run-count') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({ count: 1 }),
+        })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+    const { _sessionTokenSet, appendLine, _storage } = loadTokenSetFns({ apiFetch })
+
+    await _sessionTokenSet('tok_abcd1234efgh5678ijkl9012mnop3456', 'tab-1')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      'you have 1 run(s) in your current session. migrate history to this session token?',
+      '',
+      'tab-1',
+    )
+    expect(appendLine).not.toHaveBeenCalledWith(
+      expect.stringContaining('session token set:'),
+      '',
+      'tab-1',
+    )
+    expect(_storage.getItem('session_token')).toBeNull()
+  })
+})
+
+describe('session-token clear', () => {
+  it('opens a terminal yes/no confirmation before clearing the token', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      localStorageEntries: { session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456' },
+    })
+
+    await submitCommand('session-token clear')
+
+    expect(appendLine).toHaveBeenNthCalledWith(1, 'session-token clear', 'prompt-echo', undefined)
+    expect(appendLine).toHaveBeenNthCalledWith(
+      2,
+      'warning: clearing the active session token removes it from this browser',
+      'notice',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenNthCalledWith(
+      3,
+      "run 'session-token copy' first if you want to save the current token before clearing it",
+      'notice',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenNthCalledWith(
+      4,
+      'clear the active session token and revert to an anonymous session?',
+      '',
+      'tab-1',
+    )
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+    expect(status.className).toBe('status-pill idle')
+  })
+
+  it('clears the token only after answering yes to the terminal confirmation', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const updateSessionId = vi.fn()
+    const reloadSessionHistory = vi.fn(() => Promise.resolve())
+    const hydrateCmdHistory = vi.fn()
+    const { submitCommand, status, storage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      updateSessionId,
+      reloadSessionHistory,
+      hydrateCmdHistory,
+      sessionId: 'session-old',
+      localStorageEntries: {
+        session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456',
+        session_id: 'uuid-base-session',
+      },
+    })
+
+    await submitCommand('session-token clear')
+    await submitCommand('yes')
+    await vi.waitFor(() => expect(storage.getItem('session_token')).toBeNull())
+
+    expect(updateSessionId).toHaveBeenCalledWith('uuid-base-session')
+    expect(hydrateCmdHistory).toHaveBeenCalledWith([])
+    expect(reloadSessionHistory).toHaveBeenCalled()
+    expect(appendLine).toHaveBeenCalledWith('yes', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      'session token cleared — reverted to anonymous session (uuid-bas••••••••)',
+      '',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      'your session token data remains in the server database',
+      '',
+      'tab-1',
+    )
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('leaves the session token untouched when the user answers no', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const updateSessionId = vi.fn()
+    const { submitCommand, status, storage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      updateSessionId,
+      localStorageEntries: { session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456' },
+    })
+
+    await submitCommand('session-token clear')
+    await submitCommand('no')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Session token clear canceled.', '', 'tab-1'),
+    )
+
+    expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(updateSessionId).not.toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill idle')
+  })
+
+  it('treats Ctrl+C as no and cancels the clear confirmation', async () => {
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const updateSessionId = vi.fn()
+    const { submitCommand, cancelPendingTerminalConfirm, status, storage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      setComposerPromptMode,
+      updateSessionId,
+      localStorageEntries: { session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456' },
+    })
+
+    await submitCommand('session-token clear')
+    expect(cancelPendingTerminalConfirm()).toBe(true)
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Session token clear canceled.', '', 'tab-1'),
+    )
+
+    expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(updateSessionId).not.toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(status.className).toBe('status-pill idle')
+  })
+})
+
+describe('session-token copy', () => {
+  it('copies the active token to the clipboard from the terminal', async () => {
+    const appendLine = vi.fn()
+    const copyTextToClipboard = vi.fn(() => Promise.resolve())
+    const addToRecentPreview = vi.fn()
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      copyTextToClipboard,
+      addToRecentPreview,
+      localStorageEntries: { session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456' },
+    })
+
+    await submitCommand('session-token copy')
+
+    expect(copyTextToClipboard).toHaveBeenCalledWith('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(appendLine).toHaveBeenCalledWith(
+      'session token copied to clipboard: tok_abcd••••••••',
+      '',
+      'tab-1',
+    )
+    expect(addToRecentPreview).toHaveBeenCalledWith('session-token copy')
+    expect(status.className).toBe('status-pill ok')
+  })
+
+  it('shows an error when clipboard copy fails', async () => {
+    const appendLine = vi.fn()
+    const copyTextToClipboard = vi.fn(() => Promise.reject(new Error('Clipboard unavailable')))
+    const { submitCommand, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      copyTextToClipboard,
+      localStorageEntries: { session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456' },
+    })
+
+    await submitCommand('session-token copy')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        '[error] failed to copy the session token to clipboard',
+        'exit-fail',
+        'tab-1',
+      ),
+    )
+
+    expect(status.className).toBe('status-pill fail')
+  })
+})
+
+describe('session-token set pending prompt', () => {
+  it('prints success only after a skipped migration answer and does not store yes/no in command history', async () => {
+    const addToHistory = vi.fn()
+    const addToRecentPreview = vi.fn()
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const updateSessionId = vi.fn()
+    const reloadSessionHistory = vi.fn(() => Promise.resolve())
+    const { submitCommand, storage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      addToHistory,
+      addToRecentPreview,
+      setComposerPromptMode,
+      updateSessionId,
+      reloadSessionHistory,
+      sessionId: 'uuid-base-session',
+      localStorageEntries: { session_id: 'uuid-base-session' },
+      apiFetch: vi.fn((url) => {
+        if (url === '/session/token/verify') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ exists: true }) })
+        }
+        if (url === '/session/run-count') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 1 }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }),
+    })
+
+    await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'you have 1 run(s) in your current session. migrate history to this session token?',
+        '',
+        'tab-1',
+      ),
+    )
+
+    expect(appendLine).toHaveBeenNthCalledWith(
+      1,
+      'session-token set tok_abcd1234efgh5678ijkl9012mnop3456',
+      'prompt-echo',
+      undefined,
+    )
+    expect(appendLine).toHaveBeenNthCalledWith(
+      2,
+      'you have 1 run(s) in your current session. migrate history to this session token?',
+      '',
+      'tab-1',
+    )
+    expect(appendLine).not.toHaveBeenCalledWith(
+      expect.stringContaining('session token set:'),
+      '',
+      'tab-1',
+    )
+    expect(addToHistory).toHaveBeenCalledTimes(1)
+    expect(addToHistory).toHaveBeenCalledWith('session-token set tok_abcd••••••••')
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+
+    await submitCommand('no')
+    await vi.waitFor(() =>
+      expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456'),
+    )
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('session token set: tok_abcd••••••••', '', 'tab-1'),
+    )
+
+    expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(updateSessionId).toHaveBeenCalledWith('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(reloadSessionHistory).toHaveBeenCalled()
+    expect(addToHistory).toHaveBeenCalledTimes(1)
+    expect(addToRecentPreview).toHaveBeenCalledWith('session-token set tok_abcd••••••••')
+    expect(appendLine).toHaveBeenCalledWith('no', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('session token set: tok_abcd••••••••', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith(
+      'reload other tabs to apply the new session token',
+      '',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith('History migration skipped.', '', 'tab-1')
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+  })
+
+  it('keeps the pending prompt open on invalid answers', async () => {
+    const addToHistory = vi.fn()
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const { submitCommand, storage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      addToHistory,
+      setComposerPromptMode,
+      localStorageEntries: { session_id: 'uuid-base-session' },
+      apiFetch: vi.fn((url) => {
+        if (url === '/session/token/verify') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ exists: true }) })
+        }
+        if (url === '/session/run-count') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 1 }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }),
+    })
+
+    await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'you have 1 run(s) in your current session. migrate history to this session token?',
+        '',
+        'tab-1',
+      ),
+    )
+    await submitCommand('maybe')
+
+    expect(appendLine).toHaveBeenCalledWith('maybe', 'prompt-echo', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('please answer yes or no', 'notice', 'tab-1')
+    expect(storage.getItem('session_token')).toBeNull()
+    expect(addToHistory).toHaveBeenCalledTimes(1)
+    expect(setComposerPromptMode).toHaveBeenCalledTimes(1)
+    expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
+  })
+
+  it('treats Ctrl+C as cancel and aborts the session-token set flow', async () => {
+    const addToHistory = vi.fn()
+    const appendLine = vi.fn()
+    const setComposerPromptMode = vi.fn()
+    const updateSessionId = vi.fn()
+    const reloadSessionHistory = vi.fn(() => Promise.resolve())
+    const { submitCommand, cancelPendingTerminalConfirm, storage } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      addToHistory,
+      setComposerPromptMode,
+      updateSessionId,
+      reloadSessionHistory,
+      sessionId: 'uuid-base-session',
+      localStorageEntries: { session_id: 'uuid-base-session' },
+      apiFetch: vi.fn((url) => {
+        if (url === '/session/token/verify') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ exists: true }) })
+        }
+        if (url === '/session/run-count') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 1 }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }),
+    })
+
+    await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'you have 1 run(s) in your current session. migrate history to this session token?',
+        '',
+        'tab-1',
+      ),
+    )
+    expect(cancelPendingTerminalConfirm()).toBe(true)
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('Session token set canceled.', '', 'tab-1'),
+    )
+
+    expect(storage.getItem('session_token')).toBeNull()
+    expect(updateSessionId).not.toHaveBeenCalled()
+    expect(reloadSessionHistory).not.toHaveBeenCalled()
+    expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    expect(addToHistory).toHaveBeenCalledTimes(1)
+  })
+
+  it('uses the uncapped session run-count endpoint for migration prompts', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      localStorageEntries: { session_id: 'uuid-base-session' },
+      apiFetch: vi.fn((url) => {
+        if (url === '/session/token/verify') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ exists: true }) })
+        }
+        if (url === '/session/run-count') {
+          return Promise.resolve({ ok: true, json: () => Promise.resolve({ count: 73 }) })
+        }
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+      }),
+    })
+
+    await submitCommand('session-token set tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'you have 73 run(s) in your current session. migrate history to this session token?',
+        '',
+        'tab-1',
+      ),
+    )
   })
 })
 

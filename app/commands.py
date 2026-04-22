@@ -54,7 +54,7 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             "question": "What built-in shell features are supported?",
             "answer": (
                 "The shell supports built-in commands plus a narrow set of commands with built-in "
-                "pipe support like grep, head, tail, and wc -l. For a full list of built-in commands, "
+                "pipe support like grep, head, tail, wc -l, sort, and uniq. For a full list of built-in commands, "
                 "run the command help in the web shell."
             ),
             "answer_html": (
@@ -63,14 +63,14 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
                 "<code>history</code>, <code>retention</code>, <code>shortcuts</code>, "
                 "<code>limits</code>, and <code>faq</code>. For a full list, run the command <code>help</code>."
                 " These are provided directly by the shell.<br><br>"
-                "<strong>Commands with built-in pipe support</strong> let you trim output with one "
-                "supported pipe stage, for example <code>command | grep pattern</code>, "
+                "<strong>Commands with built-in pipe support</strong> let you trim output with "
+                "supported pipe helpers, for example <code>command | grep pattern</code>, "
                 "<code>command | head -n 20</code>, <code>command | head -20</code>, "
                 "<code>command | tail -n 20</code>, <code>command | tail -20</code>, "
                 "<code>command | wc -l</code>, <code>command | sort -rn</code>, or "
-                "<code>command | uniq -c</code>.<br><br>"
-                "Only one supported pipe stage can be used per command. General shell piping, "
-                "chaining, and redirection are still blocked."
+                "<code>command | uniq -c</code>. These helpers can also be chained together, "
+                "for example <code>command | grep pattern | wc -l</code>.<br><br>"
+                "General shell piping, arbitrary chaining, and redirection are still blocked."
             ),
         },
         {
@@ -199,14 +199,14 @@ def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/da
             "answer": (
                 "Without a session token, your history is tied to your current browser — switch browsers "
                 "or workstations and you start fresh. Set a token and any browser that uses the same "
-                "token shares your run history and starred commands."
+                "token shares your run history, starred commands, and saved user options."
             ),
             "answer_html": (
                 "Without a session token, your history is tied to your current browser. Switch to a "
                 "different browser or workstation and you start fresh.<br><br>"
                 "Set a <strong>session token</strong> and any browser that uses the same token shares "
-                "your run history and starred commands — useful if you work across multiple machines or "
-                "want to pick up where you left off after clearing your browser.<br><br>"
+                "your run history, starred commands, and saved user options — useful if you work across "
+                "multiple machines or want to pick up where you left off after clearing your browser.<br><br>"
                 "Use these commands to manage your session token:<br><br>"
                 "<span class=\"allowed-chip faq-chip\" data-faq-command=\"session-token\">session-token</span>"
                 " — show whether a token is active.<br>"
@@ -508,8 +508,22 @@ def _parse_synthetic_uniq_stage(stage_tokens: list[str]) -> tuple[dict | None, s
     return None, "Synthetic uniq supports only -c."
 
 
+def _parse_synthetic_postfilter_stage(stage_tokens: list[str]) -> tuple[dict | None, str | None]:
+    for parser in (
+        _parse_synthetic_grep_stage,
+        _parse_synthetic_head_tail_stage,
+        _parse_synthetic_wc_stage,
+        _parse_synthetic_sort_stage,
+        _parse_synthetic_uniq_stage,
+    ):
+        spec, error = parser(stage_tokens)
+        if spec or error:
+            return spec, error
+    return None, None
+
+
 def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
-    """Parse a narrow app-native `command | helper ...` post-filter form.
+    """Parse a narrow app-native `command | helper ...` post-filter pipeline.
 
     Returns (spec, error_message). spec is None when the command does not use
     the synthetic post-filter path. error_message is populated only when the
@@ -529,30 +543,35 @@ def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
     if any(token in disallowed_control for token in tokens):
         return None, None
 
-    pipe_count = sum(1 for token in tokens if token == '|')
-    if pipe_count != 1:
+    pipe_indexes = [index for index, token in enumerate(tokens) if token == '|']
+    if not pipe_indexes:
         return None, None
 
-    pipe_index = tokens.index('|')
-    base_tokens = tokens[:pipe_index]
-    stage_tokens = tokens[pipe_index + 1:]
-    if not base_tokens or not stage_tokens:
+    base_tokens = tokens[:pipe_indexes[0]]
+    if not base_tokens:
         return None, "Synthetic post-filters require `command | helper ...`."
 
-    for parser in (
-        _parse_synthetic_grep_stage,
-        _parse_synthetic_head_tail_stage,
-        _parse_synthetic_wc_stage,
-        _parse_synthetic_sort_stage,
-        _parse_synthetic_uniq_stage,
-    ):
-        spec, error = parser(stage_tokens)
-        if spec or error:
-            if spec:
-                spec["base_command"] = shlex.join(base_tokens)
-            return spec, error
+    stage_specs: list[dict] = []
+    stage_start = pipe_indexes[0] + 1
+    for pipe_index in pipe_indexes[1:] + [len(tokens)]:
+        stage_tokens = tokens[stage_start:pipe_index]
+        if not stage_tokens:
+            return None, "Synthetic post-filters require `command | helper ...`."
 
-    return None, None
+        spec, error = _parse_synthetic_postfilter_stage(stage_tokens)
+        if error:
+            return None, error
+        if not spec:
+            return None, None
+
+        stage_specs.append(spec)
+        stage_start = pipe_index + 1
+
+    return {
+        "base_command": shlex.join(base_tokens),
+        "stages": stage_specs,
+        "kind": stage_specs[0]["kind"],
+    }, None
 
 
 def load_allowed_commands():

@@ -594,5 +594,36 @@ describe('showConfirm', () => {
       g.cancelConfirm()
       await promise
     })
+
+    it('cycles confirm actions with ArrowRight/ArrowDown and ArrowLeft/ArrowUp', async () => {
+      const promise = g.showConfirm({ actions: KILL_ACTIONS })
+      const card = document.querySelector('[data-confirm-card]')
+      const cancelBtn = card.querySelector('[data-confirm-action-id="cancel"]')
+      const confirmBtn = card.querySelector('[data-confirm-action-id="confirm"]')
+
+      cancelBtn.focus()
+      const right = new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })
+      card.dispatchEvent(right)
+      expect(right.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(confirmBtn)
+
+      const down = new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })
+      card.dispatchEvent(down)
+      expect(down.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(cancelBtn)
+
+      const left = new KeyboardEvent('keydown', { key: 'ArrowLeft', bubbles: true, cancelable: true })
+      card.dispatchEvent(left)
+      expect(left.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(confirmBtn)
+
+      const up = new KeyboardEvent('keydown', { key: 'ArrowUp', bubbles: true, cancelable: true })
+      card.dispatchEvent(up)
+      expect(up.defaultPrevented).toBe(true)
+      expect(document.activeElement).toBe(cancelBtn)
+
+      g.cancelConfirm()
+      await promise
+    })
   })
 })

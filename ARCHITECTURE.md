@@ -36,7 +36,7 @@ At a high level, it works like this:
 - Command execution flows through `POST /run`, which validates and rewrites commands, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
 - `Redis` provides the shared state that must work correctly across multiple Gunicorn workers: rate limiting and active run PID tracking for `/kill`.
 - `SQLite` persists completed run metadata, preview output, snapshots, and full-output artifact metadata so history, canonical run permalinks, and snapshot permalinks survive restarts.
-- The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover user preferences, session identity, and reload continuity.
+- The browser client stays build-step-free. Classic scripts share one global runtime, while browser cookies and storage cover local continuity and cache layers around session identity, session-scoped preferences, and reload restore.
 - The Docker runtime enforces a two-user model: Gunicorn runs as `appuser`, while user-submitted commands run as `scanner`.
 
 The rest of this document is organized by concern rather than by historical file order: stable system structure first, then browser/backend composition, then the core runtime stories such as run lifecycle, state, observability, and security.
@@ -191,7 +191,9 @@ This route list belongs in the architecture document because it describes the ap
 | `GET` | `/session/token/info` | Returns the current named token plus creation timestamp, or `null` fields for anonymous sessions |
 | `POST` | `/session/token/verify` | Checks whether a supplied `tok_...` token was issued by this server |
 | `POST` | `/session/token/revoke` | Revokes a named token so future `tok_...` headers are treated as anonymous |
-| `POST` | `/session/migrate` | Migrates runs, snapshots, and starred commands from one session ID to another |
+| `GET` | `/session/preferences` | Returns the current session's normalized saved Options snapshot |
+| `POST` | `/session/preferences` | Persists the current session's normalized saved Options snapshot |
+| `POST` | `/session/migrate` | Migrates runs, snapshots, starred commands, and session preferences from one session ID to another (without overwriting destination preferences) |
 | `GET` | `/session/starred` | Returns the current session's starred command list |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session |
@@ -258,7 +260,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, and the HUD clock timezone mode all sit in the frontend layer rather than in `config.yaml`. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying cookie-backed preferences remain part of the same frontend-owned layer.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -398,7 +400,7 @@ Full rules, the allowed exceptions (starred items, search-hit highlights, decora
 
 ### Confirmation Dialog Contract
 
-Every destructive or mode-switching confirmation in the shell — kill, history-delete, history-clear, share-redaction, session-token set/migrate, delete-all — goes through a single imperative primitive, `showConfirm()` in `app/static/js/ui_confirm.js`. Surfaces do not hand-roll confirm markup, do not wire their own Escape handler, and do not manage their own backdrop.
+App-level modal confirmations — kill, history-delete, history-clear, share-redaction, Options-driven session-token actions, delete-all — go through a single imperative primitive, `showConfirm()` in `app/static/js/ui_confirm.js`. Surfaces do not hand-roll confirm markup, do not wire their own Escape handler, and do not manage their own backdrop. Terminal-owned `session-token` confirms are the intentional exception: they stay inside the transcript and use the shared pending-confirm state in `runner.js` instead of a modal surface.
 
 The contract:
 
@@ -573,13 +575,14 @@ That split is what allows the app to keep the interactive shell fast while still
 
 ### Database
 
-`./data/history.db` — SQLite, WAL mode. Five persistent tables, one FTS5 virtual table, and file-backed run-output artifacts:
+`./data/history.db` — SQLite, WAL mode. Six persistent tables, one FTS5 virtual table, and file-backed run-output artifacts:
 
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
 - `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
 - `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
+- `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
 - Redis-backed active-run metadata plus browser `sessionStorage` form a second persistence layer for reload continuity:
   - `/history/active` covers in-flight runs owned by the server/session
@@ -606,7 +609,7 @@ Session identity is a two-tier model managed in `app/static/js/session.js`:
 1. **UUID session (anonymous)** — generated by `_generateUUID()` on first visit and persisted in `localStorage` under `session_id`. Always present; never removed. `_generateUUID()` tries `crypto.randomUUID()` first (HTTPS/localhost) and falls back to `crypto.getRandomValues()` so HTTP LAN deployments (e.g. `http://192.168.x.x`) work without a secure context.
 2. **Session token (named)** — a `tok_<32 hex>` string generated server-side by `GET /session/token/generate` and persisted in `localStorage` under `session_token`. Takes precedence over the UUID when present. Stored in the `session_tokens` database table `(token TEXT PRIMARY KEY, created TEXT)`.
 
-`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History and run data is scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session.
+`SESSION_ID` is initialised at page load by preferring `session_token` over `session_id`. `updateSessionId(newId)` switches identity at runtime without a page reload — used by `session-token generate/set/clear/rotate/revoke`. Every API call sends the active identity as `X-Session-ID` via `apiFetch()`. History, stars, and saved Options state are scoped to this identity; clearing a session token reverts to the UUID rather than losing the anonymous session. Terminal `session-token` flows keep their prompts in the transcript, while the Options-panel clear/set actions use `showConfirm()`.
 
 **Server-side token validation:** `get_session_id()` in `helpers.py` validates `tok_`-prefixed header values against the `session_tokens` table on every request. A revoked or never-issued `tok_` token is treated as anonymous (returns `""`) so the caller loses access to session-scoped data immediately, without requiring a client-side logout. UUID-format session IDs pass through without a DB lookup.
 
@@ -789,10 +792,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 856
-- `vitest`: 696
+- `pytest`: 864
+- `vitest`: 726
 - `playwright`: 198
-- total: 1,750
+- total: 1,788
 
 ### Testing Architecture
 
@@ -801,9 +804,9 @@ This split exists to keep each risk at the cheapest useful layer:
 - backend behavior stays fast and deterministic in `pytest`
 - browser-module logic is isolated in `Vitest` without changing the classic-script frontend architecture
 - browser-only integration risks such as real focus, scroll, SSE timing, and mobile layout behavior stay in `Playwright`
-- browser-visible autocomplete behavior spans two contexts:
-  - command-root-aware flag/value suggestions
-  - the narrow single-stage built-in pipe context after `command |`
+  - browser-visible autocomplete behavior spans two contexts:
+    - command-root-aware flag/value suggestions
+    - the allowlisted built-in pipe-helper context after `command |`, including chained helper stages
 
 The browser test harness mirrors production constraints rather than abstracting them away:
 

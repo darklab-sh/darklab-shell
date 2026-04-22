@@ -181,7 +181,7 @@ describe('loadStarredFromServer', () => {
 })
 
 describe('command history hydration', () => {
-  function loadHistoryHelpers() {
+  function loadHistoryHelpers({ emitUiEvent = vi.fn() } = {}) {
     document.body.innerHTML = `
       <div id="history-row"><span class="history-label">Recent:</span></div>
       <input id="cmd" />
@@ -204,6 +204,7 @@ describe('command history hydration', () => {
         historyPanel,
         refreshHistoryPanel: vi.fn(),
         useMobileTerminalViewportMode: () => false,
+        emitUiEvent,
         setComposerState: (next) => {
           if (Object.prototype.hasOwnProperty.call(next, 'value'))
             cmdInput.value = String(next.value ?? '')
@@ -225,6 +226,7 @@ describe('command history hydration', () => {
       renderHistory,
       getCmdHistory: () => cmdHistory.slice(),
       getRecentPreviewHistory: () => recentPreviewHistory.slice(),
+      emitUiEvent,
     }`,
     )
   }
@@ -272,6 +274,21 @@ describe('command history hydration', () => {
     expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(-1)).toBe(true)
     expect(cmdInput.value).toBe('pin')
+  })
+
+  it('emits a history-rendered event when hydrated history becomes empty', () => {
+    const emitUiEvent = vi.fn()
+    const { hydrateCmdHistory } = loadHistoryHelpers({ emitUiEvent })
+
+    hydrateCmdHistory([{ command: 'ping darklab.sh', exit_code: 0 }])
+    emitUiEvent.mockClear()
+
+    hydrateCmdHistory([])
+
+    expect(emitUiEvent).toHaveBeenCalledWith('app:history-rendered', {
+      cmdHistory: [],
+      recentPreviewHistory: [],
+    })
   })
 
   it('resetCmdHistoryNav clears navigation state after the user types', () => {

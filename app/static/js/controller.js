@@ -430,6 +430,55 @@ async function _waitForMigrateChoice(msg) {
   });
 }
 
+async function _clearActiveSessionToken() {
+  localStorage.removeItem('session_token');
+  const uuid = localStorage.getItem('session_id') || SESSION_ID;
+  updateSessionId(uuid);
+  if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
+  if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+  _updateOptionsSessionTokenStatus();
+  return uuid;
+}
+
+async function confirmClearSessionToken() {
+  const token = localStorage.getItem('session_token');
+  if (!token) return { cleared: false, anonymousSessionId: null };
+  if (typeof showConfirm !== 'function') {
+    const uuid = await _clearActiveSessionToken();
+    return { cleared: true, anonymousSessionId: uuid };
+  }
+
+  const choice = await showConfirm({
+    body: {
+      text: 'Clear the current session token from this browser?',
+      note: 'If you have not saved it elsewhere, you will not be able to recover it from the app, and history tied to it will no longer be accessible from this browser.',
+    },
+    tone: 'danger',
+    actions: [
+      {
+        id: 'copy',
+        label: 'Copy token',
+        role: 'secondary',
+        onActivate: async () => {
+          try {
+            await copyTextToClipboard(token);
+            showToast('Token copied to clipboard');
+          } catch (_) {
+            showToast('Failed to copy token', 'error');
+          }
+          return false;
+        },
+      },
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'clear', label: 'Clear token', role: 'primary', tone: 'danger' },
+    ],
+  });
+
+  if (choice !== 'clear') return { cleared: false, anonymousSessionId: null };
+  const uuid = await _clearActiveSessionToken();
+  return { cleared: true, anonymousSessionId: uuid };
+}
+
 document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
   const token = localStorage.getItem('session_token');
   if (!token) return;
@@ -673,14 +722,9 @@ document.getElementById('options-session-token-rotate-btn')?.addEventListener('c
   }
 });
 
-document.getElementById('options-session-token-clear-btn')?.addEventListener('click', () => {
-  if (!localStorage.getItem('session_token')) return;
-  localStorage.removeItem('session_token');
-  const uuid = localStorage.getItem('session_id') || SESSION_ID;
-  updateSessionId(uuid);
-  if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
-  _updateOptionsSessionTokenStatus();
-  showToast('Session token cleared');
+document.getElementById('options-session-token-clear-btn')?.addEventListener('click', async () => {
+  const result = await confirmClearSessionToken();
+  if (result.cleared) showToast('Session token cleared');
 });
 
 apiFetch('/allowed-commands').then(r => r.json()).then(data => {
@@ -729,6 +773,11 @@ applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
 applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
 applyHudClockPreference(getHudClockPreference(), false);
 syncOptionsControls();
+if (typeof loadSessionPreferences === 'function') {
+  loadSessionPreferences().catch(err => {
+    logClientError('failed to apply session preferences', err);
+  });
+}
 
 Promise.all([
   apiFetch('/history').then(r => r.json()).catch(err => {
@@ -898,6 +947,8 @@ document.addEventListener('keydown', e => {
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
+    } else if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+      cancelPendingTerminalConfirm(activeTabId);
     } else {
       interruptPromptLine(activeTabId);
     }
@@ -1178,6 +1229,10 @@ cmdInput.addEventListener('keydown', e => {
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
+      return;
+    }
+    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+      cancelPendingTerminalConfirm(activeTabId);
       return;
     }
     interruptPromptLine(activeTabId);

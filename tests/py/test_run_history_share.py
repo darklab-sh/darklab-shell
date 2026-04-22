@@ -320,6 +320,41 @@ class TestRunStreaming:
         texts = [entry["text"] for entry in preview["output_entries"]]
         assert texts == ["3"]
 
+    def test_run_filters_output_through_chained_synthetic_helpers(self):
+        client = get_client()
+        fake_proc = _FakeProc(lines=["ttl=54\n", "time=12ms\n", "ttl=55\n", ""])
+
+        with mock.patch("blueprints.run.runtime_missing_command_name", return_value=None), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[
+                 True,
+                 True,
+                 True,
+                 True,
+             ]):
+            resp = client.post(
+                "/run",
+                json={"command": "ping darklab.sh | grep ttl | wc -l"},
+                headers={"X-Session-ID": "sess-chain"},
+            )
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "ttl=54\\n" not in body
+        assert "ttl=55\\n" not in body
+        assert "time=12ms\\n" not in body
+        assert '"text": "2"' in body
+
+        hist = client.get("/history", headers={"X-Session-ID": "sess-chain"})
+        data = json.loads(hist.data)
+        run_id = data["runs"][0]["id"]
+        preview_resp = client.get(f"/history/{run_id}?json&preview=1")
+        preview = json.loads(preview_resp.data)
+        texts = [entry["text"] for entry in preview["output_entries"]]
+        assert texts == ["2"]
+
     def test_run_rejects_invalid_synthetic_grep_regex(self):
         client = get_client()
 
@@ -534,11 +569,13 @@ class TestRunStreaming:
         assert "shortcuts" in body and "Show current keyboard shortcuts." in body
         assert "status" in body and "Show the current session and shell configuration summary." in body
         assert "Commands with built-in pipe support:\\n" in body
-        assert "Use one supported pipe stage after a command.\\n" in body
+        assert "Chain supported helpers like grep, head, tail, wc -l, sort, and uniq after a command.\\n" in body
         assert "grep" in body and "command | grep <pattern>" in body
         assert "head" in body and "command | head -n <count>" in body
         assert "tail" in body and "command | tail -n <count>" in body
         assert "wc -l" in body and "command | wc -l" in body
+        assert "sort" in body and "command | sort -u" in body
+        assert "uniq" in body and "command | uniq -c" in body
         assert "tty" in body and "Show the web terminal device path." in body
         assert "type <cmd>" in body and "Describe whether a command is built in, installed, or missing." in body
         assert "uname [-a]" in body and "Show the shell platform string." in body
@@ -1086,7 +1123,7 @@ class TestRunStreaming:
         assert resp.status_code == 200
         assert "Autocomplete:\\n" in body
         assert "Known command roots can suggest flags, values, and positional hints.\\n" in body
-        assert "Built-in pipe support can also suggest grep, head, tail, and wc -l after `command |`.\\n" in body
+        assert "Built-in pipe support can also suggest grep, head, tail, wc -l, sort, and uniq after `command |`.\\n" in body
         assert '"type": "exit"' in body
 
     def test_fake_id_returns_synthetic_identity(self):

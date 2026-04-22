@@ -403,6 +403,7 @@ describe('autocomplete helpers', () => {
               __positional__: [
                 { value: 'generate' },
                 { value: 'set <token>', insertValue: 'set ' },
+                { value: 'copy' },
                 { value: 'clear' },
               ],
             },
@@ -829,6 +830,114 @@ describe('autocomplete helpers', () => {
 
     const wcItems = getAutocompleteMatches('help | wc ', 10)
     expect(wcItems.map((item) => item.value)).toEqual(['-l'])
+  })
+
+  it('suggests additional pipe helpers after an earlier helper stage', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'help | grep ttl | ',
+        acSuggestions: [],
+        acContextRegistry: {
+          grep: { pipe_command: true, pipe_description: 'Filter lines by pattern' },
+          head: { pipe_command: true, pipe_description: 'Show the first lines' },
+          tail: { pipe_command: true, pipe_description: 'Show the last lines' },
+          wc: {
+            pipe_command: true,
+            pipe_insert_value: 'wc -l',
+            pipe_label: 'wc -l',
+            pipe_description: 'Count lines',
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('help | grep ttl | ', 18)
+    expect(items.map((item) => item.value)).toEqual(['grep', 'head', 'tail', 'wc -l'])
+  })
+
+  it('returns chained pipe-stage flag and value hints from the last helper stage', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'help | grep ttl | head -n ',
+        acSuggestions: [],
+        acContextRegistry: {
+          grep: {
+            pipe_command: true,
+            arg_hints: {
+              __positional__: [{ value: '<pattern>', description: 'Text or regex to match' }],
+            },
+          },
+          head: {
+            pipe_command: true,
+            flags: [{ value: '-n', description: 'Show the first N lines' }],
+            expects_value: ['-n'],
+            arg_hints: {
+              '-n': [
+                { value: '5', description: 'Show the first 5 lines' },
+                { value: '10', description: 'Show the first 10 lines' },
+              ],
+            },
+          },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const flagItems = getAutocompleteMatches('help | grep ttl | head -', 25)
+    expect(flagItems.map((item) => item.value)).toEqual(['-n'])
+
+    const valueItems = getAutocompleteMatches('help | grep ttl | head -n ', 27)
+    expect(valueItems.map((item) => item.value)).toEqual(['5', '10'])
+  })
+
+  it('does not offer chained pipe autocomplete after an invalid earlier stage', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'help | cat | ',
+        acSuggestions: [],
+        acContextRegistry: {
+          grep: { pipe_command: true, pipe_description: 'Filter lines by pattern' },
+          head: { pipe_command: true, pipe_description: 'Show the first lines' },
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('help | cat | ', 13)).toEqual([])
   })
 
   it('mousedown on a suggestion accepts it without blurring the input', () => {

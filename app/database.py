@@ -2,7 +2,7 @@
 SQLite persistence — connection helper, schema initialisation, and retention pruning.
 Database lives in /data (writable volume mount). Falls back to /tmp for local dev.
 
-Tables: runs, run_output_artifacts, snapshots, session_tokens.
+Tables: runs, run_output_artifacts, snapshots, session_tokens, session_preferences.
 FTS: runs_fts (FTS5 virtual table over runs.command + runs.output_search_text).
 """
 
@@ -90,6 +90,13 @@ def _create_schema(conn):
         CREATE TABLE IF NOT EXISTS session_tokens (
             token   TEXT PRIMARY KEY,
             created TEXT NOT NULL
+        )
+    """)
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS session_preferences (
+            session_id  TEXT PRIMARY KEY,
+            preferences TEXT NOT NULL,
+            updated     TEXT NOT NULL
         )
     """)
     conn.execute("""
@@ -230,6 +237,17 @@ def _migrate_schema(conn):
             CREATE TABLE IF NOT EXISTS session_tokens (
                 token   TEXT PRIMARY KEY,
                 created TEXT NOT NULL
+            )
+        """)
+    except sqlite3.OperationalError:
+        pass
+
+    try:
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS session_preferences (
+                session_id  TEXT PRIMARY KEY,
+                preferences TEXT NOT NULL,
+                updated     TEXT NOT NULL
             )
         """)
     except sqlite3.OperationalError:

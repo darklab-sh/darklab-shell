@@ -22,11 +22,7 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
-- **Persist user options with session tokens** — session tokens currently preserve command history and session identity, but user-facing options still reset outside the current browser scope. Extend the session-token data model so saved options can live in the database and follow the user's restored session across browsers and devices.
-
-- **Confirmation modal before clearing the session token** — the `clear` built-in command and the clear button both discard the current session token immediately. If the user has not saved the token elsewhere, it cannot be recovered, and all history associated with it becomes inaccessible. Gate the action behind a confirmation modal that makes the consequence explicit and offers a "copy token to clipboard" action so the user can save it before confirming. The modal should not appear for no-token sessions (nothing to lose) and should not block the clear path once the user confirms.
-
-- **Chain multiple pipe helpers in a single command** — today the shell accepts a single pipe stage (e.g. `ping -c 4 darklab.sh | grep 'bytes from'`) but rejects longer pipelines. Allow strung-together helpers (e.g. `ping -c 4 darklab.sh | grep 'bytes from' | wc -l`) so common post-processing workflows work without leaving the shell. Each stage must still be individually allowlisted, metacharacter-blocked, and policy-checked; apply the same pipe-helper rules uniformly across every stage rather than loosening guards for the additional segments.
+- **Add snapshots to the history drawer/sheets** — snapshots are currently only reachable by direct link even though session migration tracks them internally. Extend the history surfaces so users can browse and search snapshots alongside runs with a type filter such as `all`, `runs`, and `snapshots`. Once snapshots are first-class in the history UI, restore snapshot-related migration messaging in the session-token flows because it will become user-visible and actionable there.
 
 ---
 

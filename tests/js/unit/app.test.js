@@ -52,6 +52,9 @@ async function loadAppFns({
   copyTextToClipboard: copyTextToClipboardOverride = vi.fn(() => Promise.resolve()),
   reloadSessionHistory: reloadSessionHistoryOverride = vi.fn(() => Promise.resolve()),
   seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride = vi.fn(() => Promise.resolve()),
+  hydrateCmdHistory: hydrateCmdHistoryOverride = vi.fn(),
+  hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride = vi.fn(() => false),
+  cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride = vi.fn(() => false),
   sessionId = 'session-old',
 } = {}) {
   document.body.className = ''
@@ -417,6 +420,8 @@ async function loadAppFns({
       copyTextToClipboard: copyTextToClipboardOverride,
       reloadSessionHistory: reloadSessionHistoryOverride,
       _seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
+      hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
+      cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
       ...domBindings,
       getOutput: getOutputOverride || (() => document.getElementById('history-list')),
       renderMotd: (text) => text,
@@ -453,7 +458,7 @@ async function loadAppFns({
       resetCmdHistoryNav: () => {},
       navigateCmdHistory: navigateCmdHistoryOverride,
       setupTabScrollControls: () => {},
-      hydrateCmdHistory: () => {},
+      hydrateCmdHistory: hydrateCmdHistoryOverride,
       mountShellPrompt: () => {},
       unmountShellPrompt: () => {},
       logClientError,
@@ -551,6 +556,7 @@ async function loadAppFns({
     openFaq,
     getComposerState,
     setComposerState,
+    setComposerPromptMode,
     resetComposerState,
     syncShellPrompt,
     _getAcIndex: () => acIndex,
@@ -577,6 +583,9 @@ async function loadAppFns({
     copyTextToClipboard: copyTextToClipboardOverride,
     reloadSessionHistory: reloadSessionHistoryOverride,
     seedLocalStorageStarsToServer: seedLocalStorageStarsToServerOverride,
+    hydrateCmdHistory: hydrateCmdHistoryOverride,
+    hasPendingTerminalConfirm: hasPendingTerminalConfirmOverride,
+    cancelPendingTerminalConfirm: cancelPendingTerminalConfirmOverride,
     confirmKill: confirmKillOverride,
     createTab: createTabOverride,
     closeTab: closeTabOverride,
@@ -673,6 +682,108 @@ describe('app helpers', () => {
     expect(document.getElementById('ln-btn').textContent).toBe('line numbers: on')
     expect(document.getElementById('options-hud-clock-select').value).toBe('local')
     expect(getHudClockPreference()).toBe('local')
+  })
+
+  it('applies saved session preferences on startup over stale local cookies', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/preferences') {
+        return Promise.resolve({
+          ok: true,
+          json: () => Promise.resolve({
+            preferences: {
+              pref_theme_name: 'theme_light_blue',
+              pref_timestamps: 'clock',
+              pref_line_numbers: 'on',
+              pref_welcome_intro: 'disable_animation',
+              pref_share_redaction_default: 'redacted',
+              pref_run_notify: 'off',
+              pref_hud_clock: 'local',
+            },
+          }),
+        })
+      }
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              default_theme: 'darklab_obsidian.yaml',
+              share_redaction_enabled: true,
+              share_redaction_rules: [],
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }) })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
+
+    await loadAppFns({
+      apiFetch,
+      cookies: { pref_timestamps: 'off', pref_line_numbers: 'off', pref_hud_clock: 'utc' },
+      themeRegistry: {
+        current: {
+          name: 'darklab_obsidian.yaml',
+          label: 'Darklab Obsidian',
+          source: 'variant',
+          vars: { '--bg': '#111111' },
+        },
+        themes: [
+          {
+            name: 'darklab_obsidian.yaml',
+            label: 'Darklab Obsidian',
+            source: 'variant',
+            vars: { '--bg': '#111111' },
+          },
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+        ],
+      },
+    })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(document.body.dataset.theme).toBe('theme_light_blue')
+    expect(document.body.classList.contains('ts-clock')).toBe(true)
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.getElementById('options-welcome-select').value).toBe('disable_animation')
+    expect(document.getElementById('options-share-redaction-select').value).toBe('redacted')
+    expect(document.getElementById('options-hud-clock-select').value).toBe('local')
+  })
+
+  it('switches the visible prompt into confirmation mode when requested', async () => {
+    const { setComposerPromptMode } = await loadAppFns()
+    const shellPromptWrap = document.getElementById('shell-prompt-wrap')
+    const promptPrefix = shellPromptWrap.querySelector('.prompt-prefix')
+    const mobilePromptLabel = document.querySelector('#mobile-composer-row .mobile-prompt-label')
+
+    expect(promptPrefix.textContent).toBe('anon@darklab:~$')
+    expect(mobilePromptLabel.textContent).toBe('$')
+
+    setComposerPromptMode('confirm')
+    expect(promptPrefix.textContent).toBe('[yes/no]:')
+    expect(mobilePromptLabel.textContent).toBe('[yes/no]:')
+    expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(true)
+
+    setComposerPromptMode(null)
+    expect(promptPrefix.textContent).toBe('anon@darklab:~$')
+    expect(mobilePromptLabel.textContent).toBe('$')
+    expect(shellPromptWrap.classList.contains('shell-prompt-confirm')).toBe(false)
   })
 
   it('_setTsMode updates body classes and button labels', async () => {
@@ -1152,7 +1263,7 @@ describe('app helpers', () => {
       expect.any(Error),
     )
     expect(logClientError).toHaveBeenCalledWith('failed to load /autocomplete', expect.any(Error))
-    expect(storage.getItem('theme')).toBeNull()
+    expect(storage.getItem('theme')).toBe('only_theme')
   })
 
   it('settles the welcome intro immediately when the user types into the active welcome tab', async () => {
@@ -2630,6 +2741,25 @@ describe('app helpers', () => {
     expect(confirmKill).not.toHaveBeenCalled()
   })
 
+  it('uses Ctrl+C to cancel a pending terminal confirmation before opening a fresh prompt', async () => {
+    const interruptPromptLine = vi.fn()
+    const cancelPendingTerminalConfirm = vi.fn(() => true)
+    const hasPendingTerminalConfirm = vi.fn(() => true)
+    const { cmdInput, confirmKill } = await loadAppFns({
+      tabs: [{ id: 'tab-1', st: 'idle' }],
+      interruptPromptLine,
+      hasPendingTerminalConfirm,
+      cancelPendingTerminalConfirm,
+    })
+
+    cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 'c', ctrlKey: true, bubbles: true }))
+
+    expect(hasPendingTerminalConfirm).toHaveBeenCalled()
+    expect(cancelPendingTerminalConfirm).toHaveBeenCalledWith('tab-1')
+    expect(interruptPromptLine).not.toHaveBeenCalled()
+    expect(confirmKill).not.toHaveBeenCalled()
+  })
+
   it('supports Alt+T to create a new tab from the terminal prompt', async () => {
     const createTab = vi.fn(() => 'tab-2')
     const { cmdInput } = await loadAppFns({
@@ -3437,8 +3567,118 @@ describe('app helpers', () => {
     expect(showToast).not.toHaveBeenCalledWith('Session token applied')
   })
 
+  it('opens a destructive confirm before clearing the active session token', async () => {
+    const showConfirm = vi.fn().mockResolvedValue(null)
+    const { storage } = await loadAppFns({ showConfirm })
+    storage.setItem('session_token', 'tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    document.getElementById('options-session-token-clear-btn').click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1))
+
+    const confirmOpts = showConfirm.mock.calls[0][0]
+    expect(confirmOpts.tone).toBe('danger')
+    expect(confirmOpts.body.text).toBe('Clear the current session token from this browser?')
+    expect(confirmOpts.body.note).toContain('will not be able to recover it from the app')
+    expect(confirmOpts.actions.map((action) => action.id)).toEqual(['copy', 'cancel', 'clear'])
+    expect(confirmOpts.actions.find((action) => action.id === 'cancel')).toMatchObject({ role: 'cancel' })
+    expect(confirmOpts.actions.find((action) => action.id === 'clear')).toMatchObject({
+      role: 'primary',
+      tone: 'danger',
+      label: 'Clear token',
+    })
+  })
+
+  it('lets the user copy the session token from the clear confirm without clearing it', async () => {
+    const copyTextToClipboard = vi.fn(() => Promise.resolve())
+    const showToast = vi.fn()
+    const updateSessionId = vi.fn()
+    const showConfirm = vi.fn().mockImplementation(async (opts) => {
+      const copy = opts.actions.find((action) => action.id === 'copy')
+      const keepOpen = await copy.onActivate()
+      expect(keepOpen).toBe(false)
+      return 'cancel'
+    })
+    const { storage } = await loadAppFns({
+      showConfirm,
+      copyTextToClipboard,
+      showToast,
+      updateSessionId,
+    })
+    storage.setItem('session_token', 'tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    document.getElementById('options-session-token-clear-btn').click()
+    await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1))
+
+    expect(copyTextToClipboard).toHaveBeenCalledWith('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(showToast).toHaveBeenCalledWith('Token copied to clipboard')
+    expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
+    expect(updateSessionId).not.toHaveBeenCalled()
+  })
+
+  it('clears the session token only after confirming the destructive action', async () => {
+    const showConfirm = vi.fn().mockResolvedValue('clear')
+    const showToast = vi.fn()
+    const updateSessionId = vi.fn()
+    const reloadSessionHistory = vi.fn(() => Promise.resolve())
+    const hydrateCmdHistory = vi.fn()
+    const { storage } = await loadAppFns({
+      showConfirm,
+      showToast,
+      updateSessionId,
+      reloadSessionHistory,
+      hydrateCmdHistory,
+      sessionId: 'session-old',
+    })
+    storage.setItem('session_token', 'tok_abcd1234efgh5678ijkl9012mnop3456')
+
+    document.getElementById('options-session-token-clear-btn').click()
+    await vi.waitFor(() => expect(storage.getItem('session_token')).toBeNull())
+
+    expect(updateSessionId).toHaveBeenCalledWith('session-old')
+    expect(hydrateCmdHistory).toHaveBeenCalledWith([])
+    expect(reloadSessionHistory).toHaveBeenCalled()
+    expect(document.getElementById('options-session-token-status').textContent).toBe(
+      'No session token — anonymous session',
+    )
+    expect(showToast).toHaveBeenCalledWith('Session token cleared')
+  })
+
   it('persists options changes through cookies and syncs quick-toggle state', async () => {
+    const apiFetch = vi.fn((url, opts = {}) => {
+      if (url === '/config') {
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              app_name: 'darklab shell',
+              prompt_prefix: 'anon@darklab:~$',
+              version: '9.9',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              default_theme: 'darklab_obsidian.yaml',
+              share_redaction_enabled: true,
+              share_redaction_rules: [],
+              motd: '',
+              command_timeout_seconds: 0,
+              max_output_lines: 0,
+              permalink_retention_days: 0,
+            }),
+        })
+      }
+      if (url === '/allowed-commands') {
+        return Promise.resolve({ json: () => Promise.resolve({ restricted: false, commands: [], groups: [] }) })
+      }
+      if (url === '/faq') {
+        return Promise.resolve({ json: () => Promise.resolve({ items: [] }) })
+      }
+      if (url === '/session/preferences' && (!opts.method || opts.method === 'GET')) {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ preferences: {} }) })
+      }
+      if (url === '/session/preferences' && opts.method === 'POST') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: () => Promise.resolve({}) })
+    })
     const { getWelcomeIntroPreference, getShareRedactionDefaultPreference, getHudClockPreference } = await loadAppFns({
+      apiFetch,
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
@@ -3506,6 +3746,17 @@ describe('app helpers', () => {
     expect(getWelcomeIntroPreference()).toBe('disable_animation')
     expect(getShareRedactionDefaultPreference()).toBe('redacted')
     expect(getHudClockPreference()).toBe('local')
+    const postCalls = apiFetch.mock.calls.filter(([url, opts]) => url === '/session/preferences' && opts?.method === 'POST')
+    expect(postCalls.length).toBeGreaterThan(0)
+    const lastPayload = JSON.parse(postCalls.at(-1)[1].body)
+    expect(lastPayload.preferences).toMatchObject({
+      pref_theme_name: 'theme_light_olive',
+      pref_timestamps: 'elapsed',
+      pref_line_numbers: 'on',
+      pref_welcome_intro: 'disable_animation',
+      pref_share_redaction_default: 'redacted',
+      pref_hud_clock: 'local',
+    })
   })
 
   it('renders backend-driven FAQ items with HTML answers and dynamic sections', async () => {
