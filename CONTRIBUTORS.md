@@ -18,6 +18,7 @@ Key references for contributors:
 Current implementation note:
 
 - The desktop rail is the visible desktop navigation surface, but some rail actions still proxy through legacy hidden header button IDs so older controller wiring can be reused. That desktop-only indirection is tracked as technical debt in [TODO.md](TODO.md).
+- Export/render de-duplication is the other active frontend debt area: live permalink/share pages and saved HTML/PDF exports already share most rendering helpers, but bootstrap/header/transcript normalization is not fully unified yet. That broader cleanup plan is also tracked in [TODO.md](TODO.md).
 
 ---
 

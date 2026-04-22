@@ -295,7 +295,7 @@ The contract the helpers jointly enforce: focus returns to the composer after no
 
 **Why not ES modules (`type="module"`)?** ES modules are deferred by default and each runs in its own scope, which would require explicit `export`/`import` everywhere. The plain script approach shares a single global scope — simpler and sufficient for this scale.
 
-**Export rendering module (`export_html.js`).** All HTML export rendering is centralized in `window.ExportHtmlUtils`, which is loaded via a Flask route (`/static/js/export_html.js`) and exposes: `buildExportLinesHtml` (converts raw line objects to styled HTML spans, respecting `tsMode`/`lnMode` prefix state), `buildTerminalExportStyles` (produces the full inline CSS block with theme variables), `buildTerminalExportHtml` (assembles the complete standalone HTML document), `fetchVendorFontFacesCss` (fetches and base64-encodes fonts for self-contained export files), and `fetchTerminalExportCss` (fetches `terminal_export.css` with module-level caching so the shared export stylesheet is embedded in every exported document). All save surfaces — `exportTabHtml` in `tabs.js`, `saveHtml` in `permalink.html`, and the jsPDF-based PDF export — consume these shared helpers so visual changes propagate to all save formats from one place. PDF rendering (`exportTabPdf` / `savePdf`) shares the same line data and prefix logic but uses jsPDF directly for the rendering layer, as documented in [DECISIONS.md](DECISIONS.md).
+**Export rendering modules (`export_html.js` / `export_pdf.js`).** Browser export rendering is split into two shared modules. `window.ExportHtmlUtils` owns the browser-rendered export model and exposes `buildExportLinesHtml` (converts raw line objects to styled HTML spans, respecting `tsMode`/`lnMode` prefix state), `buildExportMetaLine`, `buildExportHeaderModel`, `buildTerminalExportHeaderHtml`, `buildTerminalExportStyles` (produces the full inline CSS block with theme variables), `buildTerminalExportHtml` (assembles the complete standalone HTML document), `fetchVendorFontFacesCss` (fetches and base64-encodes fonts for self-contained export files), and `fetchTerminalExportCss` (fetches `terminal_export.css` with module-level caching so the shared export stylesheet is embedded in every exported document). `window.ExportPdfUtils` owns jsPDF rendering and consumes the same prepared header/meta/line model so PDF stays aligned with the browser export baseline while still handling PDF-only responsibilities such as font embedding, wrapping, pagination, and geometric drawing. All save surfaces — `exportTabHtml` / `exportTabPdf` in `tabs.js` and `saveHtml` / `savePdf` in `permalink.js` — delegate to these shared modules so visual changes propagate from one place instead of being rebuilt independently per surface.
 
 ---
 
@@ -780,9 +780,9 @@ The test stack is intentionally split into three layers:
 Current totals:
 
 - `pytest`: 856
-- `vitest`: 685
+- `vitest`: 694
 - `playwright`: 197
-- total: 1,738
+- total: 1,747
 
 ### Testing Architecture
 

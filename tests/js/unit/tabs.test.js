@@ -865,6 +865,7 @@ describe('tabs helpers', () => {
     window.ExportHtmlUtils = {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
       fetchTerminalExportCss: () => Promise.resolve(''),
       buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
@@ -946,8 +947,65 @@ describe('tabs helpers', () => {
     expect(html).toContain('--bg: #eef4fa;')
     expect(html).toContain('--theme-panel-bg: #edf4fb;')
     expect(html).toContain('.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }')
+    expect(html).toContain('<h1 class="export-title">darklab shell</h1>')
 
     delete window.ThemeRegistry
+  })
+
+  it('builds a shared export header model with canonical run-meta ordering', () => {
+    const { buildExportHeaderModel } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+        window,
+      },
+      'ExportHtmlUtils',
+    )
+
+    const header = buildExportHeaderModel({
+      appName: 'darklab shell',
+      metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
+      runMeta: { exitCode: 0, duration: '1.2s', lines: '42 lines', version: '1.5' },
+    })
+
+    expect(header).toEqual({
+      appName: 'darklab shell',
+      metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
+      runMetaItems: [
+        { kind: 'badge', tone: 'ok', text: 'exit 0' },
+        { kind: 'item', text: '1.2s' },
+        { kind: 'item', text: '42 lines' },
+        { kind: 'item', text: 'v1.5' },
+      ],
+    })
+  })
+
+  it('renders export header html with the same title/meta/run-meta structure as permalink pages', () => {
+    const { buildTerminalExportHeaderHtml } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+        window,
+      },
+      'ExportHtmlUtils',
+    )
+
+    const html = buildTerminalExportHeaderHtml({
+      appName: 'darklab shell',
+      metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
+      runMetaItems: [
+        { kind: 'badge', tone: 'fail', text: 'exit 1' },
+        { kind: 'item', text: '9 lines' },
+      ],
+    })
+
+    expect(html).toContain('<header class="export-header">')
+    expect(html).toContain('<h1 class="export-title">darklab shell</h1>')
+    expect(html).toContain('<div class="export-meta">scan  ·  1/1/2026, 10:00:00 AM</div>')
+    expect(html).toContain('<div class="export-run-meta">')
+    expect(html).toContain('meta-badge-fail')
+    expect(html).toContain('exit 1')
+    expect(html).toContain('9 lines')
   })
 
   it('saveTab shows a toast when there is only welcome output', () => {
@@ -984,6 +1042,7 @@ describe('tabs helpers', () => {
     window.ExportHtmlUtils = {
       escapeExportHtml: (s) => s,
       renderExportPromptEcho: (s) => s,
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
       fetchTerminalExportCss: () => Promise.resolve(''),
       buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
@@ -1014,6 +1073,7 @@ describe('tabs helpers', () => {
 
   it('exportTabHtml shows a toast when the tab has no lines', async () => {
     window.ExportHtmlUtils = {
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
       fetchTerminalExportCss: () => Promise.resolve(''),
       buildExportLinesHtml: (lines) => ({ linesHtml: '', prefixWidth: 0 }),

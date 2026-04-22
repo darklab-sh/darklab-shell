@@ -50,6 +50,20 @@ All notable changes to darklab shell are documented here.
 
 ### Changed
 
+#### Export Parity and Shared Save Rendering
+
+- **Permalink/share pages, saved HTML, and PDF now follow one tighter export model** — the export surfaces were visually close but still drifting in typography, spacing, and transcript treatment because the shared logic stopped one layer too late.
+  - **Why:** several export regressions surfaced at once: permalink vs saved-HTML header spacing drift, PDF using a visibly different font, PDF-only blank rows, uneven header spacing, and output/badge border treatment that no longer matched the browser-rendered surfaces.
+  - **What:**
+    - `ExportHtmlUtils` now owns more of the shared browser export model: meta-line formatting, header-model preparation, and export-header HTML structure used as the browser baseline.
+    - `ExportPdfUtils` now consumes that same shared header/meta ordering instead of rebuilding the browser semantics independently.
+    - PDF export now embeds the committed JetBrains Mono fonts when jsPDF font VFS hooks are available and falls back safely when they are not.
+    - permalink/share exports now preserve the page display timestamp instead of rebuilding ad hoc date strings at save time.
+    - browser-rendered export surfaces no longer force uppercase on the command/meta line, preserving case-sensitive flags and command text.
+    - PDF header spacing, run-meta badge geometry, output-panel border drawing, and empty-line handling were tightened so PDF follows the permalink/saved-HTML baseline more closely without pretending jsPDF can be pixel-identical to the browser.
+    - fully empty raw lines with no prefix are now skipped in PDF so the exported transcript does not gain blank rows that are absent in permalink/share pages and saved HTML.
+  - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; current Vitest total is now 694 and the combined documented suite total is 1,747.
+
 #### Mobile Sheets, Options Surface, and Navigation Cleanup
 
 - **Mobile sheets now share one structural contract instead of per-ID scaffolding** — the options, FAQ, workflows, shortcuts, and confirm surfaces now rely on shared `.mobile-sheet-overlay` / `.mobile-sheet-surface` structure plus mobile-specific overrides instead of each carrying its own overlay/surface boilerplate.

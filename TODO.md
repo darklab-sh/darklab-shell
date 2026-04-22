@@ -50,8 +50,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 - **CI/runtime source-of-truth drift** — production, CI, and version-checking logic currently need to stay aligned across multiple files. Consolidate Python base-image/runtime declarations so the production image, CI jobs, and version-check script cannot silently diverge.
 
-- **Duplicated page bootstrap in Jinja templates** — `index.html`, `permalink_base.html`, and `diag.html` now share enough `<head>` and theme/bootstrap wiring that the duplication is real maintenance overhead. Factor the common bootstrap into a lightweight shared base before a fourth page type makes the drift worse.
-
 - **Cross-module UI event flow is still coupled through wrappers and observers** — `shell_chrome.js` and `mobile_chrome.js` currently mirror shared UI state by wrapping globals (`renderHistory`, `renderRailWorkflows`, `closeWorkflows`, `refreshHistoryPanel`, `setTabStatus`), and by using three `MutationObserver`s in `mobile_chrome.js` (`:107` on the status pill `class` attr, `:113` on the run-timer `characterData`, `:699` on the body `class` list) to mirror state changes they have no other way to hear about. Replace those ad hoc integrations with a small UI event bus or equivalent explicit publish/subscribe layer so cross-module synchronization does not depend on monkey-patching exported functions.
 
 - **Desktop rail still proxies through legacy hidden header buttons** — the visible desktop nav now lives in the left rail, but `shell_chrome.js` still routes rail clicks through the old header button IDs (`hist-btn`, `options-btn`, `theme-btn`, `faq-btn`) so the original controller wiring continues to work. Mobile does not use that path; it dispatches its own menu actions directly. The result is an unnecessary desktop-only indirection layer and leftover hidden/header DOM that is no longer the real UI.
@@ -73,58 +71,110 @@ This file tracks open work items, known issues, and product ideas for darklab sh
       - Update unit tests that currently click the hidden header buttons as a proxy for desktop desktop-nav behavior.
       - Prefer exercising the visible rail on desktop and the visible menu sheet on mobile, while keeping direct function-level tests only where the behavior itself is under test.
 
-- **PDF and HTML export inconsistencies**
-  - The PDF exporter is closer to the HTML exporter than it used to be, but the two paths still do not share enough rendering logic. Some differences are expected because jsPDF cannot reproduce browser layout perfectly, but there is still avoidable drift in wrapping, spacing, and metadata rendering that comes from the PDF helper taking its own shortcuts instead of consuming the same rendering contract as HTML.
-  - Current drift areas:
-    - ANSI and prompt-echo lines in PDF do not wrap like HTML output, so long colored output can diverge or run past the expected width.
-    - Wrapped PDF lines do not currently advance vertical layout as carefully as the HTML path, which risks overlap and late page breaks.
-    - The run-meta row and header spacing are rebuilt separately in `export_pdf.js` instead of reusing more of the HTML export semantics, so small visual drifts are easy to introduce.
-    - Theme/color sourcing in the PDF helper is simpler than the HTML helper and should be brought onto the same precedence model.
-    - The current tests prove the PDF helper does not throw and that basic branches render, but they do not yet pin enough parity-level behavior against the HTML export model.
-  - Improvement plan:
-    - **Phase 1: define the parity contract**
-      - Write down which parts must match across HTML and PDF:
-        - line ordering
-        - prefix gutter behavior
-        - prompt-echo styling semantics
-        - run-meta content and ordering
-        - theme token mapping
-        - wrapped-line visibility and pagination behavior
-      - Explicitly note which differences are acceptable because of jsPDF limitations:
-        - exact font family / kerning parity
-        - exact CSS flexbox layout
-        - exact text-shadow / glow treatment
-    - **Phase 2: share more data-preparation logic**
-      - Introduce a shared export-preparation layer that produces:
+- **Render/export de-duplication across main UI, permalink, snapshot, HTML, and PDF**
+  - The current system looks like many separate surfaces, but the real maintenance problem is smaller and more structural:
+    - `/history/<run_id>` and `/share/<id>` already share the same live-page frontend (`permalink_base.html` + `permalink.html` + `permalink.js`)
+    - main-shell export buttons share `ExportHtmlUtils` / `ExportPdfUtils`
+    - drift still happens because the shared pieces stop one layer too late: page bootstrap, header modeling, transcript normalization, and export preparation are still rebuilt in parallel in Python templates, page JS, and export helpers
+  - Merge the old Jinja bootstrap debt into this plan instead of tracking it separately. The duplicated permalink/bootstrap wiring in `index.html`, `permalink_base.html`, and `diag.html` is part of the same underlying problem: too many surfaces still assemble their own page/export model instead of consuming one normalized one.
+  - Current drift / duplication areas:
+    - `permalink.html` still hand-renders the live permalink header while `export_html.js` separately builds the saved-HTML header
+    - permalink/share pages bootstrap many parallel template variables into `window.PermData` instead of one normalized page/export model
+    - main-tab export uses tab `rawLines` directly, while permalink/share pages first pass through `_normalize_permalink_lines(...)`
+    - prompt-echo treatment is split across:
+      - `_prompt_echo_text(...)` in Python
+      - `renderExportPromptEcho(...)` in HTML export
+      - `buildPdfLineSegments(...)` in PDF export
+    - run-meta content is built separately on the server for permalink/share pages and in the client for main-tab export
+    - theme/font/bootstrap plumbing is still split between:
+      - Jinja page bootstrap
+      - live permalink JS
+      - HTML export helpers
+      - PDF export helpers
+  - Concrete visual findings to preserve while refactoring:
+    - HTML export spacing is the preferred baseline for the header meta line
+    - command text in the header should remain case-true, not forced uppercase
+    - PDF should remain a best-effort renderer against the shared browser baseline, not a separately styled surface
+    - permalink page and saved HTML should be browser-exact parity targets wherever practical
+  - Implementation plan:
+    - **Phase 1: define the real surface map and parity contract**
+      - Document the true renderer families so future work targets the real seams:
+        - live permalink/share page renderer
+        - main-shell saved HTML export
+        - permalink/share saved HTML export
+        - main-shell PDF export
+        - permalink/share PDF export
+      - Write down which concerns must be shared vs allowed to differ:
+        - shared: header model, line normalization rules, prompt-echo semantics, run-meta ordering, theme-token precedence
+        - allowed to differ: route-specific data acquisition, snapshot redaction flow, jsPDF layout limits
+      - Keep this split explicit:
+        - browser-exact parity targets: live permalink/share page ↔ saved HTML
+        - best-effort parity target: PDF ↔ shared browser baseline
+    - **Phase 2: unify permalink/share/bootstrap data modeling**
+      - Replace the current scatter of template variables in `permalink.html` with one normalized bootstrap model for:
+        - header
+        - transcript lines
+        - export context
+        - page actions / capability flags
+      - Fold the old “Duplicated page bootstrap in Jinja templates” work into this step:
+        - factor shared `<head>` / theme / bootstrap wiring out of `index.html`, `permalink_base.html`, and `diag.html`
+        - keep the shared base lightweight, but remove repeated theme/bootstrap assembly before a fourth page type adds more drift
+      - Make `/history` and `/share` continue to use the same frontend, but with a cleaner server-provided model instead of parallel injected fields
+    - **Phase 3: introduce one canonical export/transcript preparation layer**
+      - Define one normalized transcript/export-preparation model that can be consumed by:
+        - live permalink/share rendering
+        - main-shell saved HTML
+        - permalink/share saved HTML
+        - main-shell PDF
+        - permalink/share PDF
+      - The shared preparation layer should own:
+        - prompt-echo insertion / splitting rules
+        - spacer / blank-line behavior
         - prefix strings and prefix width
-        - line classification
-        - prompt-echo token splits
-        - run-meta token list
-      - Keep HTML and PDF as separate renderers, but make them consume the same prepared export model instead of rebuilding pieces independently.
-    - **Phase 3: fix PDF wrapping and pagination**
-      - Make ANSI-rendered and prompt-echo lines wrap within the same usable content width as the HTML export.
-      - Track wrapped line height correctly so `y` advancement and page-break checks reflect the actual rendered line count.
-      - Verify prefix-gutter width is applied consistently for wrapped lines so wrapped content aligns under its own content column rather than under the prefix.
-    - **Phase 4: reduce header and badge drift**
-      - Move run-meta badge/item preparation behind one shared builder so HTML and PDF use the same ordering and text casing.
-      - Bring the PDF helper onto the same theme-value precedence model as `ExportHtmlUtils` instead of relying only on computed CSS values from `documentElement`.
-      - Revisit header spacing constants after the shared metadata model is in place so visual tuning is applied once, not independently.
-    - **Phase 5: strengthen parity tests**
-      - Expand `export_pdf.test.js` so it verifies:
-        - wrapped output increments vertical layout correctly
-        - prompt-echo lines preserve the command-prefix split
-        - run-meta ordering matches the HTML helper
-        - prefix gutter width is stable across mixed prefix lengths
-        - theme-color resolution follows the same precedence contract as the HTML helper
-      - Add at least one higher-level integration test that compares HTML and PDF preparation output from the same input lines rather than testing each renderer in isolation.
-    - **Phase 6: final visual review**
-      - Run a manual visual comparison across:
-        - plain output
-        - ANSI-heavy output
-        - prompt-echo output
-        - prefixed output (timestamps / line numbers)
-        - long wrapped output
-      - Compare desktop-tab save, permalink save, and mobile save surfaces so all call sites are verified against the same rendering expectations.
+        - line-class normalization
+        - run-meta token ordering
+        - header token/content model
+      - Keep renderers separate, but stop letting each one reinterpret raw line data independently
+    - **Phase 4: unify browser-rendered header structure**
+      - Eliminate the duplicated live-permalink-vs-saved-HTML header assembly by moving both onto the same semantic header model
+      - Make permalink/share live pages and saved HTML render the same:
+        - app name treatment
+        - command/timestamp line
+        - run-meta ordering
+        - spacing/grouping
+      - Use saved HTML spacing as the browser baseline unless a stronger reason emerges during implementation
+    - **Phase 5: keep PDF as a separate renderer but a shared-model consumer**
+      - PDF should continue to render independently, but only from the same prepared transcript/header model used by browser surfaces
+      - Keep PDF-specific responsibilities isolated to:
+        - font embedding/fallback
+        - line wrapping/pagination
+        - geometric drawing of borders/badges
+      - Prevent PDF from rebuilding header semantics, prompt-echo semantics, or line-normalization rules on its own
+    - **Phase 6: align run-meta and export metadata ownership**
+      - Decide which metadata belongs to the prepared export model vs route-only/server-only concerns
+      - Move shared run-meta preparation behind one builder so:
+        - permalink/share live pages
+        - main-shell HTML/PDF export
+        - permalink/share HTML/PDF export
+        all use the same ordering and casing rules
+      - Leave route-specific differences explicit:
+        - run permalink can show duration/full-output context
+        - snapshot permalink can omit unavailable metadata without inventing placeholders
+    - **Phase 7: strengthen anti-drift tests**
+      - Add tests that compare the same source input across:
+        - live permalink/share header model
+        - saved HTML header model
+        - PDF-preparation model
+      - Add tests specifically for normalization drift:
+        - prompt-echo handling
+        - empty/spacer line handling
+        - prefix gutter alignment
+        - run-meta ordering
+      - Keep PDF tests focused on “consumes the shared model correctly” rather than re-testing browser layout details it cannot match exactly
+    - **Phase 8: final cleanup and deletion**
+      - Remove dead bootstrap duplication left behind in Jinja templates once the shared base/model is live
+      - Remove redundant header-building code that only existed to bridge old permalink/export paths
+      - Remove any now-obsolete one-off normalization helpers once all live/export surfaces consume the canonical preparation layer
 
 ## Ideas
 

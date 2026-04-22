@@ -481,14 +481,15 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 - **save ▾** is a dropdown with three export formats:
   - **txt** — plain-text file with a timestamped filename.
   - **html** — themed HTML file with ANSI colors preserved, renders correctly in a browser without the shell; fonts and theme colors are inlined so the file is fully self-contained.
-  - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output.
+  - **pdf** — themed PDF rendered entirely in the browser via jsPDF, no server round-trip; includes the app header, command, exit-status badge, timestamp, and full ANSI output while following the same header/meta ordering and transcript-preparation model as the browser-rendered permalink and saved-HTML surfaces.
 - The same `save ▾` dropdown is available on the desktop HUD bar, the permalink page header, and the mobile menu, so the export experience is consistent across all surfaces.
+- The browser-rendered parity target is permalink/share page ↔ saved HTML. PDF is intentionally treated as a best-effort renderer against that same browser baseline rather than a separately styled surface.
 
 **Limits:** local exports (txt, html, pdf) produce unredacted output — they show the true command output as it appeared in the terminal. Redaction is scoped exclusively to the permalink share flow.
 
 **Configuration:** none — export formats and filename shape are not user-tunable.
 
-**Related files:** `app/static/js/tabs.js` (per-tab save menu), `app/static/js/shell_chrome.js` (HUD save menu), `app/static/js/export_html.js` (shared HTML renderer), `app/static/js/export_pdf.js` (jsPDF renderer), `app/templates/permalink.html` (permalink save menu).
+**Related files:** `app/static/js/tabs.js` (per-tab save menu), `app/static/js/shell_chrome.js` (HUD save menu), `app/static/js/export_html.js` (shared browser export model), `app/static/js/export_pdf.js` (jsPDF renderer consuming the shared model), `app/static/js/permalink.js` (permalink/share save actions), `app/static/css/terminal_export.css` (shared browser export chrome).
 
 ---
 

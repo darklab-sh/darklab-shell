@@ -55,6 +55,13 @@
     return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
   }
 
+  function buildExportMetaLine({ label = '', createdText = '' }) {
+    const trimmedLabel = String(label || '').trim();
+    const trimmedCreated = String(createdText || '').trim();
+    if (trimmedLabel && trimmedCreated) return `${trimmedLabel} · ${trimmedCreated}`;
+    return trimmedLabel || trimmedCreated;
+  }
+
   function getThemeExportVars() {
     const registryCurrent = window.ThemeRegistry
       && window.ThemeRegistry.current
@@ -121,20 +128,62 @@
     return { linesHtml, prefixWidth };
   }
 
-  // ── Run-meta badge row ────────────────────────────────────────────────────
-  // runMeta: { exitCode, duration, lines, version } — all fields optional/null
-  function _buildRunMetaHtml(runMeta) {
-    if (!runMeta) return '';
-    const parts = [];
+  // ── Header / run-meta model ───────────────────────────────────────────────
+  // Shared by permalink save html, tab save html, and PDF prep so the browser
+  // surfaces and the PDF renderer all consume the same content ordering.
+  function buildExportRunMetaItems(runMeta) {
+    if (!runMeta) return [];
+    const items = [];
     const { exitCode, duration, lines, version } = runMeta;
     if (exitCode !== null && exitCode !== undefined) {
-      const cls = exitCode === 0 ? 'meta-badge-ok' : 'meta-badge-fail';
-      parts.push(`<span class="meta-badge ${cls}">exit ${exitCode}</span>`);
+      items.push({
+        kind: 'badge',
+        tone: exitCode === 0 ? 'ok' : 'fail',
+        text: `exit ${exitCode}`,
+      });
     }
-    if (duration) parts.push(`<span class="meta-item">${escapeExportHtml(String(duration))}</span>`);
-    if (lines)    parts.push(`<span class="meta-item">${escapeExportHtml(String(lines))}</span>`);
-    if (version)  parts.push(`<span class="meta-item">v${escapeExportHtml(String(version))}</span>`);
-    return parts.join('');
+    if (duration) items.push({ kind: 'item', text: String(duration) });
+    if (lines)    items.push({ kind: 'item', text: String(lines) });
+    if (version)  items.push({ kind: 'item', text: `v${version}` });
+    return items;
+  }
+
+  function buildExportHeaderModel({ appName, metaLine = '', runMeta = null }) {
+    return {
+      appName: String(appName || ''),
+      metaLine: metaLine ? String(metaLine) : '',
+      runMetaItems: buildExportRunMetaItems(runMeta),
+    };
+  }
+
+  function buildExportRunMetaHtml(runMetaOrItems) {
+    const items = Array.isArray(runMetaOrItems)
+      ? runMetaOrItems
+      : buildExportRunMetaItems(runMetaOrItems);
+    return items.map((item) => {
+      if (item.kind === 'badge') {
+        const cls = item.tone === 'ok' ? 'meta-badge-ok' : 'meta-badge-fail';
+        return `<span class="meta-badge ${cls}">${escapeExportHtml(item.text)}</span>`;
+      }
+      return `<span class="meta-item">${escapeExportHtml(item.text)}</span>`;
+    }).join('');
+  }
+
+  function buildTerminalExportHeaderHtml(headerModel) {
+    const titleHtml = `<h1 class="export-title">${escapeExportHtml(headerModel.appName)}</h1>`;
+    const metaHtml = headerModel.metaLine
+      ? `<div class="export-meta">${escapeExportHtml(headerModel.metaLine)}</div>`
+      : '';
+    const runMetaHtml = headerModel.runMetaItems.length
+      ? `<div class="export-run-meta">${buildExportRunMetaHtml(headerModel.runMetaItems)}</div>`
+      : '';
+    return `<header class="export-header">
+  <div class="export-header-copy">
+    ${titleHtml}
+    ${metaHtml}
+    ${runMetaHtml}
+  </div>
+</header>`;
   }
 
   // ── Styles ────────────────────────────────────────────────────────────────
@@ -184,7 +233,7 @@ ${themeDecls}
     exportCss = '',
   }) {
     const colorScheme = getThemeExportColorScheme();
-    const runMetaHtml = _buildRunMetaHtml(runMeta);
+    const headerModel = buildExportHeaderModel({ appName, metaLine, runMeta });
     const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth, exportCss);
     return `<!DOCTYPE html>
 <html lang="en">
@@ -197,13 +246,7 @@ ${styles}
 </style>
 </head>
 <body>
-<header class="export-header">
-  <div class="export-header-copy">
-    <div class="export-title">${escapeExportHtml(appName)}</div>
-    ${metaLine ? `<div class="export-meta">${escapeExportHtml(metaLine)}</div>` : ''}
-    ${runMetaHtml ? `<div class="export-run-meta">${runMetaHtml}</div>` : ''}
-  </div>
-</header>
+${buildTerminalExportHeaderHtml(headerModel)}
 <main class="export-output">
 ${linesHtml}
 </main>
@@ -252,11 +295,18 @@ ${linesHtml}
 
   window.ExportHtmlUtils = {
     exportTimestamp,
+    buildExportMetaLine,
     escapeExportHtml,
     renderExportPromptEcho,
     buildExportLinesHtml,
+    buildExportRunMetaItems,
+    buildExportHeaderModel,
+    buildExportRunMetaHtml,
+    buildTerminalExportHeaderHtml,
     buildTerminalExportHtml,
     buildTerminalExportStyles,
+    getThemeExportVars,
+    getThemeExportColorScheme,
     fetchVendorFontFacesCss,
     fetchTerminalExportCss,
   };

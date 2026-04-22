@@ -23,7 +23,7 @@ This document is the full reference for the shell theme system. It explains how 
 
 ## Overview
 
-The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, and exported HTML all read from the same resolved values rather than each maintaining a separate palette. Themes are selectable at runtime through a preview modal without requiring code changes or a container rebuild.
+The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, exported HTML, and PDF export all read from the same resolved semantic tokens rather than each maintaining a separate palette. Themes are selectable at runtime through a preview modal without requiring code changes or a container rebuild.
 
 ---
 
@@ -115,7 +115,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 5. Consume from CSS and export helpers
 
-`styles.css` uses the shared vars for the live shell, tabs, history drawer, FAQ, modals, mobile UI, welcome art, and toast surfaces. `app.js` applies the selected theme live by swapping the root CSS variables on `:root`. `export_html.js` uses the same vars when building downloadable HTML snapshots so the saved file matches the active theme instead of drifting over time.
+`styles.css` uses the shared vars for the live shell, tabs, history drawer, FAQ, modals, mobile UI, welcome art, and toast surfaces. `app.js` applies the selected theme live by swapping the root CSS variables on `:root`. `export_html.js` uses the same vars when building downloadable HTML snapshots so the saved file matches the active theme instead of drifting over time, and `export_pdf.js` resolves the same semantic tokens into RGB values for jsPDF so PDF export follows the active theme as closely as the PDF renderer allows.
 
 ---
 
@@ -133,7 +133,8 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 | `app/templates/theme_vars_script.html` | Exposes resolved theme values and the theme registry to browser JS |
 | `app/static/css/styles.css` | Consumes the theme vars for live UI styling |
 | `app/static/js/app.js` | Applies the selected theme on the fly from the theme selector modal preview cards |
-| `app/static/js/export_html.js` | Builds downloadable HTML snapshots from the resolved vars |
+| `app/static/js/export_html.js` | Builds downloadable HTML snapshots and the shared browser export header model from the resolved vars |
+| `app/static/js/export_pdf.js` | Resolves the active theme tokens for jsPDF and renders PDF export against the same semantic palette |
 
 ---
 

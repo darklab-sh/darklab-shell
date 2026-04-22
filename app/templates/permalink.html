@@ -1,7 +1,7 @@
 {% extends "permalink_base.html" %}
 
 {% block header_meta %}
-  <div class="export-meta">{{ label }} &nbsp;·&nbsp; {{ created_fmt }}</div>
+  <div class="export-meta">{{ label }} · {{ created_fmt }}</div>
   {% if meta %}
   <div class="export-run-meta">
     {% if meta.exit_code is not none %}<span class="meta-badge {% if meta.exit_code == 0 %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">exit {{ meta.exit_code }}</span>{% endif %}
@@ -48,6 +48,7 @@
     appName:             {{ app_name_json | safe }},
     label:               {{ label_json | safe }},
     created:             {{ created_json | safe }},
+    createdDisplay:      {{ created_fmt | tojson }},
     fontFacesCss:        {{ font_faces_css | tojson }},
     permalinkMeta:       {{ meta_json | safe }},
   };

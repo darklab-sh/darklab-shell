@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 856
-- `vitest`: 685
+- `vitest`: 694
 - `playwright`: 197
-- total: 1,738
+- total: 1,747
 
 This document is organized in two parts:
 
@@ -1445,7 +1445,9 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `save-html calls ExportHtmlUtils chain` | Verifies that save-html calls ExportHtmlUtils chain. |
 | `save-html passes runMeta with exit_code, duration, lines, version` | Verifies that save-html passes runMeta with exit_code, duration, lines, version. |
 | `save-html passes null runMeta when permalinkMeta is null` | Verifies that save-html passes null runMeta when permalinkMeta is null. |
+| `save-html uses the permalink page display timestamp for the shared meta line` | Verifies that save-html uses the permalink page display timestamp for the shared meta line. |
 | `save-pdf calls ExportPdfUtils.buildTerminalExportPdf and doc.save` | Verifies that save-pdf calls ExportPdfUtils.buildTerminalExportPdf and doc.save. |
+| `save-pdf uses the permalink page display timestamp for the shared meta line` | Verifies that save-pdf uses the permalink page display timestamp for the shared meta line. |
 | `save-pdf download filename uses appName and exportTimestamp` | Verifies that save-pdf download filename uses appName and exportTimestamp. |
 | `does nothing for unknown data-action values` | Verifies that does nothing for unknown data-action values. |
 | `clicking perm-save-btn toggles open class` | Verifies that clicking perm-save-btn toggles open class. |
@@ -1621,6 +1623,8 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `refocuses the terminal input after copy, save, and html export actions` | Verifies that refocuses the terminal input after copy, save, and html export actions. |
 | `builds exported HTML styles from the injected theme vars object` | Verifies that builds exported HTML styles from the injected theme vars object. |
 | `builds exported HTML with color-scheme metadata and themed shell surfaces` | Verifies that builds exported HTML with color-scheme metadata and themed shell surfaces. |
+| `builds a shared export header model with canonical run-meta ordering` | Verifies that the shared export header model preserves the canonical run-meta ordering used across permalink, HTML, and PDF surfaces. |
+| `renders export header html with the same title/meta/run-meta structure as permalink pages` | Verifies that the shared export header HTML matches the permalink page title/meta/run-meta structure. |
 | `saveTab shows a toast when there is only welcome output` | Verifies that saveTab shows a toast when there is only welcome output. |
 | `saveTab does not apply redaction rules to exported text` | Verifies that saveTab does not apply redaction rules to exported text. |
 | `exportTabHtml does not apply redaction rules to rendered HTML output` | Verifies that exportTabHtml does not apply redaction rules to rendered HTML output. |
@@ -1896,6 +1900,11 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing` | Verifies all supported line class variants render without errors using a canvas-capable document mock. |
 | `renders runMeta badges without throwing` | Verifies the exit code, duration, line count, and version badge row renders when `runMeta` is provided. |
 | `renders prefix gutter when getPrefix returns non-empty strings` | Verifies the line-number/timestamp prefix gutter renders correctly when `getPrefix` returns non-empty strings. |
+| `uses ExportHtmlUtils theme vars before falling back to computed CSS` | Verifies theme-color resolution prefers the shared HTML export vars before falling back to computed CSS values. |
+| `uses the shared header model ordering for app name, meta line, and run meta` | Verifies PDF header text consumes the shared export header model ordering for app name, meta line, and run-meta items. |
+| `embeds JetBrains Mono into the PDF when font VFS hooks are available` | Verifies PDF export embeds the committed JetBrains Mono fonts when jsPDF font VFS hooks are available. |
+| `uses the dim green border color for success badges` | Verifies the success badge border uses the dim green export token rather than the brighter text green. |
+| `skips fully empty raw lines without prefixes so PDF output matches browser rendering` | Verifies PDF export skips raw lines that have neither a prefix nor renderable content so blank rows do not drift from browser rendering. |
 
 ### Playwright
 

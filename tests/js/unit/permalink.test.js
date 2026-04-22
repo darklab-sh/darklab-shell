@@ -33,6 +33,7 @@ function makeExportHtmlUtilsMock() {
       (t) => '<span class="prompt-prefix">$</span>' + (t || ''),
     ),
     exportTimestamp: vi.fn(() => '2025-01-15T10-30-00'),
+    buildExportMetaLine: vi.fn(({ label, createdText }) => `${label} · ${createdText}`),
     buildExportLinesHtml: vi.fn(() => ({ linesHtml: '<span>line</span>', prefixWidth: 0 })),
     buildTerminalExportHtml: vi.fn(() => '<html>export</html>'),
     fetchTerminalExportCss: vi.fn(() => Promise.resolve('.export{}')),
@@ -42,7 +43,7 @@ function makeExportHtmlUtilsMock() {
 function makeExportPdfUtilsMock() {
   const doc = { save: vi.fn() }
   return {
-    buildTerminalExportPdf: vi.fn(() => doc),
+    buildTerminalExportPdf: vi.fn(() => Promise.resolve(doc)),
     _doc: doc,
   }
 }
@@ -64,6 +65,7 @@ function loadPermalink({
   appName = 'testapp',
   label = 'test label',
   created = '2025-01-15T10:30:00Z',
+  createdDisplay = '2025-01-15 10:30:00 UTC',
   fontFacesCss = '',
   permalinkMeta = null,
   cookie = '',
@@ -90,6 +92,7 @@ function loadPermalink({
     appName,
     label,
     created,
+    createdDisplay,
     fontFacesCss,
     permalinkMeta,
   }
@@ -473,25 +476,73 @@ describe('data-action dispatch', () => {
     expect(call.runMeta).toBeNull()
   })
 
-  it('save-pdf calls ExportPdfUtils.buildTerminalExportPdf and doc.save', () => {
+  it('save-html uses the permalink page display timestamp for the shared meta line', async () => {
+    const lines = [{ text: 'out', cls: '' }]
+    const { el, mocks } = loadPermalink({
+      lines,
+      label: 'ping -i 0.5 -c 20 darklab.sh',
+      created: '2025-01-15T10:30:00Z',
+      createdDisplay: '2026-04-22 02:39:24 UTC',
+    })
+    mocks.ExportHtmlUtils.buildExportMetaLine = vi.fn(({ label, createdText }) => `${label} · ${createdText}`)
+    const btn = document.createElement('button')
+    btn.dataset.action = 'save-html'
+    el.container.appendChild(btn)
+    btn.click()
+    await new Promise((r) => setTimeout(r, 0))
+
+    expect(mocks.ExportHtmlUtils.buildExportMetaLine).toHaveBeenCalledWith({
+      label: 'ping -i 0.5 -c 20 darklab.sh',
+      createdText: '2026-04-22 02:39:24 UTC',
+    })
+    expect(mocks.ExportHtmlUtils.buildTerminalExportHtml.mock.calls[0][0].metaLine)
+      .toBe('ping -i 0.5 -c 20 darklab.sh · 2026-04-22 02:39:24 UTC')
+  })
+
+  it('save-pdf calls ExportPdfUtils.buildTerminalExportPdf and doc.save', async () => {
     const lines = [{ text: 'out', cls: '' }]
     const { el, mocks } = loadPermalink({ lines })
     const btn = document.createElement('button')
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
+    await Promise.resolve()
     expect(mocks.ExportPdfUtils.buildTerminalExportPdf).toHaveBeenCalledOnce()
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledOnce()
   })
 
-  it('save-pdf download filename uses appName and exportTimestamp', () => {
+  it('save-pdf uses the permalink page display timestamp for the shared meta line', async () => {
+    const lines = [{ text: 'out', cls: '' }]
+    const { el, mocks } = loadPermalink({
+      lines,
+      label: 'ping -i 0.5 -c 20 darklab.sh',
+      created: '2025-01-15T10:30:00Z',
+      createdDisplay: '2026-04-22 02:39:24 UTC',
+    })
+    mocks.ExportHtmlUtils.buildExportMetaLine = vi.fn(({ label, createdText }) => `${label} · ${createdText}`)
+    const btn = document.createElement('button')
+    btn.dataset.action = 'save-pdf'
+    el.container.appendChild(btn)
+    btn.click()
+    await Promise.resolve()
+
+    expect(mocks.ExportHtmlUtils.buildExportMetaLine).toHaveBeenCalledWith({
+      label: 'ping -i 0.5 -c 20 darklab.sh',
+      createdText: '2026-04-22 02:39:24 UTC',
+    })
+    expect(mocks.ExportPdfUtils.buildTerminalExportPdf.mock.calls[0][0].metaLine)
+      .toBe('ping -i 0.5 -c 20 darklab.sh · 2026-04-22 02:39:24 UTC')
+  })
+
+  it('save-pdf download filename uses appName and exportTimestamp', async () => {
     const lines = [{ text: 'out', cls: '' }]
     const { el, mocks } = loadPermalink({ lines, appName: 'darklab' })
     const btn = document.createElement('button')
     btn.dataset.action = 'save-pdf'
     el.container.appendChild(btn)
     btn.click()
+    await Promise.resolve()
     const doc = mocks.ExportPdfUtils._doc
     expect(doc.save).toHaveBeenCalledWith('darklab-2025-01-15T10-30-00.pdf')
   })

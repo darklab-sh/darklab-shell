@@ -11,7 +11,7 @@ const REPO_ROOT = resolve(__dirname, '../../../')
 // requirements; omit it to use the real jsdom document (canvas unsupported).
 function loadExportPdfUtils(overrides = {}) {
   const src = readFileSync(resolve(REPO_ROOT, 'app/static/js/export_pdf.js'), 'utf8')
-  const w = {}
+  const w = { ...(overrides.windowProps ?? {}) }
   const globals = {
     window: w,
     document: overrides.document ?? document,
@@ -29,14 +29,20 @@ function makeDocumentMock() {
   return {
     createElement(tag) {
       if (tag === 'canvas') {
+        let fillStyle = 'rgb(0, 0, 0)'
         return {
           width: 1,
           height: 1,
           getContext() {
             return {
-              fillStyle: '',
+              get fillStyle() { return fillStyle },
+              set fillStyle(value) { fillStyle = value },
               fillRect() {},
-              getImageData() { return { data: [100, 150, 200, 255] } },
+              getImageData() {
+                const match = String(fillStyle).match(/(\d+)\D+(\d+)\D+(\d+)/)
+                if (!match) return { data: [100, 150, 200, 255] }
+                return { data: [Number(match[1]), Number(match[2]), Number(match[3]), 255] }
+              },
             }
           },
         }
@@ -87,12 +93,24 @@ function makeMockJsPDF() {
     constructor() {
       this.internal = { pageSize: { getWidth: () => 595, getHeight: () => 842 } }
       this.savedAs = null
+      this.textCalls = []
+      this.setFontCalls = []
+      this.addFileToVFSCalls = []
+      this.addFontCalls = []
+      this.drawColorCalls = []
     }
-    setFillColor() {} rect() {} setFont() {} setFontSize() {} setTextColor() {}
-    setCharSpace() {} text() {} setDrawColor() {} setLineWidth() {} line() {}
+    setFillColor() {} rect() {}
+    setFont(family, style) { this.setFontCalls.push({ family, style }) }
+    setFontSize() {} setTextColor() {}
+    setCharSpace() {}
+    setDrawColor(...args) { this.drawColorCalls.push(args) }
+    setLineWidth() {} line() {}
     getTextWidth() { return 50 }
     addPage() {}
+    addFileToVFS(filename) { this.addFileToVFSCalls.push(filename) }
+    addFont(filename, family, style) { this.addFontCalls.push({ filename, family, style }) }
     splitTextToSize(t) { return [t] }
+    text(text, x, y) { this.textCalls.push({ text, x, y }) }
     save(name) { this.savedAs = name }
   }
 }
@@ -119,10 +137,10 @@ describe('buildTerminalExportPdf', () => {
     })
   }
 
-  it('returns a jsPDF doc instance', () => {
+  it('returns a jsPDF doc instance', async () => {
     const { buildTerminalExportPdf } = buildUtils()
     const MockJsPDF = makeMockJsPDF()
-    const doc = buildTerminalExportPdf({
+    const doc = await buildTerminalExportPdf({
       jsPDF: MockJsPDF,
       appName: 'darklab shell',
       metaLine: 'my run  ·  01/01/2025',
@@ -134,10 +152,10 @@ describe('buildTerminalExportPdf', () => {
     expect(doc).toBeInstanceOf(MockJsPDF)
   })
 
-  it('returns a doc when rawLines is empty', () => {
+  it('returns a doc when rawLines is empty', async () => {
     const { buildTerminalExportPdf } = buildUtils()
     const MockJsPDF = makeMockJsPDF()
-    const doc = buildTerminalExportPdf({
+    const doc = await buildTerminalExportPdf({
       jsPDF: MockJsPDF,
       appName: 'darklab shell',
       metaLine: '',
@@ -149,7 +167,7 @@ describe('buildTerminalExportPdf', () => {
     expect(doc).toBeInstanceOf(MockJsPDF)
   })
 
-  it('renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing', () => {
+  it('renders exit-ok / exit-fail / denied / notice / prompt-echo line classes without throwing', async () => {
     const { buildTerminalExportPdf } = buildUtils()
     const MockJsPDF = makeMockJsPDF()
     const rawLines = [
@@ -160,7 +178,7 @@ describe('buildTerminalExportPdf', () => {
       { text: '$ ls -la', cls: 'prompt-echo' },
       { text: 'plain',   cls: '' },
     ]
-    expect(() => buildTerminalExportPdf({
+    await expect(buildTerminalExportPdf({
       jsPDF: MockJsPDF,
       appName: 'test',
       metaLine: 'run  ·  now',
@@ -168,13 +186,13 @@ describe('buildTerminalExportPdf', () => {
       rawLines,
       getPrefix: () => '',
       ansiToHtml: (t) => `<span style="color:rgb(1,2,3)">${t}</span>`,
-    })).not.toThrow()
+    })).resolves.toBeInstanceOf(MockJsPDF)
   })
 
-  it('renders runMeta badges without throwing', () => {
+  it('renders runMeta badges without throwing', async () => {
     const { buildTerminalExportPdf } = buildUtils()
     const MockJsPDF = makeMockJsPDF()
-    expect(() => buildTerminalExportPdf({
+    await expect(buildTerminalExportPdf({
       jsPDF: MockJsPDF,
       appName: 'test',
       metaLine: 'run  ·  now',
@@ -182,13 +200,13 @@ describe('buildTerminalExportPdf', () => {
       rawLines: [{ text: 'hello', cls: '' }],
       getPrefix: () => '',
       ansiToHtml: (t) => t,
-    })).not.toThrow()
+    })).resolves.toBeInstanceOf(MockJsPDF)
   })
 
-  it('renders prefix gutter when getPrefix returns non-empty strings', () => {
+  it('renders prefix gutter when getPrefix returns non-empty strings', async () => {
     const { buildTerminalExportPdf } = buildUtils()
     const MockJsPDF = makeMockJsPDF()
-    expect(() => buildTerminalExportPdf({
+    await expect(buildTerminalExportPdf({
       jsPDF: MockJsPDF,
       appName: 'test',
       metaLine: '',
@@ -199,6 +217,176 @@ describe('buildTerminalExportPdf', () => {
       ],
       getPrefix: (_, i) => String(i + 1),
       ansiToHtml: (t) => t,
-    })).not.toThrow()
+    })).resolves.toBeInstanceOf(MockJsPDF)
+  })
+
+  it('uses ExportHtmlUtils theme vars before falling back to computed CSS', () => {
+    const { themeColors } = loadExportPdfUtils({
+      document: makeDocumentMock(),
+      getComputedStyle: () => ({ getPropertyValue: () => 'rgb(1, 2, 3)' }),
+      Node: { ELEMENT_NODE: 1 },
+      windowProps: {
+        ExportHtmlUtils: {
+          getThemeExportVars: () => ({
+            '--bg': 'rgb(10, 11, 12)',
+            '--surface': 'rgb(20, 21, 22)',
+            '--border': 'rgb(30, 31, 32)',
+            '--text': 'rgb(40, 41, 42)',
+            '--muted': 'rgb(50, 51, 52)',
+            '--green': 'rgb(60, 61, 62)',
+            '--red': 'rgb(70, 71, 72)',
+            '--amber': 'rgb(80, 81, 82)',
+            '--blue': 'rgb(90, 91, 92)',
+          }),
+        },
+      },
+    })
+
+    const colors = themeColors()
+
+    expect(colors.bg).toEqual([10, 11, 12])
+    expect(colors.text).toEqual([40, 41, 42])
+    expect(colors.greenDim).toEqual([1, 2, 3])
+  })
+
+  it('uses the shared header model ordering for app name, meta line, and run meta', async () => {
+    const { buildTerminalExportPdf } = loadExportPdfUtils({
+      document: makeDocumentMock(),
+      getComputedStyle: makeMockGetComputedStyle(),
+      Node: { ELEMENT_NODE: 1 },
+      windowProps: {
+        ExportHtmlUtils: {
+          getThemeExportVars: () => ({}),
+          buildExportHeaderModel: () => ({
+            appName: 'shared app',
+            metaLine: 'shared meta',
+            runMetaItems: [
+              { kind: 'badge', tone: 'fail', text: 'exit 9' },
+              { kind: 'item', text: '5 lines' },
+              { kind: 'item', text: 'v1.5' },
+            ],
+          }),
+        },
+      },
+    })
+    const MockJsPDF = makeMockJsPDF()
+    const doc = await buildTerminalExportPdf({
+      jsPDF: MockJsPDF,
+      appName: 'ignored',
+      metaLine: 'ignored',
+      runMeta: { exitCode: 0, lines: '1 line', version: '1.0' },
+      rawLines: [{ text: 'hello', cls: '' }],
+      getPrefix: () => '',
+      ansiToHtml: (t) => t,
+    })
+
+    expect(doc.textCalls.map((call) => call.text)).toContain('shared app')
+    expect(doc.textCalls.map((call) => call.text)).toContain('shared meta')
+    expect(doc.textCalls.map((call) => call.text)).toContain('exit 9')
+    expect(doc.textCalls.map((call) => call.text)).toContain('5 LINES')
+    expect(doc.textCalls.map((call) => call.text)).toContain('V1.5')
+  })
+
+  it('embeds JetBrains Mono into the PDF when font VFS hooks are available', async () => {
+    const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      arrayBuffer: () => Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+    })
+
+    try {
+      const { buildTerminalExportPdf } = buildUtils()
+      const MockJsPDF = makeMockJsPDF()
+      const doc = await buildTerminalExportPdf({
+        jsPDF: MockJsPDF,
+        appName: 'darklab shell',
+        metaLine: 'scan · now',
+        runMeta: null,
+        rawLines: [{ text: 'hello', cls: '' }],
+        getPrefix: () => '',
+        ansiToHtml: (t) => t,
+      })
+
+      expect(doc.addFileToVFSCalls).toContain('JetBrainsMono-400.ttf')
+      expect(doc.addFileToVFSCalls).toContain('JetBrainsMono-700.ttf')
+      expect(doc.addFontCalls).toContainEqual({
+        filename: 'JetBrainsMono-400.ttf',
+        family: 'JetBrains Mono',
+        style: 'normal',
+      })
+      expect(doc.setFontCalls).toContainEqual({ family: 'JetBrains Mono', style: 'normal' })
+    } finally {
+      fetchMock.mockRestore()
+    }
+  })
+
+  it('uses the dim green border color for success badges', async () => {
+    const { buildTerminalExportPdf } = loadExportPdfUtils({
+      document: makeDocumentMock(),
+      getComputedStyle: () => ({ getPropertyValue: () => 'rgb(1, 2, 3)' }),
+      Node: { ELEMENT_NODE: 1 },
+      windowProps: {
+        ExportHtmlUtils: {
+          getThemeExportVars: () => ({
+            '--bg': 'rgb(10, 10, 10)',
+            '--surface': 'rgb(20, 20, 20)',
+            '--border': 'rgb(30, 30, 30)',
+            '--text': 'rgb(40, 40, 40)',
+            '--muted': 'rgb(50, 50, 50)',
+            '--green': 'rgb(80, 80, 80)',
+            '--green-dim': 'rgb(40, 40, 40)',
+            '--red': 'rgb(70, 70, 70)',
+            '--amber': 'rgb(80, 80, 80)',
+            '--blue': 'rgb(90, 90, 90)',
+          }),
+          buildExportHeaderModel: () => ({
+            appName: 'darklab shell',
+            metaLine: 'scan · now',
+            runMetaItems: [
+              { kind: 'badge', tone: 'ok', text: 'exit 0' },
+              { kind: 'item', text: '5 lines' },
+            ],
+          }),
+        },
+      },
+    })
+    const MockJsPDF = makeMockJsPDF()
+    const doc = await buildTerminalExportPdf({
+      jsPDF: MockJsPDF,
+      appName: 'darklab shell',
+      metaLine: 'scan · now',
+      runMeta: { exitCode: 0, duration: '1s', lines: '5 lines', version: '1.5' },
+      rawLines: [{ text: 'hello', cls: '' }],
+      getPrefix: () => '',
+      ansiToHtml: (t) => t,
+    })
+
+    expect(doc.drawColorCalls).toContainEqual([40, 40, 40])
+  })
+
+  it('skips fully empty raw lines without prefixes so PDF output matches browser rendering', async () => {
+    const { buildTerminalExportPdf } = buildUtils()
+    const MockJsPDF = makeMockJsPDF()
+    const doc = await buildTerminalExportPdf({
+      jsPDF: MockJsPDF,
+      appName: 'darklab shell',
+      metaLine: 'scan · now',
+      runMeta: null,
+      rawLines: [
+        { text: 'anon@darklab.sh:~$ ping -i 0.5 -c 20 darklab.sh', cls: 'prompt-echo' },
+        { text: '', cls: 'prompt-echo' },
+        { text: 'PING darklab.sh (104.21.4.35) 56(84) bytes of data.', cls: '' },
+        { text: '', cls: '' },
+        { text: '--- darklab.sh ping statistics ---', cls: '' },
+      ],
+      getPrefix: () => '',
+      ansiToHtml: (t) => t,
+    })
+
+    const renderedText = doc.textCalls.map((call) => call.text)
+    const renderedJoined = renderedText.join('')
+    expect(renderedJoined).toContain('anon@darklab.sh:~$ ping -i 0.5 -c 20 darklab.sh')
+    expect(renderedJoined).toContain('PING darklab.sh (104.21.4.35) 56(84) bytes of data.')
+    expect(renderedJoined).toContain('--- darklab.sh ping statistics ---')
+    expect(renderedText).not.toContain('')
   })
 })

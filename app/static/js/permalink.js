@@ -14,6 +14,7 @@
   var appName             = pd.appName             || '';
   var label               = pd.label               || '';
   var created             = pd.created             || '';
+  var createdDisplay      = pd.createdDisplay      || '';
   var fontFacesCss        = pd.fontFacesCss        || '';
   var permalinkMeta       = pd.permalinkMeta       || null;
 
@@ -157,14 +158,14 @@
       version:  permalinkMeta.version  || null,
     } : null;
 
-    var createdFmt = created;
-    try { createdFmt = new Date(created).toLocaleString(); } catch (_) {}
-
     ExportHtmlUtils.fetchTerminalExportCss().catch(function () { return ''; }).then(function (exportCss) {
       var html = ExportHtmlUtils.buildTerminalExportHtml({
         appName: appName,
         title: label,
-        metaLine: label + '  \u00b7  ' + createdFmt,
+        metaLine: ExportHtmlUtils.buildExportMetaLine({
+          label: label,
+          createdText: createdDisplay || created,
+        }),
         runMeta: runMeta,
         linesHtml: linesHtml,
         prefixWidth: prefixWidth,
@@ -179,11 +180,9 @@
     });
   }
 
-  function savePdf() {
+  async function savePdf() {
     if (!window.jspdf) { alert('PDF library not loaded'); return; }
     var jsPDF = window.jspdf.jsPDF;
-    var createdFmt = created;
-    try { createdFmt = new Date(created).toLocaleString(); } catch (_) {}
     var runMeta = permalinkMeta ? {
       exitCode: permalinkMeta.exit_code,
       duration: permalinkMeta.duration || null,
@@ -192,10 +191,13 @@
     } : null;
     var ansiUpPdf = new AnsiUp();
     ansiUpPdf.use_classes = false;
-    var doc = ExportPdfUtils.buildTerminalExportPdf({
+    var doc = await ExportPdfUtils.buildTerminalExportPdf({
       jsPDF: jsPDF,
       appName: appName,
-      metaLine: label + '  \u00b7  ' + createdFmt,
+      metaLine: ExportHtmlUtils.buildExportMetaLine({
+        label: label,
+        createdText: createdDisplay || created,
+      }),
       runMeta: runMeta,
       rawLines: lines,
       getPrefix: function (entry, i) { return formatPrefix(i + 1, entry); },
@@ -212,7 +214,7 @@
     if (action === 'copy-txt') copyTxt();
     else if (action === 'save-txt') saveTxt();
     else if (action === 'save-html') saveHtml();
-    else if (action === 'save-pdf') savePdf();
+    else if (action === 'save-pdf') void savePdf();
     else return;
     var saveWrap = document.getElementById('perm-save-wrap');
     if (saveWrap) saveWrap.classList.remove('open');

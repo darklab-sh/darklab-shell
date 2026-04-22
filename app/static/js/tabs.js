@@ -628,7 +628,7 @@ function createTab(label) {
         }
         if (action === 'save-txt')  saveTab(id);
         if (action === 'save-html') exportTabHtml(id);
-        if (action === 'save-pdf')  exportTabPdf(id);
+        if (action === 'save-pdf')  void exportTabPdf(id);
       },
     });
   });
@@ -1002,7 +1002,10 @@ async function exportTabHtml(id) {
     const html = ExportHtmlUtils.buildTerminalExportHtml({
       appName,
       title: t.label,
-      metaLine: `${t.label}  ·  ${exportedAt}`,
+      metaLine: ExportHtmlUtils.buildExportMetaLine({
+        label: t.label,
+        createdText: exportedAt,
+      }),
       runMeta,
       linesHtml,
       prefixWidth,
@@ -1027,7 +1030,7 @@ async function exportTabHtml(id) {
 // truth shared with permalink.html. This function handles only tab-specific
 // guards and data collection.
 
-function exportTabPdf(id) {
+async function exportTabPdf(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) {
     showToast('No output to export');
@@ -1049,10 +1052,13 @@ function exportTabPdf(id) {
       lines: `${t.rawLines.length} lines`,
       version: APP_CONFIG.version || null,
     };
-    const doc = ExportPdfUtils.buildTerminalExportPdf({
+    const doc = await ExportPdfUtils.buildTerminalExportPdf({
       jsPDF,
       appName,
-      metaLine: `${t.label}  ·  ${exportedAt}`,
+      metaLine: ExportHtmlUtils.buildExportMetaLine({
+        label: t.label,
+        createdText: exportedAt,
+      }),
       runMeta,
       rawLines: t.rawLines,
       getPrefix: (line, i) => _exportPrefix(line, i),

@@ -258,15 +258,19 @@ That choice keeps the codebase free of a larger ES-module migration while still 
 
 **Problem:** Save/export had rendering logic in multiple places. `exportTabHtml` in `tabs.js`, `saveHtml` in `permalink.html`, and the PDF surfaces in both files each built their own line rendering, CSS, and document structure. Every visual fix required edits in two or more places. The PDF surfaces were especially fragile because they were structurally identical but unlinked.
 
-**Solution:** `export_html.js` was introduced as the single source of truth for HTML export rendering, exposing `window.ExportHtmlUtils`. All HTML save paths — desktop tab, permalink, and (via shared prefix logic) PDF — consume these helpers. The PDF rendering layer still calls jsPDF directly for the output, but reads the same `rawLines` and calls the same `_exportPrefix()` helper so prefix state and line ordering are consistent.
+**Solution:** `export_html.js` was introduced as the single source of truth for the browser-rendered export model, exposing `window.ExportHtmlUtils`. It owns line preparation, meta-line formatting, header-model preparation, export-header HTML, inline export CSS, and embedded-font CSS for self-contained HTML downloads. Both the main-shell save path and the permalink/share save path now consume those helpers.
 
-**Current drift risk:** The PDF rendering functions (`exportTabPdf` in `tabs.js` and `savePdf` in `permalink.html`) remain structurally duplicated. Every visual change to the PDF layout requires parallel edits to both files. A future `ExportPdfUtils` module would resolve this, but was deferred — see the Technical Debt entry in `TODO.md`. For now, the HTML and PDF surfaces share data preparation but not rendering.
+**Follow-through:** PDF rendering was extracted into `export_pdf.js` as `window.ExportPdfUtils`, so the two PDF call sites no longer carry duplicated rendering logic. The current split is deliberate:
+- `ExportHtmlUtils` owns the shared browser export semantics and acts as the baseline for permalink/share live pages plus saved HTML
+- `ExportPdfUtils` remains a separate renderer because jsPDF cannot reproduce browser layout exactly, but it consumes the same prepared header/meta/line model so PDF visual drift is bounded to renderer limitations rather than duplicated business logic
+
+**Current drift risk:** the largest remaining export risk is not duplicated PDF code anymore; it is the seam between server-rendered permalink/share page bootstrap and the client-side export model. That broader render/export de-duplication work is tracked in `TODO.md`.
 
 ### Client-Side PDF Export (jsPDF)
 
 **Why jsPDF over server-side rendering:** The shell has no server-side PDF capability (no headless browser, no LaTeX, no wkhtmltopdf). Adding a server-side PDF renderer would require a new dependency, server CPU, and a separate request lifecycle. jsPDF generates PDFs entirely in the browser from the already-rendered ANSI data, matching the "no server round-trip" model of the existing HTML export.
 
-**Font limitations:** jsPDF bundles Courier (a monospaced font) rather than JetBrains Mono. Replicating exact CSS kerning, weight 300, and `letter-spacing` values is not feasible in jsPDF's text model. The PDF export aims for visual parity — matching spacing, proportions, and theme colors — rather than pixel-identical output.
+**Font limitations:** jsPDF cannot reproduce browser typography exactly even when it embeds the same font files. The current PDF path embeds the committed JetBrains Mono fonts when jsPDF's VFS hooks are available and falls back to Courier otherwise, but exact browser kerning, flex layout, glow, and CSS text metrics still are not achievable. The PDF export therefore targets visual parity — matching hierarchy, ordering, spacing intent, and theme colors — rather than pixel-identical output.
 
 **Color resolution:** jsPDF needs RGB arrays, not CSS custom property values. `_parseCssColor()` creates a 1×1 canvas, sets the CSS color string as `fillStyle`, reads back the computed `fillStyle`, and parses the `rgb(...)` result. This handles any CSS color format including `color-mix()` expressions from the theme system.
 
