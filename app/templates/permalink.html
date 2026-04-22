@@ -1,17 +1,22 @@
 {% extends "permalink_base.html" %}
 
 {% block header_meta %}
-  <div class="export-meta">{{ label }} · {{ created_fmt }}</div>
-  {% if meta %}
+  {% if header_model.metaLine %}
+  <div class="export-meta">{{ header_model.metaLine }}</div>
+  {% endif %}
+  {% if header_model.runMetaItems %}
   <div class="export-run-meta">
-    {% if meta.exit_code is not none %}<span class="meta-badge {% if meta.exit_code == 0 %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">exit {{ meta.exit_code }}</span>{% endif %}
-    {% if meta.duration %}<span class="meta-item">{{ meta.duration }}</span>{% endif %}
-    {% if meta.lines %}<span class="meta-item">{{ meta.lines }}</span>{% endif %}
-    {% if meta.version %}<span class="meta-item">v{{ meta.version }}</span>{% endif %}
+    {% for item in header_model.runMetaItems %}
+      {% if item.kind == 'badge' %}
+      <span class="meta-badge {% if item.tone == 'ok' %}meta-badge-ok{% else %}meta-badge-fail{% endif %}">{{ item.text }}</span>
+      {% else %}
+      <span class="meta-item">{{ item.text }}</span>
+      {% endif %}
+    {% endfor %}
   </div>
   {% endif %}
-  {% if expiry_html %}
-    <div class="permalink-expiry">{{ expiry_html | safe }}</div>
+  {% if header_model.expiryHtml %}
+    <div class="permalink-expiry">{{ header_model.expiryHtml | safe }}</div>
   {% endif %}
 {% endblock %}
 
@@ -42,15 +47,6 @@
 
 {% block scripts %}
 <script>
-  window.PermData = {
-    lines:               {{ lines_json | safe }},
-    hasTimestampMetadata: {{ has_timestamp_metadata | tojson }},
-    appName:             {{ app_name_json | safe }},
-    label:               {{ label_json | safe }},
-    created:             {{ created_json | safe }},
-    createdDisplay:      {{ created_fmt | tojson }},
-    fontFacesCss:        {{ font_faces_css | tojson }},
-    permalinkMeta:       {{ meta_json | safe }},
-  };
+  window.PermData = {{ page_model_json | safe }};
 </script>
 {% endblock %}

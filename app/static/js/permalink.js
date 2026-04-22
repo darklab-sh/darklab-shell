@@ -9,14 +9,17 @@
 // in permalink_base.html before this file.
 (function () {
   var pd = window.PermData || {};
-  var lines               = pd.lines               || [];
-  var hasTimestampMetadata = pd.hasTimestampMetadata || false;
-  var appName             = pd.appName             || '';
-  var label               = pd.label               || '';
-  var created             = pd.created             || '';
-  var createdDisplay      = pd.createdDisplay      || '';
-  var fontFacesCss        = pd.fontFacesCss        || '';
-  var permalinkMeta       = pd.permalinkMeta       || null;
+  var transcriptModel = pd.transcript || {};
+  var exportModel = pd.export || {};
+  var headerModel = pd.header || {};
+  var lines = transcriptModel.lines || pd.lines || [];
+  var hasTimestampMetadata = transcriptModel.hasTimestampMetadata || pd.hasTimestampMetadata || false;
+  var appName = exportModel.appName || pd.appName || headerModel.appName || '';
+  var label = exportModel.label || pd.label || '';
+  var created = exportModel.created || pd.created || '';
+  var createdDisplay = exportModel.createdDisplay || pd.createdDisplay || headerModel.createdDisplay || '';
+  var fontFacesCss = exportModel.fontFacesCss || pd.fontFacesCss || '';
+  var permalinkMeta = exportModel.runMeta || pd.permalinkMeta || null;
 
   var ansiUp = new AnsiUp();
   ansiUp.use_classes = false;
@@ -152,7 +155,7 @@
     var prefixWidth = result.prefixWidth;
 
     var runMeta = permalinkMeta ? {
-      exitCode: permalinkMeta.exit_code,
+      exitCode: permalinkMeta.exitCode !== undefined ? permalinkMeta.exitCode : permalinkMeta.exit_code,
       duration: permalinkMeta.duration || null,
       lines:    permalinkMeta.lines    || null,
       version:  permalinkMeta.version  || null,
@@ -184,7 +187,7 @@
     if (!window.jspdf) { alert('PDF library not loaded'); return; }
     var jsPDF = window.jspdf.jsPDF;
     var runMeta = permalinkMeta ? {
-      exitCode: permalinkMeta.exit_code,
+      exitCode: permalinkMeta.exitCode !== undefined ? permalinkMeta.exitCode : permalinkMeta.exit_code,
       duration: permalinkMeta.duration || null,
       lines:    permalinkMeta.lines    || null,
       version:  permalinkMeta.version  || null,
