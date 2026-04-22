@@ -147,13 +147,6 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
-.header-btns {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 header h1 {
   font-family: var(--font-mono);
   display: inline-flex;

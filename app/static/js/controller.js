@@ -18,10 +18,6 @@ lnBtn.addEventListener('click', () => {
   refocusComposerAfterAction({ defer: true });
 });
 
-themeBtn.addEventListener('click', () => {
-  openThemeSelector();
-});
-
 function openWorkflows() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
@@ -55,6 +51,23 @@ function closeShortcuts() {
   if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
   refocusComposerAfterAction({ defer: true });
 }
+
+function toggleHistoryPanelSurface(force = null) {
+  _closeMajorOverlays();
+  const isOpen = togglePanelOverlay(historyPanel, force);
+  if (isOpen) {
+    if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+    refreshHistoryPanel();
+  } else {
+    refocusComposerAfterAction({ defer: true });
+  }
+  return isOpen;
+}
+
+window.toggleHistoryPanelSurface = toggleHistoryPanelSurface;
+window.openHistoryPanelSurface = () => toggleHistoryPanelSurface(true);
+window.closeHistoryPanelSurface = () => toggleHistoryPanelSurface(false);
 
 function renderShortcuts(data) {
   const listEl = document.getElementById('shortcuts-list');
@@ -307,14 +320,6 @@ _uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(
   });
 });
 
-// ── Workflows ──
-// Backdrop + close button dismissal is registered via bindDismissible in
-// setupDismissibleOverlays(); this section only wires the open trigger.
-workflowsBtn?.addEventListener('click', openWorkflows);
-
-// ── FAQ ──
-faqBtn.addEventListener('click', openFaq);
-
 // ── Keyboard shortcuts overlay (`?` trigger) ──
 
 // Global `?` handler. Opens the shortcuts overlay from anywhere on the page,
@@ -357,7 +362,6 @@ document.addEventListener('keydown', e => {
 // Theme + Options: backdrop + close button dismissal is registered via
 // bindDismissible in setupDismissibleOverlays(); only the open triggers
 // live here.
-optionsBtn?.addEventListener('click', openOptions);
 optionsTsSelect?.addEventListener('change', e => {
   applyTimestampPreference(e.target.value);
 });
@@ -807,17 +811,6 @@ searchRegexBtn.addEventListener('click', () => {
 });
 
 // ── Run history panel ──
-histBtn.addEventListener('click', () => {
-  _closeMajorOverlays();
-  const isOpen = togglePanelOverlay(historyPanel);
-  if (isOpen) {
-    if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
-    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-    refreshHistoryPanel();
-  } else {
-    refocusComposerAfterAction({ defer: true });
-  }
-});
 // history panel close button + outside-area dismissal are registered via
 // bindDismissible in setupDismissibleOverlays().
 
@@ -1028,7 +1021,7 @@ function _replayPromptShortcutAfterSelection(e) {
 // the viewport so every outside click hits it.
 if (historyPanel && typeof bindOutsideClickClose === 'function') {
   bindOutsideClickClose(historyPanel, {
-    triggers: histBtn,
+    triggers: null,
     isOpen: isHistoryPanelOpen,
     onClose: hideHistoryPanel,
     exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]'],

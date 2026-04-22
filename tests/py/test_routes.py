@@ -48,7 +48,7 @@ class TestIndexRoute:
         client = get_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/").get_data(as_text=True)
-        assert 'id="diag-btn"' in body
+        assert 'id="rail-diag-btn"' in body
         assert 'href="/diag"' in body
         assert 'target="_blank"' in body
         assert 'rel="noopener noreferrer"' in body

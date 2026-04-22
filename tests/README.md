@@ -20,8 +20,8 @@ Current totals:
 
 - `pytest`: 856
 - `vitest`: 695
-- `playwright`: 197
-- total: 1,748
+- `playwright`: 198
+- total: 1,749
 
 This document is organized in two parts:
 
@@ -2017,7 +2017,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `closing a mobile tab does not leave the close button focused` | Verifies that closing a mobile tab does not leave the close button focused. |
 | `closing the only mobile tab does not leave the reset close button focused` | Verifies that closing the only mobile tab does not leave the reset close button focused. |
 | `mobile tabs bar can overflow and scroll horizontally` | Verifies that mobile tabs bar can overflow and scroll horizontally. |
-| `hamburger button is visible and desktop header buttons are hidden at mobile width` | Verifies that hamburger button is visible and desktop header buttons are hidden at mobile width. |
+| `hamburger button is visible and legacy desktop header button DOM is absent at mobile width` | Verifies that hamburger button is visible and the removed legacy desktop header button container is absent at mobile width. |
 | `clicking the hamburger opens the mobile menu` | Verifies that clicking the hamburger opens the mobile menu. |
 | `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell and can be dismissed by tapping the backdrop, matching the shared mobile-sheet contract. |
 | `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history and theme action buttons. |
@@ -2179,6 +2179,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `each workflow step renders a chip and a per-step run button` | Verifies that each workflow step in the workflows modal renders a chip and a per-step run button with the matching `aria-label`. |
 | `step layout is a two-row grid with chip on row 1 and note on row 2` | Verifies that the workflow step layout is a CSS grid with `.workflow-step-main` on row 1 and `.workflow-step-note` on row 2. |
 | `clicking a step run button closes the modal and submits the command` | Verifies that clicking a workflow step run button closes the workflows modal and submits the step command. |
+| `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
 
 #### `welcome.spec.js`

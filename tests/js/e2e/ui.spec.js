@@ -155,6 +155,23 @@ test.describe('workflows modal', () => {
     await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('body')).toContainText(cmd)
   })
+
+  test('clicking a rail workflow opens the scoped modal without collapsing the rail list', async ({ page }) => {
+    const section = page.locator('#rail-section-workflows')
+    if (await section.evaluate((node) => node.classList.contains('closed'))) {
+      await page.locator('#rail-workflows-header').click()
+    }
+    const railItems = page.locator('#rail-workflows-list .rail-item')
+    await expect(railItems.first()).toBeVisible()
+    const beforeCount = await railItems.count()
+    expect(beforeCount).toBeGreaterThan(1)
+
+    await railItems.first().click()
+
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#workflows-modal .workflow-card')).toHaveCount(1)
+    await expect(page.locator('#rail-workflows-list .rail-item')).toHaveCount(beforeCount)
+  })
 })
 
 test.describe('options modal', () => {
