@@ -664,6 +664,66 @@ body #history-panel { background: var(--theme-history-panel-bg); }
 .history-active-filter-remove:hover {
   color: var(--green);
 }
+.history-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--theme-history-panel-bg) 95%, var(--surface));
+  font-family: var(--font-mono);
+}
+.history-pagination-summary {
+  flex: 1 0 100%;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.history-pagination-controls {
+  flex: 1 0 100%;
+  display: flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  overflow-x: auto;
+}
+.history-pagination-ellipsis {
+  display: inline-block;
+  padding: 0 1px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+}
+.history-pagination-controls > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.history-pagination-controls > .btn.history-pagination-chevron {
+  font-size: 14px;
+  line-height: 1;
+  min-height: 22px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+.history-pagination-controls > .btn:hover:not(:disabled) {
+  color: var(--green);
+  transform: none;
+}
+.history-pagination-controls > .btn[aria-current="page"] {
+  color: var(--green);
+  border-color: color-mix(in srgb, var(--green) 55%, var(--border-bright));
+  background: color-mix(in srgb, var(--green) 9%, transparent);
+}
+.history-pagination-controls > .btn:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
 .history-panel-title {
   font-family: var(--font-display);
   font-size: 13px;
@@ -1251,6 +1311,12 @@ body #diag-btn:hover {
   padding: 2px 4px;
   min-width: 22px;
   min-height: 22px;
+}
+
+/* History pager buttons stay flat on hover so the compact row does not
+   clip the top border against the summary row above it. */
+.history-pagination-controls > .btn:hover:not(:disabled) {
+  transform: none;
 }
 
 /* ── Nav-item primitive ─────────────────────────────────────────────────────

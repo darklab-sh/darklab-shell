@@ -64,6 +64,8 @@
   cursor: pointer;
   flex-shrink: 0;
   min-height: 34px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #mobile-run-btn:active {
@@ -73,6 +75,12 @@
 #mobile-run-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+#mobile-run-btn,
+#mobile-kill-btn {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ── Mobile ── */
@@ -657,6 +665,30 @@
   }
   body.mobile-terminal-mode .history-active-filters {
     padding: 10px 14px;
+  }
+  body.mobile-terminal-mode .history-pagination {
+    padding: 10px 14px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  body.mobile-terminal-mode .history-pagination-summary {
+    white-space: normal;
+    line-height: 1.35;
+    font-size: 12px;
+  }
+  body.mobile-terminal-mode .history-pagination-controls {
+    justify-content: flex-start;
+  }
+  body.mobile-terminal-mode .history-pagination-controls > .btn {
+    min-height: 34px;
+    font-size: 12px;
+  }
+  body.mobile-terminal-mode .history-pagination-controls > .btn.history-pagination-chevron {
+    font-size: 20px;
+    line-height: 1;
+  }
+  body.mobile-terminal-mode .history-pagination-ellipsis {
+    font-size: 10px;
   }
   body.mobile-terminal-mode .history-panel-filters input,
   body.mobile-terminal-mode .history-panel-filters select,

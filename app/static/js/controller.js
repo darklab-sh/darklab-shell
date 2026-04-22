@@ -501,8 +501,15 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   input.id = 'session-token-set-input';
   input.className = 'options-token-input modal-token-input';
   input.placeholder = 'tok_... or UUID';
-  input.autocomplete = 'off';
-  input.spellcheck = false;
+  if (typeof global.applyMobileTextInputDefaults === 'function') {
+    global.applyMobileTextInputDefaults(input);
+  } else {
+    input.autocomplete = 'off';
+    input.autocapitalize = 'none';
+    input.autocorrect = 'off';
+    input.spellcheck = false;
+    input.inputMode = 'text';
+  }
 
   const errEl = document.createElement('div');
   errEl.id = 'session-token-set-error';

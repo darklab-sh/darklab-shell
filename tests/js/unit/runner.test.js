@@ -168,7 +168,7 @@ function loadRunnerFns({
       <div id="mobile-shell-composer">
         <div id="mobile-composer-host">
           <div id="mobile-composer-row">
-            <input id="mobile-cmd" />
+            <input id="mobile-cmd" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
             <button id="mobile-run-btn"></button>
           </div>
         </div>

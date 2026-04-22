@@ -62,6 +62,14 @@
     if (start > end) [start, end] = [end, start];
     return { start, end };
   };
+  global.applyMobileTextInputDefaults = (input) => {
+    if (!input || typeof input.setAttribute !== 'function') return;
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocapitalize', 'none');
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('spellcheck', 'false');
+    input.setAttribute('inputmode', 'text');
+  };
   function _estimateComposerTextWidth(input, text) {
     if (!input || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
     const style = window.getComputedStyle(input);

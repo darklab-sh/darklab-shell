@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 853
-- `vitest`: 681
+- `pytest`: 855
+- `vitest`: 685
 - `playwright`: 197
-- total: 1,731
+- total: 1,737
 
 This document is organized in two parts:
 
@@ -740,6 +740,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
 | `TestHistoryRoute.test_history_respects_panel_limit_and_sorts_newest_first` | Checks that history respects panel limit and sorts newest first. |
+| `TestHistoryRoute.test_history_reports_totals_and_keeps_roots_complete_across_pages` | Checks that paginated history responses report totals and keep command-root suggestions across pages. |
+| `TestHistoryRoute.test_history_applies_starred_only_server_side` | Checks that starred-only history filtering is applied server-side and reflected in totals. |
 | `TestHistoryRoute.test_history_search_filters_by_command_text` | Checks that `/history` command-text search narrows the returned runs. |
 | `TestHistoryRoute.test_history_filters_by_command_root` | Checks that `/history` command-root filtering returns matching runs and exposes the session root list. |
 | `TestHistoryRoute.test_history_filters_by_exit_code_and_recent_date_range` | Checks that `/history` exit-code and recent-date filters can be combined. |
@@ -1280,6 +1282,15 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `app/templates/theme_vars_style.html: every button-like element uses a primitive class or an allowlisted selector` | Scans the theme-variables style include — currently emits no button-like elements; pins that state. |
 | `fixture selectors are all syntactically valid` | Validates that every `exceptions[].selector` in the allowlist fixture is a parseable CSS selector — catches typos before they mask real regressions. |
 
+#### `button_primitives_runtime.test.js`
+
+Runtime contract coverage for JS-rendered button surfaces that the static template scan cannot see. This suite mounts the live history/mobile pagination helpers and asserts that the generated controls still compose the shared button primitives rather than surface-specific classes.
+
+| Test | Description |
+| --- | --- |
+| `history pagination buttons render with allowed primitives` | Verifies that the desktop history pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
+| `mobile recents pagination buttons render with allowed primitives` | Verifies that the mobile recents sheet pager renders its Prev / page / Next controls with the shared `.btn` primitive classes. |
+
 #### `config.test.js`
 
 | Test | Description |
@@ -1325,6 +1336,8 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `_historyRelativeTime buckets recent diffs as just now / m / h / d and falls back to a short date` | Verifies the relative-time helper used by the mobile recents sheet returns stable bucket strings and a short date for older runs. |
 | `desktop history rows keep absolute clock time and no tooltip on the time span` | Regression: the desktop history drawer keeps exact clock time and does not set a title tooltip on the time span, so only the mobile sheet switches to relative copy. |
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
+| `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
+| `_historyPageWindow keeps a three-page window with ellipses around the edges` | Verifies that the pagination helper keeps a three-number window with ellipses at the ends. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
 | `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
@@ -1335,7 +1348,7 @@ Positive counterpart to the negative blocklist in `button_primitives.test.js`. E
 | `hides the root suggestion menu when the only matching suggestion exactly matches the input` | Verifies that the custom command-root suggestion menu disappears once the input already matches the only suggestion. |
 | `accepts a root suggestion with one mobile-style pointer interaction` | Verifies that the custom command-root menu accepts with a single pointer interaction instead of requiring a second native picker confirmation. |
 | `keeps the root suggestion menu hidden until at least one character is typed` | Verifies that the command-root suggestion menu stays hidden on bare focus and only opens after input. |
-| `refreshHistoryPanel applies the starred-only filter client-side` | Verifies that starred-only history filtering stays local to the drawer state. |
+| `refreshHistoryPanel sends starred-only as a server-side filter` | Verifies that starred-only history filtering is passed to `/history` and rendered from the server response. |
 | `clearHistoryFilters resets the drawer controls and the request URL` | Verifies that clearing all history filters resets both control values and the generated `/history` query string. |
 | `shows a filtered empty state when no runs match the active filters` | Verifies that the drawer distinguishes “no matching runs” from “no runs yet”. |
 | `executeHistAction shows a failure toast when deleting a run fails` | Verifies that executeHistAction shows a failure toast when deleting a run fails. |

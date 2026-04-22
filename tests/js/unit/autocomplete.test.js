@@ -39,7 +39,7 @@ describe('autocomplete helpers', () => {
       <input id="cmd" />
       <div id="ac"></div>
       <div id="mobile-composer-host"></div>
-      <input id="mobile-cmd" />
+      <input id="mobile-cmd" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
     `
     document.body.className = ''
   })

@@ -26,11 +26,11 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 - **History/session seed fixtures for visual flows** — formalise the seeded demo/capture history dataset as a named fixture so screenshot packs, demo recordings, and documentation screenshots stay stable across releases instead of depending on ad hoc generated history.
 
-- **History drawer/sheet pagination instead of a hard cap** — the configured history limit should act as a page size, not a global ceiling, because the full run history is already stored in SQLite and searchable via the history filters and reverse-i-search. Add pagination controls to the desktop history drawer and mobile history sheet, and show a count summary at the top such as `N of Total shown` so it is clear the current view is paginated rather than truncated.
-
 - **Persist user options with session tokens** — session tokens currently preserve command history and session identity, but user-facing options still reset outside the current browser scope. Extend the session-token data model so saved options can live in the database and follow the user's restored session across browsers and devices.
 
 - **CI Docker images covered by the version-check script** — `scripts/check_versions.sh` (or the equivalent vendor / dependency check) should also pin and verify the CI base images so the runner environments do not drift silently from the production image. Add the CI images to the same source-of-truth list and fail the check when they fall behind.
+
+- **Confirmation modal before clearing the session token** — the `clear` built-in command and the clear button both discard the current session token immediately. If the user has not saved the token elsewhere, it cannot be recovered, and all history associated with it becomes inaccessible. Gate the action behind a confirmation modal that makes the consequence explicit and offers a "copy token to clipboard" action so the user can save it before confirming. The modal should not appear for no-token sessions (nothing to lose) and should not block the clear path once the user confirms.
 
 - **Chain multiple pipe helpers in a single command** — today the shell accepts a single pipe stage (e.g. `ping -c 4 darklab.sh | grep 'bytes from'`) but rejects longer pipelines. Allow strung-together helpers (e.g. `ping -c 4 darklab.sh | grep 'bytes from' | wc -l`) so common post-processing workflows work without leaving the shell. Each stage must still be individually allowlisted, metacharacter-blocked, and policy-checked; apply the same pipe-helper rules uniformly across every stage rather than loosening guards for the additional segments.
 

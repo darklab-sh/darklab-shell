@@ -65,6 +65,16 @@ let _historyRootSuggestions = [];
 let _historyRootFiltered = [];
 let _historyRootIndex = -1;
 let _historyRootSuppressInputOnce = false;
+let _historyPaging = {
+  page: 1,
+  pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
+    ? Math.max(1, Number(APP_CONFIG.history_panel_limit) || 50)
+    : 50,
+  totalCount: 0,
+  pageCount: 0,
+  hasPrev: false,
+  hasNext: false,
+};
 
 function _normalizeHistoryFilterValue(value) {
   return typeof value === 'string' ? value.trim() : '';
@@ -209,6 +219,86 @@ function _historyActiveFilterItems() {
   return items;
 }
 
+function _historySetPage(nextPage, { refresh = true } = {}) {
+  const page = Math.max(1, Number(nextPage) || 1);
+  if (_historyPaging.page !== page) {
+    _historyPaging.page = page;
+  }
+  if (refresh) refreshHistoryPanel();
+}
+
+function _historyPageWindow(page, pageCount) {
+  const totalPages = Math.max(0, Number(pageCount) || 0);
+  if (totalPages <= 0) return [];
+  if (totalPages <= 3) {
+    return Array.from({ length: totalPages }, (_, idx) => idx + 1);
+  }
+  const current = Math.min(Math.max(1, Number(page) || 1), totalPages);
+  if (current <= 3) return [1, 2, 3, 4, '..', totalPages];
+  if (current >= totalPages - 2) return [1, '..', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+  return [1, '..', current - 1, current, current + 1, '..', totalPages];
+}
+
+function _historyRenderPagination(visibleCount = 0) {
+  if (typeof historyPagination === 'undefined' || !historyPagination) return;
+  if (typeof historyPaginationSummary === 'undefined' || !historyPaginationSummary) return;
+  if (typeof historyPaginationControls === 'undefined' || !historyPaginationControls) return;
+
+  const { page, pageSize, totalCount, pageCount } = _historyPaging;
+  const totalLabel = totalCount === 1 ? 'stored run' : 'stored runs';
+  if (totalCount > 0) {
+    const start = ((page - 1) * pageSize) + 1;
+    const count = Math.max(0, Number(visibleCount) || 0);
+    const end = count > 0 ? Math.min(totalCount, start + count - 1) : start;
+    historyPaginationSummary.textContent = `Showing ${start}-${end} of ${totalCount} ${totalLabel}`;
+  } else {
+    historyPaginationSummary.textContent = 'Showing 0 of 0 stored runs';
+  }
+
+  historyPaginationControls.replaceChildren();
+
+  const prevPage = page > 1 ? page - 1 : 1;
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
+  prevBtn.textContent = '‹';
+  prevBtn.disabled = page <= 1;
+  prevBtn.setAttribute('aria-label', 'Previous page');
+  prevBtn.addEventListener('click', () => _historySetPage(prevPage));
+  historyPaginationControls.appendChild(prevBtn);
+
+  for (const item of _historyPageWindow(page, pageCount)) {
+    if (item === '..') {
+      const ellipsis = document.createElement('span');
+      ellipsis.className = 'history-pagination-ellipsis';
+      ellipsis.textContent = '..';
+      historyPaginationControls.appendChild(ellipsis);
+      continue;
+    }
+    const btn = document.createElement('button');
+    btn.type = 'button';
+    btn.className = 'btn btn-secondary btn-compact';
+    btn.textContent = String(item);
+    btn.dataset.page = String(item);
+    btn.setAttribute('aria-current', item === page ? 'page' : 'false');
+    if (item === page) btn.disabled = true;
+    btn.addEventListener('click', () => _historySetPage(item));
+    historyPaginationControls.appendChild(btn);
+  }
+
+  const nextPage = pageCount > page ? page + 1 : page;
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
+  nextBtn.textContent = '›';
+  nextBtn.disabled = page >= pageCount;
+  nextBtn.setAttribute('aria-label', 'Next page');
+  nextBtn.addEventListener('click', () => _historySetPage(nextPage));
+  historyPaginationControls.appendChild(nextBtn);
+
+  historyPagination.classList.remove('u-hidden');
+}
+
 function _renderHistoryActiveFilters() {
   if (typeof historyActiveFilters === 'undefined' || !historyActiveFilters) return;
   historyActiveFilters.replaceChildren();
@@ -239,24 +329,20 @@ function _renderHistoryActiveFilters() {
 
 function _buildHistoryRequestUrl() {
   const params = new URLSearchParams();
+  params.set('page', String(_historyPaging.page || 1));
+  params.set('page_size', String(_historyPaging.pageSize || 1));
+  params.set('include_total', '1');
   if (_historyFilters.q) params.set('q', _historyFilters.q);
   if (_historyFilters.commandRoot) params.set('command_root', _historyFilters.commandRoot);
   if (_historyFilters.exitCode !== 'all') params.set('exit_code', _historyFilters.exitCode);
   if (_historyFilters.dateRange !== 'all') params.set('date_range', _historyFilters.dateRange);
+  if (_historyFilters.starredOnly) params.set('starred_only', '1');
   const query = params.toString();
   return query ? `/history?${query}` : '/history';
 }
 
 function _applyHistoryClientFilters(runs) {
-  const items = Array.isArray(runs) ? runs.slice() : [];
-  const starred = _getStarred();
-  const filtered = _historyFilters.starredOnly
-    ? items.filter(run => starred.has(run.command))
-    : items;
-  return [
-    ...filtered.filter(run => starred.has(run.command)),
-    ...filtered.filter(run => !starred.has(run.command)),
-  ];
+  return Array.isArray(runs) ? runs.slice() : [];
 }
 
 function _renderHistoryEmptyState() {
@@ -275,6 +361,9 @@ function _renderHistoryEmptyState() {
     : 'Completed commands will appear here for this browser session.';
   empty.appendChild(detail);
   historyList.appendChild(empty);
+  if (typeof historyPagination !== 'undefined' && historyPagination) {
+    historyPagination.classList.remove('u-hidden');
+  }
 }
 
 function _scheduleHistoryPanelRefresh() {
@@ -288,6 +377,7 @@ function _scheduleHistoryPanelRefresh() {
 function _setHistoryFilter(key, value, { debounce = false } = {}) {
   if (key === 'starredOnly') _historyFilters.starredOnly = !!value;
   else _historyFilters[key] = _normalizeHistoryFilterValue(value) || (key === 'q' || key === 'commandRoot' ? '' : 'all');
+  _historyPaging.page = 1;
   if (debounce) _scheduleHistoryPanelRefresh();
   else refreshHistoryPanel();
 }
@@ -300,6 +390,7 @@ function clearHistoryFilters() {
     dateRange: 'all',
     starredOnly: false,
   };
+  _historyPaging.page = 1;
   _syncHistoryFilterControls();
   _renderHistoryActiveFilters();
   _hideHistoryRootDropdown();
@@ -748,15 +839,22 @@ function refreshHistoryPanel() {
   _renderHistoryActiveFilters();
   apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
     historyList.replaceChildren();
+    _historyPaging.page = Math.max(1, Number(data.page) || _historyPaging.page || 1);
+    _historyPaging.pageSize = Math.max(1, Number(data.page_size) || _historyPaging.pageSize || 1);
+    _historyPaging.totalCount = Math.max(0, Number(data.total_count ?? data.runs?.length ?? 0) || 0);
+    _historyPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
+    _historyPaging.hasPrev = !!data.has_prev;
+    _historyPaging.hasNext = !!data.has_next;
     _renderHistoryRootSuggestions(Array.isArray(data.roots) ? data.roots : data.runs);
-    const sorted = _applyHistoryClientFilters(data.runs);
-    const starred = _getStarred();
-    if (!sorted.length) {
+    const visibleRuns = _applyHistoryClientFilters(data.runs);
+    if (!visibleRuns.length) {
+      _historyRenderPagination(0);
       _renderHistoryEmptyState();
       return;
     }
 
-    sorted.forEach(run => {
+    const starred = _getStarred();
+    visibleRuns.forEach(run => {
       const isStarred = starred.has(run.command);
       const entry = _createHistoryEntry(run, isStarred);
 
@@ -828,6 +926,7 @@ function refreshHistoryPanel() {
 
       historyList.appendChild(entry);
     });
+    _historyRenderPagination(visibleRuns.length);
   });
 }
 

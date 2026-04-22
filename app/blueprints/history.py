@@ -4,6 +4,7 @@ History and share routes: run history, single-run permalinks, snapshot permalink
 
 import json
 import logging
+import math
 import re
 import sqlite3
 import uuid
@@ -99,6 +100,60 @@ def _history_command_roots(conn, session_id):
     return [str(row["root"]) for row in rows if row["root"]]
 
 
+def _parse_history_bool(value):
+    return str(value).strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _parse_history_int(value, default, *, minimum=1, maximum=None):
+    try:
+        parsed = int(str(value).strip())
+    except (TypeError, ValueError):
+        parsed = default
+    if parsed < minimum:
+        parsed = minimum
+    if maximum is not None and parsed > maximum:
+        parsed = maximum
+    return parsed
+
+
+def _history_match_clause(query, scope, force_like=False):
+    if not query:
+        return "", [], None
+    fts_q = _build_fts_query(query) if scope != "command" and not force_like else None
+    if fts_q:
+        return (
+            " AND r.rowid IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)",
+            [fts_q],
+            fts_q,
+        )
+    return " AND LOWER(r.command) LIKE ?", [f"%{query.lower()}%"], None
+
+
+def _history_base_clause(
+    session_id,
+    query,
+    command_root,
+    exit_code_filter,
+    date_range,
+    scope,
+    *,
+    starred_only=False,
+    force_like=False,
+):
+    sql = " FROM runs r WHERE r.session_id = ?"
+    params: list[Any] = [session_id]
+    if starred_only:
+        sql += (
+            " AND EXISTS (SELECT 1 FROM starred_commands sc "
+            "WHERE sc.session_id = r.session_id AND sc.command = r.command)"
+        )
+    match_sql, match_params, fts_q = _history_match_clause(query, scope, force_like=force_like)
+    sql += match_sql
+    params.extend(match_params)
+    sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
+    return sql, params, fts_q
+
+
 # ── Preview output helpers ────────────────────────────────────────────────────
 
 def _preview_output_entries_from_run(run):
@@ -159,62 +214,71 @@ def get_history():
     command_root = _normalize_history_filter_text(request.args.get("command_root")).lower()
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
+    starred_only = _parse_history_bool(request.args.get("starred_only"))
+    include_total = _parse_history_bool(request.args.get("include_total"))
+    page = _parse_history_int(request.args.get("page"), 1)
+    page_size = _parse_history_int(request.args.get("page_size"), CFG["history_panel_limit"], maximum=200)
     # scope=command suppresses FTS so the search only considers the command
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
 
-    fts_q = _build_fts_query(query) if query and scope != "command" else None
-
-    if fts_q:
-        sql = (
-            "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
-            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-            "FROM runs r WHERE r.session_id = ? "
-            "AND r.rowid IN (SELECT rowid FROM runs_fts WHERE runs_fts MATCH ?)"
+    def _query_history(conn, *, force_like=False):
+        base_sql, base_params, fts_q = _history_base_clause(
+            session_id,
+            query,
+            command_root,
+            exit_code_filter,
+            date_range,
+            scope,
+            starred_only=starred_only,
+            force_like=force_like,
         )
-        params: list[Any] = [session_id, fts_q]
-    else:
-        sql = (
+        current_page = max(page, 1)
+        total_count = None
+        page_count = None
+        if include_total:
+            count_row = conn.execute("SELECT COUNT(*) AS n" + base_sql, base_params).fetchone()
+            total_count = int(count_row["n"] if count_row else 0)
+            page_count = math.ceil(total_count / page_size) if total_count else 0
+            current_page = min(current_page, page_count or 1)
+        offset = (current_page - 1) * page_size
+        rows = conn.execute(
             "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
-            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-            "FROM runs r WHERE r.session_id = ?"
-        )
-        params = [session_id]
-        if query:
-            sql += " AND LOWER(r.command) LIKE ?"
-            params.append(f"%{query.lower()}%")
-
-    sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
-    sql += " ORDER BY r.started DESC LIMIT ?"
-    params.append(CFG["history_panel_limit"])
+            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated"
+            + base_sql
+            + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
+            base_params + [page_size, offset],
+        ).fetchall()
+        roots_rows = conn.execute(
+            "SELECT "
+            "CASE "
+            "WHEN instr(trim(r.command), ' ') > 0 THEN substr(trim(r.command), 1, instr(trim(r.command), ' ') - 1) "
+            "ELSE trim(r.command) "
+            "END AS root, "
+            "MAX(r.started) AS latest_started"
+            + base_sql
+            + " GROUP BY root "
+            + " ORDER BY latest_started DESC "
+            + " LIMIT 50",
+            base_params,
+        ).fetchall()
+        return rows, roots_rows, total_count, page_count, current_page, fts_q
 
     with db_connect() as conn:
         try:
-            rows = conn.execute(sql, params).fetchall()
+            rows, roots_rows, total_count, page_count, current_page, fts_q = _query_history(conn)
         except sqlite3.OperationalError as exc:
-            if fts_q:
+            if query and _build_fts_query(query):
                 log.warning("FTS_SEARCH_FALLBACK", extra={
                     "session": session_id, "q": query, "error": str(exc),
                 })
-                fallback_sql = (
-                    "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
-                    "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated "
-                    "FROM runs r WHERE r.session_id = ?"
+                rows, roots_rows, total_count, page_count, current_page, fts_q = _query_history(
+                    conn,
+                    force_like=True,
                 )
-                fallback_params: list[Any] = [session_id]
-                if query:
-                    fallback_sql += " AND LOWER(r.command) LIKE ?"
-                    fallback_params.append(f"%{query.lower()}%")
-                fallback_sql, fallback_params = _history_add_filters(
-                    fallback_sql, fallback_params, command_root, exit_code_filter, date_range
-                )
-                fallback_sql += " ORDER BY r.started DESC LIMIT ?"
-                fallback_params.append(CFG["history_panel_limit"])
-                rows = conn.execute(fallback_sql, fallback_params).fetchall()
             else:
                 raise
-        roots = _history_command_roots(conn, session_id)
     runs = []
     for row in rows:
         item = dict(row)
@@ -222,6 +286,7 @@ def get_history():
         item["full_output_available"] = bool(item.get("full_output_available"))
         item["full_output_truncated"] = bool(item.get("full_output_truncated"))
         runs.append(item)
+    roots = [str(row["root"]) for row in roots_rows if row["root"]]
     log.info("HISTORY_VIEWED", extra={
         "ip": get_client_ip(),
         "session": session_id,
@@ -231,8 +296,22 @@ def get_history():
         "command_root": command_root or None,
         "exit_code_filter": exit_code_filter or None,
         "date_range": date_range or None,
+        "starred_only": starred_only or None,
+        "page": current_page,
+        "page_size": page_size,
     })
-    return jsonify({"runs": runs, "roots": roots})
+    payload = {
+        "runs": runs,
+        "roots": roots,
+        "page": current_page,
+        "page_size": page_size,
+        "has_prev": current_page > 1,
+        "has_next": bool(page_count and current_page < page_count),
+    }
+    if include_total:
+        payload["total_count"] = total_count
+        payload["page_count"] = page_count
+    return jsonify(payload)
 
 
 @history_bp.route("/history/active")

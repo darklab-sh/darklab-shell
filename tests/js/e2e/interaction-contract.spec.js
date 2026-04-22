@@ -219,10 +219,7 @@ test.describe('UI interaction contract — confirmation dialog', () => {
       })
     })
     await page.locator('#confirm-host').waitFor({ state: 'visible' })
-    const focused = await page.evaluate(
-      () => document.activeElement?.dataset?.confirmActionId,
-    )
-    expect(focused).toBe('cancel')
+    await expect(page.locator('#confirm-host [data-confirm-action-id="cancel"]')).toBeFocused()
 
     // Clean up — resolve the promise so later cases start fresh.
     await page.keyboard.press('Escape')

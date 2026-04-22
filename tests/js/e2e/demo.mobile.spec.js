@@ -449,7 +449,7 @@ test('demo-mobile', async ({ page }) => {
   await smoothScroll(page, '#mobile-recents-list', 0, { durationMs: 800 })
   await page.waitForTimeout(500)
 
-  await page.locator('#mobile-recents-close').click()
+  await page.locator('#mobile-recents-sheet-scrim').click()
   await expect(page.locator('#mobile-recents-sheet')).toBeHidden()
   await page.waitForTimeout(800)
 

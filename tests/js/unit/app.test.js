@@ -85,7 +85,7 @@ async function loadAppFns({
           </div>
           <div id="mobile-composer-row">
             <span class="mobile-prompt-label">$</span>
-            <input id="mobile-cmd" />
+            <input id="mobile-cmd" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
             <button id="mobile-run-btn"></button>
           </div>
         </div>
@@ -134,7 +134,7 @@ async function loadAppFns({
         <button id="run-btn" aria-label="Run command">Run</button>
       </div>
       <div class="search-bar" id="search-bar" style="display:none">
-        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
+        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search output">
         <div class="search-toggles">
           <button id="search-case-btn"></button>
           <button id="search-regex-btn"></button>
@@ -1122,7 +1122,7 @@ describe('app helpers', () => {
       <div id="history-panel"></div>
       <div id="history-list"></div>
       <div id="search-bar"></div>
-      <input id="search-input" />
+      <input id="search-input" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" />
       <span id="search-count"></span>
       <button id="search-case-btn"></button>
       <button id="search-regex-btn"></button>
@@ -1638,6 +1638,12 @@ describe('app helpers', () => {
     const historyPanel = document.getElementById('history-panel')
     const faqOverlay = document.getElementById('faq-overlay')
     const optionsOverlay = document.getElementById('options-overlay')
+
+    expect(mobileCmdInput.getAttribute('autocomplete')).toBe('off')
+    expect(mobileCmdInput.getAttribute('autocapitalize')).toBe('none')
+    expect(mobileCmdInput.getAttribute('autocorrect')).toBe('off')
+    expect(mobileCmdInput.getAttribute('spellcheck')).toBe('false')
+    expect(mobileCmdInput.getAttribute('inputmode')).toBe('text')
 
     document.body.classList.add('mobile-terminal-mode')
     Object.defineProperty(document, 'activeElement', {

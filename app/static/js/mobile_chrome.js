@@ -27,6 +27,9 @@
   const recentsSheetScrim     = document.getElementById('mobile-recents-sheet-scrim');
   const recentsSheetClearBtn  = document.getElementById('mobile-recents-clear');
   const recentsSheetSearch    = document.getElementById('mobile-recents-search');
+  const recentsPagination     = document.getElementById('mobile-recents-pagination');
+  const recentsPaginationSummary = document.getElementById('mobile-recents-pagination-summary');
+  const recentsPaginationControls = document.getElementById('mobile-recents-pagination-controls');
   const recentsSheetList      = document.getElementById('mobile-recents-list');
   const menuSheet             = document.getElementById('mobile-menu-sheet');
   const menuSheetScrim        = document.getElementById('mobile-menu-sheet-scrim');
@@ -428,6 +431,16 @@
   let _recentsRuns = [];
   let _recentsSearchQuery = '';
   const _recentsFilterState = { root: '', exit: 'all', date: 'all', starred: false };
+  const _recentsPaging = {
+    page: 1,
+    pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
+      ? Math.max(1, Number(APP_CONFIG.history_panel_limit) || 50)
+      : 50,
+    totalCount: 0,
+    pageCount: 0,
+    hasPrev: false,
+    hasNext: false,
+  };
 
   function _recentsParseDate(iso) {
     if (!iso) return null;
@@ -435,38 +448,6 @@
       const d = new Date(iso);
       return Number.isNaN(d.getTime()) ? null : d;
     } catch (_) { return null; }
-  }
-  function _recentsDateMatch(iso, mode) {
-    if (mode === 'all') return true;
-    if (!iso) return false;
-    const d = new Date(iso);
-    if (Number.isNaN(d.getTime())) return false;
-    const now = Date.now();
-    const delta = now - d.getTime();
-    if (mode === 'today') {
-      const today = new Date(); today.setHours(0,0,0,0);
-      return d.getTime() >= today.getTime();
-    }
-    if (mode === 'week') return delta <= 7 * 24 * 60 * 60 * 1000;
-    return true;
-  }
-  function _recentsFilter(runs) {
-    const q = _recentsSearchQuery.trim().toLowerCase();
-    const root = _recentsFilterState.root.trim().toLowerCase();
-    const starredSet = _recentsFilterState.starred ? _recentsStarred() : null;
-    return runs.filter(r => {
-      const cmd = (r.command || '').toLowerCase();
-      if (q && !cmd.includes(q)) return false;
-      if (root) {
-        const first = cmd.trim().split(/\s+/)[0] || '';
-        if (first !== root) return false;
-      }
-      if (_recentsFilterState.exit === 'success' && r.exit_code !== 0) return false;
-      if (_recentsFilterState.exit === 'failed' && (r.exit_code === 0 || r.exit_code == null)) return false;
-      if (!_recentsDateMatch(r.started, _recentsFilterState.date)) return false;
-      if (starredSet && !starredSet.has(r.command || '')) return false;
-      return true;
-    });
   }
   function _recentsFiltersActiveCount() {
     let n = 0;
@@ -481,6 +462,104 @@
       if (typeof global._getStarred === 'function') return global._getStarred();
     } catch (_) { /* non-critical */ }
     return new Set();
+  }
+  function _recentsHasActiveFilters() {
+    return Boolean(
+      _recentsSearchQuery.trim()
+      || _recentsFilterState.root.trim()
+      || _recentsFilterState.exit !== 'all'
+      || _recentsFilterState.date !== 'all'
+      || _recentsFilterState.starred
+    );
+  }
+  function _recentsBuildHistoryRequestUrl() {
+    const params = new URLSearchParams();
+    params.set('page', String(_recentsPaging.page || 1));
+    params.set('page_size', String(_recentsPaging.pageSize || 1));
+    params.set('include_total', '1');
+    if (_recentsSearchQuery.trim()) params.set('q', _recentsSearchQuery.trim());
+    if (_recentsFilterState.root.trim()) params.set('command_root', _recentsFilterState.root.trim());
+    if (_recentsFilterState.exit === 'success') params.set('exit_code', '0');
+    else if (_recentsFilterState.exit === 'failed') params.set('exit_code', 'nonzero');
+    if (_recentsFilterState.date === 'today') params.set('date_range', '24h');
+    else if (_recentsFilterState.date === 'week') params.set('date_range', '7d');
+    if (_recentsFilterState.starred) params.set('starred_only', '1');
+    const query = params.toString();
+    return query ? `/history?${query}` : '/history';
+  }
+  function _recentsPageWindow(page, pageCount) {
+    if (typeof global._historyPageWindow === 'function') {
+      return global._historyPageWindow(page, pageCount);
+    }
+    const totalPages = Math.max(0, Number(pageCount) || 0);
+    if (totalPages <= 0) return [];
+    if (totalPages <= 3) {
+      return Array.from({ length: totalPages }, (_, idx) => idx + 1);
+    }
+    const current = Math.min(Math.max(1, Number(page) || 1), totalPages);
+    if (current <= 3) return [1, 2, 3, 4, '..', totalPages];
+    if (current >= totalPages - 2) return [1, '..', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
+    return [1, '..', current - 1, current, current + 1, '..', totalPages];
+  }
+  function _recentsSetPage(nextPage, { refresh = true } = {}) {
+    _recentsPaging.page = Math.max(1, Number(nextPage) || 1);
+    if (refresh) _recentsRefresh();
+  }
+  function _recentsRenderPagination(visibleCount = 0) {
+    if (!recentsPagination || !recentsPaginationSummary || !recentsPaginationControls) return;
+    const { page, pageSize, totalCount, pageCount } = _recentsPaging;
+    const totalLabel = totalCount === 1 ? 'stored run' : 'stored runs';
+    if (totalCount > 0) {
+      const start = ((page - 1) * pageSize) + 1;
+      const count = Math.max(0, Number(visibleCount) || 0);
+      const end = count > 0 ? Math.min(totalCount, start + count - 1) : start;
+      recentsPaginationSummary.textContent = `Showing ${start}-${end} of ${totalCount} ${totalLabel}`;
+    } else {
+      recentsPaginationSummary.textContent = 'Showing 0 of 0 stored runs';
+    }
+
+    recentsPaginationControls.replaceChildren();
+
+    const prevPage = page > 1 ? page - 1 : 1;
+    const prevBtn = document.createElement('button');
+    prevBtn.type = 'button';
+    prevBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
+    prevBtn.textContent = '‹';
+    prevBtn.disabled = page <= 1;
+    prevBtn.setAttribute('aria-label', 'Previous page');
+    prevBtn.addEventListener('click', () => _recentsSetPage(prevPage));
+    recentsPaginationControls.appendChild(prevBtn);
+
+    for (const item of _recentsPageWindow(page, pageCount)) {
+      if (item === '..') {
+        const ellipsis = document.createElement('span');
+        ellipsis.className = 'history-pagination-ellipsis';
+        ellipsis.textContent = '..';
+        recentsPaginationControls.appendChild(ellipsis);
+        continue;
+      }
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'btn btn-secondary btn-compact';
+      btn.textContent = String(item);
+      btn.dataset.page = String(item);
+      btn.setAttribute('aria-current', item === page ? 'page' : 'false');
+      if (item === page) btn.disabled = true;
+      btn.addEventListener('click', () => _recentsSetPage(item));
+      recentsPaginationControls.appendChild(btn);
+    }
+
+    const nextPage = pageCount > page ? page + 1 : page;
+    const nextBtn = document.createElement('button');
+    nextBtn.type = 'button';
+    nextBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
+    nextBtn.textContent = '›';
+    nextBtn.disabled = page >= pageCount;
+    nextBtn.setAttribute('aria-label', 'Next page');
+    nextBtn.addEventListener('click', () => _recentsSetPage(nextPage));
+    recentsPaginationControls.appendChild(nextBtn);
+
+    recentsPagination.classList.remove('u-hidden');
   }
   function _recentsMakeAction(label, handler) {
     const btn = document.createElement('button');
@@ -498,20 +577,20 @@
   function _recentsRenderList() {
     if (!recentsSheetList) return;
     recentsSheetList.replaceChildren();
-    const filtered = _recentsFilter(_recentsRuns);
     const starred = _recentsStarred();
-    if (!filtered.length) {
+    if (!_recentsRuns.length) {
       const empty = document.createElement('div');
       empty.className = 'sheet-item';
       empty.style.color = 'var(--muted)';
       empty.style.opacity = '0.7';
       empty.style.justifyContent = 'center';
       empty.style.alignItems = 'center';
-      empty.textContent = _recentsSearchQuery ? 'no matches' : 'no recent commands';
+      empty.textContent = _recentsHasActiveFilters() ? 'no matches' : 'no recent commands';
       recentsSheetList.appendChild(empty);
+      _recentsRenderPagination(0);
       return;
     }
-    filtered.forEach(run => {
+    _recentsRuns.forEach(run => {
       const cmd = run.command || '';
       const isStarred = starred.has(cmd);
       const item = document.createElement('div');
@@ -539,6 +618,7 @@
             try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
           }
           _recentsRenderList();
+          if (_recentsFilterState.starred) _recentsRefresh();
         },
       });
       const cmdEl = document.createElement('span');
@@ -603,13 +683,32 @@
 
       recentsSheetList.appendChild(item);
     });
+    _recentsRenderPagination(_recentsRuns.length);
   }
-  function _recentsFetch() {
+  function _recentsRefresh() {
     if (typeof global.apiFetch !== 'function') return Promise.resolve([]);
-    return global.apiFetch('/history')
+    return global.apiFetch(_recentsBuildHistoryRequestUrl())
       .then(r => r.json())
-      .then(data => Array.isArray(data.runs) ? data.runs : [])
-      .catch(() => []);
+      .then(data => {
+        _recentsPaging.page = Math.max(1, Number(data.page) || _recentsPaging.page || 1);
+        _recentsPaging.pageSize = Math.max(1, Number(data.page_size) || _recentsPaging.pageSize || 1);
+        _recentsPaging.totalCount = Math.max(0, Number(data.total_count ?? data.runs?.length ?? 0) || 0);
+        _recentsPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
+        _recentsPaging.hasPrev = !!data.has_prev;
+        _recentsPaging.hasNext = !!data.has_next;
+        _recentsRuns = Array.isArray(data.runs) ? data.runs : [];
+        _recentsRenderList();
+        return _recentsRuns;
+      })
+      .catch(() => {
+        _recentsRuns = [];
+        _recentsPaging.totalCount = 0;
+        _recentsPaging.pageCount = 0;
+        _recentsPaging.hasPrev = false;
+        _recentsPaging.hasNext = false;
+        _recentsRenderList();
+        return [];
+      });
   }
   function showRecentsSheet() {
     if (!recentsSheet) return;
@@ -623,15 +722,13 @@
     _recentsFilterState.exit = 'all';
     _recentsFilterState.date = 'all';
     _recentsFilterState.starred = false;
+    _recentsPaging.page = 1;
     if (recentsFiltersToggle) recentsFiltersToggle.setAttribute('aria-expanded', 'false');
     if (recentsFiltersExpanded) recentsFiltersExpanded.classList.add('u-hidden');
     _recentsSyncFilterUI();
     show(recentsSheetScrim);
     show(recentsSheet);
-    _recentsFetch().then(runs => {
-      _recentsRuns = runs;
-      _recentsRenderList();
-    });
+    _recentsRefresh();
   }
   function closeRecentsSheet() {
     _closeRecentsDropdowns();
@@ -667,10 +764,7 @@
     global.refreshHistoryPanel = function wrappedRefreshHistoryPanel(...args) {
       const result = _origRefreshHistoryPanel.apply(this, args);
       if (isRecentsSheetOpen()) {
-        _recentsFetch().then(runs => {
-          _recentsRuns = runs;
-          _recentsRenderList();
-        });
+        _recentsRefresh();
       }
       return result;
     };
@@ -680,8 +774,17 @@
   recentsSheetSearch?.addEventListener('input', (e) => {
     _recentsSearchQuery = e.target.value || '';
     if (_recentsSearchTimer) clearTimeout(_recentsSearchTimer);
-    _recentsSearchTimer = setTimeout(_recentsRenderList, 100);
+    _recentsSearchTimer = setTimeout(() => {
+      _recentsPaging.page = 1;
+      _recentsRefresh();
+    }, 100);
   });
+
+  recentsSheetList?.addEventListener('touchmove', () => {
+    if (recentsSheetSearch && document.activeElement === recentsSheetSearch) {
+      recentsSheetSearch.blur();
+    }
+  }, { passive: true });
 
   // Drag/tap/keyboard close behavior is provided by the shared bindMobileSheet
   // helper (see app/static/js/mobile_sheet.js) so the recents sheet matches
@@ -697,7 +800,6 @@
   const recentsFilterStarred   = recentsSheet?.querySelector('[data-recents-filter="starred"]') || null;
   const recentsDropdowns       = Array.from(recentsSheet?.querySelectorAll('[data-recents-dropdown]') || []);
   const recentsChipsEl         = document.getElementById('mobile-recents-chips');
-
   const _dropdownLabels = {
     exit: { all: 'all', success: 'success (0)', failed: 'failed (non-zero)' },
     date: { all: 'all', today: 'today', week: 'this week' },
@@ -715,7 +817,8 @@
     if (key === 'date')    _recentsFilterState.date = 'all';
     if (key === 'starred') _recentsFilterState.starred = false;
     _recentsSyncFilterUI();
-    _recentsRenderList();
+    _recentsPaging.page = 1;
+    _recentsRefresh();
   }
 
   function _renderRecentsChips() {
@@ -803,7 +906,8 @@
     if (_recentsRootTimer) clearTimeout(_recentsRootTimer);
     _recentsRootTimer = setTimeout(() => {
       _recentsSyncFilterUI();
-      _recentsRenderList();
+      _recentsPaging.page = 1;
+      _recentsRefresh();
     }, 100);
   });
 
@@ -822,7 +926,8 @@
         wrap.classList.remove('open');
         trigger?.setAttribute('aria-expanded', 'false');
         _recentsSyncFilterUI();
-        _recentsRenderList();
+        _recentsPaging.page = 1;
+        _recentsRefresh();
       });
     });
   });
@@ -846,7 +951,8 @@
       onActivate: () => {
         _recentsFilterState.starred = !_recentsFilterState.starred;
         _recentsSyncFilterUI();
-        _recentsRenderList();
+        _recentsPaging.page = 1;
+        _recentsRefresh();
       },
     });
   }
@@ -859,9 +965,10 @@
         _recentsFilterState.exit = 'all';
         _recentsFilterState.date = 'all';
         _recentsFilterState.starred = false;
+        _recentsPaging.page = 1;
         _closeRecentsDropdowns();
         _recentsSyncFilterUI();
-        _recentsRenderList();
+        _recentsRefresh();
       },
     });
   }

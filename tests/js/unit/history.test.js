@@ -309,7 +309,7 @@ describe('command history hydration', () => {
       {
         document,
         localStorage: new MemoryStorage(),
-        APP_CONFIG: { recent_commands_limit: 8 },
+        APP_CONFIG: { recent_commands_limit: 8, history_panel_limit: 8 },
         histRow: document.getElementById('history-row'),
         cmdInput: document.getElementById('cmd'),
         historyPanel: document.getElementById('history-panel'),
@@ -413,6 +413,10 @@ describe('history panel actions', () => {
       <button id="history-clear-filters"></button>
       <div id="history-active-filters" class="u-hidden"></div>
       <div id="history-list"></div>
+      <div id="history-pagination" class="u-hidden">
+        <div id="history-pagination-summary"></div>
+        <div id="history-pagination-controls"></div>
+      </div>
       <div id="history-load-overlay"></div>
       <div id="confirm-host" class="modal-overlay u-hidden">
         <div class="modal-card modal-card-compact" data-confirm-card>
@@ -430,7 +434,7 @@ describe('history panel actions', () => {
     const apiFetch =
       apiFetchImpl ||
       vi.fn((url) => {
-        if (url === '/history') {
+        if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
           return Promise.resolve({
             json: () =>
               Promise.resolve({
@@ -484,6 +488,9 @@ describe('history panel actions', () => {
     const historyStarredToggle = document.getElementById('history-starred-toggle')
     const historyClearFiltersBtn = document.getElementById('history-clear-filters')
     const historyActiveFilters = document.getElementById('history-active-filters')
+    const historyPagination = document.getElementById('history-pagination')
+    const historyPaginationSummary = document.getElementById('history-pagination-summary')
+    const historyPaginationControls = document.getElementById('history-pagination-controls')
     const cmdInput = document.getElementById('cmd')
     const location = { origin: 'https://example.test' }
     const windowOpen = vi.fn()
@@ -494,7 +501,7 @@ describe('history panel actions', () => {
         {
           document,
           localStorage: new MemoryStorage(),
-          APP_CONFIG: { recent_commands_limit: 8 },
+          APP_CONFIG: { recent_commands_limit: 8, history_panel_limit: 8 },
           apiFetch,
           navigator: { clipboard },
           location,
@@ -510,10 +517,13 @@ describe('history panel actions', () => {
           historyDateFilter,
           historyStarredToggle,
           historyClearFiltersBtn,
-          historyActiveFilters,
-          histRow: document.createElement('div'),
-          showConfirm: vi.fn(() => Promise.resolve(null)),
-          cmdInput,
+        historyActiveFilters,
+        historyPagination,
+        historyPaginationSummary,
+        historyPaginationControls,
+        histRow: document.createElement('div'),
+        showConfirm: vi.fn(() => Promise.resolve(null)),
+        cmdInput,
           tabs,
           activateTab,
           createTab,
@@ -539,13 +549,15 @@ describe('history panel actions', () => {
           },
           refocusComposerAfterAction: vi.fn(() => false),
         },
-        `{
+      `{
         refreshHistoryPanel,
         executeHistAction,
         confirmHistAction,
         clearHistoryFilters,
         _buildHistoryRequestUrl,
         _setHistoryFilter,
+        _historySetPage,
+        _historyPageWindow,
         _historyRelativeTime,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
@@ -805,12 +817,97 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(_buildHistoryRequestUrl()).toBe(
-      '/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
+      '/history?page=1&page_size=8&include_total=1&q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
     )
     expect(apiFetch).toHaveBeenLastCalledWith(
-      '/history?q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
+      '/history?page=1&page_size=8&include_total=1&q=dig&command_root=nmap&exit_code=nonzero&date_range=7d',
     )
     expect(typeof refreshHistoryPanel).toBe('function')
+  })
+
+  it('refreshHistoryPanel renders pagination controls and advances to the next page', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        const page = new URL(url, 'https://example.test').searchParams.get('page') || '1'
+        if (page === '2') {
+          return Promise.resolve({
+            json: () =>
+              Promise.resolve({
+                page: 2,
+                page_size: 8,
+                total_count: 9,
+                page_count: 2,
+                has_prev: true,
+                has_next: false,
+                roots: ['dig', 'ping'],
+                runs: [
+                  {
+                    id: 'run-2',
+                    command: 'dig darklab.sh A',
+                    started: '2026-01-01T00:01:00Z',
+                    exit_code: 0,
+                  },
+                ],
+              }),
+          })
+        }
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              page: 1,
+              page_size: 8,
+              total_count: 9,
+              page_count: 2,
+              has_prev: false,
+              has_next: true,
+              roots: ['dig', 'ping'],
+              runs: [
+                {
+                  id: 'run-1',
+                  command: 'ping darklab.sh',
+                  started: '2026-01-01T00:00:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+
+    const { refreshHistoryPanel } = loadHistoryPanel({ apiFetchImpl: apiFetch })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(document.getElementById('history-pagination-summary').textContent).toBe(
+      'Showing 1-1 of 9 stored runs',
+    )
+    expect(document.querySelector('#history-pagination-controls [data-page="2"]')).not.toBeNull()
+
+    document.querySelector('#history-pagination-controls [data-page="2"]').click()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(apiFetch).toHaveBeenLastCalledWith(
+      '/history?page=2&page_size=8&include_total=1',
+    )
+    expect(document.getElementById('history-pagination-summary').textContent).toBe(
+      'Showing 9-9 of 9 stored runs',
+    )
+    expect([...document.querySelectorAll('#history-list .history-entry-cmd')].map((el) => el.textContent))
+      .toEqual(['dig darklab.sh A'])
+  })
+
+  it('_historyPageWindow keeps a three-page window with ellipses around the edges', () => {
+    const { _historyPageWindow } = loadHistoryPanel()
+
+    expect(_historyPageWindow(1, 1)).toEqual([1])
+    expect(_historyPageWindow(2, 3)).toEqual([1, 2, 3])
+    expect(_historyPageWindow(1, 6)).toEqual([1, 2, 3, 4, '..', 6])
+    expect(_historyPageWindow(3, 20)).toEqual([1, 2, 3, 4, '..', 20])
+    expect(_historyPageWindow(4, 6)).toEqual([1, '..', 3, 4, 5, 6])
+    expect(_historyPageWindow(18, 20)).toEqual([1, '..', 17, 18, 19, 20])
+    expect(_historyPageWindow(6, 6)).toEqual([1, '..', 3, 4, 5, 6])
   })
 
   it('populates command root suggestions from loaded history runs', async () => {
@@ -996,7 +1093,7 @@ describe('history panel actions', () => {
     removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(_buildHistoryRequestUrl()).toBe('/history?q=dig')
+    expect(_buildHistoryRequestUrl()).toBe('/history?page=1&page_size=8&include_total=1&q=dig')
     expect(document.getElementById('history-root-input').value).toBe('')
   })
 
@@ -1059,33 +1156,34 @@ describe('history panel actions', () => {
     expect(toggleBtn.textContent).toBe('filters (3)')
   })
 
-  it('refreshHistoryPanel applies the starred-only filter client-side', async () => {
-    const { _saveStarred } = loadHistoryPanel({
-      apiFetchImpl: vi.fn((url) => {
-        if (url === '/history') {
-          return Promise.resolve({
-            json: () =>
-              Promise.resolve({
-                runs: [
-                  {
-                    id: 'run-1',
-                    command: 'ping darklab.sh',
-                    started: '2026-01-01T00:00:00Z',
-                    exit_code: 0,
-                  },
-                  {
-                    id: 'run-2',
-                    command: 'dig darklab.sh A',
-                    started: '2026-01-01T00:01:00Z',
-                    exit_code: 0,
-                  },
-                ],
-              }),
-          })
-        }
-        return Promise.resolve({ json: () => Promise.resolve({}) })
-      }),
+  it('refreshHistoryPanel sends starred-only as a server-side filter', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
+        expect(url).toContain('starred_only=1')
+        return Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              page: 1,
+              page_size: 8,
+              total_count: 1,
+              page_count: 1,
+              has_prev: false,
+              has_next: false,
+              roots: ['dig'],
+              runs: [
+                {
+                  id: 'run-2',
+                  command: 'dig darklab.sh A',
+                  started: '2026-01-01T00:01:00Z',
+                  exit_code: 0,
+                },
+              ],
+            }),
+        })
+      }
+      return Promise.resolve({ json: () => Promise.resolve({}) })
     })
+    const { _saveStarred } = loadHistoryPanel({ apiFetchImpl: apiFetch })
 
     _saveStarred(new Set(['dig darklab.sh A']))
     document.getElementById('history-starred-toggle').checked = true
@@ -1098,6 +1196,9 @@ describe('history panel actions', () => {
       (el) => el.textContent,
     )
     expect(entries).toEqual(['dig darklab.sh A'])
+    expect(document.getElementById('history-pagination-summary').textContent).toBe(
+      'Showing 1-1 of 1 stored run',
+    )
   })
 
   it('clearHistoryFilters resets the drawer controls and the request URL', async () => {
@@ -1126,7 +1227,7 @@ describe('history panel actions', () => {
 
     clearHistoryFilters()
 
-    expect(_buildHistoryRequestUrl()).toBe('/history')
+    expect(_buildHistoryRequestUrl()).toBe('/history?page=1&page_size=8&include_total=1')
     expect(document.getElementById('history-search-input').value).toBe('')
     expect(document.getElementById('history-root-input').value).toBe('')
     expect(document.getElementById('history-exit-filter').value).toBe('all')
@@ -1161,7 +1262,7 @@ describe('history panel actions', () => {
 
   it('executeHistAction shows a failure toast when deleting a run fails', async () => {
     const apiFetch = vi.fn((url, options = {}) => {
-      if (url === '/history') {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
@@ -1200,7 +1301,7 @@ describe('history panel actions', () => {
 
   it('executeHistAction shows a failure toast when clearing non-favorite history fails', async () => {
     const apiFetch = vi.fn((url, options = {}) => {
-      if (url === '/history' && (!options.method || options.method === 'GET')) {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?')) && (!options.method || options.method === 'GET')) {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
@@ -1237,7 +1338,7 @@ describe('history panel actions', () => {
   it('shows and clears the history loading overlay while a run is being restored', async () => {
     let resolveRun
     const apiFetch = vi.fn((url) => {
-      if (url === '/history') {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
@@ -1288,7 +1389,7 @@ describe('history panel actions', () => {
 
   it('restores the full history payload when full output is available', async () => {
     const apiFetch = vi.fn((url) => {
-      if (url === '/history') {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
@@ -1344,7 +1445,7 @@ describe('history panel actions', () => {
 
   it('clears the history loading overlay and shows a failure toast when a restore fetch fails', async () => {
     const apiFetch = vi.fn((url) => {
-      if (url === '/history') {
+      if (typeof url === 'string' && (url === '/history' || url.startsWith('/history?'))) {
         return Promise.resolve({
           json: () =>
             Promise.resolve({

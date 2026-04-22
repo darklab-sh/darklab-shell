@@ -954,6 +954,88 @@ class TestHistoryRoute:
             conn.commit()
             conn.close()
 
+    def test_history_reports_totals_and_keeps_roots_complete_across_pages(self):
+        client = get_client()
+        session = "pagination-test-session"
+        run_ids = ["page-run-1", "page-run-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "nmap -sV darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?page=2&page_size=1&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["page"] == 2
+            assert data["page_size"] == 1
+            assert data["total_count"] == 2
+            assert data["page_count"] == 2
+            assert data["has_prev"] is True
+            assert data["has_next"] is False
+            assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+            assert data["roots"] == ["nmap", "dig"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_applies_starred_only_server_side(self):
+        client = get_client()
+        session = "starred-filter-session"
+        run_ids = ["star-run-1", "star-run-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "ping darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "dig darklab.sh A", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                (session, "dig darklab.sh A"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?starred_only=1&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["total_count"] == 1
+            assert data["page_count"] == 1
+            assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+            assert data["roots"] == ["dig"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.execute(
+                "DELETE FROM starred_commands WHERE session_id = ? AND command IN (?, ?)",
+                (session, "ping darklab.sh", "dig darklab.sh A"),
+            )
+            conn.commit()
+            conn.close()
+
     def test_history_search_filters_by_command_text(self):
         client = get_client()
         session = "history-search-session"
@@ -1009,7 +1091,7 @@ class TestHistoryRoute:
             resp = client.get("/history?command_root=nmap", headers={"X-Session-ID": session})
             data = json.loads(resp.data)
             assert [r["command"] for r in data["runs"]] == ["nmap -Pn darklab.sh", "nmap -sV darklab.sh"]
-            assert data["roots"] == ["dig", "nmap"]
+            assert data["roots"] == ["nmap"]
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
