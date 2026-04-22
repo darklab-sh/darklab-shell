@@ -50,6 +50,24 @@ All notable changes to darklab shell are documented here.
 
 ### Changed
 
+#### Mobile Sheets, Options Surface, and Navigation Cleanup
+
+- **Mobile sheets now share one structural contract instead of per-ID scaffolding** — the options, FAQ, workflows, shortcuts, and confirm surfaces now rely on shared `.mobile-sheet-overlay` / `.mobile-sheet-surface` structure plus mobile-specific overrides instead of each carrying its own overlay/surface boilerplate.
+  - **Why:** the old setup mixed shared modal rules with per-surface ID rules, which made mobile sheet regressions easy to introduce and left redundant CSS behind after the bottom-sheet refactor.
+  - **What:**
+    - `app/static/css/shell.css` now provides the common overlay/surface structure for mobile sheet-class surfaces.
+    - redundant per-ID overlay/surface scaffolding for FAQ / options / workflows was removed where it no longer carried unique behavior.
+    - `#theme-modal` remains intentionally outside the generic mobile-sheet geometry so the theme picker keeps its dedicated full-screen mobile layout.
+  - **Tests:** `tests/js/e2e/mobile.spec.js` now treats backdrop dismissal as the mobile-sheet close contract for FAQ / options / workflows instead of clicking visible `X` buttons.
+
+- **Mobile Options now hides desktop-only rows** — the `Run Notifications` and `HUD Clock` settings remain part of the shared Options modal, but are no longer rendered in the mobile sheet.
+  - **Why:** both settings are desktop-oriented. `HUD Clock` controls the desktop HUD `CLOCK` pill, and run notifications are meant for long-running desktop tabs that may lose foreground focus.
+  - **What:** the two rows now carry a shared `.options-desktop-only` marker in `app/templates/index.html`, and `app/static/css/mobile.css` hides that marker in mobile terminal mode.
+
+- **Options now appears before history in both visible navigation surfaces** — the desktop rail and the mobile menu overlay group were reordered so `options` precedes `history`.
+  - **Why:** the visible desktop navigation is the rail, not the old header-button row, and the mobile menu should match that order.
+  - **What:** `app/templates/index.html` now renders `options` before `history` in the mobile menu group and in the desktop rail. The legacy hidden header buttons were also reordered to stay consistent with the current desktop proxy wiring.
+
 #### UI Overhaul
 
 - **Desktop shell chrome rebuilt** — the desktop layout is now a single composed surface instead of a stack of unrelated bands.
@@ -863,6 +881,8 @@ All notable changes to darklab shell are documented here.
 - **Scroll to bottom on typing** — typing in either the desktop or mobile composer now immediately scrolls the active output to the bottom and resets `followOutput` to `true`. Previously, if the user had scrolled up to review output, typing did not return the view to the prompt.
 - **Mobile landscape orientation overlay** — a full-screen `#landscape-overlay` element is shown on touch devices in landscape orientation with a viewport height under 500px (phones, not tablets). The overlay uses `var(--bg)` and `var(--text-muted)` to follow the active theme and displays an animated rotate icon prompting the user to return to portrait. It is purely CSS-driven via `@media (orientation: landscape) and (pointer: coarse) and (max-height: 500px)` and requires no JavaScript.
 - **Mobile composer layout broken after app backgrounding** — returning to the browser after switching to another app (or the home screen) left the mobile composer and keyboard helper bar pinned near the top of the screen with a large gray gap. The OS closes the keyboard when the app is backgrounded, but on iOS the `visualViewport` `resize` event does not always fire on return, so the stale `mobile-keyboard-open` class and `--mobile-keyboard-offset` value persisted. A `visibilitychange` listener added to `bindMobileComposerKeyboardListeners` re-runs `syncMobileComposerKeyboard()` followed by `syncMobileViewportState()` after a 50 ms settle delay whenever the page transitions from hidden to visible. `syncMobileViewportState` calls `isMobileKeyboardOpen()` which returns `false` when the offset is at or below the baseline, clearing the stale class and restoring the correct layout.
+- **HUD clock "local" mode Playwright assertion fails on UTC CI runners** — the `options modal` e2e test asserted that switching the HUD clock to local mode produces a display string that does not contain `"UTC"`. CI runners whose system timezone is UTC negate that assumption: `_formatLocalClock` appends the short timezone label, which is `"UTC"` when local = UTC, so the assertion always failed on those machines even though the preference was correctly applied. The test now sets `timezoneId: 'America/New_York'` via `test.use` at the describe level so the local-clock label is always a non-UTC zone (`EST`/`EDT`), making the assertion environment-independent.
+  - **Tests:** no count change — this is a fix to an existing Playwright case, not a new test. Net suite total unchanged: 842 pytest + 666 Vitest + 197 Playwright = **1,705 tests**.
 
 ### Changed
 - **Composer state Phase 3** — focus and selection changes now publish directly into `composerState`, and the last hidden-input mirroring helper was removed. Mobile focus, desktop focus, and selectionchange events now update shared composer state instead of pushing DOM state from one input into the other.

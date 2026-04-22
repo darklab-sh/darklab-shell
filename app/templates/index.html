@@ -29,8 +29,8 @@
 <header>
   <h1><span id="header-title">{{ app_name }}</span></h1>
   <div class="header-btns" id="header-btns">
-    <button id="hist-btn" title="Run history (Alt+H)">⧖ history</button>
     <button id="options-btn" title="Display and preference options (Alt+,)">≡ options</button>
+    <button id="hist-btn" title="Run history (Alt+H)">⧖ history</button>
     <button id="theme-btn" title="Theme selector (Alt+Shift+T)">◑ theme</button>
     <button id="workflows-btn" title="Guided workflows (Alt+G)">⊡ workflows</button>
     <button id="faq-btn" title="Frequently asked questions (Alt+/)">? FAQ</button>
@@ -195,6 +195,11 @@
       <div class="menu-group-divider" aria-hidden="true"></div>
 
       <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="options">
+          <span class="menu-item-icon" aria-hidden="true">≡</span>
+          <span class="menu-item-label">options</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
         <button type="button" class="menu-item" data-menu-action="history">
           <span class="menu-item-icon" aria-hidden="true">⧖</span>
           <span class="menu-item-label">history</span>
@@ -205,11 +210,6 @@
           <span class="menu-item-icon" aria-hidden="true">⚙</span>
           <span class="menu-item-label">workflows</span>
           <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
-          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
-        </button>
-        <button type="button" class="menu-item" data-menu-action="options">
-          <span class="menu-item-icon" aria-hidden="true">≡</span>
-          <span class="menu-item-label">options</span>
           <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
         </button>
         <button type="button" class="menu-item" data-menu-action="theme">
@@ -276,8 +276,8 @@
     </div>
 
     <nav class="rail-nav" id="rail-nav">
-      <button class="rail-nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
       <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
       <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
       <button class="rail-nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
       <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
@@ -395,7 +395,7 @@
 </div>
 
 <!-- Run History panel -->
-<div id="history-panel">
+<div id="history-panel" class="mobile-sheet-surface">
   <div class="history-panel-header">
     <span class="history-panel-title">RUN HISTORY</span>
     <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">delete all</button>
@@ -459,8 +459,8 @@
 <!-- Shared confirmation-dialog host. Pre-minted once; showConfirm()
      populates the card on each open and resolves a promise with the
      chosen action id (or null for cancel). See ui_confirm.js. -->
-<div id="confirm-host" class="modal-overlay u-hidden">
-  <div class="modal-card modal-card-compact" data-confirm-card>
+<div id="confirm-host" class="modal-overlay mobile-sheet-overlay u-hidden">
+  <div class="modal-card modal-card-compact mobile-sheet-surface" data-confirm-card>
     <div class="modal-copy" data-confirm-body></div>
     <div class="modal-confirm-content" data-confirm-content></div>
     <div class="modal-actions modal-actions-wrap" data-confirm-actions></div>
@@ -468,8 +468,8 @@
 </div>
 
 <!-- Workflows Modal -->
-<div id="workflows-overlay">
-  <div id="workflows-modal">
+<div id="workflows-overlay" class="mobile-sheet-overlay">
+  <div id="workflows-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">WORKFLOWS</span>
       <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
@@ -479,8 +479,8 @@
 </div>
 
 <!-- FAQ Modal -->
-<div id="faq-overlay">
-  <div id="faq-modal">
+<div id="faq-overlay" class="mobile-sheet-overlay">
+  <div id="faq-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">FAQ</span>
       <button type="button" class="close-btn faq-close" aria-label="Close FAQ">✕</button>
@@ -490,8 +490,8 @@
 </div>
 
 <!-- Keyboard Shortcuts Overlay (triggered by `?`) -->
-<div id="shortcuts-overlay" aria-hidden="true">
-  <div id="shortcuts-modal" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+<div id="shortcuts-overlay" class="mobile-sheet-overlay" aria-hidden="true">
+  <div id="shortcuts-modal" class="mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
     <div class="faq-header">
       <span class="faq-title" id="shortcuts-title">KEYBOARD SHORTCUTS</span>
       <button type="button" class="close-btn shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
@@ -516,8 +516,8 @@
 </div>
 
 <!-- Options Modal -->
-<div id="options-overlay">
-  <div id="options-modal">
+<div id="options-overlay" class="mobile-sheet-overlay">
+  <div id="options-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">OPTIONS</span>
       <button type="button" class="close-btn options-close" aria-label="Close options">✕</button>
@@ -562,7 +562,7 @@
           </select>
         </div>
       </div>
-      <div class="faq-item">
+      <div class="faq-item options-desktop-only">
         <div class="faq-q">Run Notifications</div>
         <div class="faq-a form-fieldset">
           <label class="form-check">
@@ -571,7 +571,7 @@
           </label>
         </div>
       </div>
-      <div class="faq-item">
+      <div class="faq-item options-desktop-only">
         <div class="faq-q">HUD Clock</div>
         <div class="faq-a">
           <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">

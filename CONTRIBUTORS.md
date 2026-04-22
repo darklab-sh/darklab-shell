@@ -15,6 +15,10 @@ Key references for contributors:
 - [DECISIONS.md](DECISIONS.md) — architectural rationale, known gotchas, and implementation history
 - [tests/README.md](tests/README.md) — test suite handbook and full appendix
 
+Current implementation note:
+
+- The desktop rail is the visible desktop navigation surface, but some rail actions still proxy through legacy hidden header button IDs so older controller wiring can be reused. That desktop-only indirection is tracked as technical debt in [TODO.md](TODO.md).
+
 ---
 
 ## Acknowledgements

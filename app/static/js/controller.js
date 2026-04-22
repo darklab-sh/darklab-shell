@@ -501,8 +501,8 @@ document.getElementById('options-session-token-set-btn')?.addEventListener('clic
   input.id = 'session-token-set-input';
   input.className = 'options-token-input modal-token-input';
   input.placeholder = 'tok_... or UUID';
-  if (typeof global.applyMobileTextInputDefaults === 'function') {
-    global.applyMobileTextInputDefaults(input);
+  if (typeof applyMobileTextInputDefaults === 'function') {
+    applyMobileTextInputDefaults(input);
   } else {
     input.autocomplete = 'off';
     input.autocapitalize = 'none';

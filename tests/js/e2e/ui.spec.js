@@ -158,6 +158,12 @@ test.describe('workflows modal', () => {
 })
 
 test.describe('options modal', () => {
+  // The HUD clock "local" mode formats using the browser's local timezone.
+  // CI runners are typically in UTC, which makes `not.toContainText('UTC')`
+  // fail even after switching to local mode (local = UTC on that machine).
+  // Pin a non-UTC zone so the assertion is environment-independent.
+  test.use({ timezoneId: 'America/New_York' })
+
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()

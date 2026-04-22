@@ -591,9 +591,9 @@ body.mobile-terminal-mode .output-follow-btn {
 
 /* ── Modals ── */
 .modal-overlay,
-#faq-overlay,
-#theme-overlay,
-#options-overlay {
+.mobile-sheet-overlay,
+#shortcuts-overlay,
+#theme-overlay {
   display: none;
   position: fixed;
   inset: 0;
@@ -603,14 +603,14 @@ body.mobile-terminal-mode .output-follow-btn {
   justify-content: center;
   backdrop-filter: blur(3px);
 }
-#faq-overlay.open,
-#theme-overlay.open,
-#options-overlay.open { display: flex; }
+.mobile-sheet-overlay.open,
+#shortcuts-overlay.open,
+#theme-overlay.open { display: flex; }
 
 .modal-card,
-#faq-modal,
-#theme-modal,
-#options-modal {
+.mobile-sheet-surface,
+#shortcuts-modal,
+#theme-modal {
   background: var(--theme-panel-bg);
   border: 1px solid var(--theme-panel-border);
   border-radius: 6px;
@@ -709,45 +709,6 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--green);
   letter-spacing: 2px;
   text-shadow: 0 0 16px var(--green-glow);
-}
-
-.faq-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-.faq-close:hover,
-.options-close:hover,
-.theme-close:hover { color: var(--text); }
-
-.options-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-
-.theme-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
 }
 
 .faq-body,
@@ -1340,6 +1301,7 @@ body.mobile-terminal-mode .output-follow-btn {
 body #output { color: var(--text); }
 body #faq-modal { background: var(--theme-faq-modal-bg); }
 body #options-modal { background: var(--theme-options-modal-bg); }
+body #workflows-modal { background: var(--theme-faq-modal-bg); }
 body .faq-a {
   color: var(--text);
 }
@@ -1419,14 +1381,9 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 }
 #shortcuts-overlay.open { display: flex; }
 #shortcuts-modal {
-  background: var(--theme-faq-modal-bg);
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 6px;
+  width: min(1150px, 92vw);
   width: min(1150px, 92vw);
   max-height: 82vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 24px 60px var(--theme-panel-shadow);
 }
 #shortcuts-modal .faq-header {
   cursor: default;
@@ -1491,41 +1448,9 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
 .shortcuts-close:hover { color: var(--green); }
 
 /* ── Workflows overlay & modal ────────────────────────────────────── */
-#workflows-overlay {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: var(--theme-overlay-backdrop-bg);
-  z-index: 320;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(3px);
-}
-#workflows-overlay.open { display: flex; }
-
 #workflows-modal {
   width: min(960px, 92vw);
-  background: var(--theme-faq-modal-bg);
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 6px;
-  max-height: 85vh;
-  display: flex;
-  flex-direction: column;
-  box-shadow: 0 24px 60px var(--theme-panel-shadow);
 }
-
-.workflows-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-.workflows-close:hover { color: var(--text); }
 
 /* ── Workflow cards ───────────────────────────────────────────────── */
 .workflow-card {

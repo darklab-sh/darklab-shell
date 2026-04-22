@@ -313,6 +313,20 @@ The key architectural decision here is negative: the app no longer tries to outs
 
 This keeps the mobile surface structured without needing a separate frontend bundle or framework split, while preserving the simplified layout that fixed the Firefox mobile issue.
 
+### Shared Mobile Sheet Contract
+
+**Mobile sheets use one structural contract (`.mobile-sheet-overlay` + `.mobile-sheet-surface`) and close through backdrop / grab / Escape, not per-surface `X` buttons.**
+
+Options, FAQ, workflows, shortcuts, and confirmation surfaces had accumulated a mix of per-ID overlay rules and surface-specific close affordances. That made regressions easy: one sheet could still behave like a centered modal while another rendered as a bottom sheet, and hiding `X` buttons on mobile had to be remembered per surface. The current contract centralizes the structural part of mobile sheets in shared selectors and treats dismissal as a behavior contract rather than a per-surface decoration: backdrop tap, drag/grab handling where applicable, and Escape all route through the same dismissal helpers, while the visible `X` is removed from mobile sheet UIs.
+
+The theme selector is the deliberate exception. It keeps a dedicated full-screen mobile treatment because its grouped theme preview grid is denser than the other sheet-style surfaces and benefits from using the full viewport.
+
+### Desktop-Only Options Stay Out Of The Mobile Sheet
+
+**The Options modal is shared across device classes, but the mobile sheet hides settings whose effect is desktop-specific (`HUD Clock`, `Run Notifications`).**
+
+Not every preference belongs equally on every surface. `HUD Clock` controls the desktop HUD `CLOCK` pill, and run notifications are treated as a desktop-oriented “tab not in focus” affordance rather than a core mobile workflow. Leaving both rows visible on mobile made the Options sheet noisier without adding useful handheld behavior. The underlying preferences still live in the same cookie-backed frontend layer, but the mobile presentation now omits those rows so the sheet stays focused on settings that matter on phones.
+
 ### Button Primitive Family
 
 **Every pressable surface in the shell uses one of a small, allowlisted set of primitive classes (`.btn` with role + tone modifiers; `.nav-item`, `.close-btn`, `.toggle-btn`, `.kb-key`) rather than one-off component CSS.**

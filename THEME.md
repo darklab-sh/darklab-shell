@@ -368,6 +368,8 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `mobile_menu_button_hover_bg` | `var(--green-glow)` | `var(--bg)` | Mobile menu button hover background |
 | `mobile_menu_button_hover_text` | `#39ff14` | `#101820` | Mobile menu button hover text |
 
+Theme authors should also know that not every mobile overlay uses the same geometry. Options / FAQ / workflows / shortcuts now share the generic mobile sheet contract, but the theme selector intentionally keeps its dedicated full-screen mobile treatment so the grouped preview cards have enough space. Theme tokens still flow into both categories through the same surface variables; only the layout contract differs.
+
 ### Welcome and Onboarding
 
 | Key | Dark default | Light default | Used for |

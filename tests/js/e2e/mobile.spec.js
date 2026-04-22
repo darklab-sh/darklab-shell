@@ -421,14 +421,14 @@ test.describe('mobile menu', () => {
     await page.locator('#mobile-menu-sheet [data-menu-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
-    await page.locator('#faq-overlay .faq-close').click()
+    await page.locator('#faq-overlay').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
 
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
 
-    await page.locator('#options-overlay .options-close').click()
+    await page.locator('#options-overlay').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#options-overlay')).not.toHaveClass(/open/)
   })
 
@@ -581,8 +581,8 @@ test.describe('mobile menu', () => {
       async () => page.locator('#workflows-modal').evaluate(el => el.style.transform || ''),
     ).toContain('translateY')
 
-    // External close: click the X. The drag's pointerup never fires.
-    await page.locator('#workflows-modal .workflows-close').click()
+    // External close: dismiss via backdrop. The drag's pointerup never fires.
+    await page.locator('#workflows-overlay').click({ position: { x: 10, y: 10 } })
     await expect(page.locator('#workflows-modal')).toBeHidden()
 
     // Inline transform must be scrubbed before the next open so the modal

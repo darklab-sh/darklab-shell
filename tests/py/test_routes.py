@@ -115,6 +115,25 @@ class TestHealthRoute:
         assert data["redis"] is False
 
 
+# ── /log ──────────────────────────────────────────────────────────────────────
+
+class TestClientLogRoute:
+    def test_accepts_client_error_payload(self):
+        client = get_client()
+        with mock.patch.object(shell_assets.log, "warning") as mock_warning:
+            resp = client.post("/log", json={
+                "context": "session-token set",
+                "message": "ReferenceError: global is not defined",
+            })
+        assert resp.status_code == 200
+        assert resp.get_json() == {"ok": True}
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args[0][0] == "CLIENT_ERROR"
+        extra = mock_warning.call_args.kwargs["extra"]
+        assert extra["context"] == "session-token set"
+        assert extra["client_message"] == "ReferenceError: global is not defined"
+
+
 # ── /status ───────────────────────────────────────────────────────────────────
 
 class TestStatusRoute:

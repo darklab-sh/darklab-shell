@@ -51,7 +51,7 @@ def client_log():
         "ip": get_client_ip(),
         "session": get_session_id(),
         "context": context,
-        "message": message,
+        "client_message": message,
     })
     return jsonify({"ok": True})
 

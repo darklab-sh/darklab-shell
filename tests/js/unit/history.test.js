@@ -557,7 +557,6 @@ describe('history panel actions', () => {
         _buildHistoryRequestUrl,
         _setHistoryFilter,
         _historySetPage,
-        _historyPageWindow,
         _historyRelativeTime,
         resetHistoryMobileFilters,
         toggleHistoryMobileFilters,
@@ -883,9 +882,10 @@ describe('history panel actions', () => {
     expect(document.getElementById('history-pagination-summary').textContent).toBe(
       'Showing 1-1 of 9 stored runs',
     )
-    expect(document.querySelector('#history-pagination-controls [data-page="2"]')).not.toBeNull()
+    expect(document.querySelector('#history-pagination-controls .history-pagination-status')?.textContent)
+      .toBe('Page 1 of 2')
 
-    document.querySelector('#history-pagination-controls [data-page="2"]').click()
+    document.querySelector('#history-pagination-controls [aria-label="Next page"]').click()
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(apiFetch).toHaveBeenLastCalledWith(
@@ -894,20 +894,10 @@ describe('history panel actions', () => {
     expect(document.getElementById('history-pagination-summary').textContent).toBe(
       'Showing 9-9 of 9 stored runs',
     )
+    expect(document.querySelector('#history-pagination-controls .history-pagination-status')?.textContent)
+      .toBe('Page 2 of 2')
     expect([...document.querySelectorAll('#history-list .history-entry-cmd')].map((el) => el.textContent))
       .toEqual(['dig darklab.sh A'])
-  })
-
-  it('_historyPageWindow keeps a three-page window with ellipses around the edges', () => {
-    const { _historyPageWindow } = loadHistoryPanel()
-
-    expect(_historyPageWindow(1, 1)).toEqual([1])
-    expect(_historyPageWindow(2, 3)).toEqual([1, 2, 3])
-    expect(_historyPageWindow(1, 6)).toEqual([1, 2, 3, 4, '..', 6])
-    expect(_historyPageWindow(3, 20)).toEqual([1, 2, 3, 4, '..', 20])
-    expect(_historyPageWindow(4, 6)).toEqual([1, '..', 3, 4, 5, 6])
-    expect(_historyPageWindow(18, 20)).toEqual([1, '..', 17, 18, 19, 20])
-    expect(_historyPageWindow(6, 6)).toEqual([1, '..', 3, 4, 5, 6])
   })
 
   it('populates command root suggestions from loaded history runs', async () => {

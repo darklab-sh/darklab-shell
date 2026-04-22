@@ -3344,6 +3344,20 @@ describe('app helpers', () => {
     }
   })
 
+  it('opens the session-token set confirm without relying on a Node global binding', async () => {
+    const showConfirm = vi.fn().mockResolvedValue(null)
+    const originalGlobal = globalThis.global
+
+    try {
+      globalThis.global = undefined
+      await loadAppFns({ showConfirm })
+      document.getElementById('options-session-token-set-btn').click()
+      await vi.waitFor(() => expect(showConfirm).toHaveBeenCalledTimes(1))
+    } finally {
+      globalThis.global = originalGlobal
+    }
+  })
+
   it('aborts generated-token activation when the migration prompt is dismissed', async () => {
     const updateSessionId = vi.fn()
     const showToast = vi.fn()

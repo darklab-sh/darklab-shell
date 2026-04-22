@@ -512,7 +512,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 **Full-text search:** the history drawer supports full-text search across command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only. The search field placeholder reads "search commands and output". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete, and row actions keep the drawer open so you can work through multiple entries without repeated reopen churn.
 
-On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (history, workflows, options, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
+On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, workflows, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
 ---
 
@@ -602,7 +602,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - **Output follow** — when the keyboard opens, the active output re-sticks to the bottom so the last line stays visible.
 - **Stable layout** — the mobile shell uses a normal-flow layout that avoids Firefox keyboard flash, gap, and floating-composer regressions.
 - **Shared state** — desktop and mobile Run buttons stay in sync: both disable together for blank prompts and running tabs.
-- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (history, workflows, options, theme, FAQ, diag) that opens full-screen surfaces. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
+- The **☰** menu in the top-right header opens a bottom-sheet with two grouped sections: a **session** group (search, clear, line numbers toggle, timestamps picker) that affects the current terminal in place, and an **overlays** group (options, history, workflows, theme, FAQ, diag). The sheet closes through the backdrop, Escape, or the shared grab/drag contract rather than a visible `X` button. `clear` wipes the active tab's output while preserving its run state; `line numbers` is a single on/off row; `timestamps` expands inline into a three-mode picker (off / elapsed / clock). The history drawer's advanced filters stay behind a dedicated `filters` toggle to preserve result space.
 
 **Limits:** the diag entry appears only for clients whose IP matches `diagnostics_allowed_cidrs`. The mobile layout activates on touch-sized viewports — desktop browsers at narrow widths keep the desktop chrome.
 
@@ -841,10 +841,10 @@ wget -q -O /dev/null --server-response https://example.com
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
-- The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time.
+- The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
 - The welcome-intro setting controls whether the welcome animation plays on first tab: full animated sequence, instant settle, or no welcome tab at all.
 - The share-snapshot redaction setting selects the default redaction choice (prompt / redacted / raw) so the share prompt is skipped once a preference is saved.
-- Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast.
+- Run notifications fire a browser desktop notification each time a run exits or is killed; the title shows only the command root (`$ curl`) and the body shows exit code and elapsed time. Enabling triggers the native permission prompt; if notifications are blocked, the toggle reverts with a toast. This toggle is intentionally hidden from the mobile Options sheet because the feature is treated as desktop-oriented chrome behavior.
 - Preferences are stored in browser cookies and applied on every page load; they persist across sessions on the same device.
 
 **Limits:** preferences are per-browser (not synced across devices); clearing cookies reverts to defaults. Blocked notification permission cannot be re-prompted by the toggle — it must be re-enabled in browser settings.
@@ -855,10 +855,10 @@ wget -q -O /dev/null --server-response https://example.com
 |---------|---------|-------------|
 | **Timestamps** | Off / Elapsed / Clock | Timestamp mode for output lines. Equivalent to the tabbar quick toggle |
 | **Line Numbers** | on / off | Sequential line numbers beside output and the live prompt. Equivalent to the tabbar toggle |
-| **HUD Clock** | UTC / Local Time | Timezone mode for the desktop HUD `CLOCK` pill |
+| **HUD Clock** | UTC / Local Time | Timezone mode for the desktop HUD `CLOCK` pill; shown on desktop, hidden from the mobile Options sheet |
 | **Welcome Intro** | Animated / Disable Animation / Remove Completely | Welcome animation behavior on first tab |
 | **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Default redaction choice for snapshot sharing |
-| **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time |
+| **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time; shown on desktop, hidden from the mobile Options sheet |
 
 **Related files:** `app/static/js/shell_chrome.js` (Options modal rendering + tabbar sync), `app/static/js/mobile_chrome.js` (mobile menu wiring), `app/static/js/notifications.js` (permission + notification dispatch).
 

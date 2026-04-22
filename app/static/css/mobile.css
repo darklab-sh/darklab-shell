@@ -548,30 +548,27 @@
      mirrors the kill-button move above. */
   body.mobile-terminal-mode .terminal-actions [data-action="clear"] { display: none !important; }
 
-  /* Mobile overlays: bottom sheet layout for FAQ and options */
-  body.mobile-terminal-mode #workflows-overlay,
-  body.mobile-terminal-mode #faq-overlay,
-  body.mobile-terminal-mode #theme-overlay,
-  body.mobile-terminal-mode #options-overlay {
-    align-items: flex-end;
-    justify-content: stretch;
+  /* Mobile sheet contract: overlay wrappers opt into bottom-sheet alignment
+     via .mobile-sheet-overlay instead of per-surface ID selectors. */
+  body.mobile-terminal-mode .mobile-sheet-overlay,
+  body.mobile-terminal-mode .mobile-sheet-overlay.open,
+  body.mobile-terminal-mode #theme-overlay {
+    align-items: flex-end !important;
+    justify-content: stretch !important;
   }
   body.mobile-terminal-mode #theme-overlay {
     align-items: stretch;
     justify-content: stretch;
   }
-  body.mobile-terminal-mode #workflows-modal,
-  body.mobile-terminal-mode #faq-modal,
-  body.mobile-terminal-mode #theme-modal,
-  body.mobile-terminal-mode #options-modal,
+  body.mobile-terminal-mode .mobile-sheet-surface,
   body.mobile-terminal-mode .modal-card-compact {
-    width: 100%;
-    max-width: 100%;
-    border-radius: 14px 14px 0 0;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    max-height: 88svh;
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 14px 14px 0 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-bottom: none !important;
+    max-height: 88svh !important;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
   body.mobile-terminal-mode .modal-card-compact {
@@ -583,6 +580,14 @@
     border-radius: 14px;
     margin: 0 auto 12px;
     padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .mobile-sheet-surface .close-btn {
+    display: none !important;
+  }
+  body.mobile-terminal-mode .modal-token-input,
+  body.mobile-terminal-mode .options-token-input {
+    font-size: 16px;
+    line-height: 1.35;
   }
   body.mobile-terminal-mode #theme-modal {
     align-self: stretch;
@@ -607,10 +612,8 @@
     overflow-x: hidden;
     -webkit-overflow-scrolling: touch;
   }
-  body.mobile-terminal-mode #workflows-modal::before,
-  body.mobile-terminal-mode #faq-modal::before,
+  body.mobile-terminal-mode .mobile-sheet-surface::before,
   body.mobile-terminal-mode #theme-modal::before,
-  body.mobile-terminal-mode #options-modal::before,
   body.mobile-terminal-mode .modal-card-compact::before {
     display: none;
   }
@@ -677,18 +680,15 @@
     font-size: 12px;
   }
   body.mobile-terminal-mode .history-pagination-controls {
-    justify-content: flex-start;
+    grid-template-columns: max-content minmax(96px, auto) max-content;
   }
   body.mobile-terminal-mode .history-pagination-controls > .btn {
-    min-height: 34px;
-    font-size: 12px;
-  }
-  body.mobile-terminal-mode .history-pagination-controls > .btn.history-pagination-chevron {
-    font-size: 20px;
-    line-height: 1;
-  }
-  body.mobile-terminal-mode .history-pagination-ellipsis {
+    min-height: 26px;
     font-size: 10px;
+  }
+  body.mobile-terminal-mode .history-pagination-status {
+    font-size: 11px;
+    min-width: 96px;
   }
   body.mobile-terminal-mode .history-panel-filters input,
   body.mobile-terminal-mode .history-panel-filters select,
@@ -752,6 +752,9 @@
   body.mobile-terminal-mode .theme-picker-group-grid {
     grid-template-columns: repeat(var(--theme-picker-columns-mobile, 1), minmax(0, 1fr));
     gap: 10px;
+  }
+  body.mobile-terminal-mode .options-desktop-only {
+    display: none;
   }
   body.mobile-terminal-mode .theme-card {
     min-height: 176px;

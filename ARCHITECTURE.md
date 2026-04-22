@@ -258,7 +258,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, and the HUD clock timezone mode all sit in the frontend layer rather than in `config.yaml`.
+The options modal is part of that same browser-owned layer. It does not change backend config; it only persists per-browser UX preferences in cookies and feeds them back into the classic-script runtime during boot. That is why timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, and the HUD clock timezone mode all sit in the frontend layer rather than in `config.yaml`. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying cookie-backed preferences remain part of the same frontend-owned layer.
 
 ### Browser Runtime
 
@@ -266,11 +266,11 @@ Modular frontend with no build step. `index.html` is the HTML shell — no inlin
 
 **CSS composition.** CSS is split across ordered static files under `static/css/`, with `styles.css` acting as the compatibility entrypoint that imports `base.css`, `shell.css`, `components.css`, `welcome.css`, `shell-chrome.css`, and `mobile.css`.
 
-**Desktop shell chrome.** `shell-chrome.css` and its companion `static/js/shell_chrome.js` own the left rail (app title, recent commands, workflows, history, options, theme, FAQ, diag, version footer), the tabbar row, and the bottom HUD bar (eleven live status pills — STATUS, LAST EXIT, TABS, TRANSPORT, LATENCY, MODE, SESSION, UPTIME, CLOCK, DB, REDIS — plus the `share snapshot / copy / save ▾ / clear` actions and the kill button).
+**Desktop shell chrome.** `shell-chrome.css` and its companion `static/js/shell_chrome.js` own the left rail (app title, recent commands, workflows, options, history, theme, FAQ, diag, version footer), the tabbar row, and the bottom HUD bar (eleven live status pills — STATUS, LAST EXIT, TABS, TRANSPORT, LATENCY, MODE, SESSION, UPTIME, CLOCK, DB, REDIS — plus the `share snapshot / copy / save ▾ / clear` actions and the kill button). The visible desktop navigation now lives in the rail, but some rail actions still proxy through legacy hidden header button IDs so the older controller wiring continues to work. That desktop-only indirection is deliberate short-term compatibility, not the desired end state, and is tracked as technical debt in `TODO.md`.
 
 **HUD runtime.** Polls `GET /status` on a visibility-aware cadence: every 3 seconds while the tab is visible and every 15 seconds while hidden, with an immediate refresh when the tab becomes visible again. Round-trip latency is measured client-side via `performance.now()`, server uptime is interpolated locally between polls, and the clock pill ticks once per second. The clock mode is user-selectable from the Options modal (`UTC` vs browser-local time); local mode prefers the browser's short timezone label (for example `CDT`) and falls back to a GMT offset label when the browser cannot provide a stable abbreviation. The `SESSION` pill reflects the active session identity and updates via a `storage` event listener so cross-tab token switches are picked up without a reload. `LAST EXIT` is updated from `runner.js` on every SSE `exit` event and on kill through the `setHudLastExit(code)` global.
 
-**Mobile chrome.** The original top header, recent-command chip row, and per-tab footer action row are hidden on both desktop and mobile by `shell-chrome.css` / `mobile-chrome.css`, but remain in the DOM because parts of the classic tab and composer DOM are still re-parented into the mobile shell through `syncMobileShellLayout()`. The mobile chrome (tabs, header, transcript framing, recents peek + pull-up sheet, bottom-sheet menu, and the keyboard edit-helper row) is composed through `mobile-chrome.css` and its companion `mobile_chrome.js`.
+**Mobile chrome.** The original top header, recent-command chip row, and per-tab footer action row are hidden on both desktop and mobile by `shell-chrome.css` / `mobile-chrome.css`, but remain in the DOM because parts of the classic tab and composer DOM are still re-parented into the mobile shell through `syncMobileShellLayout()`. The mobile chrome (tabs, header, transcript framing, recents peek + pull-up sheet, bottom-sheet menu, and the keyboard edit-helper row) is composed through `mobile-chrome.css` and its companion `mobile_chrome.js`. Shared mobile sheet structure now comes from common `.mobile-sheet-overlay` / `.mobile-sheet-surface` scaffolding in `shell.css` plus the mobile overrides in `mobile.css`, so options / FAQ / workflows / shortcuts use one mobile sheet contract instead of per-ID structural CSS. The theme selector is the intentional exception and keeps its dedicated full-screen mobile treatment.
 
 **Page exceptions.** The permalink and diag pages are explicitly scoped out of the desktop header hide so their own `<header class="export-header">` still renders. The diagnostics page (`/diag`) uses a separate `diag.css` rather than inline styles; it also links `terminal_export.css` to share the same header chrome foundation (`export-header`, `export-header-copy` classes) used by permalink pages. The mobile chrome on `/diag` (back button, header layout) activates at `@media (max-width: 900px) and (pointer: coarse)` — matching the same width + touch criteria used by the shell's `useMobileTerminalViewportMode()` — while layout-only changes (grid collapse, column widths) continue at `max-width: 760px` for all device types.
 
@@ -676,7 +676,7 @@ The current event inventory is:
 | WARN | `SHARE_NOT_FOUND` | `get_share` | ip, share_id |
 | WARN | `CMD_DENIED` | `run_command` | ip, session, cmd, reason |
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
-| WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, message |
+| WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
@@ -779,10 +779,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 855
+- `pytest`: 856
 - `vitest`: 685
 - `playwright`: 197
-- total: 1,737
+- total: 1,738
 
 ### Testing Architecture
 

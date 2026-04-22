@@ -227,18 +227,6 @@ function _historySetPage(nextPage, { refresh = true } = {}) {
   if (refresh) refreshHistoryPanel();
 }
 
-function _historyPageWindow(page, pageCount) {
-  const totalPages = Math.max(0, Number(pageCount) || 0);
-  if (totalPages <= 0) return [];
-  if (totalPages <= 3) {
-    return Array.from({ length: totalPages }, (_, idx) => idx + 1);
-  }
-  const current = Math.min(Math.max(1, Number(page) || 1), totalPages);
-  if (current <= 3) return [1, 2, 3, 4, '..', totalPages];
-  if (current >= totalPages - 2) return [1, '..', totalPages - 3, totalPages - 2, totalPages - 1, totalPages];
-  return [1, '..', current - 1, current, current + 1, '..', totalPages];
-}
-
 function _historyRenderPagination(visibleCount = 0) {
   if (typeof historyPagination === 'undefined' || !historyPagination) return;
   if (typeof historyPaginationSummary === 'undefined' || !historyPaginationSummary) return;
@@ -261,36 +249,23 @@ function _historyRenderPagination(visibleCount = 0) {
   const prevBtn = document.createElement('button');
   prevBtn.type = 'button';
   prevBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
-  prevBtn.textContent = '‹';
+  prevBtn.textContent = '‹ Prev';
   prevBtn.disabled = page <= 1;
   prevBtn.setAttribute('aria-label', 'Previous page');
   prevBtn.addEventListener('click', () => _historySetPage(prevPage));
   historyPaginationControls.appendChild(prevBtn);
 
-  for (const item of _historyPageWindow(page, pageCount)) {
-    if (item === '..') {
-      const ellipsis = document.createElement('span');
-      ellipsis.className = 'history-pagination-ellipsis';
-      ellipsis.textContent = '..';
-      historyPaginationControls.appendChild(ellipsis);
-      continue;
-    }
-    const btn = document.createElement('button');
-    btn.type = 'button';
-    btn.className = 'btn btn-secondary btn-compact';
-    btn.textContent = String(item);
-    btn.dataset.page = String(item);
-    btn.setAttribute('aria-current', item === page ? 'page' : 'false');
-    if (item === page) btn.disabled = true;
-    btn.addEventListener('click', () => _historySetPage(item));
-    historyPaginationControls.appendChild(btn);
-  }
+  const pageLabel = document.createElement('span');
+  pageLabel.className = 'history-pagination-status';
+  pageLabel.textContent = `Page ${pageCount > 0 ? page : 0} of ${pageCount}`;
+  pageLabel.setAttribute('aria-live', 'polite');
+  historyPaginationControls.appendChild(pageLabel);
 
   const nextPage = pageCount > page ? page + 1 : page;
   const nextBtn = document.createElement('button');
   nextBtn.type = 'button';
   nextBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
-  nextBtn.textContent = '›';
+  nextBtn.textContent = 'Next ›';
   nextBtn.disabled = page >= pageCount;
   nextBtn.setAttribute('aria-label', 'Next page');
   nextBtn.addEventListener('click', () => _historySetPage(nextPage));

@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 855
+- `pytest`: 856
 - `vitest`: 685
 - `playwright`: 197
-- total: 1,737
+- total: 1,738
 
 This document is organized in two parts:
 
@@ -646,6 +646,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestHealthRoute.test_status_degraded_when_db_fails` | Checks that status degraded when database fails. |
 | `TestHealthRoute.test_status_ok_when_redis_pings_successfully` | Checks that status ok when Redis pings successfully. |
 | `TestHealthRoute.test_status_degraded_when_redis_ping_fails` | Checks that status degraded when Redis ping fails. |
+| `TestClientLogRoute.test_accepts_client_error_payload` | Checks that the client log route accepts browser error reports without colliding with reserved logging fields. |
 | `TestStatusRoute.test_returns_200_even_when_db_fails` | `/status` is HUD polling and must never return 503; a DB failure degrades fields, not the response code. |
 | `TestStatusRoute.test_response_contains_expected_keys` | Response includes `uptime`, `db`, `redis`, `server_time`. |
 | `TestStatusRoute.test_uptime_is_non_negative_integer` | Uptime is a non-negative integer count of seconds since app boot. |
@@ -1194,6 +1195,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `shows rotate/clear/copy session token buttons when a token is active — mobile menu open` | Verifies that shows rotate/clear/copy session token buttons when a token is active — mobile menu open. |
 | `aborts session-token set when the migration prompt is dismissed instead of applying the token` | Verifies that dismissing the migration confirm during the Set-token flow aborts activation instead of silently applying the token. |
 | `applies session-token set on explicit skip without running migration` | Verifies that the Set-token flow still applies the token when the user explicitly chooses `Skip`, without calling `/session/migrate`. |
+| `opens the session-token set confirm without relying on a Node global binding` | Verifies that the Set-token button opens its confirm flow in a browser-like environment where the Node-only `global` binding does not exist. |
 | `aborts generated-token activation when the migration prompt is dismissed` | Verifies that dismissing the migration confirm during Generate aborts activation and does not switch the active token. |
 | `persists options changes through cookies and syncs quick-toggle state` | Verifies that persists options changes through cookies and syncs quick-toggle state. |
 | `renders backend-driven FAQ items with HTML answers and dynamic sections` | Verifies that renders backend-driven FAQ items with HTML answers and dynamic sections. |
@@ -1337,7 +1339,6 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `desktop history rows keep absolute clock time and no tooltip on the time span` | Regression: the desktop history drawer keeps exact clock time and does not set a title tooltip on the time span, so only the mobile sheet switches to relative copy. |
 | `refreshHistoryPanel sends the active server-side filters to /history` | Verifies that the history drawer sends the current search and filter state to `/history`. |
 | `refreshHistoryPanel renders pagination controls and advances to the next page` | Verifies that the history drawer shows a paginated window and advances with the control buttons. |
-| `_historyPageWindow keeps a three-page window with ellipses around the edges` | Verifies that the pagination helper keeps a three-number window with ellipses at the ends. |
 | `populates command root suggestions from loaded history runs` | Verifies that the history drawer populates command-root suggestions from the server-provided root list. |
 | `renders active filter chips for the current history filters` | Verifies that active history filters render as removable chips. |
 | `removes an individual filter when its active filter chip is cleared` | Verifies that removing a single history filter chip updates the request state and control value. |
@@ -2008,14 +2009,14 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `mobile tabs bar can overflow and scroll horizontally` | Verifies that mobile tabs bar can overflow and scroll horizontally. |
 | `hamburger button is visible and desktop header buttons are hidden at mobile width` | Verifies that hamburger button is visible and desktop header buttons are hidden at mobile width. |
 | `clicking the hamburger opens the mobile menu` | Verifies that clicking the hamburger opens the mobile menu. |
-| `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell. |
+| `mobile menu FAQ and options open overlays in the mobile shell` | Verifies that mobile menu FAQ and options open overlays in the mobile shell and can be dismissed by tapping the backdrop, matching the shared mobile-sheet contract. |
 | `mobile menu contains history and theme action buttons` | Verifies that mobile menu contains history and theme action buttons. |
 | `timestamps menu expands inline and applies the selected mode` | Verifies that the mobile menu `timestamps` row expands inline to a three-mode picker (off / elapsed / clock), keeps the sheet open while expanded, applies the selected mode on tap, closes the sheet, and resets the sub-menu to collapsed on the next sheet open. |
 | `mobile theme selector opens full screen with evenly sized grouped sections` | Verifies that mobile theme selector opens full screen with evenly sized grouped sections. |
 | `selecting a theme on mobile applies the shell palette, not just the modal preview` | Verifies that selecting a theme on mobile applies the shell palette, not just the modal preview. |
 | `clicking outside the menu closes it` | Verifies that clicking outside the menu closes it. |
 | `tapping the sticky header dismisses the mobile menu sheet` | Verifies that tapping inside the mobile-terminal sticky header (`page.mouse.click(40, 10)`) while the menu sheet is open lands on the scrim and dismisses the sheet — guards the scrim z-index lift above the header. |
-| `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the `.workflows-close` X button — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
+| `workflows sheet reopens at full height after an interrupted drag` | Verifies that the workflows mobile sheet reopens at full viewport-relative height after a synthetic drag is externally closed via the backdrop — guards the `bindMobileSheet` visibility-observer cleanup that scrubs leaked `transform: translateY(...)` inline styles. |
 | `mobile recent peek summarizes recent runs and opens the recents sheet on tap` | Verifies that the idle peek row between the transcript and the composer shows the recent-command count plus a one-line preview, and that tapping it opens the full mobile recents pull-up sheet. |
 | `mobile recents sheet injects the tapped command into the composer and closes` | Verifies that tapping a row in the mobile recents sheet populates `#mobile-cmd` with the selected command and dismisses the sheet — the primary tap path is now composer-injection, not tab-restore. |
 | `mobile recents sheet restore action loads the run into the active tab` | Verifies that the per-row `restore` action button in the mobile recents sheet loads the corresponding run into the active tab — the pre-swap row-tap behavior now lives on an explicit button. |

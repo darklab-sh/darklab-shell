@@ -54,6 +54,25 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 - **Cross-module UI event flow is still coupled through wrappers and observers** — `shell_chrome.js` and `mobile_chrome.js` currently mirror shared UI state by wrapping globals (`renderHistory`, `renderRailWorkflows`, `closeWorkflows`, `refreshHistoryPanel`, `setTabStatus`), and by using three `MutationObserver`s in `mobile_chrome.js` (`:107` on the status pill `class` attr, `:113` on the run-timer `characterData`, `:699` on the body `class` list) to mirror state changes they have no other way to hear about. Replace those ad hoc integrations with a small UI event bus or equivalent explicit publish/subscribe layer so cross-module synchronization does not depend on monkey-patching exported functions.
 
+- **Desktop rail still proxies through legacy hidden header buttons** — the visible desktop nav now lives in the left rail, but `shell_chrome.js` still routes rail clicks through the old header button IDs (`hist-btn`, `options-btn`, `theme-btn`, `faq-btn`) so the original controller wiring continues to work. Mobile does not use that path; it dispatches its own menu actions directly. The result is an unnecessary desktop-only indirection layer and leftover hidden/header DOM that is no longer the real UI.
+  - Implementation plan:
+    - **Phase 1: identify the real action surface**
+      - Inventory every desktop-only consumer of `hist-btn`, `options-btn`, `theme-btn`, `faq-btn`, `workflows-btn`, and `diag-btn` in `dom.js`, `controller.js`, tests, and CSS.
+      - Separate true behavior ownership from legacy trigger ownership so shared open/close functions (`openOptions()`, `openFaq()`, `openWorkflows()`, `showHistoryPanel()`, theme open helpers) become the explicit action layer.
+    - **Phase 2: make the rail the desktop source of truth**
+      - Replace `shell_chrome.js` rail proxy clicks with direct calls into the shared desktop action helpers.
+      - Keep mobile on `dispatchMobileMenuAction(...)` so the desktop and mobile trigger layers are parallel consumers of the same underlying behavior, not consumers of each other.
+    - **Phase 3: remove hidden-header trigger dependency**
+      - Stop reading the legacy header button elements as required globals in `dom.js` for desktop action flow.
+      - Update controller wiring so behavior is attached to shared functions or explicit visible triggers, not to hidden header buttons that exist only as relay targets.
+    - **Phase 4: delete dead desktop-header scaffolding**
+      - Remove leftover hidden header button markup if no visible desktop surface still needs it.
+      - Remove header-button-specific desktop CSS rules that no longer style a visible surface.
+      - Keep only any remaining semantics that are still genuinely needed for mobile or accessibility.
+    - **Phase 5: align tests with the real trigger model**
+      - Update unit tests that currently click the hidden header buttons as a proxy for desktop desktop-nav behavior.
+      - Prefer exercising the visible rail on desktop and the visible menu sheet on mobile, while keeping direct function-level tests only where the behavior itself is under test.
+
 - **PDF and HTML export inconsistencies**
   - The PDF exporter is closer to the HTML exporter than it used to be, but the two paths still do not share enough rendering logic. Some differences are expected because jsPDF cannot reproduce browser layout perfectly, but there is still avoidable drift in wrapping, spacing, and metadata rendering that comes from the PDF helper taking its own shortcuts instead of consuming the same rendering contract as HTML.
   - Current drift areas:

@@ -682,43 +682,34 @@ body #history-panel { background: var(--theme-history-panel-bg); }
 }
 .history-pagination-controls {
   flex: 1 0 100%;
-  display: flex;
-  flex-wrap: nowrap;
+  display: inline-grid;
+  grid-template-columns: max-content minmax(96px, auto) max-content;
   align-items: center;
-  justify-content: flex-start;
+  max-width: 100%;
   gap: 6px;
-  overflow-x: auto;
-}
-.history-pagination-ellipsis {
-  display: inline-block;
-  padding: 0 1px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 10px;
-  line-height: 1;
 }
 .history-pagination-controls > .btn {
   flex: 0 0 auto;
   white-space: nowrap;
   cursor: pointer;
 }
+.history-pagination-status {
+  min-width: 96px;
+  text-align: center;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
 .history-pagination-controls > .btn.history-pagination-chevron {
-  font-size: 14px;
+  font-size: 10px;
   line-height: 1;
   min-height: 22px;
-  padding-top: 0;
-  padding-bottom: 0;
+  padding-top: 3px;
+  padding-bottom: 3px;
 }
 .history-pagination-controls > .btn:hover:not(:disabled) {
   color: var(--green);
   transform: none;
-}
-.history-pagination-controls > .btn[aria-current="page"] {
-  color: var(--green);
-  border-color: color-mix(in srgb, var(--green) 55%, var(--border-bright));
-  background: color-mix(in srgb, var(--green) 9%, transparent);
 }
 .history-pagination-controls > .btn:disabled {
   opacity: 0.45;
@@ -1150,6 +1141,8 @@ body #diag-btn:hover {
   transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
   background: transparent;
   color: var(--text);
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 .btn:focus-visible {
@@ -1345,6 +1338,8 @@ body #diag-btn:hover {
   text-decoration: none;
   cursor: pointer;
   transition: background 0.15s, color 0.15s, border-color 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
   background: color-mix(in srgb, var(--green) 6%, transparent);
@@ -1392,6 +1387,8 @@ body #diag-btn:hover {
   line-height: 1;
   cursor: pointer;
   transition: color 0.15s, background 0.15s, opacity 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 .close-btn:hover:not([aria-disabled="true"]):not(:disabled) {
   color: var(--text);
