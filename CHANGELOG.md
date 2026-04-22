@@ -99,6 +99,9 @@ All notable changes to darklab shell are documented here.
     - `.gitlab-ci.yml` now declares `CI_DEFAULT_IMAGE`, `CI_PYTHON_E2E_IMAGE`, `CI_NODE_IMAGE`, and `CI_DOCKER_IMAGE` once in the top-level `variables:` block and reuses them in every `image:` field.
     - `scripts/check_versions.sh --docker-only` now reports both the production Docker base image from `Dockerfile` and the CI runner images from `.gitlab-ci.yml` instead of only the production image.
     - Docker tag parsing in the version-check helper now accepts common major-only tags such as `docker:27` and `node:22-slim`, so CI image checks no longer fall into an “unsupported tag format” bucket.
+- **Self-hosted Docker build jobs now use the host Docker socket again** — the temporary switch back to `docker:27-dind` restored portability after a daemon-connectivity failure, but it also discarded the self-hosted runner's cross-job Docker layer cache and pushed build times back toward full cold builds.
+  - **What:** `container-smoke-test` and `docker-build` now point back at `unix:///var/run/docker.sock` with `DOCKER_TLS_CERTDIR=\"\"`, matching the self-hosted runner's socket mount configuration.
+  - **Why:** this restores the host-daemon layer cache on the self-hosted runner, which is the reason those jobs previously dropped from roughly 20 minutes to a few minutes after the first warm build.
 
 #### Mobile Sheets, Options Surface, and Navigation Cleanup
 
