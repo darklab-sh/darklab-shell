@@ -47,6 +47,15 @@ All notable changes to darklab shell are documented here.
     - `scripts/playwright/run_e2e_server.sh` detects the `capture-*` slot prefix and opts into both the seeder and the fake client.
     - The seeder refuses to write from the host by default because container/host SQLite can disagree on FTS5 internals (`sqlite_cross_version_fts` memory rule).
   - **Tests:** capture runs are themselves the verification; `tests/README.md` documents the seeder as a manual-QA helper for the history drawer, reverse-i-search, filters, and token-migration flows.
+- **Shared parity guardrails for demo and capture Playwright flows** — the standalone demo-recording and screenshot-capture pipelines now assert the same viewport, mobile-mode, health, and seeded-history assumptions before they begin recording frames.
+  - **Why:** the dedicated demo/capture configs already depended on fixed desktop/mobile viewports, seeded history shape, a fixed capture session token, and production-like `/status` health, but those assumptions were spread across config files, shell wrappers, and spec-local setup. Drift in any one of those layers could quietly degrade the visual outputs without failing fast.
+  - **What:**
+    - New `config/playwright.visual.contracts.js` centralises the desktop/mobile visual contract values plus the fixed capture session token and minimum seeded-history thresholds.
+    - Dedicated Playwright configs for desktop/mobile demo and capture now read viewport, `deviceScaleFactor`, and touch settings from that shared contract file instead of repeating literals.
+    - New `tests/js/e2e/visual_guardrails.js` checks the live browser state before a recording flow proceeds: viewport size, `devicePixelRatio`, touch capability, mobile-shell body class, user-agent expectation, `/status` health, and, for capture flows, the fixed token plus minimum seeded `/history` shape.
+    - `ui_capture_shared.js` now runs those guardrails during `freshHome(...)`, so every desktop/mobile screenshot scene uses the same startup contract instead of a mix of guarded and unguarded resets.
+    - `demo.spec.js` and `demo.mobile.spec.js` now assert the same desktop/mobile contract at startup, so README demo recordings fail immediately if their config or runtime assumptions drift.
+  - **Tests:** validated by the dedicated `npx playwright test --list --config ...` demo/capture configs plus the shared guardrail wiring in `demo.spec.js`, `demo.mobile.spec.js`, `ui-capture.desktop.capture.js`, and `ui-capture.mobile.capture.js`.
 
 ### Changed
 

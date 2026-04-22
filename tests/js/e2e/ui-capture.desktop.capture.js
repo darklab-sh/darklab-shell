@@ -22,6 +22,11 @@ import {
   writeManifest,
 } from './ui_capture_shared.js'
 
+const freshCaptureHome = (page, opts = {}) => freshHome(page, {
+  ...opts,
+  guardrailMode: 'desktop',
+})
+
 async function runLongCaptureCommand(page) {
   await page.locator('#cmd').fill(LONG_RUN_CMD)
   await page.keyboard.press('Enter')
@@ -57,7 +62,7 @@ const scenes = [
     title: 'Main UI - welcome animation completed',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName, cancelWelcome: false, hydrateHistory: false })
+      await freshCaptureHome(page, { themeName, cancelWelcome: false, hydrateHistory: false })
     },
   },
   {
@@ -65,7 +70,7 @@ const scenes = [
     title: 'Main UI - autocomplete menu open',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await setComposerValueForTest(page, 'curl -')
       await expect(page.locator('#ac-dropdown')).not.toHaveClass(/u-hidden/)
     },
@@ -75,7 +80,7 @@ const scenes = [
     title: 'Main UI - reverse history search open',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await runCommand(page, 'date')
       await page.locator('#cmd').press('Control+r')
@@ -88,7 +93,7 @@ const scenes = [
     title: 'Main UI - multiple tabs open',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await page.locator('#new-tab-btn').click()
       await runCommand(page, 'date')
@@ -101,7 +106,7 @@ const scenes = [
     title: 'Main UI - active tab running',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await page.locator('#new-tab-btn').click()
       await runLongCaptureCommand(page)
@@ -112,7 +117,7 @@ const scenes = [
     title: 'Main UI - inactive tab running',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runLongCaptureCommand(page)
       await page.locator('#new-tab-btn').click()
       await runFastCaptureCommand(page)
@@ -124,7 +129,7 @@ const scenes = [
     title: 'Main UI - kill confirmation modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runLongCaptureCommand(page)
       await page.locator('#hud-actions [data-action="kill"]').click()
       await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
@@ -135,7 +140,7 @@ const scenes = [
     title: 'Main UI - confirmation modal with three stacked actions',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await page.evaluate(() => {
         window.showConfirm({
           title: 'Unsaved changes',
@@ -156,7 +161,7 @@ const scenes = [
     title: 'Main UI - save menu open',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await page.locator('.hud-save-wrap [data-action="save-menu"]').click()
       await expect(page.locator('.hud-save-wrap.open .save-menu')).toBeVisible()
@@ -167,7 +172,7 @@ const scenes = [
     title: 'Main UI - rail open with Recents and Workflows expanded',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await runCommand(page, 'date')
       await waitForWorkflowsReady(page)
@@ -184,7 +189,7 @@ const scenes = [
     title: 'Main UI - rail open with Recents expanded and Workflows collapsed',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await waitForWorkflowsReady(page)
       const workflowsOpen = !(await page.locator('#rail-section-workflows').evaluate((node) =>
@@ -200,7 +205,7 @@ const scenes = [
     title: 'Main UI - rail open with Recents and Workflows collapsed',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await waitForWorkflowsReady(page)
       const recentOpen = !(await page.locator('#rail-section-recent').evaluate((node) =>
         node.classList.contains('closed'),
@@ -219,7 +224,7 @@ const scenes = [
     title: 'Main UI - rail collapsed',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await page.locator('#rail-collapse-btn').click()
       await expect(page.locator('#rail')).toHaveClass(/rail-collapsed/)
     },
@@ -229,7 +234,7 @@ const scenes = [
     title: 'Main UI - search open with active matches',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ curl http://localhost:5001/health' },
         { text: '{"status":"ok"}' },
@@ -245,7 +250,7 @@ const scenes = [
     title: 'Main UI - workflow modal example',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await openScopedWorkflow(page)
     },
   },
@@ -254,7 +259,7 @@ const scenes = [
     title: 'Main UI - history drawer',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await openHistoryWithEntries(page)
     },
@@ -264,7 +269,7 @@ const scenes = [
     title: 'Main UI - history drawer command search with chip',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await runCommand(page, 'date')
       await openHistoryWithEntries(page)
@@ -278,7 +283,7 @@ const scenes = [
     title: 'Main UI - history drawer delete-all confirmation modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await runCommand(page, 'date')
       await openHistoryWithEntries(page)
@@ -291,7 +296,7 @@ const scenes = [
     title: 'Main UI - history drawer delete confirmation modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await openHistoryWithEntries(page)
       await page.locator('.history-entry').first().locator('[data-action="delete"]').click()
@@ -303,7 +308,7 @@ const scenes = [
     title: 'Main UI - options modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await page.locator('.rail-nav [data-action="options"]').click()
       await expect(page.locator('#options-modal')).toBeVisible()
     },
@@ -313,7 +318,7 @@ const scenes = [
     title: 'Main UI - theme modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await page.locator('.rail-nav [data-action="theme"]').click()
       await expect(page.locator('#theme-modal')).toBeVisible()
     },
@@ -323,7 +328,7 @@ const scenes = [
     title: 'Main UI - FAQ modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await page.locator('.rail-nav [data-action="faq"]').click()
       await expect(page.locator('#faq-modal')).toBeVisible()
     },
@@ -333,7 +338,7 @@ const scenes = [
     title: 'Main UI - keyboard shortcuts overlay',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await page.evaluate(() => window.showShortcutsOverlay && window.showShortcutsOverlay())
       await expect(page.locator('#shortcuts-overlay.open')).toBeVisible()
     },
@@ -343,7 +348,7 @@ const scenes = [
     title: 'Main UI - line numbers enabled',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ hostname' },
         { text: 'darklab-shell' },
@@ -358,7 +363,7 @@ const scenes = [
     title: 'Main UI - timestamps enabled',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'ping -c 4 darklab.sh')
       await page.locator('#ts-btn').click()
       await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
@@ -369,7 +374,7 @@ const scenes = [
     title: 'Main UI - line numbers and timestamps enabled',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'ping -c 4 darklab.sh')
       await page.locator('#ln-btn').click()
       await page.locator('#ts-btn').click()
@@ -382,7 +387,7 @@ const scenes = [
     title: 'Snapshot page',
     route: '/share/:id',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       const shareResp = await createShareSnapshot(page)
       const data = await shareResp.json()
@@ -395,7 +400,7 @@ const scenes = [
     title: 'Permalink page',
     route: '/history/:id',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
       await waitForHistoryRuns(page, 1)
       await openHistory(page)

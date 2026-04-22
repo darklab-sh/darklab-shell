@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test'
 
 import { buildIsolatedWebServer, testDir } from './playwright.shared.js'
+import { MOBILE_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 
 export default defineConfig({
   testDir,
@@ -13,11 +14,11 @@ export default defineConfig({
   use: {
     isMobile: false,
     browserName: 'chromium',
-    viewport: { width: 430, height: 932 },
-    deviceScaleFactor: 3,
+    viewport: MOBILE_VISUAL_CONTRACT.viewport,
+    deviceScaleFactor: MOBILE_VISUAL_CONTRACT.deviceScaleFactor,
     userAgent:
       'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    hasTouch: true,
+    hasTouch: MOBILE_VISUAL_CONTRACT.hasTouch,
     baseURL: 'http://localhost:5011',
     trace: 'off',
     video: { mode: 'off' },

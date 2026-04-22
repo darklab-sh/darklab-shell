@@ -18,6 +18,11 @@ import {
   writeManifest,
 } from './ui_capture_shared.js'
 
+const freshCaptureHome = (page, opts = {}) => freshHome(page, {
+  ...opts,
+  guardrailMode: 'mobile',
+})
+
 async function runCommandMobile(page, cmd) {
   await setComposerValueForTest(page, cmd, { mobile: true })
   await page.locator('#mobile-run-btn').click()
@@ -67,7 +72,7 @@ const scenes = [
     title: 'Main UI - welcome animation completed',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName, cancelWelcome: false, hydrateHistory: false })
+      await freshCaptureHome(page, { themeName, cancelWelcome: false, hydrateHistory: false })
     },
   },
   {
@@ -75,7 +80,7 @@ const scenes = [
     title: 'Main UI - multiple tabs open',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await page.locator('#new-tab-btn').click()
       await runCommandMobile(page, 'date')
@@ -88,7 +93,7 @@ const scenes = [
     title: 'Main UI - active tab running',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await page.locator('#new-tab-btn').click()
       await runLongCaptureCommandMobile(page)
@@ -99,7 +104,7 @@ const scenes = [
     title: 'Main UI - inactive tab running',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runLongCaptureCommandMobile(page)
       await page.locator('#new-tab-btn').click()
       await runFastCaptureCommandMobile(page)
@@ -111,7 +116,7 @@ const scenes = [
     title: 'Main UI - running-indicator chip with two inactive running tabs',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runLongCaptureCommandMobile(page)
       await page.locator('#new-tab-btn').click()
       await runLongCaptureCommandMobile(page)
@@ -125,7 +130,7 @@ const scenes = [
     title: 'Main UI - kill confirmation modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runLongCaptureCommandMobile(page)
       await page.locator('#mobile-kill-btn').click()
       await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
@@ -136,7 +141,7 @@ const scenes = [
     title: 'Main UI - save menu open',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await page.locator('.tab-panel.active [data-action="save-menu"]').click()
       await expect(page.locator('.tab-panel.active .save-menu-wrap.open .save-menu')).toBeVisible()
@@ -147,7 +152,7 @@ const scenes = [
     title: 'Main UI - search open with active matches',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ curl http://localhost:5001/health' },
         { text: '{"status":"ok"}' },
@@ -164,7 +169,7 @@ const scenes = [
     title: 'Main UI - line numbers enabled',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ hostname' },
         { text: 'darklab-shell' },
@@ -181,7 +186,7 @@ const scenes = [
     title: 'Main UI - timestamps enabled',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'ping -c 4 darklab.sh')
       await page.evaluate(() => {
         if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed')
@@ -194,7 +199,7 @@ const scenes = [
     title: 'Main UI - line numbers and timestamps enabled',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'ping -c 4 darklab.sh')
       await page.evaluate(() => {
         if (typeof applyLineNumberPreference === 'function') applyLineNumberPreference('on')
@@ -209,7 +214,7 @@ const scenes = [
     title: 'History sheet',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
@@ -221,7 +226,7 @@ const scenes = [
     title: 'History sheet - command search with filters expanded',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
@@ -237,7 +242,7 @@ const scenes = [
     title: 'History sheet - command search with filters collapsed and chip shown',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
@@ -254,7 +259,7 @@ const scenes = [
     title: 'History sheet - delete-all confirmation modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await runCommandMobile(page, 'date')
       await waitForHistoryRuns(page, 2)
@@ -268,7 +273,7 @@ const scenes = [
     title: 'History sheet - delete confirmation modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)
@@ -281,7 +286,7 @@ const scenes = [
     title: 'Menu modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await openMenu(page)
     },
   },
@@ -290,7 +295,7 @@ const scenes = [
     title: 'Workflows modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
       await expect(page.locator('#workflows-modal')).toBeVisible()
@@ -301,7 +306,7 @@ const scenes = [
     title: 'Options modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
       await expect(page.locator('#options-modal')).toBeVisible()
@@ -312,7 +317,7 @@ const scenes = [
     title: 'Theme modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
       await expect(page.locator('#theme-modal')).toBeVisible()
@@ -323,7 +328,7 @@ const scenes = [
     title: 'FAQ modal',
     route: '/',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="faq"]').click()
       await expect(page.locator('#faq-modal')).toBeVisible()
@@ -334,7 +339,7 @@ const scenes = [
     title: 'Snapshot page',
     route: '/share/:id',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       const shareResp = await createShareSnapshot(page)
       const data = await shareResp.json()
@@ -347,7 +352,7 @@ const scenes = [
     title: 'Permalink page',
     route: '/history/:id',
     run: async (page, themeName) => {
-      await freshHome(page, { themeName })
+      await freshCaptureHome(page, { themeName })
       await runCommandMobile(page, 'hostname')
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)

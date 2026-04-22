@@ -25,6 +25,7 @@ import { dirname, resolve, join } from 'path'
 import { fileURLToPath } from 'url'
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
+import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const KEYBOARD_SRC = `data:image/png;base64,${readFileSync(resolve(__dir, 'fixtures/ios-keyboard-dark.png')).toString('base64')}`
@@ -322,6 +323,7 @@ test('demo-mobile', async ({ page }) => {
   })
 
   await expect(page.locator('#mobile-composer')).toBeVisible()
+  await assertVisualFlowGuardrails(page, { mode: 'mobile' })
 
   // Start the capture loop only after the UI is visible so the first captured
   // frame shows real content rather than the blank pre-navigation page.

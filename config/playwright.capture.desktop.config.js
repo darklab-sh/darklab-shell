@@ -1,6 +1,7 @@
 import { defineConfig, devices } from '@playwright/test'
 
 import { buildIsolatedWebServer, testDir } from './playwright.shared.js'
+import { DESKTOP_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 
 export default defineConfig({
   testDir,
@@ -13,8 +14,8 @@ export default defineConfig({
   use: {
     ...devices['Desktop Chrome'],
     baseURL: 'http://localhost:5010',
-    viewport: { width: 1600, height: 900 },
-    deviceScaleFactor: 2,
+    viewport: DESKTOP_VISUAL_CONTRACT.viewport,
+    deviceScaleFactor: DESKTOP_VISUAL_CONTRACT.deviceScaleFactor,
     trace: 'off',
     video: { mode: 'off' },
   },

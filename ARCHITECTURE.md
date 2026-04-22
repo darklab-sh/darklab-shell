@@ -809,6 +809,7 @@ The browser test harness mirrors production constraints rather than abstracting 
 
 - the frontend remains a no-build classic-script app, so `Vitest` uses extraction helpers instead of converting the runtime to ES modules
 - `Playwright` uses two configs: a simple single-project default config for VS Code/debugging and a parallel CLI config that balances the suite across 5 isolated projects
+- the standalone demo/capture Playwright configs share one visual-contract file so desktop/mobile viewport, density, touch, token, and seeded-history assumptions stay aligned across recording and screenshot flows
 - each parallel browser project gets its own Flask server port plus isolated `APP_DATA_DIR` state so SQLite history, run-output artifacts, and limiter/process state do not collide across workers
 - backend tests keep the app’s real relative-path assumptions by changing into `app/` before imports
 - the browser suite also carries focused regressions for the split welcome specs, pipe-stage autocomplete, and the responsive FAQ limits renderer because those are easiest to verify in the real UI

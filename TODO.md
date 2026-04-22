@@ -22,8 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
-- **Capture/demo parity guardrails** — add a lightweight guardrail for the Playwright demo and UI-capture pipelines so the intended desktop/mobile viewport classes, seeded history shape, and production-like health state do not silently drift. At minimum, keep viewport/config parity explicit and fail fast when capture/demo assumptions diverge.
-
 - **History/session seed fixtures for visual flows** — formalise the seeded demo/capture history dataset as a named fixture so screenshot packs, demo recordings, and documentation screenshots stay stable across releases instead of depending on ad hoc generated history.
 
 - **Persist user options with session tokens** — session tokens currently preserve command history and session identity, but user-facing options still reset outside the current browser scope. Extend the session-token data model so saved options can live in the database and follow the user's restored session across browsers and devices.

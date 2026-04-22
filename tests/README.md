@@ -176,6 +176,8 @@ scripts/record_demo.sh --base-url http://localhost:9000
 
 Wrappers health-check the container, set `RUN_DEMO=1`, run the spec, and stitch frames into `assets/darklab_shell_demo.mp4` / `assets/darklab_shell_mobile_demo.mp4` with ffmpeg (HEVC/VideoToolbox on macOS, VP9/libvpx on Linux). See the appendix [Demo Recording Specs](#demo-recording-specs) for per-spec details and [DECISIONS.md](../DECISIONS.md#demo-recording-pipeline) for the rationale behind the capture pipeline.
 
+Desktop and mobile demo configs share a central visual contract in [config/playwright.visual.contracts.js](../config/playwright.visual.contracts.js), and both specs assert that contract at startup through `tests/js/e2e/visual_guardrails.js`. That keeps viewport, pixel density, touch/mobile-mode assumptions, and `/status` health aligned with the wrapper/config setup instead of drifting silently.
+
 ### UI Screenshot Capture
 
 Standalone Playwright specs that generate a curated screenshot pack for design review, theming, and visual QA (`tests/js/e2e/ui-capture.desktop.capture.js`, `tests/js/e2e/ui-capture.mobile.capture.js`). Guarded by `test.skip(!process.env.RUN_CAPTURE, ...)` and run only via the wrapper:
@@ -188,6 +190,8 @@ scripts/capture_ui_screenshots.sh --theme all
 ```
 
 The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+
+The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
 ### Container Smoke Test
 

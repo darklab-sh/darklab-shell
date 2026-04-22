@@ -493,6 +493,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── playwright.config.js    # Playwright single-project config for VS Code and focused local debugging
 │   ├── playwright.parallel.config.js # Playwright parallel CLI config with isolated per-project Flask/state environments
 │   ├── playwright.shared.js    # Shared Playwright server-builder helpers used by both configs
+│   ├── playwright.visual.contracts.js # Shared desktop/mobile visual contract values for demo and capture Playwright flows
 │   ├── playwright.demo.config.js     # Playwright config for recording the desktop demo video
 │   ├── playwright.demo.mobile.config.js # Playwright config for recording the mobile demo video
 │   ├── playwright.capture.desktop.config.js # Playwright config for the desktop UI screenshot capture pipeline
@@ -567,6 +568,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       └── e2e/                # Playwright end-to-end tests (require running Flask server)
 │           ├── fixtures/       # Binary test assets (e.g. ios-keyboard-dark.png used by mobile.spec.js)
 │           ├── helpers.js      # runCommand/openHistory helpers
+│           ├── visual_guardrails.js # Shared demo/capture startup assertions for viewport, health, token, and seeded-history parity
 │           ├── welcome.helpers.js # shared welcome-route fixtures and setup for split welcome specs
 │           ├── autocomplete.spec.js # autocomplete dropdown coverage — context-aware suggestions, pipe-stage hints, accept paths
 │           ├── commands.spec.js # command execution, denial, and status rendering

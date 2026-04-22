@@ -1,4 +1,5 @@
 import { defineConfig } from '@playwright/test'
+import { MOBILE_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 
 const BASE_URL = process.env.DEMO_BASE_URL || 'http://localhost:8888'
 
@@ -20,11 +21,11 @@ export default defineConfig({
     // matching the real-device history panel height without any CSS overrides.
     isMobile: false,
     browserName: 'chromium',
-    viewport: { width: 430, height: 932 },
-    deviceScaleFactor: 3,
+    viewport: MOBILE_VISUAL_CONTRACT.viewport,
+    deviceScaleFactor: MOBILE_VISUAL_CONTRACT.deviceScaleFactor,
     userAgent:
       'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1',
-    hasTouch: true,
+    hasTouch: MOBILE_VISUAL_CONTRACT.hasTouch,
     baseURL: BASE_URL,
     slowMo: 60,
     // Video recording disabled — the spec captures frames via page.screenshot()

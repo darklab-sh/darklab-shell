@@ -21,6 +21,7 @@ import { dirname, resolve, join } from 'path'
 import { fileURLToPath } from 'url'
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
+import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 
@@ -205,6 +206,7 @@ test('demo', async ({ page }) => {
   // ── Boot ──────────────────────────────────────────────────────────────────
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('.terminal-wrap')).toBeVisible()
+  await assertVisualFlowGuardrails(page, { mode: 'desktop' })
 
   // Start the capture loop only after the terminal is visible so the first
   // captured frame shows real UI rather than the blank pre-navigation page.

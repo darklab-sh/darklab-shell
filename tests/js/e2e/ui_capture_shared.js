@@ -2,7 +2,10 @@ import { mkdirSync, readdirSync, writeFileSync } from 'fs'
 import { dirname, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
+import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
+
 import { ensurePromptReady } from './helpers.js'
+import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const REPO_ROOT = resolve(__dir, '../../..')
@@ -14,8 +17,6 @@ export const CAPTURE_ROOT = process.env.CAPTURE_OUT_DIR
 
 export const LONG_RUN_CMD = 'capture-long-run'
 export const FAST_RUN_CMD = 'capture-fast-run'
-export const CAPTURE_SESSION_TOKEN = 'tok_cafebabecafebabecafebabecafebabe'
-
 export function resolveCaptureThemes() {
   const requested = String(process.env.CAPTURE_THEME || '').trim()
   if (!requested || requested === 'default') return [null]
@@ -153,6 +154,7 @@ export async function freshHome(
     cancelWelcome = true,
     useCaptureSession = true,
     hydrateHistory = true,
+    guardrailMode = null,
   } = {},
 ) {
   await page.context().clearCookies()
@@ -176,6 +178,12 @@ export async function freshHome(
     await page.waitForFunction(() => Boolean(document.body?.dataset?.theme))
   }
   await ensurePromptReady(page, { cancelWelcome })
+  if (guardrailMode) {
+    await assertVisualFlowGuardrails(page, {
+      mode: guardrailMode,
+      requireSeededHistory: useCaptureSession,
+    })
+  }
   if (hydrateHistory) await hydrateCaptureRecents(page)
 }
 
