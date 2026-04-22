@@ -64,6 +64,15 @@ All notable changes to darklab shell are documented here.
     - fully empty raw lines with no prefix are now skipped in PDF so the exported transcript does not gain blank rows that are absent in permalink/share pages and saved HTML.
   - **Tests:** expanded unit coverage in `tests/js/unit/export_pdf.test.js`, `tests/js/unit/permalink.test.js`, and `tests/js/unit/tabs.test.js`; current Vitest total is now 694 and the combined documented suite total is 1,747.
 
+#### CI Image Drift Guardrails
+
+- **CI runner image declarations now live in one explicit place in `.gitlab-ci.yml`** — the pipeline previously repeated concrete image tags inline across the default image, Node jobs, Python e2e job, and Docker-in-Docker jobs. That made runtime drift easy to introduce because the manual version-check script only knew about the production Dockerfile base image.
+  - **Why:** production and CI were both versioned in repo, but only the production image participated in the local/manual drift check. CI image changes could therefore silently bypass the same visibility the production image already had.
+  - **What:**
+    - `.gitlab-ci.yml` now declares `CI_DEFAULT_IMAGE`, `CI_PYTHON_E2E_IMAGE`, `CI_NODE_IMAGE`, and `CI_DOCKER_IMAGE` once in the top-level `variables:` block and reuses them in every `image:` field.
+    - `scripts/check_versions.sh --docker-only` now reports both the production Docker base image from `Dockerfile` and the CI runner images from `.gitlab-ci.yml` instead of only the production image.
+    - Docker tag parsing in the version-check helper now accepts common major-only tags such as `docker:27` and `node:22-slim`, so CI image checks no longer fall into an “unsupported tag format” bucket.
+
 #### Mobile Sheets, Options Surface, and Navigation Cleanup
 
 - **Mobile sheets now share one structural contract instead of per-ID scaffolding** — the options, FAQ, workflows, shortcuts, and confirm surfaces now rely on shared `.mobile-sheet-overlay` / `.mobile-sheet-surface` structure plus mobile-specific overrides instead of each carrying its own overlay/surface boilerplate.

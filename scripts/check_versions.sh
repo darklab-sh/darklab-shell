@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Check pinned Python requirements and the Docker base image version.
+"""Check pinned dependency versions plus production and CI image versions.
 
-The script reads the current Docker base image from Dockerfile so the image
-check always follows the checked-in build configuration.
+The script reads the production Docker base image from Dockerfile and the CI
+runner images from .gitlab-ci.yml so version checks follow the checked-in
+runtime configuration instead of a separately maintained list.
 """
 
 from __future__ import annotations
@@ -26,14 +27,17 @@ REQ_FILES = (
 PACKAGE_JSON = ROOT / "package.json"
 PACKAGE_LOCK = ROOT / "package-lock.json"
 DOCKERFILE = ROOT / "Dockerfile"
+GITLAB_CI = ROOT / ".gitlab-ci.yml"
 PIN_PATTERN = re.compile(r"^([A-Za-z0-9_.-]+)(?:\[[^\]]+\])?==(.+)$")
 IMAGE_PATTERN = re.compile(r"^([A-Za-z0-9./_-]+?)(?::([^@\s]+))?(?:@.+)?$")
-NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)\.(\d+)(?:\.(\d+))?$")
+NUMERIC_TAG_PATTERN = re.compile(r"^(\d+)(?:\.(\d+)(?:\.(\d+))?)?$")
 GO_INSTALL_PATTERN = re.compile(r"go install(?:\s+-v)?\s+([^\s@]+)@([^\s\\]+)")
 PIP_INSTALL_PATTERN = re.compile(r"pip install(?:\s+--no-cache-dir)?\s+([A-Za-z0-9_.\-\[\]]+)==([^\s\\]+)")
 GEM_INSTALL_PATTERN = re.compile(r"gem install\s+([A-Za-z0-9_.-]+)\s+-v\s+([^\s\\]+)")
 GITHUB_RELEASE_PATTERN = re.compile(r"github\.com/([^/\s]+)/([^/\s]+)/releases/download/([^/\s]+)/")
 GO_STABLE_TAG_PATTERN = re.compile(r"^v(\d+)\.(\d+)\.(\d+)$")
+CI_IMAGE_VAR_PATTERN = re.compile(r"^\s{2}(CI_[A-Z0-9_]+):\s*[\"']?([^\"'\n#]+)[\"']?\s*(?:#.*)?$")
+CI_IMAGE_REF_PATTERN = re.compile(r"^\s*image:\s*\$([A-Z0-9_]+)\s*(?:#.*)?$")
 
 
 def _escape_go_module_path(path: str) -> str:
@@ -258,17 +262,33 @@ def _numeric_tag_key(tag: str) -> tuple[int, int, int] | None:
     return major, minor, patch
 
 
-def _dockerhub_tags(repo: str) -> list[str]:
+def _dockerhub_tags(repo: str) -> tuple[list[str], str | None]:
     repo = urllib.parse.quote(repo, safe="/")
     page = 1
     tags: list[str] = []
     while True:
         url = f"https://hub.docker.com/v2/repositories/{repo}/tags/?page_size=100&page={page}"
-        try:
-            with urllib.request.urlopen(url, timeout=3) as resp:
-                payload = json.loads(resp.read().decode("utf-8"))
-        except (urllib.error.URLError, TimeoutError, ValueError):
-            return []
+        last_error = "unknown error"
+        payload = None
+        for _ in range(3):
+            try:
+                with urllib.request.urlopen(url, timeout=5) as resp:
+                    payload = json.loads(resp.read().decode("utf-8"))
+                last_error = ""
+                break
+            except urllib.error.HTTPError as exc:
+                last_error = f"HTTP {exc.code} on page {page}"
+            except urllib.error.URLError as exc:
+                reason = getattr(exc, 'reason', None)
+                last_error = f"URL error on page {page}: {reason or exc}"
+            except TimeoutError:
+                last_error = f"timeout on page {page}"
+            except ValueError:
+                last_error = f"invalid JSON on page {page}"
+        if payload is None:
+            if tags:
+                return tags, f"partial results ({last_error})"
+            return [], last_error
         results = payload.get("results") or []
         for item in results:
             name = item.get("name")
@@ -278,7 +298,7 @@ def _dockerhub_tags(repo: str) -> list[str]:
         if not next_page:
             break
         page += 1
-    return tags
+    return tags, None
 
 
 def _latest_docker_tag(current_image: str) -> tuple[str | None, str | None]:
@@ -298,9 +318,9 @@ def _latest_docker_tag(current_image: str) -> tuple[str | None, str | None]:
     if current_key is None:
         return None, f"unsupported tag format: {current_tag}"
 
-    tags = _dockerhub_tags(repo)
+    tags, fetch_error = _dockerhub_tags(repo)
     if not tags:
-        return None, "unable to fetch Docker Hub tags"
+        return None, fetch_error or "unable to fetch Docker Hub tags"
 
     best_tag = None
     best_key = current_key
@@ -318,7 +338,7 @@ def _latest_docker_tag(current_image: str) -> tuple[str | None, str | None]:
             best_key = candidate_key
             best_tag = tag
 
-    return best_tag, None
+    return best_tag, fetch_error
 
 
 def _docker_base_image() -> str | None:
@@ -333,6 +353,38 @@ def _docker_base_image() -> str | None:
             ref = ref.split(" AS ", 1)[0].split(" as ", 1)[0].strip()
             return ref
     return None
+
+
+def _gitlab_ci_ci_images() -> list[tuple[str, str, str]]:
+    if not GITLAB_CI.exists():
+        return []
+
+    vars_by_name: dict[str, str] = {}
+    image_refs: list[tuple[str, str, str]] = []
+    current_job = "top-level"
+
+    for raw in _read_lines(GITLAB_CI):
+        var_match = CI_IMAGE_VAR_PATTERN.match(raw)
+        if var_match:
+            name, value = var_match.groups()
+            vars_by_name[name] = value.strip()
+            continue
+
+        if raw and not raw.startswith(" ") and raw.endswith(":"):
+            current_job = raw[:-1].strip()
+            continue
+
+        image_match = CI_IMAGE_REF_PATTERN.match(raw)
+        if not image_match:
+            continue
+
+        var_name = image_match.group(1)
+        image = vars_by_name.get(var_name)
+        if image:
+            owner = "top-level default" if current_job == "variables" else current_job
+            image_refs.append((owner, var_name, image))
+
+    return image_refs
 
 
 def _print_dockerfile_pins(labels: set[str] | None = None, debug: bool = False) -> None:
@@ -420,13 +472,37 @@ def _print_docker_image() -> None:
     print("\nDocker base image:")
     print(f"- {image}")
     newer, error = _latest_docker_tag(image)
-    if error:
-        print(f"  newest: unknown ({error})")
-        return
     if newer:
-        print(f"  newest: {newer}")
+        suffix = f" ({error})" if error else ""
+        print(f"  newest: {newer}{suffix}")
+    elif error:
+        print(f"  newest: unknown ({error})")
     else:
-        print("  newest: none found")
+        print("  newest: none found; current tag appears up to date")
+
+
+def _print_ci_images() -> None:
+    refs = _gitlab_ci_ci_images()
+    if not refs:
+        print("\nCI runner images: unavailable")
+        return
+
+    print("\nCI runner images:")
+    grouped: dict[tuple[str, str], list[str]] = {}
+    for job_name, var_name, image in refs:
+        grouped.setdefault((var_name, image), []).append(job_name)
+
+    for (var_name, image), job_names in grouped.items():
+        used_by = ", ".join(job_names)
+        print(f"- {var_name:20} {image:20} (used by {used_by})")
+        newer, error = _latest_docker_tag(image)
+        if newer:
+            suffix = f" ({error})" if error else ""
+            print(f"  newest: {newer}{suffix}")
+        elif error:
+            print(f"  newest: unknown ({error})")
+        else:
+            print("  newest: none found; current tag appears up to date")
 
 
 def main() -> int:
@@ -456,6 +532,7 @@ def main() -> int:
         _print_python_requirements()
         _print_node_dependencies()
         _print_docker_image()
+        _print_ci_images()
         _print_dockerfile_pins(debug=args.debug)
     elif args.python_only:
         _print_python_requirements()
@@ -463,6 +540,7 @@ def main() -> int:
         _print_node_dependencies()
     elif args.docker_only:
         _print_docker_image()
+        _print_ci_images()
         _print_dockerfile_pins(debug=args.debug)
     elif args.go_only:
         _print_dockerfile_pins(labels={"go"}, debug=args.debug)
@@ -477,7 +555,7 @@ def main() -> int:
     print("- `pip index versions <package>` requires network access, so unavailable lookups are reported as unknown.")
     print("- The Go check uses the public Go module proxy and only considers stable release tags.")
     print("- The Node check reads package.json/package-lock.json dependencies and devDependencies and compares them against the npm registry.")
-    print("- The Docker check reads the current base image directly from Dockerfile and ignores prerelease tags like alpha and rc builds.")
+    print("- The Docker/runtime check reads the production base image from Dockerfile and CI runner images from .gitlab-ci.yml, and ignores prerelease tags like alpha and rc builds.")
     print("- Dockerfile pinned tool versions are checked against upstream: go→proxy.golang.org, pip→pypi.org, gem→rubygems.org, github→GitHub releases API.")
     print("- Version comparisons normalise leading 'v' so v2.4.1 and 2.4.1 are treated as equal.")
     print("- Use --python-only, --node-only, --docker-only, --go-only, --pip-only, --gem-only, or --github-only to narrow the output; add --debug for Go proxy lookup details.")

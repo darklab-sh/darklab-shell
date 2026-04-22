@@ -2,7 +2,14 @@ default:
   tags:
     - self-hosted
 
-image: python:3.14-slim
+variables:
+  CI_DEFAULT_IMAGE: "python:3.14-slim"
+  CI_PYTHON_E2E_IMAGE: "python:3.14"
+  CI_NODE_IMAGE: "node:22-slim"
+  CI_DOCKER_IMAGE: "docker:27"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+image: $CI_DEFAULT_IMAGE
 
 workflow:
   rules:
@@ -17,9 +24,6 @@ stages:
   - lint
   - audit
   - build
-
-variables:
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 cache:
   key: "$CI_COMMIT_REF_SLUG"
@@ -44,7 +48,7 @@ test-py-pytest:
 
 test-js-unit:
   stage: test
-  image: node:22-slim
+  image: $CI_NODE_IMAGE
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -61,7 +65,7 @@ test-js-unit:
 
 test-js-e2e:
   stage: test
-  image: python:3.14
+  image: $CI_PYTHON_E2E_IMAGE
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -95,7 +99,7 @@ lint-py:
 
 lint-js:
   stage: lint
-  image: node:22-slim
+  image: $CI_NODE_IMAGE
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -130,7 +134,7 @@ audit-py:
 
 audit-js:
   stage: audit
-  image: node:22-slim
+  image: $CI_NODE_IMAGE
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -166,7 +170,7 @@ dependency-version-check:
 
 container-smoke-test:
   stage: build
-  image: docker:27
+  image: $CI_DOCKER_IMAGE
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""
@@ -183,7 +187,7 @@ container-smoke-test:
 
 docker-build:
   stage: build
-  image: docker:27
+  image: $CI_DOCKER_IMAGE
   variables:
     DOCKER_HOST: "unix:///var/run/docker.sock"
     DOCKER_TLS_CERTDIR: ""

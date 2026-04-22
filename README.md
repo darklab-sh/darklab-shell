@@ -504,7 +504,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── playwright/
 │   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
 │   │   └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
-│   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job
+│   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job; reports production Docker base image plus CI runner images
 │   ├── container_smoke_test.sh # Builds the container, runs all autocomplete.yaml example commands through /run, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
