@@ -570,6 +570,13 @@ function renderHistory() {
   } else if (!isMobile) {
     _applyDesktopChipOverflow();
   }
+
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:history-rendered', {
+      cmdHistory: Array.isArray(cmdHistory) ? cmdHistory.slice() : [],
+      recentPreviewHistory: Array.isArray(recentPreviewHistory) ? recentPreviewHistory.slice() : [],
+    });
+  }
 }
 
 // Re-measure chip overflow when the window is resized on desktop.
@@ -825,6 +832,14 @@ function refreshHistoryPanel() {
     if (!visibleRuns.length) {
       _historyRenderPagination(0);
       _renderHistoryEmptyState();
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:history-panel-refreshed', {
+          runs: [],
+          roots: Array.isArray(data.roots) ? data.roots.slice() : [],
+          paging: { ..._historyPaging },
+          filters: { ..._historyFilters },
+        });
+      }
       return;
     }
 
@@ -902,6 +917,14 @@ function refreshHistoryPanel() {
       historyList.appendChild(entry);
     });
     _historyRenderPagination(visibleRuns.length);
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:history-panel-refreshed', {
+        runs: visibleRuns.slice(),
+        roots: Array.isArray(data.roots) ? data.roots.slice() : [],
+        paging: { ..._historyPaging },
+        filters: { ..._historyFilters },
+      });
+    }
   });
 }
 

@@ -30,6 +30,7 @@ function openWorkflows() {
 
 function closeWorkflows() {
   hideWorkflowsOverlay();
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:workflows-closed', {});
   refocusComposerAfterAction({ defer: true });
 }
 
@@ -700,7 +701,6 @@ apiFetch('/shortcuts').then(r => r.json()).then(data => {
 apiFetch('/workflows').then(r => r.json()).then(data => {
   const items = data.items || [];
   renderWorkflowItems(items);
-  if (typeof window.renderRailWorkflows === 'function') window.renderRailWorkflows(items);
 }).catch(err => {
   logClientError('failed to load /workflows', err);
 });

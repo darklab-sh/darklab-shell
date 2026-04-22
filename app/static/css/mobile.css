@@ -571,6 +571,9 @@
     max-height: 88svh !important;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
+  body.mobile-terminal-mode .mobile-sheet-surface:not(.modal-card-compact) {
+    min-height: 56svh;
+  }
   body.mobile-terminal-mode .modal-card-compact {
     width: calc(100% - 24px);
     max-width: min(520px, calc(100% - 24px));

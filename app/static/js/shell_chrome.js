@@ -262,16 +262,6 @@
     });
   }
 
-  // Hook into renderHistory() so the sidebar re-syncs whenever the chip row does.
-  if (typeof global.renderHistory === 'function') {
-    const originalRenderHistory = global.renderHistory;
-    global.renderHistory = function wrappedRenderHistory(...args) {
-      const result = originalRenderHistory.apply(this, args);
-      try { renderRailRecent(); } catch (e) { /* non-critical */ }
-      return result;
-    };
-  }
-
   // ── Workflows list rendering ────────────────────────────────────
   function renderRailWorkflows(items) {
     allWorkflows = Array.isArray(items) ? items.slice() : [];
@@ -316,20 +306,6 @@
     } else if (typeof showWorkflowsOverlay === 'function') {
       showWorkflowsOverlay();
     }
-  }
-
-  // When the workflows modal closes, restore the full list so a subsequent
-  // open shows everything — covers backdrop click, close button, Escape, and
-  // the cross-overlay helpers that call closeWorkflows() directly.
-  if (typeof global.closeWorkflows === 'function') {
-    const originalClose = global.closeWorkflows;
-    global.closeWorkflows = function wrappedCloseWorkflows(...args) {
-      const result = originalClose.apply(this, args);
-      if (typeof renderWorkflowItems === 'function') {
-        try { renderWorkflowItems(allWorkflows); } catch (e) { /* non-critical */ }
-      }
-      return result;
-    };
   }
 
   // ── Nav menu ─────────────────────────────────────────────────────
@@ -689,11 +665,6 @@
     }
   }
 
-  function setHudLastExit(codeOrStatus) {
-    hudState.lastExit = codeOrStatus;
-    _renderLastExit();
-  }
-
   async function pollHudStatus() {
     const t0 = performance.now();
     try {
@@ -740,48 +711,45 @@
     _startHudStatusPoll({ pollNow: document.visibilityState === 'visible' });
   });
 
-  // Hook setTabStatus so TABS and LAST EXIT re-render whenever any tab changes
-  // state — LAST EXIT dims to muted while the active tab is running (stale
-  // metadata per the semantic color contract).
-  if (typeof global.setTabStatus === 'function') {
-    const originalSetTabStatus = global.setTabStatus;
-    global.setTabStatus = function wrappedSetTabStatus(...args) {
-      const result = originalSetTabStatus.apply(this, args);
-      try { _renderTabs(); } catch (e) { /* non-critical */ }
-      try { _renderLastExit(); } catch (e) { /* non-critical */ }
-      return result;
-    };
-  }
-
-  // Hook activateTab so LAST EXIT dim re-evaluates when the user switches to a
-  // different tab — activeTabId changes without a setTabStatus fire.
-  if (typeof global.activateTab === 'function') {
-    const originalActivateTab = global.activateTab;
-    global.activateTab = function wrappedActivateTab(...args) {
-      const result = originalActivateTab.apply(this, args);
-      try { _renderLastExit(); } catch (e) { /* non-critical */ }
-      return result;
-    };
-  }
-
-  // Hook createTab / closeTab so TABS reflects the new count immediately —
-  // setTabStatus doesn't fire on open/close, so without these wrappers the
-  // pill would stay stale until the next command runs in any tab.
-  if (typeof global.createTab === 'function') {
-    const originalCreateTab = global.createTab;
-    global.createTab = function wrappedCreateTab(...args) {
-      const result = originalCreateTab.apply(this, args);
-      try { _renderTabs(); } catch (e) { /* non-critical */ }
-      return result;
-    };
-  }
-  if (typeof global.closeTab === 'function') {
-    const originalCloseTab = global.closeTab;
-    global.closeTab = function wrappedCloseTab(...args) {
-      const result = originalCloseTab.apply(this, args);
-      try { _renderTabs(); } catch (e) { /* non-critical */ }
-      return result;
-    };
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:history-rendered', () => {
+      try { renderRailRecent(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:workflows-rendered', (e) => {
+      try { renderRailWorkflows(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:workflows-closed', () => {
+      if (typeof renderWorkflowItems === 'function') {
+        try { renderWorkflowItems(allWorkflows); } catch (_) { /* non-critical */ }
+      }
+    });
+    onUiEvent('app:tab-status-changed', () => {
+      try { _renderTabs(); } catch (_) { /* non-critical */ }
+      try { _renderLastExit(); } catch (_) { /* non-critical */ }
+      try { refreshHudActions(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-activated', () => {
+      try { _renderLastExit(); } catch (_) { /* non-critical */ }
+      try { refreshHudActions(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-created', () => {
+      try { _renderTabs(); } catch (_) { /* non-critical */ }
+      try { refreshHudActions(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-closed', () => {
+      try { _renderTabs(); } catch (_) { /* non-critical */ }
+      try { refreshHudActions(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:last-exit-changed', (e) => {
+      hudState.lastExit = e.detail ? e.detail.value : null;
+      try { _renderLastExit(); } catch (_) { /* non-critical */ }
+    });
+    onUiEvent('app:tab-kill-visibility-changed', (e) => {
+      const tabId = e.detail && e.detail.tabId;
+      const activeId = (typeof getActiveTabId === 'function') ? getActiveTabId() : null;
+      if (tabId !== activeId) return;
+      try { _setHudKillVisible(!!(e.detail && e.detail.visible)); } catch (_) { /* non-critical */ }
+    });
   }
 
   // Initial render and pollers.
@@ -805,11 +773,6 @@
   refreshHudActions();
 
   // Expose the workflows renderer for controller.js to call after /workflows loads.
-  global.renderRailWorkflows = renderRailWorkflows;
-  global.renderRailRecent = renderRailRecent;
-  global.refreshHudActions = refreshHudActions;
-  global.setHudKillVisible = _setHudKillVisible;
-  global.setHudLastExit = setHudLastExit;
   global.renderHudClock = _renderClock;
   global.toggleRailCollapsed = () => setCollapsed(!ui.collapsed);
 

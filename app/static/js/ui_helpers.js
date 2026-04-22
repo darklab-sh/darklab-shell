@@ -184,6 +184,7 @@
         _mobileKeyboardVisibilityTimer = null;
       }
       document.body.classList.remove('mobile-keyboard-open');
+      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: false });
       return false;
     }
     if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
@@ -193,6 +194,7 @@
     if (nextOpen && nextOffset > 0) state._mobileKeyboardLastOpenOffset = nextOffset;
     if (!nextOpen) state._mobileKeyboardOffsetBaseline = nextOffset;
     document.body.classList.toggle('mobile-keyboard-open', nextOpen);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: !!nextOpen });
     return nextOpen;
   };
   global.setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
@@ -212,6 +214,7 @@
         }
         if (typeof acHide === 'function') acHide();
       }
+      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: !!open });
       return !!open;
     };
 
@@ -236,6 +239,7 @@
       );
       if (keyboardStillOpen) return;
       document.body.classList.remove('mobile-keyboard-open');
+      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: false });
       // Reset keyboard CSS vars to their closed-keyboard values. Use window.innerHeight
       // rather than visualViewport.height — the keyboard animation may still be in
       // progress at this point, leaving visualViewport.height at a mid-animation
@@ -521,9 +525,7 @@
       if (btn.style) btn.style.display = 'inline-block';
     }
     syncTerminalActionLayout(tabId);
-    // HUD Kill button only reflects the active tab.
-    const activeId = typeof getActiveTabId === 'function' ? getActiveTabId() : null;
-    if (typeof setHudKillVisible === 'function' && tabId === activeId) setHudKillVisible(true);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-kill-visibility-changed', { tabId, visible: true });
   };
   global.hideTabKillBtn = (tabId) => {
     const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
@@ -532,8 +534,7 @@
       if (btn.style) btn.style.display = 'none';
     }
     syncTerminalActionLayout(tabId);
-    const activeId = typeof getActiveTabId === 'function' ? getActiveTabId() : null;
-    if (typeof setHudKillVisible === 'function' && tabId === activeId) setHudKillVisible(false);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-kill-visibility-changed', { tabId, visible: false });
   };
   // Fallbacks. mobile_chrome.js overrides these with sheet-aware versions when
   // the mobile shell initializes; these stubs only run if that init didn't.

@@ -44,10 +44,11 @@ function _clearStalledTimeout(tabId) {
 function setStatus(s) {
   status.className = 'status-pill ' + s;
   status.textContent = s === 'running' ? 'RUNNING' : 'IDLE';
-  if (typeof setHudLastExit === 'function') {
-    if (s === 'ok') setHudLastExit(0);
-    else if (s === 'fail') setHudLastExit(1);
-    else if (s === 'killed') setHudLastExit('killed');
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:status-changed', { status: s });
+    if (s === 'ok') emitUiEvent('app:last-exit-changed', { value: 0 });
+    else if (s === 'fail') emitUiEvent('app:last-exit-changed', { value: 1 });
+    else if (s === 'killed') emitUiEvent('app:last-exit-changed', { value: 'killed' });
   }
 }
 
@@ -363,7 +364,7 @@ function doKill(tabId) {
   stopTimer();
   appendLine(`[killed by user${secs != null ? ' after ' + _formatElapsed(secs) : ''}]`, 'exit-fail', tabId);
   _maybeNotify(t.command, 'killed', secs != null ? _formatElapsed(secs) : null);
-  if (typeof setHudLastExit === 'function') setHudLastExit('killed');
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: 'killed' });
   setTabStatus(tabId, 'killed');
   hideTabKillBtn(tabId);
   if (tabId === activeTabId) {
@@ -1102,7 +1103,7 @@ function submitCommand(rawCmd) {
                 }
                 if (t) t.syntheticClear = false;
                 _maybeNotify(t ? t.command : '', msg.code, msg.elapsed ? msg.elapsed + 's' : null);
-                if (typeof setHudLastExit === 'function') setHudLastExit(msg.code);
+                if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: msg.code });
                 _setRunButtonDisabled(false); hideTabKillBtn(tabId);
                 if (t && t.closing && typeof finalizeClosingTab === 'function') {
                   finalizeClosingTab(tabId);

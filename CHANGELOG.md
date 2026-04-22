@@ -50,6 +50,23 @@ All notable changes to darklab shell are documented here.
 
 ### Changed
 
+#### Explicit UI Event Flow
+
+- **Cross-module UI sync now uses explicit document-level UI events instead of wrappers and DOM observers** — shell chrome and mobile chrome no longer keep themselves in sync by monkey-patching globals or watching unrelated DOM mutations.
+  - **Why:** `shell_chrome.js` and `mobile_chrome.js` had accumulated several indirect sync paths: wrappers around shared globals such as `renderHistory`, `refreshHistoryPanel`, `closeWorkflows`, `activateTab`, `createTab`, `closeTab`, and `setTabStatus`, plus `MutationObserver`-based mirroring in `mobile_chrome.js` for run state, tab lifecycle, and keyboard state. That coupling made ownership hard to follow and made future UI work easier to break accidentally.
+  - **What:**
+    - `state.js` now exposes explicit `emitUiEvent(...)` / `onUiEvent(...)` helpers built on document-level `CustomEvent`.
+    - shared publishers now emit UI events at the point state actually changes:
+      - `history.js` emits `app:history-rendered` and `app:history-panel-refreshed`
+      - `app.js` emits `app:workflows-rendered`
+      - `controller.js` emits `app:workflows-closed`
+      - `tabs.js` emits tab lifecycle and ordering events (`app:tab-created`, `app:tab-activated`, `app:tab-closed`, `app:tab-closing-deferred`, `app:tab-status-changed`, `app:tab-order-changed`)
+      - `runner.js` emits `app:status-changed` and `app:last-exit-changed`
+      - `ui_helpers.js` emits `app:mobile-keyboard-state` and `app:tab-kill-visibility-changed`
+    - `shell_chrome.js` now subscribes to those events instead of wrapping global functions, and `mobile_chrome.js` now uses the same explicit event stream instead of wrapper-based sync plus `MutationObserver` fallbacks.
+    - dead bridge exports such as `renderRailWorkflows`, `refreshHudActions`, `setHudKillVisible`, and `setHudLastExit` were removed from the shell-chrome layer because the owning modules now publish the state changes directly.
+  - **Tests:** `tests/js/unit/mobile_running_indicator.test.js` now verifies the mobile running-indicator resync path through tab lifecycle events rather than DOM mutation observers; targeted unit sweep: `tests/js/unit/mobile_running_indicator.test.js`, `tests/js/unit/button_primitives_runtime.test.js`, `tests/js/unit/tabs.test.js`, `tests/js/unit/history.test.js`, and `tests/js/unit/app.test.js` all pass (`261 passed`).
+
 #### Export Parity and Shared Save Rendering
 
 - **Permalink/share pages, saved HTML, and PDF now follow one tighter export model** — the export surfaces were visually close but still drifting in typography, spacing, and transcript treatment because the shared logic stopped one layer too late.

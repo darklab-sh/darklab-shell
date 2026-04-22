@@ -89,9 +89,8 @@
       if (tabId && typeof confirmKill === 'function') confirmKill(tabId);
     });
   }
-  if (statusPillEl && typeof MutationObserver === 'function') {
-    const obs = new MutationObserver(syncRunState);
-    obs.observe(statusPillEl, { attributes: true, attributeFilter: ['class'] });
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:status-changed', () => syncRunState());
   }
   syncRunState();
 
@@ -275,21 +274,8 @@
     });
   }
 
-  if (terminalBarEl && tabsBarEl && typeof MutationObserver === 'function') {
+  if (terminalBarEl && tabsBarEl) {
     _ensureRunningIndicatorMounts();
-    // Narrow the observer to attribute changes on direct .tab children.
-    // Running/active state lives in per-tab classes; we don't need
-    // subtree+childList which would also fire on timer textNode updates
-    // and drag-reorder DOM moves (both irrelevant to the chip count).
-    new MutationObserver(syncRunningIndicator).observe(tabsBarEl, {
-      attributes: true,
-      attributeFilter: ['class'],
-      subtree: true,
-    });
-    // Also observe childList at the top level so tab add/remove retriggers.
-    new MutationObserver(syncRunningIndicator).observe(tabsBarEl, {
-      childList: true,
-    });
     window.addEventListener('resize', syncRunningIndicator);
     // Edge glow direction depends on scroll position; debounce to
     // scroll-end so we never force layout during momentum. 120ms feels
@@ -299,6 +285,13 @@
       if (_scrollSyncTimer) clearTimeout(_scrollSyncTimer);
       _scrollSyncTimer = setTimeout(syncRunningIndicator, 120);
     }, { passive: true });
+  }
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:tab-created', () => syncRunningIndicator());
+    onUiEvent('app:tab-closed', () => syncRunningIndicator());
+    onUiEvent('app:tab-status-changed', () => syncRunningIndicator());
+    onUiEvent('app:tab-activated', () => syncRunningIndicator());
+    onUiEvent('app:tab-order-changed', () => syncRunningIndicator());
   }
   syncRunningIndicator();
 
@@ -729,18 +722,10 @@
     }
   });
 
-  // After the legacy confirm modal runs a delete/clear, refreshHistoryPanel
-  // is the signal that the server state changed — piggyback on it to refresh
-  // our sheet list so the UI stays in sync without a manual re-fetch.
-  if (typeof global.refreshHistoryPanel === 'function') {
-    const _origRefreshHistoryPanel = global.refreshHistoryPanel;
-    global.refreshHistoryPanel = function wrappedRefreshHistoryPanel(...args) {
-      const result = _origRefreshHistoryPanel.apply(this, args);
-      if (isRecentsSheetOpen()) {
-        _recentsRefresh();
-      }
-      return result;
-    };
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:history-panel-refreshed', () => {
+      if (isRecentsSheetOpen()) _recentsRefresh();
+    });
   }
 
   let _recentsSearchTimer = null;
@@ -980,25 +965,19 @@
     recentPeek.addEventListener('pointercancel', endPeekDrag);
   }
 
-  if (typeof global.renderHistory === 'function') {
-    const originalRenderHistory = global.renderHistory;
-    global.renderHistory = function wrappedMobileRenderHistory(...args) {
-      const result = originalRenderHistory.apply(this, args);
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:history-rendered', () => {
       try { renderRecentPeek(); } catch (_) { /* non-critical */ }
-      return result;
-    };
+    });
   }
   renderRecentPeek();
 
   // Mirror the workflows list count into the menu-sheet hint so "workflows"
   // advertises how many are available without opening the overlay.
-  if (typeof global.renderRailWorkflows === 'function') {
-    const originalRenderRailWorkflows = global.renderRailWorkflows;
-    global.renderRailWorkflows = function wrappedMobileRenderRailWorkflows(items) {
-      const result = originalRenderRailWorkflows.apply(this, arguments);
-      try { refreshWorkflowsCount(items); } catch (_) { /* non-critical */ }
-      return result;
-    };
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:workflows-rendered', (e) => {
+      try { refreshWorkflowsCount(e.detail && e.detail.items); } catch (_) { /* non-critical */ }
+    });
   }
 
   // ── 2E: Keyboard helper row ─────────────────────────────────────
@@ -1017,9 +996,8 @@
       if (mobileEditBar && mobileEditBar.style) mobileEditBar.style.display = '';
     }
   }
-  if (document.body && typeof MutationObserver === 'function') {
-    const obs = new MutationObserver(syncKbHelper);
-    obs.observe(document.body, { attributes: true, attributeFilter: ['class'] });
+  if (typeof onUiEvent === 'function') {
+    onUiEvent('app:mobile-keyboard-state', () => syncKbHelper());
   }
   syncKbHelper();
 

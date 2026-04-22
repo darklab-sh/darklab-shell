@@ -98,6 +98,12 @@ function syncTabOrderFromDom() {
   if (!orderedIds.length) return;
   const byId = new Map(tabs.map(tab => [tab.id, tab]));
   setTabs(orderedIds.map(id => byId.get(id)).filter(Boolean));
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-order-changed', {
+      order: orderedIds.slice(),
+      activeTabId,
+    });
+  }
 }
 
 function _tabFromClientX(clientX, excludeId = null) {
@@ -663,6 +669,9 @@ function createTab(label) {
   updateNewTabBtn();
   updateTabScrollButtons();
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-created', { id, label, activeTabId });
+  }
   return id;
 }
 
@@ -705,8 +714,10 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (focusComposer) refocusComposerAfterAction({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   updateOutputFollowButton(id);
-  if (typeof refreshHudActions === 'function') refreshHudActions(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-activated', { id, prevId, activeTabId });
+  }
 }
 
 function closeTab(id) {
@@ -732,6 +743,9 @@ function closeTab(id) {
     updateNewTabBtn();
     updateTabScrollButtons();
     if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
+    }
     return;
   }
   if (tabs.length === 1) {
@@ -751,6 +765,9 @@ function closeTab(id) {
     }
     blurActiveElement();
     if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:tab-closed', { id, activeTabId, preservedSingleTab: true });
+    }
     return;
   }
   tabs.splice(idx, 1);
@@ -777,6 +794,9 @@ function closeTab(id) {
   updateNewTabBtn();
   updateTabScrollButtons();
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-closed', { id, activeTabId });
+  }
 }
 
 function setTabStatus(id, st) {
@@ -791,6 +811,9 @@ function setTabStatus(id, st) {
   }
   updateOutputFollowButton(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-status-changed', { id, status: st, activeTabId });
+  }
 }
 
 function setTabLabel(id, label) {

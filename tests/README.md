@@ -19,9 +19,9 @@ The suites are intentionally layered:
 Current totals:
 
 - `pytest`: 856
-- `vitest`: 694
+- `vitest`: 695
 - `playwright`: 197
-- total: 1,747
+- total: 1,748
 
 This document is organized in two parts:
 
@@ -1379,7 +1379,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `dropdown keeps cmdHistory matches when server fetch returns empty` | Regression: typing a character used to show in-memory recents briefly, then the server response overwrote `_histSearchRuns = []` and the dropdown cleared. Client-side matches must not be dropped by an empty server response. |
 | `dropdown merges cmdHistory matches with unique server-only matches` | Verifies that server-surfaced older runs beyond the in-memory recents cap extend the dropdown list (deduped) rather than replacing the cmdHistory matches. |
 
-#### `mobile_running_indicator.test.js`
+#### `mobile_running_indicator.test.js` (11 tests)
 
 Contract-layer coverage for the mobile running-indicator surface in `app/static/js/mobile_chrome.js` (the trailing chip and pair of edge-glow overlays that surface background-tab run state). The IIFE is re-loaded per test into a fresh `Function` scope with a synchronous `requestAnimationFrame` stub and `location.search` pre-set so the `?ri=off` / `?ri=0` kill switch (read once at init) can be exercised. iOS-Safari-specific behavior (cold smooth-scroll drop, momentum destabilization from sticky children) is covered by the Playwright suite.
 
@@ -1395,6 +1395,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `chip tap activates the next running non-active tab in tab-row order` | Verifies chip click invokes `activateTab(id, {focusComposer: false})` with the next running non-active tab id in tab-row order. |
 | `chip tap cycles through the running set and wraps around` | Verifies successive chip taps cycle through all running non-active tabs and wrap back to the first after the last. |
 | `hides the chip and edge glows when the body is not in mobile-terminal-mode` | Verifies that when `body.mobile-terminal-mode` is absent, the chip carries `u-hidden` and the edge-glow overlays do not enter the `is-active` state. |
+| `re-syncs the chip count from tab lifecycle events instead of DOM mutation observers` | Verifies that the running-indicator count re-syncs from the explicit tab lifecycle event stream rather than depending on tab-row DOM mutation observers. |
 
 #### `output.test.js`
 

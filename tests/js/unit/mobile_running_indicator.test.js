@@ -74,6 +74,10 @@ function mountModule({
   injectedGlobal.getTabs = () => tabs
   injectedGlobal.getActiveTabId = () => activeTabId
   injectedGlobal.activateTab = activateTab
+  injectedGlobal.onUiEvent = (name, handler, options) => {
+    document.addEventListener(name, handler, options)
+    return () => document.removeEventListener(name, handler, options)
+  }
 
   // Collapse rAF to sync so syncRunningIndicator resolves inside the test tick.
   const origRaf = window.requestAnimationFrame
@@ -89,6 +93,7 @@ function mountModule({
 
   return {
     activateTab,
+    tabs,
     restore() {
       window.requestAnimationFrame = origRaf
     },
@@ -243,6 +248,36 @@ describe('mobile running-state indicator', () => {
     expect(activateTab.mock.calls[1][0]).toBe('tab-b')
     // Third tap wraps back to the first running tab.
     expect(activateTab.mock.calls[2][0]).toBe('tab-a')
+  })
+
+  it('re-syncs the chip count from tab lifecycle events instead of DOM mutation observers', () => {
+    ctx = mountModule({
+      tabs: [
+        { id: 'tab-a', st: 'running' },
+        { id: 'tab-b', st: 'idle' },
+      ],
+      activeTabId: 'tab-b',
+    })
+
+    const chip = document.getElementById('mobile-running-chip')
+    expect(chip.querySelector('.mobile-running-count').textContent).toBe('1')
+
+    ctx.tabs[1].st = 'running'
+    document.dispatchEvent(new CustomEvent('app:tab-status-changed', {
+      detail: { id: 'tab-b', status: 'running', activeTabId: 'tab-b' },
+    }))
+
+    // Active tab is excluded, so count stays at 1.
+    expect(chip.querySelector('.mobile-running-count').textContent).toBe('1')
+
+    ctx.tabs.push({ id: 'tab-c', st: 'running' })
+    const tabEl = addTab('tab-c', { running: true, active: false })
+    expect(tabEl).not.toBeNull()
+    document.dispatchEvent(new CustomEvent('app:tab-created', {
+      detail: { id: 'tab-c', label: 'tab c', activeTabId: 'tab-b' },
+    }))
+
+    expect(chip.querySelector('.mobile-running-count').textContent).toBe('2')
   })
 
   it('hides the chip and edge glows when the body is not in mobile-terminal-mode', () => {

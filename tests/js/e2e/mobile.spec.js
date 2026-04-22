@@ -749,8 +749,13 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {
-    // Show the helper row (normally shown only when the keyboard is open)
-    await page.evaluate(() => document.body.classList.add('mobile-keyboard-open'))
+    // Show the helper row through the real keyboard-state path rather than
+    // toggling the CSS class directly, so the event-driven visibility sync in
+    // mobile_chrome.js runs exactly the way production does.
+    await page.evaluate(() => {
+      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true)
+      else document.body.classList.add('mobile-keyboard-open')
+    })
 
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 

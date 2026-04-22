@@ -1804,7 +1804,8 @@ function renderWorkflowItems(items) {
   const body = document.querySelector('.workflows-body');
   if (!body) return;
   body.innerHTML = '';
-  (items || []).forEach(item => {
+  const list = Array.isArray(items) ? items : [];
+  list.forEach(item => {
     const card = document.createElement('div');
     card.className = 'workflow-card';
 
@@ -1866,6 +1867,12 @@ function renderWorkflowItems(items) {
 
   wireFaqCommandChips(body);
   wireWorkflowStepRunButtons(body);
+
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:workflows-rendered', {
+      items: list.slice(),
+    });
+  }
 }
 
 function activateWorkflowStepRun(cmd) {
