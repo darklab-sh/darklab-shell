@@ -1,6 +1,6 @@
 # Architectural Decisions
 
-This document records the key architectural decisions, tradeoffs, bugs, and implementation lessons that shaped the current design of darklab shell.
+This document records the key architectural decisions, tradeoffs, bugs, and implementation lessons that shaped the current design of darklab_shell.
 
 Use [ARCHITECTURE.md](ARCHITECTURE.md) for the current system structure, runtime diagrams, persistence model, and deployment shape. Use this file for the reasoning behind those structures. If you are about to change something and want to know what has historically caused problems, skip to [Known Gotchas and Lessons Learned](#known-gotchas-and-lessons-learned).
 
@@ -215,7 +215,7 @@ The `runs_fts` virtual table uses the FTS5 **trigram** tokenizer when available 
 
 **Why trigram:** Security tool output contains port numbers (`443/tcp`), CVEs (`CVE-2024-1234`), IP addresses, hostnames, and flag strings that users typically search for by substring. Trigram tokenization breaks every string into overlapping 3-character sequences, enabling `MATCH "443"` to find `443/tcp open` without the user needing to know the exact token boundary. Unicode61 tokenizes on whitespace and punctuation, so `443` alone would not match `443/tcp` — the user would need to search `443/tcp` exactly.
 
-**Why the fallback matters:** The production Docker image is based on the latest Ubuntu and ships SQLite 3.38+, so trigram is always used in production. The fallback to unicode61 preserves FTS functionality for operators running darklab shell on platforms with older SQLite (some Alpine-based images, macOS system SQLite). In the fallback case, search remains functional for whole-word and prefix queries; only substring matching within tokens degrades. `_create_fts_schema()` in `database.py` detects the available tokenizer at init time and falls back gracefully; no config change is needed.
+**Why the fallback matters:** The production Docker image is based on the latest Ubuntu and ships SQLite 3.38+, so trigram is always used in production. The fallback to unicode61 preserves FTS functionality for operators running darklab_shell on platforms with older SQLite (some Alpine-based images, macOS system SQLite). In the fallback case, search remains functional for whole-word and prefix queries; only substring matching within tokens degrades. `_create_fts_schema()` in `database.py` detects the available tokenizer at init time and falls back gracefully; no config change is needed.
 
 ---
 

@@ -217,7 +217,7 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
-  const wmText = `${cfg.app_name || 'darklab shell'}${wmVersion}`;
+  const wmText = `${cfg.app_name || 'darklab_shell'}${wmVersion}`;
   document.querySelectorAll('.terminal-wordmark').forEach(el => {
     el.textContent = wmText;
     if (cfg.project_readme) el.href = cfg.project_readme;

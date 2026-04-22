@@ -15,6 +15,7 @@ Run with: pytest tests/ (from the repo root)
 import gzip
 import importlib.util
 import os
+import re
 import sqlite3
 import tempfile
 import textwrap
@@ -27,6 +28,7 @@ import database
 import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
+import fake_commands
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
@@ -534,7 +536,7 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         assert result[0]["question"] == "What is this?"
@@ -547,7 +549,7 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         assert "https://example.invalid/README.md" in result[0]["answer"]
@@ -559,7 +561,7 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         by_question = {item["question"]: item for item in result}
@@ -583,7 +585,7 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         by_question = {item["question"]: item for item in result}
@@ -1735,3 +1737,49 @@ class TestDatabaseInit:
 
         assert conn.execute.call_count >= 1
         assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
+
+
+class TestFakeStatus:
+    def test_includes_session_summary_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "status.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                ("run-1", "tok_statusdemo", "ping darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                ("run-2", "tok_statusdemo", "curl darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-1", "tok_statusdemo", "demo snapshot", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                ("tok_statusdemo", "ping darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, datetime('now'))",
+                ("tok_statusdemo", '{"theme":"matrix"}'),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    lines = fake_commands._run_fake_status("tok_statusdemo")
+
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        assert re.search(r"session\s+tok_statusdemo", text)
+        assert re.search(r"session type\s+named token", text)
+        assert re.search(r"runs in session\s+2", text)
+        assert re.search(r"snapshots\s+1", text)
+        assert re.search(r"starred commands\s+1", text)
+        assert re.search(r"saved options\s+yes", text)
+        assert re.search(r"active jobs\s+1", text)

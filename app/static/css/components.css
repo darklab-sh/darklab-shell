@@ -1,4 +1,4 @@
-/* darklab shell CSS module: components
+/* darklab_shell CSS module: components
    Reusable shell components: tabs, search, toast, permalink/history surfaces, and menus. */
 
 /* ── Tabs ── */
@@ -516,10 +516,25 @@ body.permalink-page .output:empty::before {
 body.permalink-page .permalink-error-heading {
   color: var(--red);
   font-weight: 700;
-  margin-bottom: 12px;
+  font-size: 17px;
+  letter-spacing: 0.2px;
 }
 body.permalink-page .permalink-error-detail {
   color: var(--muted);
+  max-width: 960px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+body.permalink-page .permalink-error-state {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding-top: 8px;
+  white-space: normal;
 }
 
 /* ── Run History panel ── */
@@ -629,6 +644,9 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   background: color-mix(in srgb, var(--theme-history-panel-bg) 96%, var(--surface));
+}
+.history-active-filters:empty {
+  display: none;
 }
 .history-active-filter-chip {
   display: inline-flex;
@@ -842,13 +860,40 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   font-size: 10px;
   color: var(--muted);
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+}
+.history-entry-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border-bright);
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+.history-entry-kind-run {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+.history-entry-kind-snapshot {
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
 }
 .history-entry-date {
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
 }
 .history-entry-meta .exit-ok { color: var(--green); }
 .history-entry-meta .exit-fail { color: var(--red); }
+.history-entry-icon {
+  color: var(--muted);
+  cursor: default;
+  font-size: 18px;
+  transform: none;
+  padding-right: 2px;
+}
 .history-delete-note {
   color: var(--muted);
   font-size: 11px;

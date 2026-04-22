@@ -226,10 +226,10 @@ async function loadAppFns({
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -706,10 +706,10 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -1089,7 +1089,7 @@ describe('app helpers', () => {
           return Promise.resolve({
             json: () =>
               Promise.resolve({
-                app_name: 'darklab shell',
+                app_name: 'darklab_shell',
                 prompt_prefix: 'anon@darklab:~$',
                 version: '9.9',
                 default_theme: 'theme_missing.yaml',
@@ -2168,7 +2168,7 @@ describe('app helpers', () => {
     await Promise.resolve()
     await Promise.resolve()
 
-    expect(document.title).toBe('darklab shell')
+    expect(document.title).toBe('darklab_shell')
   })
 
   it('updates existing terminal-wordmark elements with app name and version after config loads', async () => {
@@ -2182,9 +2182,9 @@ describe('app helpers', () => {
 
     await new Promise((resolve) => setImmediate(resolve))
 
-    expect(wordmark.textContent).toBe('darklab shell v9.9')
+    expect(wordmark.textContent).toBe('darklab_shell v9.9')
     expect(wordmark.getAttribute('href')).toBe(
-      'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+      'https://gitlab.com/darklab.sh/darklab-shell',
     )
   })
 
@@ -2380,7 +2380,7 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
@@ -3350,10 +3350,10 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3426,10 +3426,10 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3519,10 +3519,10 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3649,10 +3649,10 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3765,7 +3765,7 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
@@ -3822,7 +3822,7 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',
@@ -3875,7 +3875,7 @@ describe('app helpers', () => {
         return Promise.resolve({
           json: () =>
             Promise.resolve({
-              app_name: 'darklab shell',
+              app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
               default_theme: 'darklab_obsidian.yaml',

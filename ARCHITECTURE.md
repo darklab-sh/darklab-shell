@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes the current system architecture of darklab shell: runtime boundaries, request flow, browser/runtime composition, persistence, observability, testing shape, and production deployment model.
+This document describes the current system architecture of darklab_shell: runtime boundaries, request flow, browser/runtime composition, persistence, observability, testing shape, and production deployment model.
 
 For the architectural rationale, tradeoffs, and implementation-history notes behind those structures, see [DECISIONS.md](DECISIONS.md).
 
@@ -28,7 +28,7 @@ For the architectural rationale, tradeoffs, and implementation-history notes beh
 
 ## System Overview
 
-darklab shell is a web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, and real-time SSE streaming.
+darklab_shell is a web-based shell for running network diagnostic and vulnerability scanning commands against remote endpoints. Flask + Gunicorn backend, single-file HTML frontend, SQLite persistence, and real-time SSE streaming.
 
 At a high level, it works like this:
 
@@ -197,7 +197,7 @@ This route list belongs in the architecture document because it describes the ap
 | `GET` | `/session/starred` | Returns the current session's starred command list |
 | `POST` | `/session/starred` | Adds one command to the current session's starred list |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session |
-| `GET` | `/history` | Returns the most recent completed runs for the current session as JSON |
+| `GET` | `/history` | Returns paginated history items for the current session as JSON, with support for `type=all\|runs\|snapshots` and a backward-compatible `runs` subset for run-only consumers |
 | `GET` | `/history/active` | Returns active-run metadata for the current session so reload can rebuild in-flight tabs |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
 | `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>` (`?json` for raw JSON) |
@@ -580,7 +580,7 @@ That split is what allows the app to keep the interactive shell fast while still
 - `runs` — one row per completed command. Stores run metadata plus a capped `output_preview` JSON payload for the history drawer and `/history/<id>`. Fresh previews store structured `{text, cls, tsC, tsE}` entries so run permalinks can preserve prompt echo and timestamp metadata. Also stores `output_search_text` (plain text extracted from the full artifact when available, otherwise the preview) for FTS indexing. Persists across restarts. Pruned by `permalink_retention_days`.
 - `runs_fts` — FTS5 virtual table (content table backed by `runs`, `content_rowid=rowid`) indexing the `command` and `output_search_text` columns. Uses the trigram tokenizer when available (SQLite ≥ 3.38), falling back to unicode61. Kept in sync with `runs` via INSERT/DELETE triggers. Enables history drawer full-text search across both command text and stored run output.
 - `run_output_artifacts` — metadata rows pointing at compressed full-output artifacts under `./data/run-output/`. This keeps the `runs` table lean while still allowing the canonical `/history/<id>` permalink to serve full output when it exists.
-- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction.
+- `snapshots` — one row per tab permalink (`/share/<id>`). Contains `{text, cls, tsC, tsE}` objects with raw ANSI codes and timestamp data for accurate HTML export reproduction, and now feeds the `SNAPSHOT` rows in the shared history surfaces.
 - `session_tokens` — one row per issued named session token `(token TEXT PRIMARY KEY, created TEXT)`. Used to validate `tok_`-prefixed `X-Session-ID` headers and to support `session-token list` and `session-token revoke`.
 - `session_preferences` — one row per session ID `(session_id TEXT PRIMARY KEY, preferences TEXT, updated TEXT)`. Stores the normalized Options snapshot that follows a named session token across browsers while still allowing browser-local UUID sessions to keep independent defaults.
 - `starred_commands` — one row per starred command per session `(session_id, command)`. Backs the `/session/starred` endpoints and follows session tokens across devices via the migration path.
@@ -792,10 +792,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 864
-- `vitest`: 726
-- `playwright`: 198
-- total: 1,788
+- `pytest`: 867
+- `vitest`: 728
+- `playwright`: 199
+- total: 1,794
 
 ### Testing Architecture
 

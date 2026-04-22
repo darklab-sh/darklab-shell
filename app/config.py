@@ -10,7 +10,7 @@ import yaml
 from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
 APP_VERSION = "1.5"
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"
+PROJECT_README = "https://gitlab.com/darklab.sh/darklab-shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 
 
@@ -61,7 +61,7 @@ def load_config(conf_dir=None):
     keys while leaving the checked-in defaults in place.
     """
     defaults = {
-        "app_name":                   "darklab shell",
+        "app_name":                   "darklab_shell",
         "prompt_prefix":              "anon@darklab:~$",
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",

@@ -38,7 +38,7 @@ export async function setupWelcomePage(page) {
       status: 200,
       contentType: 'text/plain',
       body: [
-        '.----[ darklab shell :: mobile console ]----.',
+        '.----[ darklab_shell :: mobile console ]----.',
         '|                                              |',
         '|   __  __   ___   ___   ___   ___   ___       |',
         '|  |  \\/  | / _ \\ / _ \\ / _ \\ / _ \\ / _ \\      |',

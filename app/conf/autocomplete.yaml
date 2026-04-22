@@ -1438,8 +1438,6 @@ context:
     arguments:
       - value: a
         description: Show all network interfaces and addresses
-      - value: route
-        description: Show the kernel routing table
   ls:
     flags:
       - value: -la

@@ -40,7 +40,7 @@ async function loadStarredFromServer() {
 async function reloadSessionHistory() {
   await loadStarredFromServer();
   try {
-    const resp = await apiFetch('/history');
+    const resp = await apiFetch('/history?type=runs');
     if (resp.ok) {
       const data = await resp.json();
       hydrateCmdHistory(data.runs || []);
@@ -54,6 +54,7 @@ async function reloadSessionHistory() {
 // starred-only toggle backed by the server cache.
 let _historyFilterRefreshTimer = null;
 let _historyFilters = {
+  type: 'all',
   q: '',
   commandRoot: '',
   exitCode: 'all',
@@ -91,15 +92,24 @@ function _syncHistoryFilterControls() {
   if (typeof historyPanel !== 'undefined' && historyPanel) {
     historyPanel.classList.toggle('mobile-history-filters-open', !!_historyMobileAdvancedOpen);
   }
+  if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) historyTypeFilter.value = _historyFilters.type;
   if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
   if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
   if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
   if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
+  const runOnlyEnabled = _historyFilters.type !== 'snapshots';
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
+  if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.disabled = !runOnlyEnabled;
+  if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.disabled = !runOnlyEnabled;
+  if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
+    histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
+  }
 }
 
 function _historyHasActiveServerFilters() {
   return Boolean(
-    _historyFilters.q
+    _historyFilters.type !== 'all'
+    || _historyFilters.q
     || _historyFilters.commandRoot
     || _historyFilters.exitCode !== 'all'
     || _historyFilters.dateRange !== 'all'
@@ -108,6 +118,25 @@ function _historyHasActiveServerFilters() {
 
 function _historyHasAnyFilters() {
   return _historyHasActiveServerFilters() || !!_historyFilters.starredOnly;
+}
+
+function _historyResetRunOnlyFilters() {
+  _historyFilters.commandRoot = '';
+  _historyFilters.exitCode = 'all';
+  _historyFilters.starredOnly = false;
+}
+
+function _historyLabelForType(type = _historyFilters.type) {
+  if (type === 'runs') return 'runs';
+  if (type === 'snapshots') return 'snapshots';
+  return 'history items';
+}
+
+function _historySummaryLabel(totalCount = _historyPaging.totalCount) {
+  const singular = totalCount === 1;
+  if (_historyFilters.type === 'runs') return singular ? 'stored run' : 'stored runs';
+  if (_historyFilters.type === 'snapshots') return singular ? 'stored snapshot' : 'stored snapshots';
+  return singular ? 'stored item' : 'stored items';
 }
 
 function _historyCommandRootsFromRuns(runs) {
@@ -209,8 +238,9 @@ function _historyRefreshRootDropdown() {
 
 function _historyActiveFilterItems() {
   const items = [];
+  if (_historyFilters.type !== 'all') items.push({ key: 'type', label: `type: ${_historyFilters.type}` });
   if (_historyFilters.q) items.push({ key: 'q', label: `search: ${_historyFilters.q}` });
-  if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `root: ${_historyFilters.commandRoot}` });
+  if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `command: ${_historyFilters.commandRoot}` });
   if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
   else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: non-zero' });
   else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
@@ -233,14 +263,14 @@ function _historyRenderPagination(visibleCount = 0) {
   if (typeof historyPaginationControls === 'undefined' || !historyPaginationControls) return;
 
   const { page, pageSize, totalCount, pageCount } = _historyPaging;
-  const totalLabel = totalCount === 1 ? 'stored run' : 'stored runs';
+  const totalLabel = _historySummaryLabel(totalCount);
   if (totalCount > 0) {
     const start = ((page - 1) * pageSize) + 1;
     const count = Math.max(0, Number(visibleCount) || 0);
     const end = count > 0 ? Math.min(totalCount, start + count - 1) : start;
     historyPaginationSummary.textContent = `Showing ${start}-${end} of ${totalCount} ${totalLabel}`;
   } else {
-    historyPaginationSummary.textContent = 'Showing 0 of 0 stored runs';
+    historyPaginationSummary.textContent = `Showing 0 of 0 ${_historySummaryLabel(0)}`;
   }
 
   historyPaginationControls.replaceChildren();
@@ -307,6 +337,7 @@ function _buildHistoryRequestUrl() {
   params.set('page', String(_historyPaging.page || 1));
   params.set('page_size', String(_historyPaging.pageSize || 1));
   params.set('include_total', '1');
+  if (_historyFilters.type !== 'all') params.set('type', _historyFilters.type);
   if (_historyFilters.q) params.set('q', _historyFilters.q);
   if (_historyFilters.commandRoot) params.set('command_root', _historyFilters.commandRoot);
   if (_historyFilters.exitCode !== 'all') params.set('exit_code', _historyFilters.exitCode);
@@ -326,14 +357,25 @@ function _renderHistoryEmptyState() {
   empty.className = 'history-empty-state';
   const title = document.createElement('div');
   title.className = 'history-empty-state-title';
-  title.textContent = _historyHasAnyFilters() ? 'No matching runs.' : 'No runs yet.';
+  const typeLabel = _historyLabelForType();
+  title.textContent = _historyHasAnyFilters()
+    ? `No matching ${typeLabel}.`
+    : _historyFilters.type === 'snapshots'
+      ? 'No snapshots yet.'
+      : _historyFilters.type === 'runs'
+        ? 'No runs yet.'
+        : 'No history yet.';
   empty.appendChild(title);
 
   const detail = document.createElement('div');
   detail.className = 'history-empty-state-detail';
   detail.textContent = _historyHasAnyFilters()
     ? 'Adjust or clear the current filters to widen the history results.'
-    : 'Completed commands will appear here for this browser session.';
+    : _historyFilters.type === 'snapshots'
+      ? 'Saved snapshots will appear here for this browser session.'
+      : _historyFilters.type === 'runs'
+        ? 'Completed commands will appear here for this browser session.'
+        : 'Completed commands and saved snapshots will appear here for this browser session.';
   empty.appendChild(detail);
   historyList.appendChild(empty);
   if (typeof historyPagination !== 'undefined' && historyPagination) {
@@ -352,6 +394,7 @@ function _scheduleHistoryPanelRefresh() {
 function _setHistoryFilter(key, value, { debounce = false } = {}) {
   if (key === 'starredOnly') _historyFilters.starredOnly = !!value;
   else _historyFilters[key] = _normalizeHistoryFilterValue(value) || (key === 'q' || key === 'commandRoot' ? '' : 'all');
+  if (key === 'type' && _historyFilters.type === 'snapshots') _historyResetRunOnlyFilters();
   _historyPaging.page = 1;
   if (debounce) _scheduleHistoryPanelRefresh();
   else refreshHistoryPanel();
@@ -359,6 +402,7 @@ function _setHistoryFilter(key, value, { debounce = false } = {}) {
 
 function clearHistoryFilters() {
   _historyFilters = {
+    type: 'all',
     q: '',
     commandRoot: '',
     exitCode: 'all',
@@ -607,6 +651,13 @@ function _historyRelativeTime(startedAt, now = new Date()) {
   return startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
 }
 
+function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
+  const badge = document.createElement('span');
+  badge.className = `history-entry-kind history-entry-kind-${kind}`;
+  badge.textContent = label;
+  return badge;
+}
+
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry' + (isStarred ? ' starred' : '');
@@ -644,6 +695,7 @@ function _createHistoryEntry(run, isStarred) {
 
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
+  meta.appendChild(_historyMetaKindBadge('run'));
   const timeEl = document.createElement('span');
   timeEl.textContent = time;
   meta.appendChild(timeEl);
@@ -684,6 +736,68 @@ function _createHistoryEntry(run, isStarred) {
   return entry;
 }
 
+function _createSnapshotHistoryEntry(snapshot) {
+  const entry = document.createElement('div');
+  entry.className = 'history-entry history-entry-snapshot';
+
+  const header = document.createElement('div');
+  header.className = 'history-entry-header';
+
+  const title = document.createElement('div');
+  title.className = 'history-entry-cmd';
+  title.textContent = snapshot.label || 'snapshot';
+  header.appendChild(title);
+  entry.appendChild(header);
+
+  const meta = document.createElement('div');
+  meta.className = 'history-entry-meta';
+  meta.appendChild(_historyMetaKindBadge('snapshot'));
+  const createdAt = new Date(snapshot.created);
+  const timeEl = document.createElement('span');
+  timeEl.textContent = Number.isNaN(createdAt.getTime())
+    ? ''
+    : _historyRelativeTime(createdAt);
+  if (!Number.isNaN(createdAt.getTime())) timeEl.title = createdAt.toLocaleString();
+  meta.appendChild(timeEl);
+  entry.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-actions';
+
+  const openBtn = document.createElement('button');
+  openBtn.className = 'history-action-btn';
+  openBtn.dataset.action = 'open';
+  openBtn.textContent = 'open';
+  actions.appendChild(openBtn);
+
+  const linkBtn = document.createElement('button');
+  linkBtn.className = 'history-action-btn';
+  linkBtn.dataset.action = 'link';
+  linkBtn.textContent = 'copy link';
+  actions.appendChild(linkBtn);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'history-action-btn';
+  deleteBtn.dataset.action = 'delete';
+  deleteBtn.textContent = 'delete';
+  actions.appendChild(deleteBtn);
+
+  entry.appendChild(actions);
+  return entry;
+}
+
+function _snapshotUrl(snapshot) {
+  return `${location.origin}/share/${snapshot.id}`;
+}
+
+function openSnapshotLink(snapshot) {
+  if (!snapshot || !snapshot.id) return;
+  const url = _snapshotUrl(snapshot);
+  if (typeof window !== 'undefined' && window && typeof window.open === 'function') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 function _historyActionKeepsPanelOpen(action) {
   if (action === 'star') return true;
   const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
@@ -695,12 +809,14 @@ function _historyActionKeepsPanelOpen(action) {
 // ── Run history panel ──
 let pendingHistAction = null;
 
-function confirmHistAction(type, id, command) {
-  pendingHistAction = { type, id, command };
+function confirmHistAction(type, id, command, itemType = 'run') {
+  pendingHistAction = { type, id, command, itemType };
   const isBulk = type === 'clear';
   const body = isBulk
-    ? { text: 'Clear run history?', note: 'This cannot be undone.' }
-    : { text: 'Remove this run from history?', note: 'This cannot be undone.' };
+    ? { text: 'Delete all runs and snapshots?', note: 'This cannot be undone.' }
+    : itemType === 'snapshot'
+      ? { text: 'Remove this snapshot from history?', note: 'This cannot be undone.' }
+      : { text: 'Remove this run from history?', note: 'This cannot be undone.' };
   const actions = isBulk
     ? [
         { id: 'cancel', label: 'Cancel', role: 'cancel' },
@@ -726,9 +842,15 @@ function executeHistAction(type) {
   const action  = type || (pendingHistAction && pendingHistAction.type);
   const id      = pendingHistAction && pendingHistAction.id;
   const command = pendingHistAction && pendingHistAction.command;
+  const itemType = pendingHistAction && pendingHistAction.itemType;
   pendingHistAction = null;
   if (action === 'delete') {
-    apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => {
+    const deleteUrl = itemType === 'snapshot' ? `/share/${id}` : `/history/${id}`;
+    apiFetch(deleteUrl, { method: 'DELETE' }).then(() => {
+      if (itemType === 'snapshot') {
+        refreshHistoryPanel();
+        return;
+      }
       // Remove from starred set and chips — deleted history should not stay pinned
       const s = _getStarred();
       if (s.has(command)) {
@@ -746,7 +868,7 @@ function executeHistAction(type) {
       refreshHistoryPanel();
     }).catch(() => showToast('Failed to delete run'));
   } else if (action === 'clear-nonfav') {
-    apiFetch('/history')
+    apiFetch('/history?type=runs')
       .then(r => r.json())
       .then(data => {
         const starred   = _getStarred();
@@ -831,17 +953,18 @@ function refreshHistoryPanel() {
     historyList.replaceChildren();
     _historyPaging.page = Math.max(1, Number(data.page) || _historyPaging.page || 1);
     _historyPaging.pageSize = Math.max(1, Number(data.page_size) || _historyPaging.pageSize || 1);
-    _historyPaging.totalCount = Math.max(0, Number(data.total_count ?? data.runs?.length ?? 0) || 0);
+    _historyPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
     _historyPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
     _historyPaging.hasPrev = !!data.has_prev;
     _historyPaging.hasNext = !!data.has_next;
-    _renderHistoryRootSuggestions(Array.isArray(data.roots) ? data.roots : data.runs);
-    const visibleRuns = _applyHistoryClientFilters(data.runs);
-    if (!visibleRuns.length) {
+    const visibleItems = _applyHistoryClientFilters(Array.isArray(data.items) ? data.items : data.runs);
+    _renderHistoryRootSuggestions(_historyFilters.type === 'snapshots' ? [] : (Array.isArray(data.roots) ? data.roots : data.runs));
+    if (!visibleItems.length) {
       _historyRenderPagination(0);
       _renderHistoryEmptyState();
       if (typeof emitUiEvent === 'function') {
         emitUiEvent('app:history-panel-refreshed', {
+          items: [],
           runs: [],
           roots: Array.isArray(data.roots) ? data.roots.slice() : [],
           paging: { ..._historyPaging },
@@ -852,7 +975,37 @@ function refreshHistoryPanel() {
     }
 
     const starred = _getStarred();
-    visibleRuns.forEach(run => {
+    visibleItems.forEach(item => {
+      if (item.type === 'snapshot') {
+        const entry = _createSnapshotHistoryEntry(item);
+        entry.addEventListener('click', e => {
+          if (e.target.closest('[data-action]')) return;
+          openSnapshotLink(item);
+          hideHistoryPanel();
+        });
+
+        bindPressable(entry.querySelector('[data-action="open"]'), {
+          onActivate: () => {
+            openSnapshotLink(item);
+            hideHistoryPanel();
+          },
+        });
+        bindPressable(entry.querySelector('[data-action="link"]'), {
+          onActivate: () => {
+            shareUrl(_snapshotUrl(item)).catch(() => showToast('Failed to copy link', 'error'));
+            if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+          },
+        });
+        bindPressable(entry.querySelector('[data-action="delete"]'), {
+          onActivate: () => {
+            confirmHistAction('delete', item.id, item.label || 'snapshot', 'snapshot');
+          },
+        });
+        historyList.appendChild(entry);
+        return;
+      }
+
+      const run = item;
       const isStarred = starred.has(run.command);
       const entry = _createHistoryEntry(run, isStarred);
 
@@ -924,10 +1077,11 @@ function refreshHistoryPanel() {
 
       historyList.appendChild(entry);
     });
-    _historyRenderPagination(visibleRuns.length);
+    _historyRenderPagination(visibleItems.length);
     if (typeof emitUiEvent === 'function') {
       emitUiEvent('app:history-panel-refreshed', {
-        runs: visibleRuns.slice(),
+        items: visibleItems.slice(),
+        runs: visibleItems.filter(item => item.type === 'run').slice(),
         roots: Array.isArray(data.roots) ? data.roots.slice() : [],
         paging: { ..._historyPaging },
         filters: { ..._historyFilters },
@@ -991,6 +1145,12 @@ if (typeof historyRootInput !== 'undefined' && historyRootInput) {
       e.preventDefault();
       _acceptHistoryRootSuggestion(_historyRootFiltered[_historyRootIndex]);
     }
+  });
+}
+
+if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) {
+  historyTypeFilter.addEventListener('change', e => {
+    _setHistoryFilter('type', e.target.value);
   });
 }
 
@@ -1063,8 +1223,8 @@ function _histSearchMatches() {
 // output text (which FTS would otherwise mix in and surface unrelated runs).
 function _histSearchFetch(q) {
   const url = q
-    ? `/history?q=${encodeURIComponent(q)}&scope=command`
-    : '/history?scope=command';
+    ? `/history?type=runs&q=${encodeURIComponent(q)}&scope=command`
+    : '/history?type=runs&scope=command';
   apiFetch(url).then(r => r.json()).then(data => {
     if (!_histSearchMode) return;
     _histSearchRuns = Array.isArray(data.runs)

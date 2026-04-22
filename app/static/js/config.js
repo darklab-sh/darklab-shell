@@ -37,8 +37,8 @@ const DEFAULT_SHARE_REDACTION_RULES = [
 // defaults keep early-rendered helpers safe during bootstrap failures.
 let APP_CONFIG = {
   version: '',
-  app_name: 'darklab shell',
-  project_readme: 'https://gitlab.com/darklab.sh/darklab-shell#darklab-shell',
+  app_name: 'darklab_shell',
+  project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
   prompt_prefix: 'anon@darklab:~$',
   default_theme: 'darklab_obsidian.yaml',
   share_redaction_enabled: true,

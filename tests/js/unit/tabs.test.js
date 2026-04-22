@@ -82,7 +82,7 @@ function loadTabsFns({
       APP_CONFIG: {
         max_tabs: maxTabs,
         max_output_lines: maxOutputLines,
-        app_name: 'darklab shell',
+        app_name: 'darklab_shell',
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
         ...(version !== undefined && { version }),
@@ -193,7 +193,7 @@ function loadTabsAndOutputFns({
       APP_CONFIG: {
         max_tabs: maxTabs,
         max_output_lines: maxOutputLines,
-        app_name: 'darklab shell',
+        app_name: 'darklab_shell',
         prompt_prefix: 'anon@darklab:~$',
         share_redaction_enabled: shareRedactionEnabled,
         share_redaction_rules: shareRedactionRules,
@@ -944,7 +944,7 @@ describe('tabs helpers', () => {
     )
 
     const html = buildTerminalExportHtml({
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       title: 'share export',
       metaHtml: '<span>meta</span>',
       linesHtml: '<span class="line">hello</span>',
@@ -955,7 +955,7 @@ describe('tabs helpers', () => {
     expect(html).toContain('--bg: #eef4fa;')
     expect(html).toContain('--theme-panel-bg: #edf4fb;')
     expect(html).toContain('.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }')
-    expect(html).toContain('<h1 class="export-title">darklab shell</h1>')
+    expect(html).toContain('<h1 class="export-title">darklab_shell</h1>')
 
     delete window.ThemeRegistry
   })
@@ -971,13 +971,13 @@ describe('tabs helpers', () => {
     )
 
     const header = buildExportHeaderModel({
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
       runMeta: { exitCode: 0, duration: '1.2s', lines: '42 lines', version: '1.5' },
     })
 
     expect(header).toEqual({
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
       runMetaItems: [
         { kind: 'badge', tone: 'ok', text: 'exit 0' },
@@ -999,7 +999,7 @@ describe('tabs helpers', () => {
     )
 
     const html = buildTerminalExportHeaderHtml({
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
       runMetaItems: [
         { kind: 'badge', tone: 'fail', text: 'exit 1' },
@@ -1008,7 +1008,7 @@ describe('tabs helpers', () => {
     })
 
     expect(html).toContain('<header class="export-header">')
-    expect(html).toContain('<h1 class="export-title">darklab shell</h1>')
+    expect(html).toContain('<h1 class="export-title">darklab_shell</h1>')
     expect(html).toContain('<div class="export-meta">scan  ·  1/1/2026, 10:00:00 AM</div>')
     expect(html).toContain('<div class="export-run-meta">')
     expect(html).toContain('meta-badge-fail')

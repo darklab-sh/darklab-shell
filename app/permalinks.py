@@ -220,7 +220,7 @@ def _expiry_note(created: str) -> str:
 def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None, meta=None):
     # Build one context shape for both live responses and downloadable HTML so
     # metadata/actions stay in sync across both surfaces.
-    app_name = CFG.get("app_name", "darklab shell")
+    app_name = CFG.get("app_name", "darklab_shell")
     theme_entry = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
@@ -271,16 +271,16 @@ def _permalink_error_page(noun: str) -> Response:
     retention_str = _format_retention(retention)
     if retention == 0:
         detail = (
-            f"The {noun} ID is invalid, the {noun} was never saved, "
-            f"or it was manually deleted."
+            f"This {noun} link is no longer available. The ID may be invalid, "
+            f"the {noun} may never have been saved, or it may have been deleted."
         )
     else:
         detail = (
-            f"The {noun} ID is invalid, it was manually deleted, or it was "
-            f"automatically deleted after exceeding the configured retention "
-            f"period ({retention_str})."
+            f"This {noun} link is no longer available. The ID may be invalid, "
+            f"the {noun} may have been deleted, or it may have expired under "
+            f"the current retention period ({retention_str})."
         )
-    app_name = CFG.get("app_name", "darklab shell")
+    app_name = CFG.get("app_name", "darklab_shell")
     current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     html = render_template(
         "permalink_error.html",

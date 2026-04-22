@@ -412,6 +412,11 @@ describe('history panel actions', () => {
       <input id="history-search-input" />
       <button id="history-mobile-filters-toggle"></button>
       <div id="history-advanced-filters"></div>
+      <select id="history-type-filter">
+        <option value="all">all</option>
+        <option value="runs">runs</option>
+        <option value="snapshots">snapshots</option>
+      </select>
       <input id="history-root-input" />
       <div id="history-root-dropdown" class="u-hidden"></div>
       <select id="history-exit-filter">
@@ -456,6 +461,17 @@ describe('history panel actions', () => {
             json: () =>
               Promise.resolve({
                 roots: ['ping'],
+                items: [
+                  {
+                    id: 'run-1',
+                    type: 'run',
+                    command: 'ping darklab.sh',
+                    label: 'ping darklab.sh',
+                    started: '2026-01-01T00:00:00Z',
+                    created: '2026-01-01T00:00:00Z',
+                    exit_code: 0,
+                  },
+                ],
                 runs: [
                   {
                     id: 'run-1',
@@ -498,6 +514,7 @@ describe('history panel actions', () => {
     const historySearchInput = document.getElementById('history-search-input')
     const historyMobileFiltersToggle = document.getElementById('history-mobile-filters-toggle')
     const historyAdvancedFilters = document.getElementById('history-advanced-filters')
+    const historyTypeFilter = document.getElementById('history-type-filter')
     const historyRootInput = document.getElementById('history-root-input')
     const historyRootDropdown = document.getElementById('history-root-dropdown')
     const historyExitFilter = document.getElementById('history-exit-filter')
@@ -528,6 +545,7 @@ describe('history panel actions', () => {
           historySearchInput,
           historyMobileFiltersToggle,
           historyAdvancedFilters,
+          historyTypeFilter,
           historyRootInput,
           historyRootDropdown,
           historyExitFilter,
@@ -700,6 +718,44 @@ describe('history panel actions', () => {
 
     const btn = document.querySelector('#history-list .history-entry [data-action="permalink"]')
     expect(btn.textContent).toBe('permalink')
+  })
+
+  it('includes the history type filter in the request URL when snapshots are selected', () => {
+    const { _setHistoryFilter, _buildHistoryRequestUrl } = loadHistoryPanel()
+
+    _setHistoryFilter('type', 'snapshots')
+
+    expect(_buildHistoryRequestUrl()).toContain('type=snapshots')
+  })
+
+  it('renders snapshot rows with open and copy-link actions', async () => {
+    const { refreshHistoryPanel } = loadHistoryPanel({
+      apiFetchImpl: vi.fn(() =>
+        Promise.resolve({
+          json: () =>
+            Promise.resolve({
+              roots: [],
+              items: [
+                {
+                  id: 'snap-1',
+                  type: 'snapshot',
+                  label: 'nmap baseline snapshot',
+                  created: '2026-01-01T00:00:00Z',
+                },
+              ],
+              runs: [],
+            }),
+        }),
+      ),
+    })
+
+    refreshHistoryPanel()
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const entry = document.querySelector('#history-list .history-entry')
+    expect(entry.querySelector('.history-entry-cmd')?.textContent).toBe('nmap baseline snapshot')
+    expect(entry.querySelector('[data-action="open"]')?.textContent).toBe('open')
+    expect(entry.querySelector('[data-action="link"]')?.textContent).toBe('copy link')
   })
 
   it('shows a date in history metadata when the run is not from today', async () => {
@@ -897,7 +953,7 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.getElementById('history-pagination-summary').textContent).toBe(
-      'Showing 1-1 of 9 stored runs',
+      'Showing 1-1 of 9 stored items',
     )
     expect(document.querySelector('#history-pagination-controls .history-pagination-status')?.textContent)
       .toBe('Page 1 of 2')
@@ -909,7 +965,7 @@ describe('history panel actions', () => {
       '/history?page=2&page_size=8&include_total=1',
     )
     expect(document.getElementById('history-pagination-summary').textContent).toBe(
-      'Showing 9-9 of 9 stored runs',
+      'Showing 9-9 of 9 stored items',
     )
     expect(document.querySelector('#history-pagination-controls .history-pagination-status')?.textContent)
       .toBe('Page 2 of 2')
@@ -1074,7 +1130,7 @@ describe('history panel actions', () => {
     ].map((el) => el.textContent)
     expect(chips).toEqual([
       expect.stringContaining('search: dig'),
-      expect.stringContaining('root: nmap'),
+      expect.stringContaining('command: nmap'),
       expect.stringContaining('exit: non-zero'),
       expect.stringContaining('date: 7d'),
       expect.stringContaining('starred'),
@@ -1094,7 +1150,7 @@ describe('history panel actions', () => {
     const removeBtn = [
       ...document.querySelectorAll('#history-active-filters .history-active-filter-chip'),
     ]
-      .find((el) => el.textContent.includes('root: nmap'))
+      .find((el) => el.textContent.includes('command: nmap'))
       ?.querySelector('.history-active-filter-remove')
 
     removeBtn.dispatchEvent(new MouseEvent('click', { bubbles: true }))
@@ -1204,7 +1260,7 @@ describe('history panel actions', () => {
     )
     expect(entries).toEqual(['dig darklab.sh A'])
     expect(document.getElementById('history-pagination-summary').textContent).toBe(
-      'Showing 1-1 of 1 stored run',
+      'Showing 1-1 of 1 stored item',
     )
   })
 
@@ -1260,7 +1316,7 @@ describe('history panel actions', () => {
     await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.querySelector('.history-empty-state-title')?.textContent).toBe(
-      'No matching runs.',
+      'No matching history items.',
     )
     expect(document.querySelector('.history-empty-state-detail')?.textContent).toContain(
       'Adjust or clear',

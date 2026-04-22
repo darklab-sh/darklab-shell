@@ -1,6 +1,6 @@
 # Contributor Guide
 
-This document is for developers and contributors working on darklab shell locally: development setup, test workflow, lint and security checks, and the expected Git/GitLab merge request flow.
+This document is for developers and contributors working on darklab_shell locally: development setup, test workflow, lint and security checks, and the expected Git/GitLab merge request flow.
 
 For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite inventory and focused test commands, use [tests/README.md](tests/README.md). For documentation structure and canonical writing templates, use [DOCS_STANDARDS.md](DOCS_STANDARDS.md).
 
@@ -133,7 +133,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **864 pytest + 726 Vitest + 198 Playwright = 1,788 tests**.
+Current totals: **867 pytest + 728 Vitest + 199 Playwright = 1,794 tests**.
 
 Playwright notes:
 

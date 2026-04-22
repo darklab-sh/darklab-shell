@@ -482,8 +482,27 @@ body.mobile-terminal-mode {
   .recents-sheet .sheet-item-meta {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 10px;
     padding-left: 23px;
+  }
+  .recents-sheet .sheet-item-kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 16px;
+    padding: 0 6px;
+    border: 1px solid var(--border-bright);
+    border-radius: 999px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+  }
+  .recents-sheet .sheet-item-kind-run {
+    color: var(--green);
+    border-color: var(--green-dim);
+  }
+  .recents-sheet .sheet-item-kind-snapshot {
+    color: color-mix(in srgb, var(--text) 72%, var(--muted));
   }
   .recents-sheet .sheet-item-time {
     color: var(--muted);

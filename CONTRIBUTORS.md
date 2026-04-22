@@ -1,6 +1,6 @@
 # Contributors
 
-darklab shell is designed, built, and maintained by [nona](https://github.com/nona).
+darklab_shell is designed, built, and maintained by [nona](https://github.com/nona).
 
 ---
 
@@ -19,7 +19,7 @@ Key references for contributors:
 
 ## Acknowledgements
 
-darklab shell uses or builds on:
+darklab_shell uses or builds on:
 
 - [Flask](https://flask.palletsprojects.com/) — Python web framework
 - [Gunicorn](https://gunicorn.org/) — WSGI HTTP server

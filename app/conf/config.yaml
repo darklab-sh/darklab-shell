@@ -1,4 +1,4 @@
-# darklab shell — Configuration
+# darklab_shell — Configuration
 # ----------------------------------
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
@@ -14,8 +14,8 @@
 # ── Branding ──────────────────────────────────────────────────────────────────
 
 # Name displayed in the browser tab, header, and permalink pages
-# Server default if unset: "darklab shell"
-# app_name: "darklab shell"
+# Server default if unset: "darklab_shell"
+# app_name: "darklab_shell"
 
 # Prompt prefix shown at the start of the terminal prompt and welcome samples.
 # Server default if unset: "anon@darklab:~$"

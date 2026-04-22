@@ -13,7 +13,7 @@ test.describe('boot resilience', () => {
   test('the app still boots and core controls still work when startup fetches fail', async ({
     page,
   }) => {
-    await expect(page.locator('.rail-wordmark-title')).toHaveText(/darklab shell/)
+    await expect(page.locator('.rail-wordmark-title')).toHaveText(/darklab_shell/)
 
     await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)

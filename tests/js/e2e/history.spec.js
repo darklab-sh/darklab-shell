@@ -6,6 +6,7 @@ import {
   waitForHistoryRuns,
   closeHistory,
   makeTestIp,
+  createShareSnapshot,
 } from './helpers.js'
 
 // Use fake shell commands — they bypass the allowlist and complete instantly.
@@ -221,5 +222,25 @@ test.describe('history drawer', () => {
     await expect(output).not.toContainText('command | head -n')
     await expect(output).not.toContainText('command | tail -n')
     await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('history drawer can filter to snapshots and shows snapshot actions', async ({ page }) => {
+    await runCommand(page, CMD_A)
+    await createShareSnapshot(page)
+
+    await openHistory(page)
+    await page.locator('#history-type-filter').selectOption('snapshots')
+
+    const entry = page.locator('#history-list .history-entry').first()
+    await expect(entry).toBeVisible()
+    await expect(entry.locator('.history-entry-kind-snapshot')).toHaveText('SNAPSHOT')
+    await expect(entry.locator('.history-entry-cmd')).toContainText(CMD_A)
+    await expect(entry.locator('[data-action="open"]')).toHaveText('open')
+    await expect(entry.locator('[data-action="link"]')).toHaveText('copy link')
+    await expect(entry.locator('[data-action="delete"]')).toHaveText('delete')
+
+    await entry.locator('[data-action="link"]').click()
+    await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   })
 })

@@ -25,7 +25,7 @@ ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 
-def _builtin_faq(app_name="darklab shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"):
+def _builtin_faq(app_name="darklab_shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell"):
     return [
         {
             "question": "What is this?",
@@ -648,7 +648,7 @@ def load_faq():
     return result
 
 
-def load_all_faq(app_name="darklab shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"):
+def load_all_faq(app_name="darklab_shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell"):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
     return [*(deepcopy(_builtin_faq(app_name, project_readme))), *load_faq()]
 

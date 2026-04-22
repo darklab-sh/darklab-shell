@@ -328,6 +328,31 @@ def _session_run_count(session_id: str) -> int:
     return int(row["count"]) if row else 0
 
 
+def _session_snapshot_count(session_id: str) -> int:
+    with db_connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM snapshots WHERE session_id = ?", (session_id,)).fetchone()
+    return int(row["count"]) if row else 0
+
+
+def _session_starred_command_count(session_id: str) -> int:
+    with db_connect() as conn:
+        row = conn.execute("SELECT COUNT(*) AS count FROM starred_commands WHERE session_id = ?", (session_id,)).fetchone()
+    return int(row["count"]) if row else 0
+
+
+def _session_has_saved_preferences(session_id: str) -> bool:
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM session_preferences WHERE session_id = ? LIMIT 1",
+            (session_id,),
+        ).fetchone()
+    return bool(row)
+
+
+def _session_type_label(session_id: str) -> str:
+    return "named token" if str(session_id or "").startswith("tok_") else "anonymous"
+
+
 def _format_duration(total_seconds: int) -> str:
     total_seconds = max(0, int(total_seconds))
     hours, remainder = divmod(total_seconds, 3600)
@@ -947,7 +972,33 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
         _output_line("Shell status:", "fake-section"),
         _output_line(_format_native_record("app", CFG['app_name'], width), "fake-kv"),
         _output_line(_format_native_record("session", session_id or 'anonymous', width), "fake-kv"),
+        _output_line(_format_native_record("session type", _session_type_label(session_id), width), "fake-kv"),
         _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "fake-kv"),
+        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
+        _output_line(
+            _format_native_record(
+                "starred commands",
+                str(_session_starred_command_count(session_id)),
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "saved options",
+                _format_yes_no(_session_has_saved_preferences(session_id)),
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(
+            _format_native_record(
+                "active jobs",
+                str(len(active_runs_for_session(session_id))),
+                width,
+            ),
+            "fake-kv",
+        ),
         _output_line(
             _format_native_record(
                 "full output save",

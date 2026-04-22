@@ -911,6 +911,8 @@ class TestHistoryRoute:
         data = json.loads(
             client.get("/history", headers={"X-Session-ID": "test-session"}).data
         )
+        assert "items" in data
+        assert isinstance(data["items"], list)
         assert "runs" in data
         assert isinstance(data["runs"], list)
         assert "roots" in data
@@ -1052,6 +1054,34 @@ class TestHistoryRoute:
                 "DELETE FROM starred_commands WHERE session_id = ? AND command IN (?, ?)",
                 (session, "ping darklab.sh", "dig darklab.sh A"),
             )
+            conn.commit()
+            conn.close()
+
+    def test_history_can_return_snapshot_items(self):
+        client = get_client()
+        session = "snapshot-history-session"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                ("snap-history-1", session, "baseline scan", "2026-01-01T00:00:03", "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?type=snapshots&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["total_count"] == 1
+            assert data["runs"] == []
+            assert data["items"][0]["type"] == "snapshot"
+            assert data["items"][0]["label"] == "baseline scan"
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM snapshots WHERE id = ?", ("snap-history-1",))
             conn.commit()
             conn.close()
 
@@ -1376,6 +1406,24 @@ class TestShareRoute:
         client = get_client()
         resp = client.get("/share/nonexistent-share-id")
         assert resp.status_code == 404
+
+    def test_delete_share_removes_snapshot_for_current_session(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "delete-me", "content": ["line"]},
+            headers={"X-Session-ID": "delete-share-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+
+        resp = client.delete(
+            f"/share/{share_id}",
+            headers={"X-Session-ID": "delete-share-session"},
+        )
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"ok": True}
+        assert client.get(f"/share/{share_id}").status_code == 404
 
     def test_get_share_json_returns_content(self):
         client = get_client()

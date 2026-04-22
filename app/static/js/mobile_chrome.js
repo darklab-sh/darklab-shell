@@ -335,9 +335,7 @@
   }
   function refreshHistoryCount() {
     if (!menuHistoryCount) return;
-    const runs = Array.isArray(_recentsRuns) && _recentsRuns.length
-      ? _recentsRuns
-      : readCmdHistory();
+    const runs = readCmdHistory();
     menuHistoryCount.textContent = runs.length ? `${runs.length}` : '';
   }
   function refreshThemeHint() {
@@ -421,9 +419,9 @@
   // Populated on open from the /history API so the list reflects persisted
   // runs (not just the in-memory cmdHistory chip list). Row click rehydrates
   // the composer; per-row actions reuse the existing history.js helpers.
-  let _recentsRuns = [];
+  let _recentsItems = [];
   let _recentsSearchQuery = '';
-  const _recentsFilterState = { root: '', exit: 'all', date: 'all', starred: false };
+  const _recentsFilterState = { type: 'all', root: '', exit: 'all', date: 'all', starred: false };
   const _recentsPaging = {
     page: 1,
     pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
@@ -444,6 +442,7 @@
   }
   function _recentsFiltersActiveCount() {
     let n = 0;
+    if (_recentsFilterState.type !== 'all') n++;
     if (_recentsFilterState.root.trim()) n++;
     if (_recentsFilterState.exit !== 'all') n++;
     if (_recentsFilterState.date !== 'all') n++;
@@ -459,6 +458,7 @@
   function _recentsHasActiveFilters() {
     return Boolean(
       _recentsSearchQuery.trim()
+      || _recentsFilterState.type !== 'all'
       || _recentsFilterState.root.trim()
       || _recentsFilterState.exit !== 'all'
       || _recentsFilterState.date !== 'all'
@@ -470,6 +470,7 @@
     params.set('page', String(_recentsPaging.page || 1));
     params.set('page_size', String(_recentsPaging.pageSize || 1));
     params.set('include_total', '1');
+    if (_recentsFilterState.type !== 'all') params.set('type', _recentsFilterState.type);
     if (_recentsSearchQuery.trim()) params.set('q', _recentsSearchQuery.trim());
     if (_recentsFilterState.root.trim()) params.set('command_root', _recentsFilterState.root.trim());
     if (_recentsFilterState.exit === 'success') params.set('exit_code', '0');
@@ -487,14 +488,18 @@
   function _recentsRenderPagination(visibleCount = 0) {
     if (!recentsPagination || !recentsPaginationSummary || !recentsPaginationControls) return;
     const { page, pageSize, totalCount, pageCount } = _recentsPaging;
-    const totalLabel = totalCount === 1 ? 'stored run' : 'stored runs';
+    const totalLabel = _recentsFilterState.type === 'runs'
+      ? (totalCount === 1 ? 'stored run' : 'stored runs')
+      : _recentsFilterState.type === 'snapshots'
+        ? (totalCount === 1 ? 'stored snapshot' : 'stored snapshots')
+        : (totalCount === 1 ? 'stored item' : 'stored items');
     if (totalCount > 0) {
       const start = ((page - 1) * pageSize) + 1;
       const count = Math.max(0, Number(visibleCount) || 0);
       const end = count > 0 ? Math.min(totalCount, start + count - 1) : start;
       recentsPaginationSummary.textContent = `Showing ${start}-${end} of ${totalCount} ${totalLabel}`;
     } else {
-      recentsPaginationSummary.textContent = 'Showing 0 of 0 stored runs';
+      recentsPaginationSummary.textContent = `Showing 0 of 0 ${totalLabel}`;
     }
 
     recentsPaginationControls.replaceChildren();
@@ -540,98 +545,141 @@
     });
     return btn;
   }
+  function _recentsMakeKindBadge(kind, label = kind.toUpperCase()) {
+    const badge = document.createElement('span');
+    badge.className = `sheet-item-kind sheet-item-kind-${kind}`;
+    badge.textContent = label;
+    return badge;
+  }
+  function _recentsSnapshotUrl(item) {
+    return `${location.origin}/share/${item.id}`;
+  }
+  function _recentsOpenSnapshot(item) {
+    if (!item || !item.id || typeof window === 'undefined' || !window || typeof window.open !== 'function') return;
+    window.open(_recentsSnapshotUrl(item), '_blank', 'noopener,noreferrer');
+  }
   function _recentsRenderList() {
     if (!recentsSheetList) return;
     recentsSheetList.replaceChildren();
     const starred = _recentsStarred();
-    if (!_recentsRuns.length) {
+    if (!_recentsItems.length) {
       const empty = document.createElement('div');
       empty.className = 'sheet-item';
       empty.style.color = 'var(--muted)';
       empty.style.opacity = '0.7';
       empty.style.justifyContent = 'center';
       empty.style.alignItems = 'center';
-      empty.textContent = _recentsHasActiveFilters() ? 'no matches' : 'no recent commands';
+      empty.textContent = _recentsHasActiveFilters()
+        ? 'no matches'
+        : _recentsFilterState.type === 'snapshots'
+          ? 'no snapshots yet'
+          : _recentsFilterState.type === 'runs'
+            ? 'no recent commands'
+            : 'no history yet';
       recentsSheetList.appendChild(empty);
       _recentsRenderPagination(0);
       return;
     }
-    _recentsRuns.forEach(run => {
-      const cmd = run.command || '';
-      const isStarred = starred.has(cmd);
+    _recentsItems.forEach((entryData) => {
+      const isRun = entryData.type !== 'snapshot';
+      const run = isRun ? entryData : null;
+      const snapshot = isRun ? null : entryData;
+      const cmd = run?.command || '';
+      const isStarred = isRun && starred.has(cmd);
       const item = document.createElement('div');
       item.className = 'sheet-item';
-      item.dataset.cmd = cmd;
+      if (cmd) item.dataset.cmd = cmd;
 
       const head = document.createElement('div');
       head.className = 'sheet-item-head';
       const star = document.createElement('span');
       star.className = 'sheet-item-star' + (isStarred ? ' starred' : '');
-      star.textContent = isStarred ? '★' : '☆';
-      star.setAttribute('role', 'button');
-      star.setAttribute('tabindex', '0');
-      const starLabel = isStarred
-        ? 'Unstar — stop pinning this command to the top'
-        : 'Star — keep this command pinned at the top';
-      star.setAttribute('aria-label', starLabel);
-      star.title = starLabel;
-      bindPressable(star, {
-        refocusComposer: false,
-        clearPressStyle: true,
-        onActivate: (e) => {
-          e.stopPropagation();
-          if (typeof global._toggleStar === 'function') {
-            try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
-          }
-          _recentsRenderList();
-          if (_recentsFilterState.starred) _recentsRefresh();
-        },
-      });
+      if (isRun) {
+        star.textContent = isStarred ? '★' : '☆';
+        star.setAttribute('role', 'button');
+        star.setAttribute('tabindex', '0');
+        const starLabel = isStarred
+          ? 'Unstar — stop pinning this command to the top'
+          : 'Star — keep this command pinned at the top';
+        star.setAttribute('aria-label', starLabel);
+        star.title = starLabel;
+        bindPressable(star, {
+          refocusComposer: false,
+          clearPressStyle: true,
+          onActivate: (e) => {
+            e.stopPropagation();
+            if (typeof global._toggleStar === 'function') {
+              try { global._toggleStar(cmd); } catch (_) { /* non-critical */ }
+            }
+            _recentsRenderList();
+            if (_recentsFilterState.starred) _recentsRefresh();
+          },
+        });
+      } else {
+        star.textContent = '⬚';
+        star.setAttribute('aria-hidden', 'true');
+      }
       const cmdEl = document.createElement('span');
       cmdEl.className = 'sheet-item-cmd';
-      cmdEl.textContent = cmd;
+      cmdEl.textContent = isRun ? cmd : (snapshot.label || 'snapshot');
       head.appendChild(star);
       head.appendChild(cmdEl);
 
       const meta = document.createElement('div');
       meta.className = 'sheet-item-meta';
+      meta.appendChild(_recentsMakeKindBadge(isRun ? 'run' : 'snapshot'));
       const timeEl = document.createElement('span');
       timeEl.className = 'sheet-item-time';
-      const parsed = _recentsParseDate(run.started);
+      const parsed = _recentsParseDate(isRun ? run.started : snapshot.created);
       const relFn = typeof _historyRelativeTime === 'function' ? _historyRelativeTime : null;
       timeEl.textContent = parsed && relFn ? relFn(parsed) : '';
       if (parsed) timeEl.title = parsed.toLocaleString();
-      const exitEl = document.createElement('span');
-      const exitCode = (run.exit_code ?? null);
-      exitEl.className = 'sheet-item-exit' + (exitCode !== null && exitCode !== 0 ? ' nonzero' : '');
-      exitEl.textContent = exitCode === null ? '—' : `exit ${exitCode}`;
       meta.appendChild(timeEl);
-      meta.appendChild(exitEl);
+      if (isRun) {
+        const exitEl = document.createElement('span');
+        const exitCode = (run.exit_code ?? null);
+        exitEl.className = 'sheet-item-exit' + (exitCode !== null && exitCode !== 0 ? ' nonzero' : '');
+        exitEl.textContent = exitCode === null ? '—' : `exit ${exitCode}`;
+        meta.appendChild(exitEl);
+      }
 
       const actions = document.createElement('div');
       actions.className = 'sheet-item-actions';
-      actions.appendChild(_recentsMakeAction('restore', () => {
-        if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
-        const cmdEl2 = item.querySelector('.sheet-item-cmd');
-        if (cmdEl2) cmdEl2.textContent = 'loading…';
-        global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
-          .then(() => closeRecentsSheet())
-          .catch(() => {
-            if (cmdEl2) cmdEl2.textContent = cmd;
-            if (typeof global.showToast === 'function') global.showToast('Failed to load run');
-          });
-      }));
-      actions.appendChild(_recentsMakeAction('permalink', () => {
-        if (!run.id) return;
-        const url = `${location.origin}/history/${run.id}`;
-        if (typeof global.shareUrl === 'function') {
-          global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
-        }
-      }));
+      if (isRun) {
+        actions.appendChild(_recentsMakeAction('restore', () => {
+          if (typeof global.restoreHistoryRunIntoTab !== 'function') return;
+          const cmdEl2 = item.querySelector('.sheet-item-cmd');
+          if (cmdEl2) cmdEl2.textContent = 'loading…';
+          global.restoreHistoryRunIntoTab(run, { hidePanelOnSuccess: false })
+            .then(() => closeRecentsSheet())
+            .catch(() => {
+              if (cmdEl2) cmdEl2.textContent = cmd;
+              if (typeof global.showToast === 'function') global.showToast('Failed to load run');
+            });
+        }));
+        actions.appendChild(_recentsMakeAction('permalink', () => {
+          if (!run.id) return;
+          const url = `${location.origin}/history/${run.id}`;
+          if (typeof global.shareUrl === 'function') {
+            global.shareUrl(url).catch(() => global.showToast && global.showToast('Share failed', 'error'));
+          }
+        }));
+      } else {
+        actions.appendChild(_recentsMakeAction('open', () => {
+          _recentsOpenSnapshot(snapshot);
+          closeRecentsSheet();
+        }));
+        actions.appendChild(_recentsMakeAction('copy link', () => {
+          if (typeof global.shareUrl === 'function') {
+            global.shareUrl(_recentsSnapshotUrl(snapshot))
+              .catch(() => global.showToast && global.showToast('Share failed', 'error'));
+          }
+        }));
+      }
       actions.appendChild(_recentsMakeAction('delete', () => {
-        if (!run.id) return;
+        if (!entryData.id) return;
         if (typeof global.confirmHistAction === 'function') {
-          global.confirmHistAction('delete', run.id, run.command);
+          global.confirmHistAction('delete', entryData.id, isRun ? run.command : snapshot.label, isRun ? 'run' : 'snapshot');
         }
       }));
 
@@ -641,6 +689,11 @@
 
       item.addEventListener('click', (e) => {
         if (e.target.closest('.sheet-item-action, .sheet-item-star')) return;
+        if (!isRun) {
+          _recentsOpenSnapshot(snapshot);
+          closeRecentsSheet();
+          return;
+        }
         if (typeof global.setComposerValue === 'function') {
           global.setComposerValue(cmd, cmd.length, cmd.length);
         }
@@ -649,7 +702,7 @@
 
       recentsSheetList.appendChild(item);
     });
-    _recentsRenderPagination(_recentsRuns.length);
+    _recentsRenderPagination(_recentsItems.length);
   }
   function _recentsRefresh() {
     if (typeof global.apiFetch !== 'function') return Promise.resolve([]);
@@ -658,16 +711,16 @@
       .then(data => {
         _recentsPaging.page = Math.max(1, Number(data.page) || _recentsPaging.page || 1);
         _recentsPaging.pageSize = Math.max(1, Number(data.page_size) || _recentsPaging.pageSize || 1);
-        _recentsPaging.totalCount = Math.max(0, Number(data.total_count ?? data.runs?.length ?? 0) || 0);
+        _recentsPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
         _recentsPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
         _recentsPaging.hasPrev = !!data.has_prev;
         _recentsPaging.hasNext = !!data.has_next;
-        _recentsRuns = Array.isArray(data.runs) ? data.runs : [];
+        _recentsItems = Array.isArray(data.items) ? data.items : (Array.isArray(data.runs) ? data.runs : []);
         _recentsRenderList();
-        return _recentsRuns;
+        return _recentsItems;
       })
       .catch(() => {
-        _recentsRuns = [];
+        _recentsItems = [];
         _recentsPaging.totalCount = 0;
         _recentsPaging.pageCount = 0;
         _recentsPaging.hasPrev = false;
@@ -684,6 +737,7 @@
       try { global.blurVisibleComposerInputIfMobile(); } catch (_) { /* non-critical */ }
     }
     // Reset filter UI each open so users don't inherit stale state.
+    _recentsFilterState.type = 'all';
     _recentsFilterState.root = '';
     _recentsFilterState.exit = 'all';
     _recentsFilterState.date = 'all';
@@ -759,17 +813,26 @@
   const recentsDropdowns       = Array.from(recentsSheet?.querySelectorAll('[data-recents-dropdown]') || []);
   const recentsChipsEl         = document.getElementById('mobile-recents-chips');
   const _dropdownLabels = {
+    type: { all: 'all', runs: 'runs', snapshots: 'snapshots' },
     exit: { all: 'all', success: 'success (0)', failed: 'failed (non-zero)' },
     date: { all: 'all', today: 'today', week: 'this week' },
   };
   // Short labels used inside the active-filter chips (desktop uses the same
   // pattern: shorter inside chips than inside the filter rows).
   const _chipLabels = {
+    type: { runs: 'runs', snapshots: 'snapshots' },
     exit: { success: 'exit 0', failed: 'exit ≠ 0' },
     date: { today: 'today', week: 'past week' },
   };
 
+  function _recentsResetRunOnlyFilters() {
+    _recentsFilterState.root = '';
+    _recentsFilterState.exit = 'all';
+    _recentsFilterState.starred = false;
+  }
+
   function _clearOneFilter(key) {
+    if (key === 'type')    _recentsFilterState.type = 'all';
     if (key === 'root')    _recentsFilterState.root = '';
     if (key === 'exit')    _recentsFilterState.exit = 'all';
     if (key === 'date')    _recentsFilterState.date = 'all';
@@ -798,7 +861,8 @@
       recentsChipsEl.appendChild(chip);
     };
     const s = _recentsFilterState;
-    if (s.root.trim())        push('root',    `root: ${s.root.trim()}`);
+    if (s.type !== 'all')      push('type',    _chipLabels.type[s.type] || s.type);
+    if (s.root.trim())        push('root',    `command: ${s.root.trim()}`);
     if (s.exit !== 'all')     push('exit',    _chipLabels.exit[s.exit] || s.exit);
     if (s.date !== 'all')     push('date',    _chipLabels.date[s.date] || s.date);
     if (s.starred)            push('starred', 'starred');
@@ -813,23 +877,29 @@
   }
 
   function _recentsSyncFilterUI() {
+    const runOnlyEnabled = _recentsFilterState.type !== 'snapshots';
+    if (recentsSheetClearBtn) recentsSheetClearBtn.classList.toggle('u-hidden', !runOnlyEnabled);
     if (recentsFilterRoot) {
       recentsFilterRoot.value = _recentsFilterState.root;
       recentsFilterRoot.closest('.sheet-filter-row')?.classList.toggle('active', !!_recentsFilterState.root.trim());
+      recentsFilterRoot.disabled = !runOnlyEnabled;
     }
     recentsDropdowns.forEach(wrap => {
       const key = wrap.dataset.recentsDropdown;
       const val = _recentsFilterState[key] || 'all';
       const labelMap = _dropdownLabels[key] || {};
       const labelEl = wrap.querySelector('[data-dropdown-label]');
+      const trigger = wrap.querySelector('.sheet-filter-dropdown');
       if (labelEl) labelEl.textContent = labelMap[val] || val;
       wrap.classList.toggle('active', val !== 'all');
+      if (trigger) trigger.disabled = !runOnlyEnabled && key === 'exit';
       wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
         opt.setAttribute('aria-selected', opt.dataset.dropdownValue === val ? 'true' : 'false');
       });
     });
     if (recentsFilterStarred) {
       recentsFilterStarred.setAttribute('aria-pressed', _recentsFilterState.starred ? 'true' : 'false');
+      recentsFilterStarred.disabled = !runOnlyEnabled;
     }
     if (recentsFiltersToggle) {
       const count = _recentsFiltersActiveCount();
@@ -881,6 +951,7 @@
     wrap.querySelectorAll('[data-dropdown-value]').forEach(opt => {
       opt.addEventListener('click', () => {
         _recentsFilterState[key] = opt.dataset.dropdownValue;
+        if (key === 'type' && _recentsFilterState.type === 'snapshots') _recentsResetRunOnlyFilters();
         wrap.classList.remove('open');
         trigger?.setAttribute('aria-expanded', 'false');
         _recentsSyncFilterUI();
@@ -919,6 +990,7 @@
     bindPressable(recentsFiltersClear, {
       refocusComposer: false,
       onActivate: () => {
+        _recentsFilterState.type = 'all';
         _recentsFilterState.root = '';
         _recentsFilterState.exit = 'all';
         _recentsFilterState.date = 'all';

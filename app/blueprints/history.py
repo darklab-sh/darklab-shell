@@ -116,6 +116,14 @@ def _parse_history_int(value, default, *, minimum=1, maximum=None):
     return parsed
 
 
+def _history_table_exists(conn, table_name):
+    row = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ? LIMIT 1",
+        (table_name,),
+    ).fetchone()
+    return bool(row)
+
+
 def _history_match_clause(query, scope, force_like=False):
     if not query:
         return "", [], None
@@ -152,6 +160,19 @@ def _history_base_clause(
     params.extend(match_params)
     sql, params = _history_add_filters(sql, params, command_root, exit_code_filter, date_range)
     return sql, params, fts_q
+
+
+def _history_snapshot_base_clause(session_id, query, date_range):
+    sql = " FROM snapshots s WHERE s.session_id = ?"
+    params: list[Any] = [session_id]
+    if query:
+        sql += " AND LOWER(s.label) LIKE ?"
+        params.append(f"%{query.lower()}%")
+    cutoff = _history_cutoff_for_range(date_range)
+    if cutoff:
+        sql += " AND s.created >= ?"
+        params.append(cutoff)
+    return sql, params
 
 
 # ── Preview output helpers ────────────────────────────────────────────────────
@@ -214,6 +235,7 @@ def get_history():
     command_root = _normalize_history_filter_text(request.args.get("command_root")).lower()
     exit_code_filter = _normalize_history_filter_text(request.args.get("exit_code")).lower()
     date_range = _normalize_history_filter_text(request.args.get("date_range")).lower()
+    type_filter = _normalize_history_filter_text(request.args.get("type")).lower() or "all"
     starred_only = _parse_history_bool(request.args.get("starred_only"))
     include_total = _parse_history_bool(request.args.get("include_total"))
     page = _parse_history_int(request.args.get("page"), 1)
@@ -222,85 +244,128 @@ def get_history():
     # column. Reverse-i-search uses this to behave like bash i-search — matching
     # on typed command text, not on output text that FTS would otherwise pull in.
     scope = _normalize_history_filter_text(request.args.get("scope")).lower()
+    if type_filter not in {"all", "runs", "snapshots"}:
+        type_filter = "all"
 
     def _query_history(conn, *, force_like=False):
-        base_sql, base_params, fts_q = _history_base_clause(
-            session_id,
-            query,
-            command_root,
-            exit_code_filter,
-            date_range,
-            scope,
-            starred_only=starred_only,
-            force_like=force_like,
+        run_rows = []
+        roots_rows = []
+        fts_q = None
+        snapshots_available = _history_table_exists(conn, "snapshots")
+        if type_filter in {"all", "runs"}:
+            run_sql, run_params, fts_q = _history_base_clause(
+                session_id,
+                query,
+                command_root,
+                exit_code_filter,
+                date_range,
+                scope,
+                starred_only=starred_only,
+                force_like=force_like,
+            )
+            run_rows = conn.execute(
+                "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
+                "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated"
+                + run_sql
+                + " ORDER BY r.started DESC",
+                run_params,
+            ).fetchall()
+            roots_rows = conn.execute(
+                "SELECT "
+                "CASE "
+                "WHEN instr(trim(r.command), ' ') > 0 THEN substr(trim(r.command), 1, instr(trim(r.command), ' ') - 1) "
+                "ELSE trim(r.command) "
+                "END AS root, "
+                "MAX(r.started) AS latest_started"
+                + run_sql
+                + " GROUP BY root "
+                + " ORDER BY latest_started DESC "
+                + " LIMIT 50",
+                run_params,
+            ).fetchall()
+
+        snapshot_rows = []
+        snapshot_filters_active = bool(
+            command_root
+            or exit_code_filter not in {"", "all"}
+            or starred_only
+            or scope == "command"
         )
+        if (
+            snapshots_available
+            and type_filter in {"all", "snapshots"}
+            and not snapshot_filters_active
+        ):
+            snap_sql, snap_params = _history_snapshot_base_clause(session_id, query, date_range)
+            snapshot_rows = conn.execute(
+                "SELECT s.id, s.label, s.created"
+                + snap_sql
+                + " ORDER BY s.created DESC",
+                snap_params,
+            ).fetchall()
+
+        items = []
+        for row in run_rows:
+            item = dict(row)
+            item["type"] = "run"
+            item["label"] = item["command"]
+            item["created"] = item["started"]
+            item["preview_truncated"] = bool(item.get("preview_truncated"))
+            item["full_output_available"] = bool(item.get("full_output_available"))
+            item["full_output_truncated"] = bool(item.get("full_output_truncated"))
+            item["_sort_created"] = item["started"]
+            items.append(item)
+        for row in snapshot_rows:
+            item = dict(row)
+            item["type"] = "snapshot"
+            item["created"] = item["created"]
+            item["_sort_created"] = item["created"]
+            items.append(item)
+
+        items.sort(key=lambda item: item.get("_sort_created") or "", reverse=True)
+        total_count = len(items) if include_total else None
+        page_count = math.ceil(total_count / page_size) if include_total and total_count else 0
         current_page = max(page, 1)
-        total_count = None
-        page_count = None
         if include_total:
-            count_row = conn.execute("SELECT COUNT(*) AS n" + base_sql, base_params).fetchone()
-            total_count = int(count_row["n"] if count_row else 0)
-            page_count = math.ceil(total_count / page_size) if total_count else 0
             current_page = min(current_page, page_count or 1)
         offset = (current_page - 1) * page_size
-        rows = conn.execute(
-            "SELECT r.id, r.command, r.started, r.finished, r.exit_code, "
-            "r.preview_truncated, r.output_line_count, r.full_output_available, r.full_output_truncated"
-            + base_sql
-            + " ORDER BY r.started DESC LIMIT ? OFFSET ?",
-            base_params + [page_size, offset],
-        ).fetchall()
-        roots_rows = conn.execute(
-            "SELECT "
-            "CASE "
-            "WHEN instr(trim(r.command), ' ') > 0 THEN substr(trim(r.command), 1, instr(trim(r.command), ' ') - 1) "
-            "ELSE trim(r.command) "
-            "END AS root, "
-            "MAX(r.started) AS latest_started"
-            + base_sql
-            + " GROUP BY root "
-            + " ORDER BY latest_started DESC "
-            + " LIMIT 50",
-            base_params,
-        ).fetchall()
-        return rows, roots_rows, total_count, page_count, current_page, fts_q
+        paged_items = items[offset:offset + page_size]
+        paged_runs = [item for item in paged_items if item.get("type") == "run"]
+        return paged_items, paged_runs, roots_rows, total_count, page_count, current_page, fts_q
 
     with db_connect() as conn:
         try:
-            rows, roots_rows, total_count, page_count, current_page, fts_q = _query_history(conn)
+            items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(conn)
         except sqlite3.OperationalError as exc:
             if query and _build_fts_query(query):
                 log.warning("FTS_SEARCH_FALLBACK", extra={
                     "session": session_id, "q": query, "error": str(exc),
                 })
-                rows, roots_rows, total_count, page_count, current_page, fts_q = _query_history(
+                items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(
                     conn,
                     force_like=True,
                 )
             else:
                 raise
-    runs = []
-    for row in rows:
-        item = dict(row)
-        item["preview_truncated"] = bool(item.get("preview_truncated"))
-        item["full_output_available"] = bool(item.get("full_output_available"))
-        item["full_output_truncated"] = bool(item.get("full_output_truncated"))
-        runs.append(item)
+    for item in items:
+        item.pop("_sort_created", None)
     roots = [str(row["root"]) for row in roots_rows if row["root"]]
     log.info("HISTORY_VIEWED", extra={
         "ip": get_client_ip(),
         "session": session_id,
-        "count": len(runs),
+        "count": len(items),
         "q": query or None,
         "output_search": bool(fts_q),
         "command_root": command_root or None,
         "exit_code_filter": exit_code_filter or None,
         "date_range": date_range or None,
+        "type_filter": type_filter,
         "starred_only": starred_only or None,
         "page": current_page,
         "page_size": page_size,
     })
     payload = {
+        "items": items,
         "runs": runs,
         "roots": roots,
         "page": current_page,
@@ -532,3 +597,22 @@ def get_share(share_id):
         json_url=f"/share/{share_id}?json",
         meta=meta,
     )
+
+
+@history_bp.route("/share/<share_id>", methods=["DELETE"])
+def delete_share(share_id):
+    """Delete a snapshot owned by the current session."""
+    session_id = get_session_id()
+    with db_connect() as conn:
+        cur = conn.execute(
+            "DELETE FROM snapshots WHERE id = ? AND session_id = ?",
+            (share_id, session_id),
+        )
+        conn.commit()
+    log.info("SHARE_DELETED", extra={
+        "ip": get_client_ip(),
+        "session": session_id,
+        "share_id": share_id,
+        "deleted": cur.rowcount > 0,
+    })
+    return jsonify({"ok": True})

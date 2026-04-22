@@ -104,7 +104,7 @@ test.describe('FAQ modal', () => {
       'What commands are allowed?',
     ])
     await expect(
-      page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first(),
+      page.locator('.faq-a a[href*="gitlab.com/darklab.sh/darklab-shell"]').first(),
     ).toBeVisible()
 
     // The allowed-commands section is inside a collapsed accordion — expand it first

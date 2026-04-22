@@ -85,20 +85,32 @@
   </div>
   <div id="mobile-shell-overlays">
     <div id="mobile-recents-sheet-scrim" class="recents-sheet-scrim u-hidden" aria-hidden="true"></div>
-    <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="Recent commands" aria-modal="true">
+    <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="History" aria-modal="true">
       <div class="sheet-grab" role="button" tabindex="0" aria-label="Close recents"></div>
       <div class="sheet-title">
-        <span class="sheet-title-label">Recent</span>
+        <span class="sheet-title-label">History</span>
         <span class="sheet-title-spacer"></span>
         <button type="button" class="sheet-clear-btn" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
       </div>
       <div class="sheet-filters">
-        <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search commands" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search recent commands">
+        <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
         <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false"><span class="sheet-filter-toggle-label">filters</span><span class="disclosure-chev" aria-hidden="true">▸</span></button>
         <div class="sheet-filter-expanded u-hidden" id="mobile-recents-filters-expanded">
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="type">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">type:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="runs">runs</button>
+              <button type="button" role="option" data-dropdown-value="snapshots">snapshots</button>
+            </div>
+          </div>
           <label class="sheet-filter-row sheet-filter-input">
-            <span class="sheet-filter-label">root:</span>
-            <input type="text" id="mobile-recents-filter-root" placeholder="any" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by root command">
+            <span class="sheet-filter-label">command:</span>
+            <input type="text" id="mobile-recents-filter-root" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
           </label>
           <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="exit">
             <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
@@ -389,17 +401,22 @@
 <!-- Run History panel -->
 <div id="history-panel" class="mobile-sheet-surface">
   <div class="history-panel-header">
-    <span class="history-panel-title">RUN HISTORY</span>
+    <span class="history-panel-title">HISTORY</span>
     <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">delete all</button>
     <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
   <div class="history-panel-body">
     <div class="history-panel-filters">
-      <input id="history-search-input" type="text" placeholder="search commands and output" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search command and output history">
+      <input id="history-search-input" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
       <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle" type="button" aria-expanded="false">filters</button>
       <div id="history-advanced-filters" class="history-advanced-filters">
+        <select id="history-type-filter" aria-label="Filter by history item type">
+          <option value="all">type: all</option>
+          <option value="runs">type: runs</option>
+          <option value="snapshots">type: snapshots</option>
+        </select>
         <div class="history-root-autocomplete">
-          <input id="history-root-input" type="text" placeholder="command root" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command root">
+          <input id="history-root-input" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
           <div id="history-root-dropdown" class="ac-dropdown history-root-dropdown u-hidden"></div>
         </div>
         <select id="history-exit-filter" aria-label="Filter by exit code">

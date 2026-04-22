@@ -341,7 +341,7 @@ function _renderWelcomeAsciiStream(tabId, asciiArt) {
   const out = getOutput(tabId);
   if (!out) return;
 
-  const artLines = (asciiArt || (APP_CONFIG.app_name || 'darklab shell'))
+  const artLines = (asciiArt || (APP_CONFIG.app_name || 'darklab_shell'))
     .split('\n')
     .map(line => line.replace(/\s+$/g, ''))
     .filter(line => line.length > 0);

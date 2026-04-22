@@ -1,6 +1,6 @@
 # TODO
 
-This file tracks open work items, known issues, and product ideas for darklab shell. Open TODOs, known issues, and technical debt are confirmed items. Ideas are speculative — not committed or planned.
+This file tracks open work items, known issues, and product ideas for darklab_shell. Open TODOs, known issues, and technical debt are confirmed items. Ideas are speculative — not committed or planned.
 
 ---
 
@@ -22,8 +22,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 
 ## Open TODOs
 
-- **Add snapshots to the history drawer/sheets** — snapshots are currently only reachable by direct link even though session migration tracks them internally. Extend the history surfaces so users can browse and search snapshots alongside runs with a type filter such as `all`, `runs`, and `snapshots`. Once snapshots are first-class in the history UI, restore snapshot-related migration messaging in the session-token flows because it will become user-visible and actionable there.
-
 ---
 
 ## Research
@@ -31,8 +29,6 @@ This file tracks open work items, known issues, and product ideas for darklab sh
 ---
 
 ## Known Issues
-
-- **Permalink 404 page layout and copy presentation feel unpolished** — the permalink 404 page does not match the rest of the shell's error treatment. The app-name subheading currently contains the error message text, there is excessive empty vertical space before the real message begins, and the overall layout/copy hierarchy feels rough compared with the rest of the UI. Rework the page so the error messaging is presented with the same polish and hierarchy as other standalone shell surfaces.
 
 ---
 

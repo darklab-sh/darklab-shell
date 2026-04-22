@@ -209,7 +209,7 @@ SECTION_ORDER = [
 
 
 INTRO = [
-    "# darklab shell — Theme Reference Template",
+    "# darklab_shell — Theme Reference Template",
     "# -------------------------------------------",
     "# Copy this file to app/conf/themes/<filename>.yaml to create a selectable",
     "# theme variant. The runtime selector ignores *.yaml.example files and only",

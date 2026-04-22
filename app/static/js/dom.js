@@ -59,6 +59,7 @@ const historyLoadOverlay = document.getElementById('history-load-overlay');
 const historySearchInput = document.getElementById('history-search-input');
 const historyMobileFiltersToggle = document.getElementById('history-mobile-filters-toggle');
 const historyAdvancedFilters = document.getElementById('history-advanced-filters');
+const historyTypeFilter = document.getElementById('history-type-filter');
 const historyRootInput = document.getElementById('history-root-input');
 const historyRootDropdown = document.getElementById('history-root-dropdown');
 const historyExitFilter = document.getElementById('history-exit-filter');

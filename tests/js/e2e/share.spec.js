@@ -228,7 +228,7 @@ test.describe('permalink / share', () => {
       page.locator('#perm-save-wrap .save-menu button:has-text("txt")').click(),
     ])
     expect(txtDownload.suggestedFilename()).toMatch(
-      /^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/,
+      /^darklab_shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/,
     )
 
     await page.locator('#perm-save-btn').click()
@@ -237,7 +237,7 @@ test.describe('permalink / share', () => {
       page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
     expect(htmlDownload.suggestedFilename()).toMatch(
-      /^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/,
+      /^darklab_shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/,
     )
   })
 

@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to darklab shell are documented here.
+All notable changes to darklab_shell are documented here.
 
 ---
 
@@ -20,6 +20,24 @@ All notable changes to darklab shell are documented here.
     - `POST /session/migrate` now migrates saved preferences together with runs, stars, and snapshots, while still letting an already-configured destination session keep its own preference snapshot.
     - Passive preference hydration no longer triggers browser notification permission prompts; notification permission is only requested when the user explicitly enables the setting.
   - **Tests:** new backend coverage in `tests/py/test_session_routes.py` for `session_preferences` read/write and migration behavior, plus new browser coverage in `tests/js/unit/app.test.js` and `tests/js/unit/session.test.js` for startup hydration and session-switch preference reloads.
+
+- **`status` now reports a fuller session summary** — the terminal status helper previously stopped at app name, session ID, run count, and a few instance limits.
+  - **Why:** the shell now treats snapshots, starred commands, saved user options, and active jobs as first-class session state, so `status` needed to reflect that current session shape instead of only showing runs.
+  - **What:** `status` now adds `session type`, `snapshots`, `starred commands`, `saved options`, and `active jobs` ahead of the existing instance-level settings, while keeping the output compact and summary-oriented.
+  - **Tests:** new backend coverage in `tests/py/test_backend_modules.py` pins the expanded `status` output against a seeded session.
+
+#### History Snapshots
+
+- **Snapshots now appear in the desktop history drawer and mobile history sheet** instead of living only behind direct `/share/<id>` links.
+  - **Why:** session migration already treated snapshots as first-class session data, but the UI still made them effectively invisible unless you had already copied or saved the link somewhere else.
+  - **What:**
+    - `/history` now supports a mixed item model with `type=all|runs|snapshots`.
+    - The desktop history drawer and mobile history sheet both expose a `type` filter and render mixed rows with `RUN` / `SNAPSHOT` badges.
+    - Snapshot rows show the snapshot label, created time, and `open` / `copy link` / `delete` actions.
+    - Run-only filters such as command-root, exit-code, and starred-only are disabled when the history surface is narrowed to snapshots.
+    - Added `DELETE /share/<share_id>` so snapshot rows can remove their own share artifact directly from the history UI.
+    - The bulk history-delete confirmation now says `Delete all runs and snapshots?` so the destructive copy matches the mixed history surface.
+  - **Tests:** new route coverage in `tests/py/test_routes.py`, new mixed-row unit coverage in `tests/js/unit/history.test.js`, and one new Playwright browser case in `tests/js/e2e/history.spec.js` covering the snapshot filter path and row actions.
 
 #### Keyboard Reference and Tab Strip Polish
 
@@ -141,6 +159,15 @@ All notable changes to darklab shell are documented here.
     - the permalink error page keeps a safe title fallback in the shared base template without reintroducing the older parallel data plumbing
   - **Tests:** targeted validation with `npm run test:unit -- tests/js/unit/permalink.test.js tests/js/unit/export_pdf.test.js tests/js/unit/tabs.test.js` (`101 passed`) and `python3 -m pytest -q tests/py/test_routes.py -k "history or share or permalink or snapshot"` (`57 passed`).
 
+- **Permalink unavailable pages now use the same polished hierarchy as the rest of the standalone shell surfaces** — the error page no longer treats the subheading like a second error message and no longer inherits transcript-style spacing and wrapping.
+  - **Why:** the old permalink 404 page still looked like a raw export surface: the subheader echoed the error state, the message block landed far too low because preserved template whitespace was being rendered inside the output pane, and normal prose wrapped like terminal transcript text.
+  - **What:**
+    - removed the extra error subheading under the app name
+    - tightened the unavailable-state layout so the heading and detail sit near the top of the page instead of floating deep into the output area
+    - switched the error detail to normal paragraph wrapping instead of transcript-style `pre-wrap`
+    - improved the copy to read like a user-facing unavailable state instead of a backend explanation
+    - title-cased the standalone heading (`Snapshot Unavailable`, `Run Unavailable`) directly in the template
+
 #### CI Image Drift Guardrails
 
 - **CI runner image declarations now live in one explicit place in `.gitlab-ci.yml`** — the pipeline previously repeated concrete image tags inline across the default image, Node jobs, Python e2e job, and Docker-in-Docker jobs. That made runtime drift easy to introduce because the manual version-check script only knew about the production Dockerfile base image.
@@ -197,7 +224,7 @@ All notable changes to darklab shell are documented here.
   - **After:**
     - `body.mobile-terminal-mode` now uses a normal-flow flex column with a fixed header, scrollable transcript, and an idle peek row that opens a full pull-up **recents sheet**; the older mobile recent-command chip strip is gone.
     - The **recents sheet** now owns search, filter chips, starring, and copy/permalink/restore actions per row.
-    - The hamburger opens a **menu sheet** with two visually grouped sections separated by an inset hairline: a session group (`search` · `line numbers` · `timestamps`) and an overlays group (`history` · `workflows` · `options` · `theme` · `FAQ` · `diag`), plus a centered `darklab shell v1.5` wordmark footer.
+    - The hamburger opens a **menu sheet** with two visually grouped sections separated by an inset hairline: a session group (`search` · `line numbers` · `timestamps`) and an overlays group (`history` · `workflows` · `options` · `theme` · `FAQ` · `diag`), plus a centered `darklab_shell v1.5` wordmark footer.
     - `timestamps` is now an inline expander rather than a tap-cycle, with a sub-menu listing `off` / `elapsed` / `clock` and live hint values (`+1.2s`, `14:03:27`); the sheet stays open while expanding and the sub-menu collapses on every fresh sheet open.
     - The legacy `#mobile-menu` proxy DOM was removed and `_setMobileActionLabel()` rewired to write directly to the sheet rows.
     - A new mobile **edit-helper row** rides above the composer when the keyboard is open with cursor motion, line jumps, and word-aware deletes; the iOS form-assistant bar is left alone instead of fought.

@@ -142,7 +142,7 @@ describe('buildTerminalExportPdf', () => {
     const MockJsPDF = makeMockJsPDF()
     const doc = await buildTerminalExportPdf({
       jsPDF: MockJsPDF,
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: 'my run  ·  01/01/2025',
       runMeta: null,
       rawLines: [{ text: 'hello', cls: '' }],
@@ -157,7 +157,7 @@ describe('buildTerminalExportPdf', () => {
     const MockJsPDF = makeMockJsPDF()
     const doc = await buildTerminalExportPdf({
       jsPDF: MockJsPDF,
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: '',
       runMeta: null,
       rawLines: [],
@@ -298,7 +298,7 @@ describe('buildTerminalExportPdf', () => {
       const MockJsPDF = makeMockJsPDF()
       const doc = await buildTerminalExportPdf({
         jsPDF: MockJsPDF,
-        appName: 'darklab shell',
+        appName: 'darklab_shell',
         metaLine: 'scan · now',
         runMeta: null,
         rawLines: [{ text: 'hello', cls: '' }],
@@ -339,7 +339,7 @@ describe('buildTerminalExportPdf', () => {
             '--blue': 'rgb(90, 90, 90)',
           }),
           buildExportHeaderModel: () => ({
-            appName: 'darklab shell',
+            appName: 'darklab_shell',
             metaLine: 'scan · now',
             runMetaItems: [
               { kind: 'badge', tone: 'ok', text: 'exit 0' },
@@ -352,7 +352,7 @@ describe('buildTerminalExportPdf', () => {
     const MockJsPDF = makeMockJsPDF()
     const doc = await buildTerminalExportPdf({
       jsPDF: MockJsPDF,
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: 'scan · now',
       runMeta: { exitCode: 0, duration: '1s', lines: '5 lines', version: '1.5' },
       rawLines: [{ text: 'hello', cls: '' }],
@@ -368,7 +368,7 @@ describe('buildTerminalExportPdf', () => {
     const MockJsPDF = makeMockJsPDF()
     const doc = await buildTerminalExportPdf({
       jsPDF: MockJsPDF,
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       metaLine: 'scan · now',
       runMeta: null,
       rawLines: [

@@ -1,6 +1,6 @@
 # Feature Details
 
-Full per-feature reference for darklab shell. See the [README](README.md) for the quick summary and the [Quick Start](README.md#quick-start).
+Full per-feature reference for darklab_shell. See the [README](README.md) for the quick summary and the [Quick Start](README.md#quick-start).
 
 ---
 
@@ -502,18 +502,18 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 **Behavior:**
 
 - Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and label themselves from the last command run. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
-- The **⧖ history** button opens a slide-out drawer listing the last 50 completed runs with timestamps and exit codes. Clicking a row injects that command into the composer for re-run (matching the terminal up-arrow convention) and closes the drawer; each row also has a toggleable **star** plus **restore** / **permalink** / **delete** actions. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists across sessions in `localStorage` keyed by command text.
+- The **⧖ history** button opens a slide-out drawer listing persisted session history with a `type` filter for **all**, **runs**, and **snapshots**. Run rows keep the current model: clicking a row injects that command into the composer for re-run (matching the terminal up-arrow convention) and closes the drawer; each row also has a toggleable **star** plus **restore** / **permalink** / **delete** actions. Snapshot rows show the snapshot label and created time plus **open** / **copy link** / **delete** actions. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists server-side per session and follows named session tokens.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button (history drawer + mobile recents sheet) prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
 - If the page reloads mid-run, the shell restores a running placeholder tab with the kill action available, polls for completion, and swaps into the saved run output when it lands in history. Non-running tabs restore separately from `sessionStorage` with labels, transcript previews, statuses, and draft input preserved; restored completed tabs remount a live prompt immediately.
 
-**Limits:** tab count capped by `max_tabs`; history drawer shows the last 50 completed runs only (older runs remain searchable via FTS); live output cannot be replayed after the SSE stream has ended (only persisted run output reappears after reload).
+**Limits:** tab count capped by `max_tabs`; history surfaces paginate stored items rather than showing one unbounded list; live output cannot be replayed after the SSE stream has ended (only persisted run output reappears after reload). Snapshot search in the first pass matches the snapshot label, not the full snapshot body content.
 
 **Configuration:** `max_tabs` in `config.yaml` (default 8; `0` for unlimited).
 
 **Related files:** `app/static/js/tabs.js` (tab lifecycle + drag + rename), `app/static/js/history.js` (history drawer + search UI), `app/blueprints/history.py` (history API + FTS queries), `app/database.py` (SQLite schema + FTS5 trigger wiring).
 
-**Full-text search:** the history drawer supports full-text search across command text and stored run output, plus filters for command root, exit status, recent date range, and starred-only. The search field placeholder reads "search commands and output". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-root field uses app-owned autocomplete, and row actions keep the drawer open so you can work through multiple entries without repeated reopen churn.
+**Full-text search:** the history surfaces support a shared `type` filter plus full-text search across command text and stored run output for run rows, with additional filters for command name, exit status, recent date range, and starred-only. The search field placeholder reads "search history". Search is backed by a SQLite FTS5 virtual table (`runs_fts`) indexed on `command` and `output_search_text`. When full-output persistence is enabled, `output_search_text` is populated from the complete gzip artifact so early lines of long runs stay reachable; otherwise it falls back to the capped preview window. Snapshot search in the first pass matches the snapshot label only. On mobile, advanced filters stay behind a dedicated `filters` toggle to preserve result space, the command-name field uses app-owned autocomplete, and row actions keep the sheet open where that matches the desktop action contract.
 
 On mobile, the **☰** menu in the top-right header opens a bottom-sheet that groups session-scoped actions (search, clear, line numbers, timestamps) and overlays (options, history, workflows, theme, FAQ, diag) — see the Mobile Shell section below for the full layout.
 
@@ -627,6 +627,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 **Utility commands**
 
 - `help`, `history`, `last`, `limits`, `retention`, `status`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session.
+- `status` prints a compact session summary: active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, and the current instance-level save/retention limits.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
 **Shell identity commands**

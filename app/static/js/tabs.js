@@ -1031,7 +1031,7 @@ function _buildTabExportModel(tab, { createdText = null } = {}) {
   const normalizedCreatedText = String(createdText || new Date().toLocaleString());
   if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
     return ExportHtmlUtils.buildExportDocumentModel({
-      appName: APP_CONFIG.app_name || 'darklab shell',
+      appName: APP_CONFIG.app_name || 'darklab_shell',
       title: String(tab && tab.label || ''),
       label: tab && tab.label,
       createdText: normalizedCreatedText,
@@ -1045,7 +1045,7 @@ function _buildTabExportModel(tab, { createdText = null } = {}) {
     });
   }
   const rawLines = _normalizeTabTranscriptLines(tab && tab.rawLines);
-  const appName = APP_CONFIG.app_name || 'darklab shell';
+  const appName = APP_CONFIG.app_name || 'darklab_shell';
   return {
     appName,
     title: String(tab && tab.label || ''),
