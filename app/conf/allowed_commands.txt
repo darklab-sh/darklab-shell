@@ -38,7 +38,14 @@ fping
 traceroute
 tcptraceroute
 # Only allow netcat to do scanning/port checking
-nc -zv
+  nc -zv                                                                                                                                                              
+  nc -vz                                                                                                                                                              
+  nc -zvn                                                                                                                                                             
+  nc -znv                                                                                                                                                           
+  nc -vzn                                                                                                                                                           
+  nc -vnz
+  nc -nzv
+  nc -nvz
 # Deny command execution flags — also caught when combined with other flags (e.g. -ve, -vc)
 !nc -e
 !nc -c
@@ -77,6 +84,26 @@ wget
 !wget 127.0.0.1
 !wget 0.0.0.0
 
+## TLS / Certificates
+# Only specific subcommands are allowed — dangerous ones (s_server, enc, req, ca, genrsa, etc.)
+# are excluded by prefix matching and never reach this allowlist.
+openssl s_client
+# Deny filesystem reads within s_client (path protections cover /data and /tmp;
+# these deny flags prevent reading other container paths such as /etc/ssl)
+!openssl s_client -cert
+!openssl s_client -key
+!openssl s_client -CAfile
+!openssl s_client -CApath
+openssl ciphers
+sslscan
+# Deny file output flags
+!sslscan --xml
+sslyze
+# Deny file output flags
+!sslyze --json_out
+# Deny reading target lists from filesystem
+!sslyze --targets_in
+
 ## Network Reconnaissance
 dnsrecon
 # Deny file output flags
@@ -109,8 +136,53 @@ ffuf
 # Deny file output flags
 !ffuf -o
 !ffuf --output
+# ProjectDiscovery port scanner
+naabu
+# Deny file output flags (-o short form + long forms)
+!naabu -o
+!naabu --output
+# Deny reading target lists from filesystem (-l short form + long forms)
+!naabu -l
+!naabu --list
+!naabu -list
+# ProjectDiscovery web crawler
+katana
+# Deny file output flags (-o short form + long forms)
+!katana -o
+!katana --output
+# Deny reading target lists from filesystem (long-form single-dash flags)
+!katana -list
+# WAF detection
+wafw00f
+# Deny file output flags
+!wafw00f -o
+!wafw00f --output
+# Deny reading input lists from filesystem
+!wafw00f -i
+!wafw00f --input-file
+# Deny connections to the local app (server-side blocked; these catch it client-side)
+!wafw00f localhost
+!wafw00f 127.0.0.1
+!wafw00f 0.0.0.0
 
 ## Vulnerability Scanning
+masscan
+# Deny file output flags
+!masscan -oX
+!masscan -oJ
+!masscan -oG
+!masscan -oB
+!masscan --output-format
+!masscan --output-filename
+# Deny connections to the local app (server-side blocked; these catch it client-side)
+!masscan localhost
+!masscan 127.0.0.1
+!masscan 0.0.0.0
+rustscan
+# Deny connections to the local app (server-side blocked; these catch it client-side)
+!rustscan -a localhost
+!rustscan -a 127.0.0.1
+!rustscan -a 0.0.0.0
 nmap
 # Deny file output flags
 !nmap -oN

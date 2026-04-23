@@ -1,4 +1,4 @@
-# darklab shell — Dark Theme: Emerald Obsidian
+# darklab_shell — Dark Theme: Emerald Obsidian
 # ------------------------------------------------
 # A deep black-green variant with a vivid emerald accent.
 label: Emerald Obsidian
@@ -81,8 +81,7 @@ history_load_modal_border: rgba(72, 161, 110, 0.22)
 history_load_modal_shadow: rgba(0,0,0,0.35)
 faq_modal_bg: '#141414'
 options_modal_bg: '#141414'
-kill_modal_bg: '#141414'
-hist_del_modal_bg: '#141414'
+confirm_modal_bg: '#141414'
 dropdown_bg: color-mix(in srgb, var(--surface) 96%, transparent)
 dropdown_border: color-mix(in srgb, var(--green) 18%, transparent)
 dropdown_shadow: rgba(0,0,0,0.35)
@@ -93,7 +92,7 @@ dropdown_item_text: '#9a9a9a'
 overlay_backdrop_bg: rgba(0,0,0,0.76)
 faq_code_bg: '#141414'
 allowed_chip_bg: '#141414'
-options_select_bg: '#141414'
+form_control_bg: '#141414'
 tab_status_ok_bg: '#39ff14'
 toast_bg: '#141414'
 toast_text: '#39ff14'

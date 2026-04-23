@@ -1,4 +1,4 @@
-# darklab shell — Light Theme: Rose Quartz
+# darklab_shell — Light Theme: Rose Quartz
 # -------------------------------------------------
 # A cool, dusty rose theme with lavender undertones.
 # Elegant and minimal — think gallery walls, fine stationery.
@@ -90,8 +90,7 @@ history_load_modal_shadow: "rgba(88, 40, 70, 0.16)"
 
 faq_modal_bg: "#f7f0f4"
 options_modal_bg: "#f7f0f4"
-kill_modal_bg: "#d0c4cc"
-hist_del_modal_bg: "#d0c4cc"
+confirm_modal_bg: "#d0c4cc"
 
 dropdown_bg: "#ece3e8"
 dropdown_border: "rgba(130, 64, 112, 0.20)"
@@ -104,7 +103,7 @@ overlay_backdrop_bg: "rgba(20, 8, 18, 0.72)"
 
 faq_code_bg: "#e0d4dc"
 allowed_chip_bg: "#e0d4dc"
-options_select_bg: "#ece3e8"
+form_control_bg: "#ece3e8"
 
 tab_status_ok_bg: "#3e6650"
 toast_bg: "#fdf8fb"

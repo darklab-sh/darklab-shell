@@ -149,8 +149,7 @@ SECTION_ORDER = [
                 [
                     "faq_modal_bg",
                     "options_modal_bg",
-                    "kill_modal_bg",
-                    "hist_del_modal_bg",
+                    "confirm_modal_bg",
                 ],
             ),
             (
@@ -168,7 +167,7 @@ SECTION_ORDER = [
             ),
             (
                 "# FAQ / options controls",
-                ["faq_code_bg", "allowed_chip_bg", "options_select_bg"],
+                ["faq_code_bg", "allowed_chip_bg", "form_control_bg"],
             ),
             (
                 "# Status / toasts",
@@ -210,7 +209,7 @@ SECTION_ORDER = [
 
 
 INTRO = [
-    "# darklab shell — Theme Reference Template",
+    "# darklab_shell — Theme Reference Template",
     "# -------------------------------------------",
     "# Copy this file to app/conf/themes/<filename>.yaml to create a selectable",
     "# theme variant. The runtime selector ignores *.yaml.example files and only",

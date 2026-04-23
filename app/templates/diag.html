@@ -5,334 +5,42 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="{{ current_theme.color_scheme }}">
 <title>{{ app_name }} — diagnostics</title>
+<script>
+  // Redirect once with the browser's UTC offset so activity counts use local
+  // calendar boundaries instead of UTC.  Only runs when tz_offset is absent.
+  (function () {
+    var params = new URLSearchParams(window.location.search);
+    if (!params.has('tz_offset')) {
+      params.set('tz_offset', new Date().getTimezoneOffset());
+      window.location.replace(window.location.pathname + '?' + params.toString());
+    }
+  })();
+</script>
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/terminal_export.css">
+<link rel="stylesheet" href="/static/css/diag.css">
 {% include "theme_vars_style.html" %}
-<style>
-/* ── Diag page layout ──────────────────────────────────────────────────────── */
-body.diag-page {
-  display: flex;
-  flex-direction: column;
-  min-height: 100vh;
-  padding: 0;
-  gap: 0;
-  overflow: auto;
-}
-body.diag-page::before { display: none; }
-
-.diag-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  gap: 18px;
-  padding: 16px 20px;
-}
-
-.diag-header-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-
-.diag-header-title {
-  display: inline-flex;
-  align-items: center;
-  min-height: 34px;
-  width: fit-content;
-  margin: 0;
-  padding: 0 12px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--green) 2%, transparent), color-mix(in srgb, var(--green) 0.6%, transparent));
-  border: 1px solid color-mix(in srgb, var(--green-dim) 22%, var(--border));
-  border-radius: 4px;
-  color: var(--green);
-  font-family: var(--font-mono);
-  font-size: 22px;
-  font-weight: 500;
-  letter-spacing: 1.5px;
-  text-shadow: 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 1.5%, transparent);
-}
-
-.diag-header-meta {
-  padding-left: 12px;
-  color: var(--muted);
-  font-size: 11px;
-  letter-spacing: 2.4px;
-  text-transform: uppercase;
-  opacity: 0.7;
-}
-
-.diag-back-btn {
-  display: none;
-  flex: 0 0 auto;
-}
-
-.diag-mobile-divider {
-  display: none;
-}
-
-.diag-main {
-  display: grid;
-  /* 4 equal columns for the top cards; Stats/Config/Tools break out full-width */
-  grid-template-columns: repeat(4, 1fr);
-  grid-template-areas:
-    "app   db    redis  assets"
-    "cfg   cfg   cfg    cfg"
-    "usage usage usage  usage"
-    "cmds  cmds  cmds   cmds"
-    "tools tools tools  tools";
-  gap: 16px;
-  padding: 24px 24px 40px;
-  max-width: 1200px;
-  width: 100%;
-  box-sizing: border-box;
-}
-
-/* ── Section card ──────────────────────────────────────────────────────────── */
-.diag-section {
-  background: var(--theme-panel-bg);
-  border: 1px solid var(--theme-panel-border);
-  border-radius: 4px;
-  overflow: hidden;
-  min-width: 0;
-}
-.diag-section.s-app    { grid-area: app; }
-.diag-section.s-db     { grid-area: db; }
-.diag-section.s-redis  { grid-area: redis; }
-.diag-section.s-assets { grid-area: assets; }
-.diag-section.s-config { grid-area: cfg; }
-.diag-section.s-usage  { grid-area: usage; }
-.diag-section.s-cmds   { grid-area: cmds; }
-.diag-section.s-tools  { grid-area: tools; }
-
-.diag-section-title {
-  font-size: 10px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding: 10px 14px 8px;
-  border-bottom: 1px solid var(--theme-terminal-bar-border);
-  background: var(--theme-terminal-bar-bg);
-  display: flex;
-  align-items: baseline;
-  gap: 8px;
-}
-.diag-section-title-count {
-  color: var(--muted);
-  opacity: 0.6;
-  font-size: 9px;
-}
-
-/* ── Key-value tables ──────────────────────────────────────────────────────── */
-.diag-table {
-  width: 100%;
-  border-collapse: collapse;
-  font-size: 13px;
-}
-.diag-table tr + tr td { border-top: 1px solid var(--theme-panel-border); }
-.diag-table td {
-  padding: 8px 14px;
-  vertical-align: middle;
-  line-height: 1.4;
-}
-.diag-table td:first-child {
-  color: var(--muted);
-  white-space: nowrap;
-  width: 1%;
-  padding-right: 20px;
-  font-size: 11px;
-  letter-spacing: 0.5px;
-}
-.diag-table td:last-child {
-  color: var(--text);
-  word-break: break-word;
-}
-
-/* Status values */
-.diag-ok   { color: var(--green); }
-.diag-warn { color: var(--amber); }
-.diag-fail { color: var(--red); }
-
-/* Dot indicator beside status text */
-.diag-dot {
-  display: inline-block;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  margin-right: 6px;
-  vertical-align: middle;
-  position: relative;
-  top: -1px;
-}
-.diag-dot.ok   { background: var(--green); box-shadow: 0 0 6px var(--green-glow); }
-.diag-dot.warn { background: var(--amber); }
-.diag-dot.fail { background: var(--red); }
-
-/* ── Config: two-column internal layout ────────────────────────────────────── */
-.diag-config-grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-.diag-config-grid .diag-table:first-child {
-  border-right: 1px solid var(--theme-panel-border);
-}
-
-/* ── Tools chip grid ────────────────────────────────────────────────────────── */
-.diag-tools-block {
-  padding: 14px 14px 10px;
-}
-.diag-tools-block + .diag-tools-block {
-  border-top: 1px solid var(--theme-panel-border);
-  padding-top: 12px;
-}
-.diag-tools-sublabel {
-  font-size: 9px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--muted);
-  margin-bottom: 10px;
-}
-.diag-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-.diag-chip {
-  font-size: 12px;
-  font-family: var(--font-mono);
-  padding: 3px 10px;
-  border-radius: 3px;
-  border: 1px solid;
-  letter-spacing: 0.2px;
-}
-.diag-chip.present {
-  color: var(--green);
-  border-color: var(--green-dim);
-  background: color-mix(in srgb, var(--green) 6%, transparent);
-}
-.diag-chip.missing {
-  color: var(--red);
-  border-color: color-mix(in srgb, var(--red) 40%, transparent);
-  background: color-mix(in srgb, var(--red) 5%, transparent);
-}
-.diag-empty {
-  color: var(--muted);
-  font-size: 12px;
-  font-style: italic;
-  padding: 12px 14px;
-}
-
-/* ── Commands split: two labelled columns ───────────────────────────────────── */
-.diag-cmd-cols {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-}
-.diag-cmd-cols > * + * { border-left: 1px solid var(--theme-panel-border); }
-.diag-cmd-col-label {
-  font-size: 9px;
-  letter-spacing: 2px;
-  text-transform: uppercase;
-  color: var(--muted);
-  padding: 8px 14px 6px;
-  border-bottom: 1px solid var(--theme-panel-border);
-}
-.diag-cmd-cell {
-  max-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--text) !important;
-  padding-right: 12px !important;
-}
-.diag-stat-val {
-  white-space: nowrap;
-  color: var(--muted) !important;
-  font-size: 12px !important;
-  width: 1% !important;
-  padding-left: 0 !important;
-}
-
-/* ── Responsive collapse ────────────────────────────────────────────────────── */
-@media (max-width: 760px) {
-  body.diag-page .diag-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: start;
-    gap: 12px;
-    border-bottom: none;
-    padding: 14px 20px 8px;
-  }
-  body.diag-page .diag-header-copy {
-    display: flex;
-    flex-direction: column;
-    min-width: 0;
-    flex: 1 1 auto;
-    gap: 6px;
-  }
-  body.diag-page .diag-header-title {
-    display: inline-flex;
-    align-items: center;
-    min-height: 34px;
-    width: fit-content;
-    padding: 0 12px;
-    font-size: 19px;
-    letter-spacing: 1.1px;
-  }
-  body.diag-page .diag-header-meta {
-    display: block;
-    padding: 0 0 0 2px;
-    margin: 0;
-    color: var(--muted);
-    font-size: 9px;
-    letter-spacing: 1.6px;
-    line-height: 1.15;
-    text-transform: uppercase;
-    opacity: 0.72;
-    white-space: normal;
-  }
-  body.diag-page .diag-back-btn {
-    display: inline-flex;
-    align-self: start;
-    flex: 0 0 auto;
-  }
-  body.diag-page .diag-mobile-divider {
-    display: none;
-  }
-  body.diag-page .diag-main {
-    border-top: 1px solid color-mix(in srgb, var(--theme-terminal-bar-border) 82%, var(--text) 18%);
-    margin-top: 10px;
-    padding-top: 12px;
-  }
-  .diag-main {
-    grid-template-columns: 1fr 1fr;
-    grid-template-areas:
-      "app    db"
-      "redis  assets"
-      "cfg    cfg"
-      "usage  usage"
-      "cmds   cmds"
-      "tools  tools";
-  }
-  .diag-config-grid { grid-template-columns: 1fr; }
-  .diag-config-grid .diag-table:first-child { border-right: none; border-bottom: 1px solid var(--theme-panel-border); }
-  .diag-cmd-cols { grid-template-columns: 1fr; }
-  .diag-cmd-cols > * + * { border-left: none; border-top: 1px solid var(--theme-panel-border); }
-}
-</style>
 </head>
 <body class="permalink-page diag-page" data-theme="{{ current_theme.name }}">
 
-<header class="permalink-header diag-header">
-  <div class="permalink-header-copy diag-header-copy">
-    <h1 class="diag-header-title">{{ app_name }}</h1>
-    <span class="diag-header-meta">operator diagnostics</span>
+<div class="diag-topbar">
+  <header class="export-header diag-header">
+    <div class="export-header-copy diag-header-copy">
+      <h1 class="diag-header-title">{{ app_name }}</h1>
+      <span class="diag-header-meta">operator diagnostics</span>
+    </div>
+    <a href="/" class="btn btn-secondary btn-compact diag-back-btn">back to shell</a>
+  </header>
+  <div class="diag-status-bar">
+    <span class="diag-generated-at">Generated at <time datetime="{{ generated_at }}">{{ generated_at }}</time></span>
+    <label class="form-check diag-refresh-toggle">
+      <input type="checkbox" id="diag-refresh-checkbox">
+      <span>Auto-refresh (10s)</span>
+    </label>
   </div>
-  <a href="/" class="term-action-btn diag-back-btn">back to shell</a>
-</header>
-<div class="diag-mobile-divider" aria-hidden="true"></div>
+</div>
 
 <main class="diag-main">
 
@@ -401,15 +109,22 @@ body.diag-page::before { display: none; }
       <tr>
         <td>ansi_up</td>
         <td>
-          <span class="diag-dot {{ 'ok' if data.assets.ansi_up == 'vendor' else 'warn' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.ansi_up == 'vendor' else 'diag-warn' }}">{{ data.assets.ansi_up }}</span>
+          <span class="diag-dot {{ 'ok' if data.assets.ansi_up == 'loaded' else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.ansi_up == 'loaded' else 'diag-fail' }}">{{ data.assets.ansi_up }}</span>
+        </td>
+      </tr>
+      <tr>
+        <td>jspdf</td>
+        <td>
+          <span class="diag-dot {{ 'ok' if data.assets.jspdf == 'loaded' else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.jspdf == 'loaded' else 'diag-fail' }}">{{ data.assets.jspdf }}</span>
         </td>
       </tr>
       <tr>
         <td>fonts</td>
         <td>
-          <span class="diag-dot {{ 'ok' if data.assets.fonts == 'vendor' else 'warn' }}"></span>
-          <span class="{{ 'diag-ok' if data.assets.fonts == 'vendor' else 'diag-warn' }}">{{ data.assets.fonts }}</span>
+          <span class="diag-dot {{ 'ok' if data.assets.fonts == 'loaded' else 'fail' }}"></span>
+          <span class="{{ 'diag-ok' if data.assets.fonts == 'loaded' else 'diag-fail' }}">{{ data.assets.fonts }}</span>
         </td>
       </tr>
     </table>
@@ -425,13 +140,7 @@ body.diag-page::before { display: none; }
         {% for key, value in cfg_items[:mid] %}
         <tr>
           <td>{{ key }}</td>
-          <td>
-            {% if value is none %}<span class="diag-warn">—</span>
-            {% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
-            {% elif value == true %}<span class="diag-ok">true</span>
-            {% elif value == false %}<span class="diag-warn">false</span>
-            {% else %}{{ value }}{% endif %}
-          </td>
+          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}true{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -439,13 +148,7 @@ body.diag-page::before { display: none; }
         {% for key, value in cfg_items[mid:] %}
         <tr>
           <td>{{ key }}</td>
-          <td>
-            {% if value is none %}<span class="diag-warn">—</span>
-            {% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}
-            {% elif value == true %}<span class="diag-ok">true</span>
-            {% elif value == false %}<span class="diag-warn">false</span>
-            {% else %}{{ value }}{% endif %}
-          </td>
+          <td>{% if value is none %}<span class="diag-muted">—</span>{% elif value is iterable and value is not string %}{{ value | join(', ') or '—' }}{% elif value is sameas true %}true{% elif value is sameas false %}<span class="diag-muted">false</span>{% else %}{{ value }}{% endif %}</td>
         </tr>
         {% endfor %}
       </table>
@@ -456,28 +159,31 @@ body.diag-page::before { display: none; }
   {% if data.stats.ok %}
   <section class="diag-section s-usage">
     <div class="diag-section-title">Activity</div>
-    <div class="diag-config-grid">
-      <table class="diag-table">
-        {% for item in data.stats.activity %}
-        <tr><td>{{ item.label }}</td><td>{{ item.count }}</td></tr>
-        {% endfor %}
-        <tr><td>all-time</td><td>{{ data.db.runs }}</td></tr>
-      </table>
-      <table class="diag-table">
-        <tr>
-          <td>success</td>
-          <td class="{{ 'diag-ok' if data.stats.outcomes.success else '' }}">{{ data.stats.outcomes.success }}</td>
-        </tr>
-        <tr>
-          <td>failed</td>
-          <td class="{{ 'diag-warn' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
-        </tr>
-        <tr>
-          <td>incomplete</td>
-          <td>{{ data.stats.outcomes.incomplete }}</td>
-        </tr>
-      </table>
-    </div>
+    <table class="diag-table">
+      {% for item in data.stats.activity %}
+      <tr><td>{{ item.label }}</td><td>{{ item.count }}</td></tr>
+      {% endfor %}
+      <tr><td>all-time</td><td>{{ data.db.runs }}</td></tr>
+    </table>
+  </section>
+
+  {# ── Outcomes ──────────────────────────────────────────────────────────── #}
+  <section class="diag-section s-outcomes">
+    <div class="diag-section-title">Outcomes</div>
+    <table class="diag-table">
+      <tr>
+        <td>success</td>
+        <td class="{{ 'diag-ok' if data.stats.outcomes.success else '' }}">{{ data.stats.outcomes.success }}</td>
+      </tr>
+      <tr>
+        <td>failed</td>
+        <td class="{{ 'diag-fail' if data.stats.outcomes.failed else '' }}">{{ data.stats.outcomes.failed }}</td>
+      </tr>
+      <tr>
+        <td>incomplete</td>
+        <td>{{ data.stats.outcomes.incomplete }}</td>
+      </tr>
+    </table>
   </section>
 
   {# ── Top Commands ──────────────────────────────────────────────────────── #}
@@ -547,5 +253,31 @@ body.diag-page::before { display: none; }
   </section>
 
 </main>
+<script>
+  // Auto-refresh toggle: persists in localStorage and reloads the page every
+  // 10s while enabled. Preserves the tz_offset query redirect.
+  (function () {
+    var KEY = 'darklab:diag:autorefresh';
+    var INTERVAL_MS = 10000;
+    var box = document.getElementById('diag-refresh-checkbox');
+    if (!box) return;
+    var enabled = false;
+    try { enabled = localStorage.getItem(KEY) === '1'; } catch (_) {}
+    box.checked = enabled;
+    var timer = null;
+    function start() {
+      if (timer) return;
+      timer = window.setTimeout(function () { window.location.reload(); }, INTERVAL_MS);
+    }
+    function stop() {
+      if (timer) { window.clearTimeout(timer); timer = null; }
+    }
+    if (enabled) start();
+    box.addEventListener('change', function () {
+      try { localStorage.setItem(KEY, box.checked ? '1' : '0'); } catch (_) {}
+      if (box.checked) { start(); } else { stop(); }
+    });
+  })();
+</script>
 </body>
 </html>

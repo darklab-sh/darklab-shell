@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# run_local.sh — Run darklab shell without Docker
+# run_local.sh — Run darklab_shell without Docker
 # Usage: bash examples/run_local.sh
 #
 # Note: This runs the app directly with Python. The security tooling
@@ -39,6 +39,6 @@ fi
 echo "Installing Python dependencies from $REQ_FILE ..."
 python3 -m pip install -r "$REQ_FILE"
 
-echo "Starting darklab shell on http://localhost:8888"
+echo "Starting darklab_shell on http://localhost:8888"
 cd "$APP_DIR"
 python3 app.py

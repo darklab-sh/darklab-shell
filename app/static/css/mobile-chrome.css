@@ -1,0 +1,836 @@
+/* Mobile chrome — progress bar, recents peek + pull-up sheet,
+   bottom-sheet menu, and keyboard-aware edit helper. All rules scoped under
+   body.mobile-terminal-mode so they never leak into desktop. Relies on the
+   theme variables declared in base.css + app/conf/themes/*.yaml. */
+
+@keyframes shell-m-sheet-in {
+  from { transform: translateY(100%); }
+  to   { transform: translateY(0); }
+}
+@keyframes shell-m-fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+@keyframes shell-m-pulse {
+  0%, 100% { opacity: 1; }
+  50%      { opacity: 0.55; }
+}
+@keyframes shell-m-progress-slide {
+  0%   { transform: translateX(-100%); }
+  100% { transform: translateX(100%); }
+}
+
+/* Prevent the browser's native pull-to-refresh / overscroll bounce while in
+   mobile terminal mode. A terminal has no refresh semantics — reloading
+   destroys session state — and without this, a finger that lands above a
+   bottom sheet's grab handle can start a page reload gesture instead of a
+   sheet-close drag. iOS Safari and Firefox only honor `overscroll-behavior`
+   on the actual scroll-root element, which is `html` (not `body`) for this
+   document, so the rule has to be hung off `html` via :has() rather than
+   nested inside the body scope below. */
+html:has(body.mobile-terminal-mode) {
+  overscroll-behavior-y: contain;
+}
+
+body.mobile-terminal-mode {
+  /* Defense-in-depth duplicate of the html rule above for engines that treat
+     body as the scroll root. */
+  overscroll-behavior-y: contain;
+
+  /* u-hidden escape hatch: the scoped rules below set display:flex / :block on
+     the sheets and helper rows and win on specificity against the base
+     .u-hidden utility. Re-assert display:none for the hidden state. */
+  .recent-peek.u-hidden,
+  .kb-helper.u-hidden,
+  .recents-sheet.u-hidden,
+  .recents-sheet-scrim.u-hidden,
+  .menu-sheet.u-hidden,
+  .menu-sheet-scrim.u-hidden,
+  .menu-sheet .menu-submenu.u-hidden,
+  .recents-sheet .sheet-filter-expanded.u-hidden {
+    display: none;
+  }
+
+  /* Thin amber slide under the header while a command is running. */
+  .shell-progress-bar {
+    position: relative;
+    height: 2px;
+    overflow: hidden;
+    background: color-mix(in srgb, var(--amber) 16%, transparent);
+  }
+  .shell-progress-bar::after {
+    content: '';
+    position: absolute; inset: 0;
+    background: linear-gradient(
+      90deg,
+      transparent,
+      var(--amber) 40%,
+      transparent 80%
+    );
+    animation: shell-m-progress-slide 1.4s ease-in-out infinite;
+  }
+
+  /* Single source of truth for every mobile bottom-sheet drag handle.
+     Behavior is wired in app/static/js/mobile_sheet.js::bindMobileSheet —
+     visual + cursor + touch-action + brighten on press all live here so the
+     menu, recents, history panel, workflows, FAQ, options, kill, hist-del,
+     and share-redaction sheets cannot drift. Outside mobile-terminal-mode the
+     scope above keeps the bar invisible on desktop modals. */
+  .sheet-grab {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    /* Generous vertical padding around the visible bar so thumb-near-misses
+       in either direction still register as a sheet drag rather than a
+       browser overscroll gesture or a tap on the row beneath the handle. */
+    padding: 20px 0;
+    cursor: grab;
+    touch-action: none;
+    flex-shrink: 0;
+  }
+  .sheet-grab:active { cursor: grabbing; }
+  .sheet-grab::before {
+    content: '';
+    width: 40px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border-bright);
+    transition: background 120ms ease;
+  }
+  .sheet-grab:hover::before,
+  .sheet-grab:active::before {
+    background: var(--text);
+  }
+
+  /* Recent peek row sits between transcript and composer while idle. */
+  .recent-peek {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 9px 14px;
+    border-top: 1px solid var(--border);
+    background: var(--theme-panel-alt-bg);
+    position: relative;
+    cursor: pointer;
+    user-select: none;
+    transition: background 120ms ease;
+  }
+  .recent-peek::before {
+    content: '';
+    position: absolute; inset: 0;
+    background: color-mix(in srgb, var(--green) 5%, transparent);
+    opacity: 0;
+    transition: opacity 140ms ease;
+    pointer-events: none;
+  }
+  .recent-peek:hover::before { opacity: 0.6; }
+  .recent-peek:active::before { opacity: 1; }
+  .recent-peek:active {
+    background: color-mix(in srgb, var(--green) 2%, var(--theme-panel-alt-bg));
+  }
+  .recent-peek .recent-peek-handle {
+    width: 32px;
+    height: 3px;
+    border-radius: 2px;
+    background: var(--border-bright);
+    flex: 0 0 auto;
+  }
+  .recent-peek .recent-peek-label {
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .recent-peek .recent-peek-count {
+    color: var(--muted);
+    font-size: 9.5px;
+    letter-spacing: 0.5px;
+  }
+  .recent-peek .recent-peek-preview {
+    flex: 1;
+    color: var(--muted);
+    font-size: 10.5px;
+    opacity: 0.7;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recent-peek.hidden { display: none; }
+
+  &.mobile-keyboard-open .recent-peek,
+  &.mobile-keyboard-open .terminal-actions {
+    display: none;
+  }
+
+  /* The legacy top-of-page "Recent:" chip row is replaced on mobile by the
+     pull-up recents sheet (opened from the bottom peek bar). Hide it so we
+     don't render two overlapping recents surfaces. */
+  #history-row { display: none !important; }
+
+  /* Pull-up recents sheet (opens when the peek row is tapped). The scrim sits
+     above the mobile-terminal sticky header (z-index 90) so tapping anywhere
+     outside the sheet — including the visually dimmed header band — hits the
+     scrim's bindDismissible click handler and closes the sheet. The sheet
+     itself stacks one step above the scrim so its own controls remain
+     interactive. */
+  .recents-sheet-scrim {
+    position: fixed; inset: 0;
+    background: var(--theme-history-load-overlay-bg, rgba(0,0,0,0.76));
+    z-index: 100;
+    animation: shell-m-fade-in 200ms ease;
+  }
+  .recents-sheet {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 101;
+    background: var(--surface);
+    border-top: 1px solid var(--border-bright);
+    border-radius: 14px 14px 0 0;
+    max-height: 86dvh;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
+    animation: shell-m-sheet-in 240ms ease;
+  }
+  .recents-sheet .sheet-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 14px 10px;
+  }
+  .recents-sheet .sheet-title-label {
+    color: var(--green);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
+  }
+  .recents-sheet .sheet-title-spacer { flex: 1; }
+  .recents-sheet .sheet-clear-btn {
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    border-radius: 6px;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 11px;
+    padding: 6px 12px;
+    letter-spacing: 0.4px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .recents-sheet .sheet-clear-btn:hover,
+  .recents-sheet .sheet-clear-btn:active {
+    background: color-mix(in srgb, var(--red, #ff6b6b) 14%, transparent);
+    border-color: color-mix(in srgb, var(--red, #ff6b6b) 55%, transparent);
+    color: var(--red, #ff6b6b);
+  }
+  .recents-sheet .sheet-filters {
+    padding: 0 14px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    border-bottom: 1px solid var(--border);
+  }
+  .recents-sheet .sheet-filter-row {
+    appearance: none;
+    -webkit-appearance: none;
+    background: var(--bg);
+    border: 1px solid var(--border-bright);
+    border-radius: 6px;
+    padding: 9px 12px;
+    font-size: 12px;
+    color: var(--text);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  /* iOS Safari auto-zooms any input with font-size < 16px on focus. */
+  .recents-sheet #mobile-recents-search,
+  .recents-sheet #mobile-recents-filter-root {
+    font-size: 16px;
+  }
+  .recents-sheet .sheet-filter-row .filter-placeholder {
+    flex: 1;
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  .recents-sheet .sheet-filter-toggle {
+    justify-content: center;
+    cursor: pointer;
+    font-family: inherit;
+    letter-spacing: 0.3px;
+  }
+  .recents-sheet .sheet-filter-toggle[aria-expanded="true"] {
+    color: var(--green);
+    border-color: color-mix(in srgb, var(--green) 50%, transparent);
+  }
+  /* Surface-specific tweaks for the disclosure primitive on the filters
+     toggle. Colour matches the muted convention used by .menu-sheet, and a
+     small translateY pulls the glyph onto the visual centerline of the
+     shorter row (the ▸ codepoint renders in the upper half of its em-box). */
+  .recents-sheet .sheet-filter-toggle .disclosure-chev {
+    color: var(--border-bright);
+    transform: translateY(2px);
+  }
+  .recents-sheet .sheet-filter-toggle[aria-expanded="true"] .disclosure-chev {
+    transform: translateY(2px) rotate(90deg);
+  }
+  .recents-sheet .sheet-filter-expanded {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .recents-sheet button.sheet-filter-row {
+    font-family: inherit;
+    cursor: pointer;
+    text-align: left;
+  }
+  .recents-sheet .sheet-filter-input input {
+    flex: 1;
+    background: transparent;
+    border: none;
+    outline: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 12px;
+    padding: 0;
+    appearance: none;
+    -webkit-appearance: none;
+  }
+  .recents-sheet .sheet-filter-input input::placeholder {
+    color: var(--muted);
+    opacity: 0.7;
+  }
+  .recents-sheet .sheet-filter-input.active .sheet-filter-label,
+  .recents-sheet .sheet-filter-input.active input {
+    color: var(--green);
+  }
+
+  /* App-style custom dropdown (mirrors .save-menu pattern). */
+  .recents-sheet .sheet-filter-dropdown-wrap {
+    position: relative;
+  }
+  .recents-sheet .sheet-filter-dropdown {
+    width: 100%;
+  }
+  .recents-sheet .sheet-filter-dropdown-wrap.active .sheet-filter-value {
+    color: var(--green);
+  }
+  .recents-sheet .sheet-filter-dropdown-wrap.open .sheet-filter-caret {
+    transform: rotate(180deg);
+  }
+  .recents-sheet .sheet-filter-caret {
+    transition: transform 120ms ease;
+    display: inline-block;
+  }
+  .recents-sheet .sheet-filter-menu {
+    display: none;
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    right: 0;
+    background: var(--theme-dropdown-bg, var(--surface));
+    border: 1px solid var(--theme-dropdown-border, var(--border-bright));
+    border-radius: 6px;
+    box-shadow:
+      0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow, rgba(0,0,0,0.4)) 24%, transparent),
+      0 8px 22px var(--theme-dropdown-shadow, rgba(0,0,0,0.45));
+    z-index: 60;
+    overflow: hidden;
+    flex-direction: column;
+  }
+  .recents-sheet .sheet-filter-dropdown-wrap.open .sheet-filter-menu {
+    display: flex;
+  }
+  .recents-sheet .sheet-filter-menu button {
+    display: block;
+    width: 100%;
+    text-align: left;
+    background: transparent;
+    border: none;
+    color: color-mix(in srgb, var(--muted) 86%, var(--text));
+    font-family: var(--font-mono);
+    font-size: 11px;
+    letter-spacing: 0.3px;
+    padding: 9px 14px;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+  .recents-sheet .sheet-filter-menu button:hover,
+  .recents-sheet .sheet-filter-menu button[aria-selected="true"] {
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+    color: var(--text);
+  }
+  .recents-sheet .sheet-filter-menu button[aria-selected="true"] {
+    color: var(--green);
+  }
+  .recents-sheet .sheet-filter-label {
+    color: var(--text);
+    opacity: 0.9;
+  }
+  .recents-sheet .sheet-filter-value {
+    flex: 1;
+    color: var(--muted);
+  }
+  .recents-sheet .sheet-filter-row.active .sheet-filter-value,
+  .recents-sheet .sheet-filter-row[aria-pressed="true"] .sheet-filter-value {
+    color: var(--green);
+  }
+  .recents-sheet .sheet-filter-caret {
+    color: var(--muted);
+    opacity: 0.6;
+    font-size: 16px;
+    line-height: 1;
+  }
+  .recents-sheet .sheet-filter-checkbox {
+    width: 14px;
+    height: 14px;
+    border: 1px solid var(--border-bright);
+    border-radius: 2px;
+    flex: 0 0 auto;
+    position: relative;
+  }
+  .recents-sheet .sheet-filter-check[aria-pressed="true"] .sheet-filter-checkbox {
+    background: var(--green);
+    border-color: var(--green);
+  }
+  .recents-sheet .sheet-filter-check[aria-pressed="true"] .sheet-filter-checkbox::after {
+    content: '';
+    position: absolute;
+    left: 3px; top: 0;
+    width: 5px; height: 9px;
+    border-right: 2px solid var(--surface);
+    border-bottom: 2px solid var(--surface);
+    transform: rotate(45deg);
+  }
+  .recents-sheet .sheet-filter-clear {
+    justify-content: center;
+    color: var(--muted);
+  }
+  .recents-sheet .filter-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    padding-top: 3px;
+  }
+  .recents-sheet .filter-chips:empty { display: none; }
+  .recents-sheet #mobile-recents-filters-toggle[aria-expanded="true"] ~ .filter-chips {
+    display: none;
+  }
+  .recents-sheet .filter-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 9px 4px 11px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--green) 10%, transparent);
+    border: 1px solid color-mix(in srgb, var(--green) 42%, transparent);
+    color: var(--green);
+    font-size: 10.5px;
+    letter-spacing: 0.3px;
+    font-family: var(--font-mono);
+    cursor: pointer;
+  }
+  .recents-sheet .filter-chip:hover,
+  .recents-sheet .filter-chip:active {
+    background: color-mix(in srgb, var(--green) 18%, transparent);
+    border-color: color-mix(in srgb, var(--green) 60%, transparent);
+  }
+  .recents-sheet .filter-chip-x {
+    opacity: 0.7;
+    font-size: 12px;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  .recents-sheet .sheet-list {
+    flex: 1;
+    overflow: auto;
+  }
+  .recents-sheet .sheet-item {
+    padding: 12px 16px 13px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .recents-sheet #mobile-recents-list .sheet-item:nth-of-type(even) {
+    background-color: color-mix(in srgb, var(--surface) 96%, var(--text) 4%);
+  }
+  .recents-sheet .sheet-item-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
+  .recents-sheet .sheet-item-star {
+    font-size: 13px;
+    color: var(--border-bright);
+  }
+  .recents-sheet .sheet-item-star.starred { color: var(--amber); }
+  .recents-sheet .sheet-item-cmd {
+    flex: 1;
+    font-size: 12.5px;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .recents-sheet .sheet-item-meta {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    padding-left: 23px;
+  }
+  .recents-sheet .sheet-item-kind {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 16px;
+    padding: 0 6px;
+    border: 1px solid var(--border-bright);
+    border-radius: 999px;
+    font-size: 9px;
+    letter-spacing: 0.06em;
+  }
+  .recents-sheet .sheet-item-kind-run {
+    color: var(--green);
+    border-color: var(--green-dim);
+  }
+  .recents-sheet .sheet-item-kind-snapshot {
+    color: color-mix(in srgb, var(--text) 72%, var(--muted));
+  }
+  .recents-sheet .sheet-item-time {
+    color: var(--muted);
+    font-size: 10px;
+  }
+  .recents-sheet .sheet-item-exit {
+    font-family: var(--font-mono);
+    font-size: 10px;
+    color: var(--green);
+  }
+  .recents-sheet .sheet-item-exit.nonzero { color: var(--red); }
+  .recents-sheet .sheet-item-actions {
+    display: flex;
+    gap: 6px;
+    padding-left: 23px;
+  }
+  .recents-sheet .sheet-item-action {
+    flex: 1;
+    text-align: center;
+    padding: 6px 4px;
+    font-size: 10.5px;
+    color: var(--text);
+    border: 1px solid var(--border-bright);
+    border-radius: 4px;
+    cursor: pointer;
+    min-height: 32px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    /* Reset native <button> chrome — without this the default user-agent
+       button fill leaks through and the row actions render as light-gray
+       boxes on real devices and on the Chromium demo recorder. */
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    font-family: inherit;
+    -webkit-tap-highlight-color: transparent;
+  }
+
+  /* Bottom-sheet menu (hamburger target). Workflows is a normal row that
+     opens the existing workflows overlay; no nested surface. */
+  .menu-sheet-scrim {
+    position: fixed; inset: 0;
+    background: var(--theme-overlay-backdrop-bg, rgba(0,0,0,0.72));
+    z-index: 100;
+    animation: shell-m-fade-in 200ms ease;
+  }
+  .menu-sheet {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    z-index: 101;
+    background: var(--surface);
+    border-top: 1px solid var(--border-bright);
+    border-radius: 14px 14px 0 0;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 -20px 50px var(--theme-panel-shadow, rgba(0,0,0,0.55));
+    animation: shell-m-sheet-in 240ms ease;
+  }
+  .menu-sheet .menu-title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 4px 14px 10px;
+  }
+  .menu-sheet .menu-title-label {
+    color: var(--green);
+    font-size: 11px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    font-weight: 600;
+    flex: 1;
+  }
+  .menu-sheet .menu-group {
+    display: flex;
+    flex-direction: column;
+  }
+  .menu-sheet .menu-group-divider {
+    /* Clear section break without fragmenting the sheet: a --surface band
+       with padded air above/below and a quiet hairline centered inside it,
+       so the divider reads as separation rather than competing with the
+       per-item borders. */
+    padding: 22px 0;
+    background: var(--surface);
+  }
+  .menu-sheet .menu-group-divider::before {
+    content: '';
+    display: block;
+    height: 1px;
+    margin: 0 16px;
+    background: var(--border);
+  }
+  .menu-sheet .menu-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 13px 16px;
+    border-bottom: 1px solid var(--border);
+    color: var(--text);
+    font-size: 13px;
+    letter-spacing: 0.3px;
+    min-height: 48px;
+    background: transparent;
+    border-left: none;
+    border-right: none;
+    border-top: none;
+    text-align: left;
+    width: 100%;
+  }
+  .menu-sheet .menu-group:first-of-type .menu-item:first-child {
+    border-top: 1px solid var(--border);
+  }
+  /* Use :last-of-type (button) so the suppression also catches the timestamps
+     row, which is the last <button> in the first group even though a sibling
+     <div class="menu-submenu"> follows it as the actual :last-child. */
+  .menu-sheet .menu-group .menu-item:last-of-type {
+    border-bottom: none;
+  }
+  .menu-sheet .menu-item.muted { color: var(--muted); }
+  .menu-sheet .menu-item-icon {
+    color: var(--muted);
+    font-size: 13px;
+    width: 16px;
+    text-align: center;
+    font-family: var(--font-mono);
+    flex: 0 0 16px;
+  }
+  .menu-sheet .menu-item-label { flex: 1; }
+  .menu-sheet .menu-item-toggle {
+    color: var(--muted);
+    font-size: 11px;
+    letter-spacing: 0.5px;
+    font-family: var(--font-mono);
+    opacity: 0.85;
+  }
+  .menu-sheet .menu-item[aria-pressed="true"] .menu-item-toggle {
+    color: var(--green);
+    opacity: 1;
+  }
+  .menu-sheet .menu-item-hint {
+    color: var(--muted);
+    font-size: 11px;
+    opacity: 0.8;
+  }
+  /* Surface-specific chev color: drill-chev (drill-in rows) and
+     disclosure-chev (timestamps expander) both render in --border-bright
+     so they recede against the menu text. The primitives in components.css
+     own size/spacing/rotation. */
+  .menu-sheet .menu-item-chev,
+  .menu-sheet .disclosure-chev {
+    color: var(--border-bright);
+  }
+  /* Block-disclosure rotation for the timestamps expander now lives in the
+     shared .disclosure-chev primitive (components.css). */
+  .menu-sheet .menu-submenu {
+    display: flex;
+    flex-direction: column;
+    background: var(--theme-panel-alt-bg);
+    border-bottom: 1px solid var(--border);
+  }
+  .menu-sheet .menu-subitem {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 11px 16px 11px 44px;
+    border: none;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font-size: 12.5px;
+    letter-spacing: 0.3px;
+    text-align: left;
+    width: 100%;
+    min-height: 42px;
+    cursor: pointer;
+  }
+  .menu-sheet .menu-submenu .menu-subitem:last-child {
+    border-bottom: none;
+  }
+  .menu-sheet .menu-subitem-radio {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: 1.5px solid var(--border-bright);
+    background: transparent;
+    flex: 0 0 12px;
+    transition: border-color 120ms ease, background 120ms ease;
+  }
+  .menu-sheet .menu-subitem[aria-pressed="true"] .menu-subitem-radio {
+    border-color: var(--green);
+    background:
+      radial-gradient(circle, var(--green) 0 3px, transparent 4px);
+  }
+  .menu-sheet .menu-subitem[aria-pressed="true"] .menu-subitem-label {
+    color: var(--green);
+  }
+  .menu-sheet .menu-subitem-label {
+    flex: 1;
+  }
+  .menu-sheet .menu-subitem-hint {
+    color: var(--muted);
+    font-size: 10.5px;
+    font-family: var(--font-mono);
+    letter-spacing: 0.3px;
+    opacity: 0.75;
+  }
+  .menu-sheet .menu-footer {
+    padding: 14px 16px 16px;
+    border-top: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--muted);
+    font-size: 10.5px;
+    letter-spacing: 1.5px;
+    text-transform: lowercase;
+    font-family: var(--font-mono);
+    text-decoration: none;
+  }
+  .menu-sheet .menu-footer:hover,
+  .menu-sheet .menu-footer:focus-visible {
+    color: var(--text);
+    outline: none;
+  }
+
+  /* Composer picks up an amber ring while a command is running so typing
+     feels distinct from the idle prompt. Scoped so desktop is untouched. */
+  #mobile-composer.is-running {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, var(--amber) 35%, transparent),
+      0 0 0 3px color-mix(in srgb, var(--amber) 10%, transparent);
+    transition: box-shadow 160ms ease;
+  }
+  #mobile-composer.is-running #mobile-cmd {
+    caret-color: var(--amber);
+    border-bottom-color: color-mix(in srgb, var(--amber) 40%, var(--border-bright));
+  }
+
+  /* Run ↔ Kill swap in the composer. The Kill button mirrors the desktop
+     HUD Kill primitive (.btn.btn-destructive.btn-compact) but tuned for the
+     tighter mobile row. */
+  #mobile-composer.is-running #mobile-run-btn { display: none; }
+  #mobile-composer:not(.is-running) #mobile-kill-btn { display: none; }
+  #mobile-kill-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: color-mix(in srgb, var(--red) 12%, transparent);
+    color: var(--red);
+    border: 1px solid color-mix(in srgb, var(--red) 55%, transparent);
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    font-weight: 600;
+    padding: 0 12px;
+    cursor: pointer;
+    flex-shrink: 0;
+    min-height: 34px;
+    letter-spacing: 0.3px;
+  }
+  #mobile-kill-btn:active {
+    background: color-mix(in srgb, var(--red) 22%, transparent);
+  }
+  #mobile-kill-btn:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
+  /* Edit-helper row above the composer when the soft keyboard is open. */
+  .kb-helper {
+    flex: 0 0 auto;
+    border-top: 1px solid var(--border);
+    padding: 5px 8px;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: var(--theme-panel-alt-bg);
+    overflow-x: auto;
+    overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none;
+  }
+  .kb-helper::-webkit-scrollbar { display: none; }
+  .kb-helper-sep {
+    width: 1px;
+    min-width: 1px;
+    height: 18px;
+    background: var(--border);
+    margin: 0 4px;
+    flex: 0 0 1px;
+    align-self: center;
+  }
+  .kb-key {
+    height: 28px;
+    min-width: 30px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 11px;
+    letter-spacing: 0.2px;
+    color: var(--muted);
+    border-radius: 5px;
+    user-select: none;
+    transition: background 100ms ease, color 100ms ease;
+    cursor: pointer;
+    /* Without these, the browser user-agent <button> appearance bleeds through
+       and renders .kb-key with a light gray/white fill — visible on a real
+       device and on Chromium-based demo recordings. */
+    appearance: none;
+    -webkit-appearance: none;
+    background: transparent;
+    border: 0;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .kb-key.kb-key-text {
+    flex: 1 1 auto;
+    min-width: 0;
+    padding: 0 8px;
+  }
+  .kb-key:active {
+    background: color-mix(in srgb, var(--green) 8%, transparent);
+    color: var(--text);
+  }
+  @media (hover: hover) {
+    .kb-key:hover {
+      background: color-mix(in srgb, var(--green) 4%, transparent);
+      color: var(--text);
+    }
+  }
+
+}

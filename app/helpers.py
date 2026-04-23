@@ -1,7 +1,8 @@
 """
 Shared per-request helpers used across blueprints.
 
-Covers client-IP resolution (trusted-proxy aware) and session-ID extraction.
+Covers client-IP resolution (trusted-proxy aware), session-ID extraction,
+active-theme resolution, and the authoritative font manifest.
 These are kept here so multiple blueprints can import them without creating
 circular dependencies through app.py.
 """
@@ -11,9 +12,9 @@ import logging
 import re
 from functools import lru_cache
 
-from flask import g, request
+from flask import g, has_request_context, request
 
-from config import CFG
+from config import CFG, THEME_REGISTRY_MAP
 
 log = logging.getLogger("shell")
 
@@ -113,5 +114,83 @@ def get_client_ip():
 
 
 def get_session_id():
-    """Extract the anonymous session ID from the X-Session-ID request header."""
-    return request.headers.get("X-Session-ID", "").strip()
+    """Extract and validate the session ID from the X-Session-ID request header.
+
+    For ``tok_`` prefixed tokens the token must be present in ``session_tokens``
+    to be considered valid.  A revoked or never-issued ``tok_`` value is treated
+    as an anonymous session (returns ``""``) so callers cannot access data under
+    an invalidated identity.  UUID-format anonymous session IDs are returned
+    as-is without a DB lookup.
+    """
+    session_id = request.headers.get("X-Session-ID", "").strip()
+    if not session_id.startswith("tok_"):
+        return session_id
+    # Local import avoids a circular dependency at module load time.
+    from database import db_connect  # noqa: PLC0415
+    with db_connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM session_tokens WHERE token = ?", (session_id,)
+        ).fetchone()
+    return session_id if row else ""
+
+
+def get_log_session_id(session_id=None):
+    """Return a log-safe session identifier.
+
+    Anonymous UUID-style sessions are correlation IDs and can be logged as-is.
+    ``tok_`` sessions are bearer credentials, so logs keep only the visible
+    prefix needed for correlation and mask the secret suffix.
+    """
+    value = get_session_id() if session_id is None else str(session_id or "")
+    if value.startswith("tok_"):
+        return f"{value[:8]}********"
+    return value
+
+
+# ── Font manifest ──────────────────────────────────────────────────────────────
+# Single source of truth for vendored font files.  assets.py derives its route
+# allowlist from this list; permalinks.py uses it to generate @font-face CSS.
+# Adding or removing a font here automatically propagates to both surfaces.
+
+FONT_FILES = [
+    ("JetBrains Mono", 300, "JetBrainsMono-300.ttf"),
+    ("JetBrains Mono", 400, "JetBrainsMono-400.ttf"),
+    ("JetBrains Mono", 700, "JetBrainsMono-700.ttf"),
+    ("Syne", 700, "Syne-700.ttf"),
+    ("Syne", 800, "Syne-800.ttf"),
+]
+
+
+# ── Theme resolution ───────────────────────────────────────────────────────────
+
+def resolve_theme() -> tuple[str, str]:
+    """Return ``(theme_name, source)`` for the current request.
+
+    Resolution order: pref_theme_name cookie → legacy pref_theme cookie →
+    default_theme config → hard-coded fallback.  ``source`` is one of
+    ``"pref_theme_name"``, ``"pref_theme"``, ``"default_theme"``, or
+    ``"fallback"``.  Safe to call outside a request context.
+    """
+    default = CFG.get("default_theme", "darklab_obsidian.yaml")
+    if not has_request_context():
+        return default, "fallback"
+    try:
+        theme_name = request.cookies.get("pref_theme_name", "").strip()
+        if theme_name and theme_name in THEME_REGISTRY_MAP:
+            return theme_name, "pref_theme_name"
+        legacy = request.cookies.get("pref_theme", "").strip()
+        if legacy and legacy in THEME_REGISTRY_MAP:
+            return legacy, "pref_theme"
+        source = "default_theme" if default in THEME_REGISTRY_MAP else "fallback"
+        return default, source
+    except Exception:
+        return default, "fallback"
+
+
+def current_theme_name() -> str:
+    """Return the active theme name for the current request.
+
+    Delegates to :func:`resolve_theme`; use that directly when the resolution
+    source is also needed (e.g. for debug logging).
+    """
+    return resolve_theme()[0]

@@ -7,6 +7,8 @@
     tabs: [],
     activeTabId: null,
     acSuggestions: [],
+    acContextRegistry: {},
+    acSpecialCommands: [],
     acFiltered: [],
     acIndex: -1,
     acSuppressInputOnce: false,
@@ -15,6 +17,7 @@
     searchCaseSensitive: false,
     searchRegexMode: false,
     cmdHistory: [],
+    recentPreviewHistory: [],
     _cmdHistoryNavIndex: -1,
     _cmdHistoryNavDraft: '',
     _suspendCmdHistoryNavReset: false,
@@ -49,6 +52,8 @@
     'tabs',
     'activeTabId',
     'acSuggestions',
+    'acContextRegistry',
+    'acSpecialCommands',
     'acFiltered',
     'acIndex',
     'acSuppressInputOnce',
@@ -57,6 +62,7 @@
     'searchCaseSensitive',
     'searchRegexMode',
     'cmdHistory',
+    'recentPreviewHistory',
     '_cmdHistoryNavIndex',
     '_cmdHistoryNavDraft',
     '_suspendCmdHistoryNavReset',
@@ -153,5 +159,22 @@
   global.setActiveTabId = (v) => { state.activeTabId = v; };
   global.getActiveTab = () => state.tabs.find(t => t.id === state.activeTabId);
   global.getTab = (id) => state.tabs.find(t => t.id === id);
+
+  // ── UI event helpers ──
+  // Keep cross-module state sync explicit: publishers emit document-level
+  // CustomEvents and subscribers opt in with add/remove listeners instead of
+  // monkey-patching each other's globals after load.
+  global.emitUiEvent = (name, detail = {}) => {
+    if (typeof document === 'undefined' || typeof document.dispatchEvent !== 'function') return false;
+    document.dispatchEvent(new CustomEvent(name, { detail }));
+    return true;
+  };
+  global.onUiEvent = (name, handler, options) => {
+    if (typeof document === 'undefined' || typeof document.addEventListener !== 'function' || typeof handler !== 'function') {
+      return () => {};
+    }
+    document.addEventListener(name, handler, options);
+    return () => document.removeEventListener(name, handler, options);
+  };
 
 })(globalThis);

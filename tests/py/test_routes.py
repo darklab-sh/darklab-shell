@@ -7,8 +7,10 @@ Run with: pytest tests/ (from the repo root)
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
+from datetime import datetime, timedelta
 import unittest.mock as mock
 
 import app as shell_app
@@ -47,11 +49,25 @@ class TestIndexRoute:
         client = get_client()
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             body = client.get("/").get_data(as_text=True)
-        assert 'id="diag-btn"' in body
+        assert 'id="rail-diag-btn"' in body
         assert 'href="/diag"' in body
         assert 'target="_blank"' in body
         assert 'rel="noopener noreferrer"' in body
-        assert 'button data-action="diag"' in body
+        assert 'data-menu-action="diag"' in body
+
+    def test_bootstrapped_app_config_matches_config_route(self):
+        client = get_client(use_forwarded_for=False)
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/").get_data(as_text=True)
+            config_payload = json.loads(client.get("/config").data)
+        match = re.search(
+            r'<script id="app-config-json" type="application/json">(.*?)</script>',
+            body,
+            re.S,
+        )
+        assert match
+        boot_payload = json.loads(match.group(1))
+        assert boot_payload == config_payload
 
 # ── /health ───────────────────────────────────────────────────────────────────
 
@@ -114,6 +130,89 @@ class TestHealthRoute:
         assert data["redis"] is False
 
 
+# ── /log ──────────────────────────────────────────────────────────────────────
+
+class TestClientLogRoute:
+    def test_accepts_client_error_payload(self):
+        client = get_client()
+        with mock.patch.object(shell_assets.log, "warning") as mock_warning:
+            resp = client.post("/log", json={
+                "context": "session-token set",
+                "message": "ReferenceError: global is not defined",
+            })
+        assert resp.status_code == 200
+        assert resp.get_json() == {"ok": True}
+        mock_warning.assert_called_once()
+        assert mock_warning.call_args[0][0] == "CLIENT_ERROR"
+        extra = mock_warning.call_args.kwargs["extra"]
+        assert extra["context"] == "session-token set"
+        assert extra["client_message"] == "ReferenceError: global is not defined"
+
+
+# ── /status ───────────────────────────────────────────────────────────────────
+
+class TestStatusRoute:
+    def test_returns_200_even_when_db_fails(self):
+        # /status is for live HUD polling; it must never return 503 so a
+        # blip doesn't tear down the UI. Fields report state instead.
+        client = get_client()
+        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+            resp = client.get("/status")
+        assert resp.status_code == 200
+
+    def test_response_contains_expected_keys(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        for key in ("uptime", "db", "redis", "server_time"):
+            assert key in data
+
+    def test_uptime_is_non_negative_integer(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert isinstance(data["uptime"], int)
+        assert data["uptime"] >= 0
+
+    def test_db_ok_when_sqlite_available(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert data["db"] == "ok"
+
+    def test_db_down_when_sqlite_fails(self):
+        client = get_client()
+        with mock.patch("blueprints.assets.db_connect", side_effect=Exception("db error")):
+            data = json.loads(client.get("/status").data)
+        assert data["db"] == "down"
+
+    def test_redis_none_when_not_configured(self):
+        # In the test environment there is no Redis configured.
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert data["redis"] == "none"
+
+    def test_redis_ok_when_ping_succeeds(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.return_value = True
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
+            data = json.loads(client.get("/status").data)
+        assert data["redis"] == "ok"
+
+    def test_redis_down_when_ping_fails(self):
+        client = get_client()
+        fake_redis = mock.MagicMock()
+        fake_redis.ping.side_effect = Exception("redis down")
+        with mock.patch("blueprints.assets.redis_client", fake_redis):
+            data = json.loads(client.get("/status").data)
+        assert data["redis"] == "down"
+
+    def test_server_time_is_ms_epoch(self):
+        client = get_client()
+        data = json.loads(client.get("/status").data)
+        assert isinstance(data["server_time"], int)
+        # Any plausible ms-epoch timestamp in 2026 fits in 13 digits.
+        assert 1e12 < data["server_time"] < 1e13
+
+
 # ── /config ───────────────────────────────────────────────────────────────────
 
 class TestConfigRoute:
@@ -127,6 +226,8 @@ class TestConfigRoute:
         data = json.loads(client.get("/config").data)
         for key in ("app_name", "project_readme", "prompt_prefix", "default_theme", "max_tabs", "max_output_lines"):
             assert key in data
+        assert "share_redaction_enabled" in data
+        assert "share_redaction_rules" in data
 
     def test_max_tabs_is_int(self):
         client = get_client()
@@ -237,6 +338,32 @@ class TestConfigRoute:
             data = json.loads(client.get("/config").data)
         assert data["diag_enabled"] is False
 
+    def test_share_redaction_rules_reflect_cfg(self):
+        client = get_client()
+        rules = [
+            {"label": "bearer", "pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": "i"},
+        ]
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": rules,
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["share_redaction_enabled"] is True
+        assert any(rule["label"] == "bearer token" for rule in data["share_redaction_rules"])
+        assert data["share_redaction_rules"][-1] == rules[0]
+
+    def test_share_redaction_rules_empty_when_disabled(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": False,
+            "share_redaction_rules": [
+                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+            ],
+        }):
+            data = json.loads(client.get("/config").data)
+        assert data["share_redaction_enabled"] is False
+        assert data["share_redaction_rules"] == []
+
 
 # ── /themes ──────────────────────────────────────────────────────────────────
 
@@ -318,59 +445,28 @@ class TestThemesRoute:
 # ── /vendor assets ───────────────────────────────────────────────────────────
 
 class TestVendorAssets:
-    def test_ansi_up_prefers_build_time_asset(self, tmp_path, monkeypatch):
+    def test_ansi_up_js_is_served(self):
         client = get_client()
-        build_asset = tmp_path / "build" / "ansi_up.js"
-        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
-        build_asset.parent.mkdir(parents=True)
-        fallback_asset.parent.mkdir(parents=True)
-        build_asset.write_text("build ansi_up")
-        fallback_asset.write_text("fallback ansi_up")
-
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", build_asset)
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
-
         resp = client.get("/vendor/ansi_up.js")
         assert resp.status_code == 200
-        assert resp.get_data(as_text=True) == "build ansi_up"
+        assert "javascript" in resp.content_type
 
-    def test_ansi_up_falls_back_to_repo_copy_when_build_asset_missing(self, tmp_path, monkeypatch):
+    def test_jspdf_js_is_served(self):
         client = get_client()
-        missing_build_asset = tmp_path / "missing" / "ansi_up.js"
-        fallback_asset = tmp_path / "fallback" / "ansi_up.js"
-        fallback_asset.parent.mkdir(parents=True)
-        fallback_asset.write_text("fallback ansi_up")
-
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", missing_build_asset)
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_FALLBACK", fallback_asset)
-
-        resp = client.get("/vendor/ansi_up.js")
+        resp = client.get("/vendor/jspdf.umd.min.js")
         assert resp.status_code == 200
-        assert resp.get_data(as_text=True) == "fallback ansi_up"
+        assert "javascript" in resp.content_type
 
-    def test_font_route_prefers_build_time_asset_and_falls_back(self, tmp_path, monkeypatch):
+    def test_font_route_serves_committed_file(self, tmp_path, monkeypatch):
         client = get_client()
-        build_dir = tmp_path / "build-fonts"
-        fallback_dir = tmp_path / "fallback-fonts"
-        build_dir.mkdir()
-        fallback_dir.mkdir()
-
-        build_font = build_dir / "JetBrainsMono-400.ttf"
-        fallback_font = fallback_dir / "JetBrainsMono-400.ttf"
-        build_font.write_bytes(b"build font bytes")
-        fallback_font.write_bytes(b"fallback font bytes")
-
-        monkeypatch.setattr(shell_assets, "_FONT_DIR", build_dir)
-        monkeypatch.setattr(shell_assets, "_FONT_FALLBACK_DIR", fallback_dir)
+        font_dir = tmp_path / "fonts"
+        font_dir.mkdir()
+        (font_dir / "JetBrainsMono-400.ttf").write_bytes(b"font bytes")
+        monkeypatch.setattr(shell_assets, "_FONT_DIR", font_dir)
 
         resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
         assert resp.status_code == 200
-        assert resp.data == b"build font bytes"
-
-        monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing-fonts")
-        resp = client.get("/vendor/fonts/JetBrainsMono-400.ttf")
-        assert resp.status_code == 200
-        assert resp.data == b"fallback font bytes"
+        assert resp.data == b"font bytes"
 
     def test_font_route_rejects_unknown_or_traversal_paths(self):
         client = get_client()
@@ -447,7 +543,8 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         cfg = data["config"]
         for key in ("rate_limit_enabled", "command_timeout_seconds", "max_output_lines",
-                    "persist_full_run_output", "permalink_retention_days"):
+                    "persist_full_run_output", "permalink_retention_days",
+                    "share_redaction_enabled", "custom_redaction_rule_count"):
             assert key in cfg, f"missing config key: {key}"
 
     def test_db_section_ok_and_has_counts(self):
@@ -472,15 +569,24 @@ class TestDiagRoute:
             data = json.loads(client.get("/diag?format=json").data)
         assert "configured" in data["redis"]
 
-    def test_assets_section_reports_vendor_or_fallback(self, tmp_path, monkeypatch):
+    def test_assets_section_reports_loaded_when_files_present(self):
         client = self._allowed_client()
-        # No build-time vendor dir present — both should report "fallback"
-        monkeypatch.setattr(shell_assets, "_ANSI_UP_PATH", tmp_path / "missing_ansi_up.js")
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            data = json.loads(client.get("/diag?format=json").data)
+        assert data["assets"]["ansi_up"] == "loaded"
+        assert data["assets"]["jspdf"] == "loaded"
+        assert data["assets"]["fonts"] == "loaded"
+
+    def test_assets_section_reports_missing_when_files_absent(self, tmp_path, monkeypatch):
+        client = self._allowed_client()
+        monkeypatch.setattr(shell_assets, "_ANSI_UP_JS", tmp_path / "missing_ansi_up.js")
+        monkeypatch.setattr(shell_assets, "_JSPDF_JS", tmp_path / "missing_jspdf.js")
         monkeypatch.setattr(shell_assets, "_FONT_DIR", tmp_path / "missing_fonts")
         with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
             data = json.loads(client.get("/diag?format=json").data)
-        assert data["assets"]["ansi_up"] == "fallback"
-        assert data["assets"]["fonts"] == "fallback"
+        assert data["assets"]["ansi_up"] == "missing"
+        assert data["assets"]["jspdf"] == "missing"
+        assert data["assets"]["fonts"] == "missing"
 
     def test_tools_section_has_present_and_missing_lists(self):
         client = self._allowed_client()
@@ -541,10 +647,21 @@ class TestDiagRoute:
         body = resp.get_data(as_text=True)
         assert "diag test shell" in body
         assert "operator diagnostics" in body
-        assert 'class="term-action-btn diag-back-btn"' in body
+        assert 'class="btn btn-secondary btn-compact diag-back-btn"' in body
         assert 'href="/"' in body
         assert "back to shell" in body
         assert "<!DOCTYPE html>" in body or "<html" in body.lower()
+
+    def test_html_response_renders_zero_custom_redaction_rule_count_as_numeric_zero(self):
+        client = self._allowed_client()
+        with mock.patch.dict("config.CFG", {
+            "diagnostics_allowed_cidrs": ["127.0.0.1/32"],
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [],
+        }):
+            body = client.get("/diag").get_data(as_text=True)
+        assert "custom_redaction_rule_count" in body
+        assert ">0<" in body
 
     def test_json_format_param_returns_json(self):
         client = self._allowed_client()
@@ -613,6 +730,109 @@ class TestFaqRoute:
         questions = [item.get("question") for item in data["items"]]
         assert "What is this?" in questions
         assert "What commands are allowed?" in questions
+
+
+# ── /workflows ────────────────────────────────────────────────────────────────
+
+class TestWorkflowsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/workflows")
+        assert resp.status_code == 200
+
+    def test_includes_v15_recon_playbooks(self):
+        client = get_client()
+        data = json.loads(client.get("/workflows").data)
+        titles = {item.get("title") for item in data["items"]}
+        expected = {
+            "Domain OSINT / Passive Recon",
+            "Subdomain Enumeration & Validation",
+            "Web Directory Discovery",
+            "SSL / TLS Deep Dive",
+            "CDN / Edge Behavior Check",
+            "API Recon",
+            "Network Path Analysis",
+            "Fast Port Discovery to Service Fingerprint",
+        }
+        assert expected.issubset(titles)
+
+    def test_payload_steps_are_prompt_fillable(self):
+        client = get_client()
+        data = json.loads(client.get("/workflows").data)
+        assert data["items"], "workflow payload should not be empty"
+        for item in data["items"]:
+            assert isinstance(item.get("title"), str) and item["title"]
+            assert isinstance(item.get("description"), str)
+            assert isinstance(item.get("steps"), list) and item["steps"]
+            for step in item["steps"]:
+                assert isinstance(step.get("cmd"), str) and step["cmd"].strip()
+                assert isinstance(step.get("note"), str)
+
+
+# ── /shortcuts ────────────────────────────────────────────────────────────────
+
+class TestShortcutsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/shortcuts")
+        assert resp.status_code == 200
+
+    def test_payload_shape(self):
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        assert isinstance(data.get("sections"), list)
+        assert data["sections"], "shortcuts payload should not be empty"
+        for section in data["sections"]:
+            assert isinstance(section, dict)
+            assert isinstance(section.get("title"), str) and section["title"]
+            assert isinstance(section.get("items"), list) and section["items"]
+            for item in section["items"]:
+                assert isinstance(item, dict)
+                assert "key" in item and "description" in item
+        assert isinstance(data.get("note", ""), str)
+
+    def test_sections_cover_terminal_tabs_and_ui(self):
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        titles = [section.get("title") for section in data["sections"]]
+        assert titles == ["Terminal", "Tabs", "UI"]
+
+    def test_includes_question_mark_self_reference(self):
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        keys = [item.get("key") for section in data["sections"] for item in section["items"]]
+        assert "?" in keys, "shortcuts overlay trigger should be self-documenting"
+
+    def test_matches_shortcuts_builtin_source(self):
+        from fake_commands import get_current_shortcuts
+        direct = get_current_shortcuts(is_mac=False)
+        client = get_client()
+        data = json.loads(client.get("/shortcuts").data)
+        assert data["sections"] == direct["sections"]
+
+    def test_non_mac_user_agent_renders_alt_prefix(self):
+        client = get_client()
+        client.environ_base["HTTP_USER_AGENT"] = (
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 "
+            "(KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        )
+        data = json.loads(client.get("/shortcuts").data)
+        keys = [item["key"] for section in data["sections"] for item in section["items"]]
+        assert "Alt+T" in keys
+        assert "Alt+Shift+C" in keys
+        assert not any(key.startswith("Option+") for key in keys)
+
+    def test_mac_user_agent_renders_option_prefix(self):
+        client = get_client()
+        client.environ_base["HTTP_USER_AGENT"] = (
+            "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) "
+            "AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15"
+        )
+        data = json.loads(client.get("/shortcuts").data)
+        keys = [item["key"] for section in data["sections"] for item in section["items"]]
+        assert "Option+T" in keys
+        assert "Option+Shift+C" in keys
+        assert not any(key.startswith("Alt+") for key in keys)
 
 
 # ── /welcome/ascii ───────────────────────────────────────────────────────────
@@ -729,6 +949,58 @@ class TestRunRoute:
         # Should not crash — Flask returns 400 or 415 for bad content type
         assert resp.status_code in (400, 415, 500)
 
+    def test_client_side_run_persists_terminal_native_builtin(self):
+        client = get_client()
+        session = "client-run-" + uuid.uuid4().hex[:8]
+        try:
+            resp = client.post(
+                "/run/client",
+                headers={"X-Session-ID": session},
+                json={
+                    "command": "theme list",
+                    "exit_code": 0,
+                    "lines": [
+                        {"text": "Available themes:", "cls": "fake-section"},
+                        {"text": "Dark themes:", "cls": "fake-section"},
+                    ],
+                },
+            )
+            data = json.loads(resp.data)
+            assert resp.status_code == 200
+            assert data["ok"] is True
+            assert data["output_line_count"] == 2
+
+            history = json.loads(
+                client.get(
+                    "/history?type=runs&include_total=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
+            assert history["runs"][0]["command"] == "theme list"
+            assert history["total_count"] == 1
+
+            run_id = history["runs"][0]["id"]
+            detail = json.loads(client.get(f"/history/{run_id}?json&preview=1").data)
+            assert detail["command"] == "theme list"
+            assert detail["output"] == ["Available themes:", "Dark themes:"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_client_side_run_rejects_non_client_builtin_root(self):
+        client = get_client()
+        resp = client.post(
+            "/run/client",
+            json={
+                "command": "ping darklab.sh",
+                "exit_code": 0,
+                "lines": [],
+            },
+        )
+        assert resp.status_code == 403
+
 
 # ── /history ──────────────────────────────────────────────────────────────────
 
@@ -743,8 +1015,12 @@ class TestHistoryRoute:
         data = json.loads(
             client.get("/history", headers={"X-Session-ID": "test-session"}).data
         )
+        assert "items" in data
+        assert isinstance(data["items"], list)
         assert "runs" in data
         assert isinstance(data["runs"], list)
+        assert "roots" in data
+        assert isinstance(data["roots"], list)
 
     def test_delete_all_returns_ok(self):
         client = get_client()
@@ -802,6 +1078,290 @@ class TestHistoryRoute:
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
             conn.commit()
             conn.close()
+
+    def test_history_commands_returns_distinct_recent_commands_without_exit_filter(self):
+        client = get_client()
+        session = "commands-distinct-" + uuid.uuid4().hex[:8]
+        run_ids = [f"{session}-{i}" for i in range(5)]
+        rows = [
+            (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", 0),
+            (run_ids[1], session, "curl -I https://darklab.sh", "2026-01-01T00:00:02", 7),
+            (run_ids[2], session, "dig darklab.sh A", "2026-01-01T00:00:03", 1),
+            (run_ids[3], session, "ping darklab.sh", "2026-01-01T00:00:04", 0),
+            (run_ids[4], session, "nmap -sV darklab.sh", "2026-01-01T00:00:05", 2),
+        ]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(run_id, sid, cmd, started, started, code, "[]") for run_id, sid, cmd, started, code in rows],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/commands?limit=3",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["commands"] == [
+                "nmap -sV darklab.sh",
+                "ping darklab.sh",
+                "dig darklab.sh A",
+            ]
+            assert data["limit"] == 3
+            assert len(data["runs"]) == 3
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_history_reports_totals_and_keeps_roots_complete_across_pages(self):
+        client = get_client()
+        session = "pagination-test-session"
+        run_ids = ["page-run-1", "page-run-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "nmap -sV darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?page=2&page_size=1&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["page"] == 2
+            assert data["page_size"] == 1
+            assert data["total_count"] == 2
+            assert data["page_count"] == 2
+            assert data["has_prev"] is True
+            assert data["has_next"] is False
+            assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+            assert data["roots"] == ["nmap", "dig"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_applies_starred_only_server_side(self):
+        client = get_client()
+        session = "starred-filter-session"
+        run_ids = ["star-run-1", "star-run-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "ping darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "dig darklab.sh A", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                (session, "dig darklab.sh A"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?starred_only=1&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["total_count"] == 1
+            assert data["page_count"] == 1
+            assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+            assert data["roots"] == ["dig"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.execute(
+                "DELETE FROM starred_commands WHERE session_id = ? AND command IN (?, ?)",
+                (session, "ping darklab.sh", "dig darklab.sh A"),
+            )
+            conn.commit()
+            conn.close()
+
+    def test_history_can_return_snapshot_items(self):
+        client = get_client()
+        session = "snapshot-history-session"
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, ?, ?)",
+                ("snap-history-1", session, "baseline scan", "2026-01-01T00:00:03", "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?type=snapshots&include_total=1",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert data["total_count"] == 1
+            assert data["runs"] == []
+            assert data["items"][0]["type"] == "snapshot"
+            assert data["items"][0]["label"] == "baseline scan"
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM snapshots WHERE id = ?", ("snap-history-1",))
+            conn.commit()
+            conn.close()
+
+    def test_history_search_filters_by_command_text(self):
+        client = get_client()
+        session = "history-search-session"
+        run_ids = ["search-run-1", "search-run-2"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "ping darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]"),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get("/history?q=dig", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["dig darklab.sh A"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_filters_by_command_root(self):
+        client = get_client()
+        session = "history-root-session"
+        run_ids = ["root-run-1", "root-run-2", "root-run-3"]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "nmap -sV darklab.sh", "2026-01-01T00:00:01", "2026-01-01T00:00:02", 0, "[]", 1),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[1], session, "nmap -Pn darklab.sh", "2026-01-01T00:00:03", "2026-01-01T00:00:04", 0, "[]", 0),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output, full_output_available) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[2], session, "dig darklab.sh A", "2026-01-01T00:00:05", "2026-01-01T00:00:06", 0, "[]", 1),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get("/history?command_root=nmap", headers={"X-Session-ID": session})
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["nmap -Pn darklab.sh", "nmap -sV darklab.sh"]
+            assert data["roots"] == ["nmap"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_filters_by_exit_code_and_recent_date_range(self):
+        client = get_client()
+        session = "history-date-session"
+        run_ids = ["date-run-1", "date-run-2", "date-run-3"]
+        recent = datetime.now().replace(microsecond=0)
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_ids[0], session, "curl recent ok", recent.isoformat(), (recent + timedelta(seconds=2)).isoformat(), 0, "[]"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[1],
+                    session,
+                    "curl recent fail",
+                    (recent - timedelta(hours=1)).isoformat(),
+                    (recent - timedelta(hours=1) + timedelta(seconds=2)).isoformat(),
+                    2,
+                    "[]",
+                ),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (
+                    run_ids[2],
+                    session,
+                    "curl old fail",
+                    (recent - timedelta(days=40)).isoformat(),
+                    (recent - timedelta(days=40) + timedelta(seconds=2)).isoformat(),
+                    2,
+                    "[]",
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history?exit_code=nonzero&date_range=24h",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+            assert [r["command"] for r in data["runs"]] == ["curl recent fail"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_active_history_returns_running_runs_for_this_session(self):
+        client = get_client()
+        session = f"session-{uuid.uuid4()}"
+        active_runs = [
+            {
+                "run_id": "run-1",
+                "command": "ping darklab.sh",
+                "started": "2026-01-01T00:00:00Z",
+            }
+        ]
+
+        with mock.patch("blueprints.history.active_runs_for_session", return_value=active_runs) as active_mock:
+            resp = client.get("/history/active", headers={"X-Session-ID": session})
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"runs": active_runs}
+        active_mock.assert_called_once_with(session)
 
 
 # ── /share ────────────────────────────────────────────────────────────────────
@@ -896,6 +1456,87 @@ class TestShareRoute:
         data = json.loads(resp.data)
         assert "id" in data
 
+    def test_post_applies_share_redaction_rules_before_persisting_snapshot(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [
+                {"pattern": "Bearer\\s+\\S+", "replacement": "Bearer [redacted]", "flags": ""},
+            ],
+        }):
+            create_resp = client.post(
+                "/share",
+                json={
+                    "label": "good content",
+                    "content": [
+                        {"text": "Authorization: Bearer abc123", "cls": "notice"},
+                    ],
+                },
+                headers={"X-Session-ID": "test-session"},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            fetch = client.get(f"/share/{share_id}?json")
+        data = json.loads(fetch.data)
+        assert data["content"][0]["text"] == "Authorization: Bearer [redacted]"
+
+    def test_post_applies_builtin_share_redaction_rules_before_persisting_snapshot(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [],
+        }):
+            create_resp = client.post(
+                "/share",
+                json={
+                    "label": "builtin redaction",
+                    "content": [
+                        {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
+                    ],
+                },
+                headers={"X-Session-ID": "test-session"},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            fetch = client.get(f"/share/{share_id}?json")
+        data = json.loads(fetch.data)
+        assert data["content"][0]["text"] == "contact [email-redacted] at [ip-redacted]"
+
+    def test_post_skips_share_redaction_when_apply_redaction_false(self):
+        client = get_client()
+        with mock.patch.dict("config.CFG", {
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [],
+        }):
+            create_resp = client.post(
+                "/share",
+                json={
+                    "label": "raw share",
+                    "apply_redaction": False,
+                    "content": [
+                        {"text": "contact admin@example.com at 203.0.113.10", "cls": "notice"},
+                    ],
+                },
+                headers={"X-Session-ID": "test-session"},
+            )
+            share_id = json.loads(create_resp.data)["id"]
+            fetch = client.get(f"/share/{share_id}?json")
+        data = json.loads(fetch.data)
+        assert data["content"][0]["text"] == "contact admin@example.com at 203.0.113.10"
+
+    def test_post_rejects_non_boolean_apply_redaction(self):
+        client = get_client()
+        resp = client.post(
+            "/share",
+            json={
+                "label": "bad share",
+                "apply_redaction": "yes",
+                "content": [{"text": "line 1", "cls": ""}],
+            },
+            headers={"X-Session-ID": "test-session"},
+        )
+        assert resp.status_code == 400
+        data = json.loads(resp.data)
+        assert data["error"] == "apply_redaction must be a boolean"
+
     def test_post_rejects_non_object_json(self):
         client = get_client()
         resp = client.post(
@@ -910,6 +1551,24 @@ class TestShareRoute:
         client = get_client()
         resp = client.get("/share/nonexistent-share-id")
         assert resp.status_code == 404
+
+    def test_delete_share_removes_snapshot_for_current_session(self):
+        client = get_client()
+        create_resp = client.post(
+            "/share",
+            json={"label": "delete-me", "content": ["line"]},
+            headers={"X-Session-ID": "delete-share-session"},
+        )
+        share_id = json.loads(create_resp.data)["id"]
+
+        resp = client.delete(
+            f"/share/{share_id}",
+            headers={"X-Session-ID": "delete-share-session"},
+        )
+
+        assert resp.status_code == 200
+        assert json.loads(resp.data) == {"ok": True}
+        assert client.get(f"/share/{share_id}").status_code == 404
 
     def test_get_share_json_returns_content(self):
         client = get_client()
@@ -986,7 +1645,7 @@ class TestShareRoute:
 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "$ ping -c 4 darklab.sh" in body
+        assert "$ ping -c 4 [host-redacted]" in body
         assert "$ curl http://localhost:5001/config" not in body
 
     def test_get_share_html_includes_prompt_echo_renderer_for_snapshot_content(self):
@@ -1008,8 +1667,10 @@ class TestShareRoute:
 
         assert resp.status_code == 200
         body = resp.get_data(as_text=True)
-        assert "renderPromptEcho" in body
-        assert "prompt-prefix" in body
+        # renderPromptEcho is now in the external permalink.js module; the page
+        # loads it and bridges data via window.PermData.  Confirm both are present.
+        assert "permalink.js" in body
+        assert "prompt-echo" in body
 
     def test_get_share_html_content_type(self):
         client = get_client()
@@ -1109,13 +1770,15 @@ class TestAutocompleteRoute:
         data = json.loads(client.get("/autocomplete").data)
         assert "suggestions" in data
         assert isinstance(data["suggestions"], list)
+        assert "context" in data
+        assert isinstance(data["context"], dict)
 
-    def test_returns_configured_suggestions(self):
+    def test_returns_configured_context(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_autocomplete", return_value=["nmap -sV", "ping -c 4"]):
+        with mock.patch("blueprints.content.load_autocomplete_context", return_value={"nmap": {"flags": []}}):
             data = json.loads(client.get("/autocomplete").data)
-        assert "nmap -sV" in data["suggestions"]
-        assert "ping -c 4" in data["suggestions"]
+        assert data["suggestions"] == []
+        assert "nmap" in data["context"]
 
 
 # ── /history session isolation ────────────────────────────────────────────────

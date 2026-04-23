@@ -5,6 +5,15 @@ let _dragMoved = false;
 let _tabDragSuppressClickUntil = 0;
 let _touchDragState = null;
 let _tabSeq = 0;
+const _TOUCH_TAB_DRAG_THRESHOLD = 14;
+const _TOUCH_TAB_DRAG_HOLD_MS = 180;
+const _POINTER_TAB_DRAG_THRESHOLD = 6;
+const _RUNNING_LABEL_DELAY_MS = 500;
+
+function _syncTabDraggable(tab) {
+  if (!tab) return;
+  tab.setAttribute('draggable', 'false');
+}
 
 function _getTabEl(id) {
   return tabsBar ? tabsBar.querySelector(`.tab[data-id="${id}"]`) : null;
@@ -22,14 +31,39 @@ function _getTabLabelEl(id) {
   return _getTabEl(id)?.querySelector('.tab-label') || null;
 }
 
+function createDefaultTabLabel(index = null) {
+  const explicitIndex = index !== null && index !== undefined && index !== '';
+  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : tabs.length + 1;
+  return `shell ${Math.max(1, next)}`;
+}
+
+function _truncateTabLabel(label) {
+  const text = String(label || '');
+  return text.length > 28 ? text.slice(0, 26) + '…' : text;
+}
+
+function _tabDisplayLabel(tab) {
+  if (!tab) return '';
+  if (tab.st === 'running' && tab.runningLabel) return tab.runningLabel;
+  return tab.label || '';
+}
+
+function _renderTabLabel(id) {
+  const tab = getTab(id);
+  const lbl = _getTabLabelEl(id);
+  if (lbl && tab) lbl.textContent = _truncateTabLabel(_tabDisplayLabel(tab));
+}
+
+function _clearTabRunningLabelTimer(tab) {
+  if (!tab || !tab.runningLabelTimer) return;
+  clearTimeout(tab.runningLabelTimer);
+  tab.runningLabelTimer = null;
+}
+
 function _getTabOutputEl(id) {
   return _getTabPanelEl(id)?.querySelector('.output') || null;
 }
 
-function _blurActiveElement() {
-  const activeEl = typeof document !== 'undefined' ? document.activeElement : null;
-  if (activeEl && typeof activeEl.blur === 'function') activeEl.blur();
-}
 
 function _clearTabDropIndicators() {
   if (!tabsBar) return;
@@ -48,11 +82,6 @@ function _getNeighborTabIdAfterClose(idx, closingId) {
   return fallback ? fallback.id : null;
 }
 
-function refocusTabsTerminalInput() {
-  if (typeof focusAnyComposerInput !== 'function') return;
-  setTimeout(() => focusAnyComposerInput(), 0);
-}
-
 function updateTabScrollButtons() {
   const leftBtn = tabsScrollLeftBtn;
   const rightBtn = tabsScrollRightBtn;
@@ -67,13 +96,6 @@ function updateTabScrollButtons() {
   rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
 }
 
-function shouldScrollActiveTabIntoView() {
-  return !(typeof document !== 'undefined'
-    && document.body
-    && document.body.classList
-    && document.body.classList.contains('mobile-terminal-mode'));
-}
-
 function ensureActiveTabVisible(tabId) {
   const tabEl = _getTabEl(tabId);
   if (!tabEl || typeof tabEl.scrollIntoView !== 'function') return;
@@ -84,7 +106,7 @@ function scrollTabsBar(direction) {
   if (!tabsBar || typeof tabsBar.scrollBy !== 'function') return;
   tabsBar.scrollBy({ left: direction * 220, behavior: 'smooth' });
   setTimeout(updateTabScrollButtons, 180);
-  refocusTabsTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function setupTabScrollControls() {
@@ -106,6 +128,12 @@ function syncTabOrderFromDom() {
   if (!orderedIds.length) return;
   const byId = new Map(tabs.map(tab => [tab.id, tab]));
   setTabs(orderedIds.map(id => byId.get(id)).filter(Boolean));
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-order-changed', {
+      order: orderedIds.slice(),
+      activeTabId,
+    });
+  }
 }
 
 function _tabFromClientX(clientX, excludeId = null) {
@@ -118,10 +146,30 @@ function _tabFromClientX(clientX, excludeId = null) {
   }) || null;
 }
 
+function _edgeTabFromClientX(clientX, excludeId = null) {
+  if (!tabsBar) return null;
+  const nodes = [...tabsBar.querySelectorAll('.tab')].filter(node => node && node.dataset.id !== excludeId);
+  if (!nodes.length) return null;
+  const first = nodes[0];
+  const last = nodes[nodes.length - 1];
+  const firstRect = first.getBoundingClientRect();
+  const lastRect = last.getBoundingClientRect();
+  if (clientX < firstRect.left) return { target: first, after: false };
+  if (clientX > lastRect.right) return { target: last, after: true };
+  return null;
+}
+
 function _reorderDraggedTab(dragged, target, clientX) {
-  if (!dragged || !target || !tabsBar || dragged === target) return;
+  if (!dragged || !target || !tabsBar || dragged === target) return false;
   const rect = target.getBoundingClientRect();
   const after = clientX > rect.left + (rect.width / 2);
+  const noChange = after
+    ? target.nextSibling === dragged
+    : target === dragged.nextSibling;
+  if (noChange) {
+    _clearTabDropIndicators();
+    return false;
+  }
   _clearTabDropIndicators();
   target.classList.add(after ? 'tab-drop-after' : 'tab-drop-before');
   if (after) {
@@ -129,6 +177,7 @@ function _reorderDraggedTab(dragged, target, clientX) {
   } else if (target !== dragged.nextSibling) {
     tabsBar.insertBefore(dragged, target);
   }
+  return true;
 }
 
 function _touchDragAutoScroll(clientX) {
@@ -139,124 +188,180 @@ function _touchDragAutoScroll(clientX) {
   else if (clientX >= rect.right - edge) tabsBar.scrollBy({ left: 18, behavior: 'auto' });
 }
 
+function _getTrackedTouchPoint(e, touchId = null) {
+  const pools = [];
+  if (e && e.touches) pools.push(e.touches);
+  if (e && e.changedTouches) pools.push(e.changedTouches);
+  for (const pool of pools) {
+    for (const touch of pool) {
+      if (touchId === null || touch.identifier === touchId) return touch;
+    }
+  }
+  return null;
+}
+
 function _cleanupTouchDrag() {
   // Touch drag state spans document-level listeners, so cleanup has to fully
   // unwind everything even when the gesture is cancelled mid-drag.
   if (!_touchDragState) return;
+  if (
+    _touchDragState.tab
+    && typeof _touchDragState.pointerId === 'number'
+    && typeof _touchDragState.tab.releasePointerCapture === 'function'
+  ) {
+    try { _touchDragState.tab.releasePointerCapture(_touchDragState.pointerId); } catch (_) {}
+  }
   document.removeEventListener('pointermove', _onTouchDragMove);
   document.removeEventListener('pointerup', _onTouchDragEnd);
   document.removeEventListener('pointercancel', _onTouchDragEnd);
+  document.removeEventListener('touchmove', _onTouchDragMove);
+  document.removeEventListener('touchend', _onTouchDragEnd);
+  document.removeEventListener('touchcancel', _onTouchDragEnd);
   _clearTabDropIndicators();
   tabsBar?.classList.remove('tabs-bar-touch-sorting');
-  _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging');
+  tabsBar?.classList.remove('tabs-bar-desktop-sorting');
+  _touchDragState.tab.classList.remove('tab-dragging', 'tab-touch-dragging', 'tab-pointer-dragging');
+  if (_touchDragState.holdTimer) clearTimeout(_touchDragState.holdTimer);
   _touchDragState = null;
 }
 
 function _onTouchDragMove(e) {
-  if (!_touchDragState || e.pointerId !== _touchDragState.pointerId) return;
-  const dx = e.clientX - _touchDragState.startX;
-  const dy = e.clientY - _touchDragState.startY;
-  if (!_touchDragState.active) {
-    if (Math.abs(dx) < 8 && Math.abs(dy) < 8) return;
-    _touchDragState.active = true;
-    tabsBar?.classList.add('tabs-bar-touch-sorting');
-    _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
+  if (!_touchDragState) return;
+  let clientX;
+  let clientY;
+  if (_touchDragState.source === 'touch') {
+    const point = _getTrackedTouchPoint(e, _touchDragState.touchId);
+    if (!point) return;
+    clientX = point.clientX;
+    clientY = point.clientY;
+  } else {
+    if (e.pointerId !== _touchDragState.pointerId) return;
+    clientX = e.clientX;
+    clientY = e.clientY;
   }
-  e.preventDefault();
+  const dx = clientX - _touchDragState.startX;
+  const dy = clientY - _touchDragState.startY;
+  if (!_touchDragState.active) {
+    if (_touchDragState.source === 'touch') {
+      if (Math.abs(dx) >= _TOUCH_TAB_DRAG_THRESHOLD || Math.abs(dy) >= _TOUCH_TAB_DRAG_THRESHOLD) {
+        if (_touchDragState.holdTimer) {
+          clearTimeout(_touchDragState.holdTimer);
+          _touchDragState.holdTimer = null;
+        }
+        _cleanupTouchDrag();
+      }
+      return;
+    }
+    if (Math.abs(dx) < _POINTER_TAB_DRAG_THRESHOLD && Math.abs(dy) < _POINTER_TAB_DRAG_THRESHOLD) return;
+    _touchDragState.active = true;
+    if (typeof e.preventDefault === 'function') e.preventDefault();
+    if (typeof e.stopPropagation === 'function') e.stopPropagation();
+    tabsBar?.classList.add('tabs-bar-desktop-sorting');
+    _touchDragState.tab.classList.add('tab-dragging', 'tab-pointer-dragging');
+  }
+  if (typeof e.preventDefault === 'function') e.preventDefault();
+  if (typeof e.stopPropagation === 'function') e.stopPropagation();
   const dragged = _touchDragState.tab;
-  const target = _tabFromClientX(e.clientX, _touchDragState.id);
+  const target = _tabFromClientX(clientX, _touchDragState.id);
+  const edgeDrop = target ? null : _edgeTabFromClientX(clientX, _touchDragState.id);
   if (target) {
-    _reorderDraggedTab(dragged, target, e.clientX);
+    const changed = _reorderDraggedTab(dragged, target, clientX);
+    if (changed) _touchDragState.moved = true;
+  } else if (edgeDrop && edgeDrop.target !== dragged) {
+    const firstTab = tabsBar.querySelector('.tab');
+    const lastTab = tabsBar.querySelector('.tab:last-of-type');
+    const noChange = (!edgeDrop.after && firstTab === dragged) || (edgeDrop.after && lastTab === dragged);
+    if (noChange) {
+      _clearTabDropIndicators();
+      updateTabScrollButtons();
+      return;
+    }
+    _clearTabDropIndicators();
+    edgeDrop.target.classList.add(edgeDrop.after ? 'tab-drop-after' : 'tab-drop-before');
+    if (edgeDrop.after) {
+      tabsBar.appendChild(dragged);
+    } else {
+      tabsBar.insertBefore(dragged, tabsBar.querySelector('.tab'));
+    }
     _touchDragState.moved = true;
   } else {
     _clearTabDropIndicators();
   }
-  _touchDragAutoScroll(e.clientX);
+  _touchDragAutoScroll(clientX);
   updateTabScrollButtons();
 }
 
 function _onTouchDragEnd(e) {
-  if (!_touchDragState || e.pointerId !== _touchDragState.pointerId) return;
+  if (!_touchDragState) return;
+  if (_touchDragState.source === 'touch') {
+    if (!_getTrackedTouchPoint(e, _touchDragState.touchId) && e.type !== 'touchcancel') return;
+  } else if (e.pointerId !== _touchDragState.pointerId) {
+    return;
+  }
   const state = _touchDragState;
   const moved = state.active && state.moved;
   _cleanupTouchDrag();
+  _syncTabDraggable(state.tab);
   if (!moved) return;
   syncTabOrderFromDom();
   updateTabScrollButtons();
-  if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
-  _tabDragSuppressClickUntil = Date.now() + 220;
-  if (state.id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+  ensureActiveTabVisible(activeTabId);
+  _tabDragSuppressClickUntil = Date.now() + (state.source === 'touch' ? 220 : 140);
+  if (state.id === activeTabId) refocusComposerAfterAction();
 }
 
 function _startTouchTabDrag(tab, id, e) {
-  if (!e || e.pointerType !== 'touch') return;
+  if (!e) return;
+  const isTouchEvent = e.type === 'touchstart';
+  if (!isTouchEvent && e.pointerType === 'touch') return;
+  if (!isTouchEvent && e.pointerType !== 'mouse') return;
+  if (!isTouchEvent && typeof e.button === 'number' && e.button !== 0) return;
   if (e.target && e.target.closest && e.target.closest('.tab-close')) return;
+  _syncTabDraggable(tab);
   _cleanupTouchDrag();
+  const point = isTouchEvent ? _getTrackedTouchPoint(e) : e;
+  if (!point) return;
+  const pointerId = !isTouchEvent && typeof e.pointerId === 'number' ? e.pointerId : null;
+  if (pointerId !== null && typeof tab.setPointerCapture === 'function') {
+    try { tab.setPointerCapture(e.pointerId); } catch (_) {}
+  }
   _touchDragState = {
     id,
     tab,
-    pointerId: e.pointerId,
-    startX: e.clientX,
-    startY: e.clientY,
+    source: isTouchEvent ? 'touch' : 'pointer',
+    pointerId,
+    touchId: isTouchEvent && typeof point.identifier === 'number' ? point.identifier : null,
+    startX: point.clientX,
+    startY: point.clientY,
     active: false,
     moved: false,
+    holdTimer: null,
   };
-  document.addEventListener('pointermove', _onTouchDragMove, { passive: false });
-  document.addEventListener('pointerup', _onTouchDragEnd);
-  document.addEventListener('pointercancel', _onTouchDragEnd);
+  if (isTouchEvent) {
+    _touchDragState.holdTimer = setTimeout(() => {
+      if (!_touchDragState || _touchDragState.id !== id || _touchDragState.tab !== tab) return;
+      _touchDragState.holdTimer = null;
+      _touchDragState.active = true;
+      tabsBar?.classList.add('tabs-bar-touch-sorting');
+      _touchDragState.tab.classList.add('tab-dragging', 'tab-touch-dragging');
+    }, _TOUCH_TAB_DRAG_HOLD_MS);
+  }
+  if (isTouchEvent) {
+    document.addEventListener('touchmove', _onTouchDragMove, { passive: false });
+    document.addEventListener('touchend', _onTouchDragEnd);
+    document.addEventListener('touchcancel', _onTouchDragEnd);
+  } else {
+    document.addEventListener('pointermove', _onTouchDragMove, { passive: false });
+    document.addEventListener('pointerup', _onTouchDragEnd);
+    document.addEventListener('pointercancel', _onTouchDragEnd);
+  }
 }
 
 function bindTabDragReorder(tab, id) {
   if (!tab) return;
-  tab.setAttribute('draggable', 'true');
+  _syncTabDraggable(tab);
   tab.addEventListener('pointerdown', e => _startTouchTabDrag(tab, id, e));
-
-  tab.addEventListener('dragstart', e => {
-    _draggedTabId = id;
-    _dragMoved = false;
-    tab.classList.add('tab-dragging');
-    if (e.dataTransfer) {
-      e.dataTransfer.effectAllowed = 'move';
-      e.dataTransfer.setData('text/plain', id);
-    }
-  });
-
-  tab.addEventListener('dragover', e => {
-    if (!_draggedTabId || _draggedTabId === id || !tabsBar) return;
-    const dragged = tabsBar.querySelector(`.tab[data-id="${_draggedTabId}"]`);
-    if (!dragged) return;
-    e.preventDefault();
-
-    const rect = tab.getBoundingClientRect();
-    const after = e.clientX > rect.left + (rect.width / 2);
-    if (after) {
-      if (tab.nextSibling !== dragged) tabsBar.insertBefore(dragged, tab.nextSibling);
-    } else if (tab !== dragged.nextSibling) {
-      tabsBar.insertBefore(dragged, tab);
-    }
-    _dragMoved = true;
-  });
-
-  tab.addEventListener('drop', e => {
-    if (!_draggedTabId) return;
-    e.preventDefault();
-    syncTabOrderFromDom();
-    updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
-  });
-
-  tab.addEventListener('dragend', () => {
-    tab.classList.remove('tab-dragging');
-    if (_dragMoved) {
-      syncTabOrderFromDom();
-      updateTabScrollButtons();
-      if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(activeTabId);
-      _tabDragSuppressClickUntil = Date.now() + 160;
-      if (id === activeTabId && typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
-    }
-    _draggedTabId = null;
-    _dragMoved = false;
-  });
+  tab.addEventListener('touchstart', e => _startTouchTabDrag(tab, id, e), { passive: false });
 }
 
 function unmountShellPrompt() {
@@ -323,6 +428,14 @@ function _createTabHeader(id, label) {
   tab.className = 'tab';
   tab.dataset.id = id;
 
+  // Mobile tab chrome shows a drag-grip glyph on the left; desktop hides it
+  // via CSS. Rendered unconditionally so a viewport switch doesn't require
+  // re-minting tab nodes.
+  const grip = document.createElement('span');
+  grip.className = 'tab-grip';
+  grip.setAttribute('aria-hidden', 'true');
+  tab.appendChild(grip);
+
   const status = document.createElement('span');
   status.className = 'tab-status idle';
   tab.appendChild(status);
@@ -336,6 +449,7 @@ function _createTabHeader(id, label) {
   closeBtn.className = 'tab-close';
   closeBtn.type = 'button';
   closeBtn.setAttribute('aria-label', 'Close tab');
+  closeBtn.title = 'Close tab (Option+W / Alt+W when active)';
   closeBtn.textContent = '✕';
   tab.appendChild(closeBtn);
 
@@ -345,7 +459,8 @@ function _createTabHeader(id, label) {
 function _createTabActionButton(id, action, label, { hidden = false, danger = false } = {}) {
   const btn = document.createElement('button');
   btn.type = 'button';
-  btn.className = 'term-action-btn' + (action === 'kill' ? ' tab-kill-btn' : '') + (danger ? ' tab-kill-btn-danger' : '');
+  const base = danger ? 'btn btn-destructive btn-compact' : 'btn btn-secondary btn-compact';
+  btn.className = base + (action === 'kill' ? ' tab-kill-btn' : '');
   btn.dataset.action = action;
   btn.dataset.tab = id;
   if (hidden) btn.hidden = true;
@@ -399,7 +514,7 @@ function _createTabPanel(id) {
   terminalBody.className = 'terminal-body';
 
   const output = document.createElement('div');
-  output.className = 'output';
+  output.className = 'output nice-scroll';
   output.id = `output-${id}`;
   terminalBody.appendChild(output);
 
@@ -426,23 +541,41 @@ function _createTabPanel(id) {
 
   const terminalActions = document.createElement('div');
   terminalActions.className = 'terminal-actions';
-  const wordmark = document.createElement('a');
-  wordmark.className = 'terminal-wordmark';
-  wordmark.href = APP_CONFIG.project_readme || '#';
-  wordmark.target = '_blank';
-  wordmark.rel = 'noopener noreferrer';
-  const wmVersion = APP_CONFIG.version ? ` v${APP_CONFIG.version}` : '';
-  wordmark.textContent = `${APP_CONFIG.app_name || 'darklab shell'}${wmVersion}`;
-  terminalActions.appendChild(wordmark);
   terminalActions.appendChild(_createTabActionButton(id, 'kill', '■ Kill', { hidden: true, danger: true }));
-  terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'permalink'));
+  terminalActions.appendChild(_createTabActionButton(id, 'permalink', 'share snapshot'));
   terminalActions.appendChild(_createTabActionButton(id, 'copy', 'copy'));
-  terminalActions.appendChild(_createTabActionButton(id, 'save', 'save txt'));
-  terminalActions.appendChild(_createTabActionButton(id, 'html', 'save html'));
+  const saveWrap = document.createElement('div');
+  saveWrap.className = 'save-menu-wrap';
+  const saveBtn = document.createElement('button');
+  saveBtn.type = 'button';
+  saveBtn.className = 'btn btn-secondary btn-compact';
+  saveBtn.dataset.action = 'save-menu';
+  saveBtn.dataset.tab = id;
+  saveBtn.textContent = 'save';
+  const saveMenu = document.createElement('div');
+  saveMenu.className = 'save-menu';
+  [['save-txt', 'Plain text (.txt)'], ['save-html', 'Styled HTML (.html)'], ['save-pdf', 'PDF document (.pdf)']].forEach(([action, label]) => {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.dataset.action = action;
+    item.dataset.tab = id;
+    item.textContent = label;
+    saveMenu.appendChild(item);
+  });
+  saveWrap.appendChild(saveBtn);
+  saveWrap.appendChild(saveMenu);
+  terminalActions.appendChild(saveWrap);
   terminalActions.appendChild(_createTabActionButton(id, 'clear', 'clear'));
   terminalBody.appendChild(terminalActions);
 
   panel.appendChild(terminalBody);
+  if (typeof bindOutsideClickClose === 'function') {
+    bindOutsideClickClose(saveWrap, {
+      triggers: saveBtn,
+      isOpen: () => saveWrap.classList.contains('open'),
+      onClose: () => saveWrap.classList.remove('open'),
+    });
+  }
   return { panel, output, terminalBody };
 }
 
@@ -454,16 +587,23 @@ function createTab(label) {
     return null;
   }
   const id = 'tab-' + (++_tabSeq);
+  const stableLabel = String(label || createDefaultTabLabel());
 
-  const { tab, labelEl } = _createTabHeader(id, label);
+  const { tab, labelEl } = _createTabHeader(id, stableLabel);
   tab.addEventListener('click', e => {
     if (Date.now() < _tabDragSuppressClickUntil) return;
     if (e.target.classList.contains('tab-close')) {
       closeTab(id);
-      _blurActiveElement();
+      blurActiveElement();
       return;
     }
     activateTab(id);
+  });
+
+  tab.addEventListener('dblclick', e => {
+    if (e.target && e.target.closest && e.target.closest('.tab-close')) return;
+    e.stopPropagation();
+    startTabRename(id, labelEl);
   });
 
   // Double-click tab label to rename
@@ -491,41 +631,55 @@ function createTab(label) {
   }
   terminalBody?.addEventListener('click', e => {
     if (id !== activeTabId) return;
-    if (e.target.closest('.term-action-btn')) return;
+    if (e.target.closest('.btn')) return;
     if (e.target.closest('.welcome-command-loadable')) return;
     // Don't steal focus while the user has text selected — they may be about to copy.
     if (typeof window !== 'undefined' && window.getSelection && window.getSelection().toString().length > 0) return;
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+    refocusComposerAfterAction();
   });
   panel.querySelectorAll('[data-action]').forEach(btn => {
-    btn.addEventListener('click', () => {
-      const action = btn.dataset.action;
-      if (typeof useMobileTerminalViewportMode === 'function'
-        && useMobileTerminalViewportMode()
-        && typeof blurVisibleComposerInputIfMobile === 'function') {
-        blurVisibleComposerInputIfMobile();
-      }
-      if (action === 'kill')      confirmKill(id);
-      if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
-      if (action === 'copy')      copyTab(id);
-      if (action === 'save')      saveTab(id);
-      if (action === 'html')      exportTabHtml(id);
-      if (action === 'permalink') permalinkTab(id);
-      if (typeof btn.blur === 'function') {
-        setTimeout(() => {
-          if (typeof btn.blur === 'function') btn.blur();
-        }, 0);
-      }
+    const action = btn.dataset.action;
+    // save-menu is a disclosure trigger: keep the dropdown-open affordance by
+    // suppressing the auto-refocus so the user's attention stays on the menu
+    // they just opened.
+    const isDisclosure = action === 'save-menu';
+    bindPressable(btn, {
+      refocusComposer: !isDisclosure,
+      onActivate: () => {
+        if (typeof useMobileTerminalViewportMode === 'function'
+          && useMobileTerminalViewportMode()
+          && typeof blurVisibleComposerInputIfMobile === 'function') {
+          blurVisibleComposerInputIfMobile();
+        }
+        if (action === 'kill')      confirmKill(id);
+        if (action === 'clear')     { cancelWelcome(id); clearTab(id, { preserveRunState: true }); }
+        if (action === 'copy')      copyTab(id);
+        if (action === 'permalink') permalinkTab(id);
+        if (action === 'save-menu') {
+          btn.closest('.save-menu-wrap').classList.toggle('open');
+          return;
+        }
+        if (action === 'save-txt' || action === 'save-html' || action === 'save-pdf') {
+          const wrap = btn.closest('.save-menu-wrap');
+          if (wrap) wrap.classList.remove('open');
+        }
+        if (action === 'save-txt')  saveTab(id);
+        if (action === 'save-html') exportTabHtml(id);
+        if (action === 'save-pdf')  void exportTabPdf(id);
+      },
     });
   });
   tabPanels.appendChild(panel);
 
   tabs.push({
     id,
-    label,
+    label: stableLabel,
+    runningLabel: '',
+    runningLabelTimer: null,
     command: '',
     runId: null,
     historyRunId: null,
+    reconnectedRun: false,
     runStart: null,
     currentRunStartIndex: null,
     exitCode: null,
@@ -547,6 +701,10 @@ function createTab(label) {
   activateTab(id);
   updateNewTabBtn();
   updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-created', { id, label: stableLabel, activeTabId });
+  }
   return id;
 }
 
@@ -559,7 +717,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   }
   // Flush the current composer value into the leaving tab's draftInput before switching.
   const prevId = activeTabId;
-  if (prevId && prevId !== id) {
+  if (!_tabSessionRestoreInProgress && prevId && prevId !== id) {
     const prevTab = getTab(prevId);
     if (prevTab && prevTab.st === 'running') {
       prevTab.draftInput = '';
@@ -573,7 +731,7 @@ function activateTab(id, { focusComposer = true } = {}) {
   mountShellPrompt(id);
   const t = getTab(id);
   setStatus(t ? (t.st || 'idle') : 'idle');
-  if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+  ensureActiveTabVisible(id);
   updateTabScrollButtons();
   clearSearch();
   // Hide the autocomplete dropdown and clear the filtered list so stale
@@ -585,9 +743,14 @@ function activateTab(id, { focusComposer = true } = {}) {
     setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   }
   resetCmdHistoryNav();
-  if (focusComposer && typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  if (typeof syncActiveRunTimer === 'function') syncActiveRunTimer(id);
+  if (focusComposer) refocusComposerAfterAction({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   updateOutputFollowButton(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-activated', { id, prevId, activeTabId });
+  }
 }
 
 function closeTab(id) {
@@ -612,16 +775,24 @@ function closeTab(id) {
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
     updateNewTabBtn();
     updateTabScrollButtons();
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:tab-closing-deferred', { id, activeTabId });
+    }
     return;
   }
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
     clearTab(id);
-    setTabLabel(id, 'tab 1');
+    setTabLabel(id, createDefaultTabLabel(1));
     const t = tabs[0];
     t.runId = null;
     t.runStart = null;
     t.exitCode = null;
+    t.command = '';
+    _clearTabRunningLabelTimer(t);
+    t.runningLabel = '';
+    t.renamed = false;
     t.killed = false;
     t.pendingKill = false;
     if (typeof useMobileTerminalViewportMode === 'function'
@@ -629,7 +800,11 @@ function closeTab(id) {
       && typeof blurVisibleComposerInputIfMobile === 'function') {
       setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
     }
-    _blurActiveElement();
+    blurActiveElement();
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:tab-closed', { id, activeTabId, preservedSingleTab: true });
+    }
     return;
   }
   tabs.splice(idx, 1);
@@ -655,26 +830,64 @@ function closeTab(id) {
   }
   updateNewTabBtn();
   updateTabScrollButtons();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-closed', { id, activeTabId });
+  }
 }
 
 function setTabStatus(id, st) {
   const dot = _getTabStatusEl(id);
   if (dot) dot.className = `tab-status ${st}`;
   const t = getTab(id);
-  if (t) t.st = st;
+  if (t) {
+    t.st = st;
+    if (st !== 'running') {
+      _clearTabRunningLabelTimer(t);
+      t.runningLabel = '';
+    }
+  }
+  _renderTabLabel(id);
   if (id === activeTabId) {
     if (st === 'running') unmountShellPrompt();
     else mountShellPrompt(id);
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   }
   updateOutputFollowButton(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:tab-status-changed', { id, status: st, activeTabId });
+  }
 }
 
 function setTabLabel(id, label) {
-  const lbl = _getTabLabelEl(id);
-  if (lbl) lbl.textContent = label.length > 28 ? label.slice(0, 26) + '…' : label;
   const t = getTab(id);
-  if (t) t.label = label;
+  if (t) {
+    t.label = String(label || '');
+    _renderTabLabel(id);
+  }
+  if (id === activeTabId) ensureActiveTabVisible(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+}
+
+function setTabRunningCommand(id, command) {
+  const t = getTab(id);
+  if (!t) return;
+  const next = String(command || '').trim();
+  if (!next) return;
+  _clearTabRunningLabelTimer(t);
+  t.command = next;
+  t.runningLabel = '';
+  t.runningLabelTimer = setTimeout(() => {
+    t.runningLabelTimer = null;
+    if (t.st !== 'running' || t.command !== next) return;
+    t.runningLabel = next;
+    _renderTabLabel(id);
+    if (id === activeTabId) ensureActiveTabVisible(id);
+  }, _RUNNING_LABEL_DELAY_MS);
+  _renderTabLabel(id);
+  if (id === activeTabId) ensureActiveTabVisible(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function getOutput(id) {
@@ -703,6 +916,9 @@ function clearTab(id, { preserveRunState = false } = {}) {
       t.fullOutputAvailable = false;
       t.fullOutputLoaded = false;
       t.historyRunId = null;
+      t.reconnectedRun = false;
+      _clearTabRunningLabelTimer(t);
+      t.runningLabel = '';
     }
   }
   if (id === activeTabId && (!preserveRunState || !wasRunning)) {
@@ -729,6 +945,7 @@ function clearTab(id, { preserveRunState = false } = {}) {
     && typeof blurVisibleComposerInputIfMobile === 'function') {
     setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
   }
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
 
 function finalizeClosingTab(id) {
@@ -740,7 +957,11 @@ function finalizeClosingTab(id) {
   if (tabs.length === 1) {
     tab.closing = false;
     clearTab(id);
-    setTabLabel(id, 'tab 1');
+    setTabLabel(id, createDefaultTabLabel(1));
+    tab.command = '';
+    _clearTabRunningLabelTimer(tab);
+    tab.runningLabel = '';
+    tab.renamed = false;
     if (typeof document !== 'undefined'
       && document.body
       && document.body.classList
@@ -748,6 +969,7 @@ function finalizeClosingTab(id) {
       && typeof blurVisibleComposerInputIfMobile === 'function') {
       setTimeout(() => blurVisibleComposerInputIfMobile(), 0);
     }
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
     return true;
   }
 
@@ -761,6 +983,7 @@ function finalizeClosingTab(id) {
   updateNewTabBtn();
   updateTabScrollButtons();
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   return true;
 }
 
@@ -773,6 +996,22 @@ function _getExportableRawLines(tab) {
     const plain = line.text.replace(/\x1b\[[0-9;]*[A-Za-z]/g, '').trim();
     return plain.length > 0;
   });
+}
+
+function _getShareRedactionRules() {
+  return APP_CONFIG && Array.isArray(APP_CONFIG.share_redaction_rules)
+    ? APP_CONFIG.share_redaction_rules
+    : [];
+}
+
+function _shareRedactionEnabled() {
+  return !(APP_CONFIG && APP_CONFIG.share_redaction_enabled === false);
+}
+
+function _getRedactedLines(lines) {
+  return typeof redactLineEntries === 'function'
+    ? redactLineEntries(lines, _getShareRedactionRules())
+    : (Array.isArray(lines) ? lines : []);
 }
 
 // ── Copy to clipboard ──
@@ -816,9 +1055,86 @@ function saveTab(id) {
   if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
 }
 
+// Returns the gutter prefix for a raw line, respecting the current tsMode/lnMode
+// toggles so exports match what the user sees in the terminal.
+function _exportPrefix(line, zeroBasedIndex) {
+  const parts = [];
+  if (typeof lnMode !== 'undefined' && lnMode === 'on') parts.push(String(zeroBasedIndex + 1));
+  if (typeof tsMode !== 'undefined') {
+    if (tsMode === 'clock' && line.tsC) parts.push(line.tsC);
+    else if (tsMode === 'elapsed' && line.tsE) parts.push(line.tsE);
+  }
+  return parts.join(' ');
+}
+
+function _normalizeTabTranscriptLine(line) {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLine === 'function') {
+    return ExportHtmlUtils.normalizeExportTranscriptLine(line);
+  }
+  if (typeof line === 'string') {
+    return { text: line, cls: '', tsC: '', tsE: '' };
+  }
+  if (line && typeof line.text === 'string') {
+    return {
+      text: line.text,
+      cls: String(line.cls || ''),
+      tsC: String(line.tsC || ''),
+      tsE: String(line.tsE || ''),
+    };
+  }
+  return null;
+}
+
+function _normalizeTabTranscriptLines(lines, { stripTruncationNotices = false } = {}) {
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.normalizeExportTranscriptLines === 'function') {
+    return ExportHtmlUtils.normalizeExportTranscriptLines(lines, { stripTruncationNotices: stripTruncationNotices });
+  }
+  return (Array.isArray(lines) ? lines : [])
+    .map(_normalizeTabTranscriptLine)
+    .filter(line => {
+      if (!line) return false;
+      if (!stripTruncationNotices) return true;
+      return !/^\[(?:preview|tab output) truncated/i.test(String(line.text || ''));
+    });
+}
+
+function _buildTabExportModel(tab, { createdText = null } = {}) {
+  const normalizedCreatedText = String(createdText || new Date().toLocaleString());
+  if (window.ExportHtmlUtils && typeof ExportHtmlUtils.buildExportDocumentModel === 'function') {
+    return ExportHtmlUtils.buildExportDocumentModel({
+      appName: APP_CONFIG.app_name || 'darklab_shell',
+      title: String(tab && tab.label || ''),
+      label: tab && tab.label,
+      createdText: normalizedCreatedText,
+      runMeta: {
+        exitCode: tab ? tab.exitCode : null,
+        duration: null,
+        lines: `${_normalizeTabTranscriptLines(tab && tab.rawLines).length} lines`,
+        version: APP_CONFIG.version || null,
+      },
+      rawLines: tab && tab.rawLines,
+    });
+  }
+  const rawLines = _normalizeTabTranscriptLines(tab && tab.rawLines);
+  const appName = APP_CONFIG.app_name || 'darklab_shell';
+  return {
+    appName,
+    title: String(tab && tab.label || ''),
+    metaLine: ExportHtmlUtils.buildExportMetaLine({
+      label: tab && tab.label,
+      createdText: normalizedCreatedText,
+    }),
+    runMeta: {
+      exitCode: tab ? tab.exitCode : null,
+      duration: null,
+      lines: `${rawLines.length} lines`,
+      version: APP_CONFIG.version || null,
+    },
+    rawLines,
+  };
+}
+
 // ── HTML snapshot export ──
-// Generates a themed HTML file with terminal styling, ANSI colors rendered
-// as inline spans, and clock timestamps shown alongside each line.
 async function exportTabHtml(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) { showToast('No output to export'); if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true }); return; }
@@ -827,42 +1143,72 @@ async function exportTabHtml(id) {
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
     return;
   }
-
   try {
-    const appName = APP_CONFIG.app_name || 'darklab shell';
-    const exportedAt = new Date().toLocaleString();
-
-    const linesHtml = t.rawLines.map(({ text, cls, tsC }) => {
-      const tsSpan = tsC ? `<span class="ts">${ExportHtmlUtils.escapeExportHtml(tsC)}</span>` : '';
-      let content;
-      if (cls === 'prompt-echo') {
-        content = ExportHtmlUtils.renderExportPromptEcho(text);
-      } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
-        content = ExportHtmlUtils.escapeExportHtml(text);
-      } else {
-        content = ansi_up.ansi_to_html(text);
-      }
-      return `<span class="line${cls ? ' ' + cls : ''}">${tsSpan}${content}</span>`;
-    }).join('\n');
-
-    const fontFacesCss = await ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => '');
-    const html = ExportHtmlUtils.buildTerminalExportHtml({
-      appName,
-      title: t.label,
-      metaHtml: `exported ${ExportHtmlUtils.escapeExportHtml(exportedAt)}`,
-      linesHtml,
-      fontFacesCss,
+    const exportModel = _buildTabExportModel(t);
+    const { linesHtml, prefixWidth } = ExportHtmlUtils.buildExportLinesHtml(exportModel.rawLines, {
+      getPrefix: (line, i) => _exportPrefix(line, i),
+      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
     });
-
+    const [fontFacesCss, exportCss] = await Promise.all([
+      ExportHtmlUtils.fetchVendorFontFacesCss().catch(() => ''),
+      ExportHtmlUtils.fetchTerminalExportCss().catch(() => ''),
+    ]);
+    const html = ExportHtmlUtils.buildTerminalExportHtml({
+      appName: exportModel.appName,
+      title: exportModel.title,
+      metaLine: exportModel.metaLine,
+      runMeta: exportModel.runMeta,
+      linesHtml,
+      prefixWidth,
+      fontFacesCss,
+      exportCss,
+    });
     const blob = new Blob([html], { type: 'text/html' });
     const a = document.createElement('a');
-    const fileTs = ExportHtmlUtils.exportTimestamp();
     a.href = URL.createObjectURL(blob);
-    a.download = `${appName}-${fileTs}.html`;
+    a.download = `${exportModel.appName}-${ExportHtmlUtils.exportTimestamp()}.html`;
     a.click();
     URL.revokeObjectURL(a.href);
   } catch {
     showToast('Failed to export html', 'error');
+  } finally {
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+  }
+}
+
+// ── PDF export ──
+// Delegates to ExportPdfUtils (export_pdf.js) which is the single source of
+// truth shared with permalink.html. This function handles only tab-specific
+// guards and data collection.
+
+async function exportTabPdf(id) {
+  const t = getTab(id);
+  if (!t || !t.rawLines.length) {
+    showToast('No output to export');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+    return;
+  }
+  if (!window.jspdf) {
+    showToast('PDF library not loaded', 'error');
+    if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
+    return;
+  }
+  try {
+    const { jsPDF } = window.jspdf;
+    const exportModel = _buildTabExportModel(t);
+    const doc = await ExportPdfUtils.buildTerminalExportPdf({
+      jsPDF,
+      appName: exportModel.appName,
+      metaLine: exportModel.metaLine,
+      runMeta: exportModel.runMeta,
+      rawLines: exportModel.rawLines,
+      getPrefix: (line, i) => _exportPrefix(line, i),
+      ansiToHtml: (text) => ansi_up.ansi_to_html(text),
+    });
+    const ts = new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+    doc.save(`${exportModel.appName}-${ts}.pdf`);
+  } catch {
+    showToast('Failed to export pdf', 'error');
   } finally {
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
   }
@@ -880,7 +1226,7 @@ function startTabRename(id, labelEl) {
   input.value = original;
   labelEl.textContent = '';
   labelEl.appendChild(input);
-  input.focus();
+  focusElement(input);
   input.select();
 
   let done = false;
@@ -892,7 +1238,7 @@ function startTabRename(id, labelEl) {
     setTabLabel(id, next);
     if (t) t.renamed = true;
     updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+    ensureActiveTabVisible(id);
   }
   function cancel() {
     if (done) return;
@@ -900,7 +1246,7 @@ function startTabRename(id, labelEl) {
     if (labelEl.contains(input)) labelEl.removeChild(input);
     setTabLabel(id, original);
     updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+    ensureActiveTabVisible(id);
   }
 
   input.addEventListener('keydown', e => {
@@ -913,29 +1259,12 @@ function startTabRename(id, labelEl) {
   input.addEventListener('input', () => {
     // Renaming can change tab width before commit, which affects scroll affordances.
     updateTabScrollButtons();
-    if (shouldScrollActiveTabIntoView()) ensureActiveTabVisible(id);
+    ensureActiveTabVisible(id);
   });
 }
 
-function _cloneShareLine(line) {
-  if (typeof line === 'string') {
-    return { text: line, cls: '', tsC: '', tsE: '' };
-  }
-  if (line && typeof line.text === 'string') {
-    return {
-      text: line.text,
-      cls: String(line.cls || ''),
-      tsC: String(line.tsC || ''),
-      tsE: String(line.tsE || ''),
-    };
-  }
-  return null;
-}
-
 function _shareLinesWithoutTruncationNotices(lines) {
-  return (Array.isArray(lines) ? lines : [])
-    .map(_cloneShareLine)
-    .filter(line => line && !/^\[(?:preview|tab output) truncated/i.test(String(line.text || '')));
+  return _normalizeTabTranscriptLines(lines, { stripTruncationNotices: true });
 }
 
 function _extractLatestFullRunShareContent(tab, fullRun) {
@@ -961,10 +1290,25 @@ function _extractLatestFullRunShareContent(tab, fullRun) {
   ];
 }
 
+function _shareSnapshotLabel(tab) {
+  if (!tab) return 'snapshot';
+  const customLabel = String(tab.label || '').trim();
+  const latestCommand = String(tab.command || '').trim();
+  if (tab.renamed && customLabel) return customLabel;
+  return latestCommand || customLabel || 'snapshot';
+}
+
 async function permalinkTab(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) {
     showToast('No output to share yet');
+    return;
+  }
+  const redactionMode = typeof confirmPermalinkRedactionChoice === 'function'
+    ? await confirmPermalinkRedactionChoice()
+    : (_shareRedactionEnabled() ? 'redacted' : 'raw');
+  if (redactionMode !== 'raw' && redactionMode !== 'redacted') {
+    refocusComposerAfterAction();
     return;
   }
   let shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
@@ -977,17 +1321,17 @@ async function permalinkTab(id) {
       shareContent = _shareLinesWithoutTruncationNotices(t.rawLines);
     }
   }
+  const applyRedaction = redactionMode === 'redacted';
+  if (applyRedaction) shareContent = _getRedactedLines(shareContent);
   apiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: t.label, content: shareContent })
+    body: JSON.stringify({ label: _shareSnapshotLabel(t), content: shareContent, apply_redaction: applyRedaction })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
-    copyTextToClipboard(url)
-      .then(() => showToast('Link copied to clipboard'))
-      .catch(() => showToast('Failed to copy link', 'error'));
+    shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
   }).catch(() => showToast('Failed to create permalink', 'error'))
     .finally(() => {
-      if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput();
+      refocusComposerAfterAction();
     });
 }

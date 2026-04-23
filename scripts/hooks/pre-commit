@@ -1,0 +1,92 @@
+#!/usr/bin/env bash
+# Pre-commit checks: flake8, bandit, pytest, pip-audit, eslint, npm audit,
+#                   shellcheck, hadolint, yamllint, jsonlint, markdownlint, vendor:check
+# Install once with: git config core.hooksPath scripts/hooks
+
+set -uo pipefail
+
+# Resolve the repo root (the directory containing scripts/hooks/)
+REPO_ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
+
+# Use the .venv Python if present, otherwise fall back to whatever is on PATH
+if [ -x "$REPO_ROOT/.venv/bin/python" ]; then
+    PYTHON="$REPO_ROOT/.venv/bin/python"
+else
+    PYTHON="python"
+fi
+
+PASS=0
+FAIL=0
+FAILURES=()
+
+run_check() {
+    local name="$1"
+    shift
+    printf "\n\033[1m[pre-commit]\033[0m %s ... " "$name"
+    if "$@"; then
+        printf "\033[32mPASS\033[0m\n"
+        PASS=$((PASS + 1))
+    else
+        printf "\033[31mFAIL\033[0m\n"
+        FAIL=$((FAIL + 1))
+        FAILURES+=("$name")
+    fi
+}
+
+run_check "flake8"    "$PYTHON" -m flake8 app/ tests/py/
+run_check "bandit"    "$PYTHON" -m bandit -r app/ -ll -q
+run_check "pytest"    "$PYTHON" -m pytest tests/py/ -q --tb=short
+run_check "pip-audit" "$PYTHON" -m pip_audit -r app/requirements.txt -r requirements-dev.txt
+
+# JS unit tests (Vitest) — run if npm is available and node_modules exist
+if command -v npm >/dev/null 2>&1 && [ -d "$REPO_ROOT/node_modules" ]; then
+    run_check "vitest" npm --prefix "$REPO_ROOT" run test:unit
+    run_check "vendor:check" npm --prefix "$REPO_ROOT" run vendor:check
+fi
+
+# ESLint — check all tracked JS files that exist on disk
+js_files=$(find "$REPO_ROOT" -name '*.js' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
+if [ -n "$js_files" ]; then
+    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
+    run_check "eslint" npx --prefix "$REPO_ROOT" eslint \
+        --config "$REPO_ROOT/config/eslint.config.js" \
+        $js_files
+fi
+
+# npm audit — JS dependency CVEs (fail on high/critical only)
+run_check "npm audit" npm --prefix "$REPO_ROOT" run audit:js
+
+# shellcheck — shell script static analysis (skips non-shell .sh files)
+shell_scripts=$(find "$REPO_ROOT" -name '*.sh' -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f | while read -r f; do
+    head -1 "$f" | grep -qE '#!/.*(bash|sh)' && printf '%s ' "$f"
+done)
+if [ -n "$shell_scripts" ]; then
+    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
+    run_check "shellcheck" shellcheck $shell_scripts
+fi
+
+# hadolint — Dockerfile linting
+if [ -f "$REPO_ROOT/Dockerfile" ]; then
+    run_check "hadolint" hadolint --config "$REPO_ROOT/config/hadolint.yaml" "$REPO_ROOT/Dockerfile"
+fi
+
+# yamllint — YAML syntax and style
+yaml_files=$(find "$REPO_ROOT" \( -name '*.yml' -o -name '*.yaml' \) -not -path "$REPO_ROOT/.git/*" -not -path "$REPO_ROOT/node_modules/*" -type f -print)
+if [ -n "$yaml_files" ]; then
+    # shellcheck disable=SC2086  # word-splitting intentional to pass list of files
+    run_check "yamllint" yamllint -c "$REPO_ROOT/config/yamllint.yml" $yaml_files
+fi
+
+# jsonlint — JSON syntax and style
+run_check "jsonlint" npm --prefix "$REPO_ROOT" run lint:json
+
+# markdownlint-cli2 — Markdown style and consistency
+run_check "markdownlint" npm --prefix "$REPO_ROOT" run lint:md
+
+printf "\n\033[1m[pre-commit]\033[0m %d passed" "$PASS"
+if [ "$FAIL" -gt 0 ]; then
+    printf ", \033[31m%d failed: %s\033[0m" "$FAIL" "${FAILURES[*]}"
+    printf "\n"
+    exit 1
+fi
+printf "\n"

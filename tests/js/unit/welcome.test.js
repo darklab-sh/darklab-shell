@@ -17,11 +17,12 @@ function loadWelcomeFns({
   appendLine = () => {},
   setTimeoutImpl = null,
   mobile = false,
+  welcomeIntroPreference = 'animated',
 } = {}) {
-  document.body.innerHTML = `<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>`
+  document.body.innerHTML = '<div id="out"></div><input id="cmd" /><div class="prompt-wrap"></div>'
   const out = document.getElementById('out')
   const cmdInput = document.getElementById('cmd')
-  const apiFetch = vi.fn(url => {
+  const apiFetch = vi.fn((url) => {
     if (url === '/welcome') {
       return Promise.resolve({ json: () => Promise.resolve(welcomeData) })
     }
@@ -39,59 +40,65 @@ function loadWelcomeFns({
     }
     if (url === '/welcome/hints-mobile') {
       if (failMobileHints) return Promise.reject(new Error('mobile hints down'))
-      return Promise.resolve({ json: () => Promise.resolve({ items: mobileHintItems ?? hintItems }) })
+      return Promise.resolve({
+        json: () => Promise.resolve({ items: mobileHintItems ?? hintItems }),
+      })
     }
     throw new Error(`Unexpected url: ${url}`)
   })
   const mountShellPrompt = vi.fn()
 
   return {
-    ...fromDomScripts([
-      'app/static/js/welcome.js',
-    ], {
-      document,
-      apiFetch,
-      activeTabId: 'tab-1',
-      _welcomeActive: false,
-      _welcomeDone: false,
-      _welcomeTabId: null,
-      _welcomeBanner: null,
-      _welcomeLiveLine: null,
-      _welcomeHintNode: null,
-      _welcomeStatusNodes: [],
-      _welcomePlan: null,
-      _welcomeNextBlockIndex: 0,
-      _welcomeSettleRequested: false,
-      _welcomeBootPending: true,
-      APP_CONFIG: {
-        motd: '',
-        welcome_char_ms: 0,
-        welcome_jitter_ms: 0,
-        welcome_post_cmd_ms: 0,
-        welcome_inter_block_ms: 0,
-        welcome_sample_count: 5,
-        welcome_hint_interval_ms: 0,
-        welcome_hint_rotations: 0,
-        welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
-        ...config,
+    ...fromDomScripts(
+      ['app/static/js/welcome.js'],
+      {
+        document,
+        apiFetch,
+        activeTabId: 'tab-1',
+        _welcomeActive: false,
+        _welcomeDone: false,
+        _welcomeTabId: null,
+        _welcomeBanner: null,
+        _welcomeLiveLine: null,
+        _welcomeHintNode: null,
+        _welcomeStatusNodes: [],
+        _welcomePlan: null,
+        _welcomeNextBlockIndex: 0,
+        _welcomeSettleRequested: false,
+        _welcomeBootPending: true,
+        APP_CONFIG: {
+          motd: '',
+          welcome_char_ms: 0,
+          welcome_jitter_ms: 0,
+          welcome_post_cmd_ms: 0,
+          welcome_inter_block_ms: 0,
+          welcome_sample_count: 5,
+          welcome_hint_interval_ms: 0,
+          welcome_hint_rotations: 0,
+          welcome_status_labels: ['CONFIG', 'RUNNER', 'HISTORY', 'LIMITS', 'AUTOCOMPLETE'],
+          ...config,
+        },
+        getOutput: () => out,
+        cmdInput,
+        appendLine,
+        mountShellPrompt,
+        unmountShellPrompt: vi.fn(),
+        renderMotd: (text) => String(text).replace(/\n/g, '<br>'),
+        logClientError: () => {},
+        useMobileTerminalViewportMode: () => mobile,
+        getWelcomeIntroPreference: () => welcomeIntroPreference,
+        requestAnimationFrame: (fn) => fn(),
+        Math: Object.create(Math, {
+          random: { value: () => 0 },
+        }),
+        setTimeout:
+          setTimeoutImpl ||
+          ((fn) => {
+            fn()
+            return 0
+          }),
       },
-      getOutput: () => out,
-      cmdInput,
-      appendLine,
-      mountShellPrompt,
-      unmountShellPrompt: vi.fn(),
-      renderMotd: (text) => String(text).replace(/\n/g, '<br>'),
-      logClientError: () => {},
-      useMobileTerminalViewportMode: () => mobile,
-      requestAnimationFrame: (fn) => fn(),
-      Math: Object.create(Math, {
-        random: { value: () => 0 },
-      }),
-      setTimeout: setTimeoutImpl || ((fn) => {
-        fn()
-        return 0
-      }),
-    }, `{
+      `{
       cancelWelcome,
       requestWelcomeSettle,
       runWelcome,
@@ -102,7 +109,8 @@ function loadWelcomeFns({
       _isWelcomeActive: () => _welcomeActive,
       _isWelcomeDone: () => _welcomeDone,
       _sampleWelcomeBlocks,
-    }`),
+    }`,
+    ),
     apiFetch,
     out,
     mountShellPrompt,
@@ -137,7 +145,7 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab_shell/)
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
     expect(out.querySelector('.welcome-command')?.textContent).toContain('anon@darklab:~$')
     expect(out.querySelectorAll('.welcome-command')[0]?.textContent).toContain('ping darklab.sh')
@@ -156,12 +164,14 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-operator-label')?.textContent).toContain('Message From The Operator')
+    expect(out.querySelector('.welcome-operator-label')?.textContent).toContain(
+      'Message From The Operator',
+    )
     expect(out.querySelector('.welcome-operator-body')?.innerHTML).toContain('Downtime tonight<br>')
     expect(out.querySelector('.welcome-operator-notice')).not.toBeNull()
   })
 
-  it('runWelcome falls back to darklab shell banner text when /welcome/ascii fails', async () => {
+  it('runWelcome falls back to darklab_shell banner text when /welcome/ascii fails', async () => {
     const { runWelcome, out } = loadWelcomeFns({
       welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one' }],
       failAscii: true,
@@ -169,7 +179,7 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toContain('darklab shell')
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toContain('darklab_shell')
   })
 
   it('runWelcome falls back to the static hint when /welcome/hints fails', async () => {
@@ -195,7 +205,7 @@ describe('welcome helpers', () => {
 
     await runWelcome()
 
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab_shell/)
     expect(out.querySelectorAll('.welcome-command')).toHaveLength(0)
     expect(out.querySelector('.welcome-hint')?.textContent).toContain('Use the history panel')
   })
@@ -224,6 +234,38 @@ describe('welcome helpers', () => {
     expect(staticScenario.out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
   })
 
+  it('runWelcome renders the settled intro immediately when animation is disabled', async () => {
+    const { runWelcome, out, mountShellPrompt } = loadWelcomeFns({
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
+      hintItems: ['Hint one'],
+      welcomeIntroPreference: 'disable_animation',
+    })
+
+    await runWelcome()
+
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab_shell/)
+    expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
+    expect(out.querySelector('.welcome-command')?.textContent).toContain('ping darklab.sh')
+    expect(out.querySelector('.welcome-hint')?.textContent).toContain('Hint one')
+    expect(mountShellPrompt).toHaveBeenCalledWith('tab-1')
+  })
+
+  it('runWelcome can remove the intro completely and mount the prompt immediately', async () => {
+    const { runWelcome, out, apiFetch, mountShellPrompt, _isWelcomeActive, _isWelcomeDone } =
+      loadWelcomeFns({
+        welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
+        welcomeIntroPreference: 'remove',
+      })
+
+    await runWelcome()
+
+    expect(apiFetch).not.toHaveBeenCalled()
+    expect(out.children).toHaveLength(0)
+    expect(mountShellPrompt).toHaveBeenCalledWith('tab-1')
+    expect(_isWelcomeActive()).toBe(false)
+    expect(_isWelcomeDone()).toBe(false)
+  })
+
   it('settleWelcome renders the remaining intro immediately', async () => {
     const { runWelcome, settleWelcome, out } = loadWelcomeFns({
       welcomeData: [
@@ -246,7 +288,7 @@ describe('welcome helpers', () => {
     await pending
 
     expect(out.querySelectorAll('.wlc-cursor')).toHaveLength(0)
-    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab shell/)
+    expect(out.querySelector('.welcome-ascii-art')?.textContent).toMatch(/ASCII ART|darklab_shell/)
     expect(out.querySelectorAll('.welcome-status-loaded')).toHaveLength(5)
     expect(out.querySelector('.welcome-hint')?.textContent).toBeTruthy()
   })
@@ -278,9 +320,7 @@ describe('welcome helpers', () => {
 
   it('requestWelcomeSettle ignores non-owner tabs', async () => {
     const { runWelcome, requestWelcomeSettle, out } = loadWelcomeFns({
-      welcomeData: [
-        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
-      ],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
       hintItems: ['Hint one'],
       config: {
         welcome_char_ms: 5,
@@ -335,9 +375,7 @@ describe('welcome helpers', () => {
   it('runWelcome uses welcome_post_status_pause_ms between the status phase and first prompt', async () => {
     const delays = []
     const { runWelcome } = loadWelcomeFns({
-      welcomeData: [
-        { cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true },
-      ],
+      welcomeData: [{ cmd: 'ping darklab.sh', out: 'line one', group: 'basics', featured: true }],
       hintItems: ['Hint one'],
       config: {
         welcome_char_ms: 0,
@@ -379,15 +417,18 @@ describe('welcome helpers', () => {
   it('_sampleWelcomeBlocks prefers a featured basics command first and avoids duplicates', () => {
     const { _sampleWelcomeBlocks } = loadWelcomeFns()
 
-    const sampled = _sampleWelcomeBlocks([
-      { cmd: 'dig darklab.sh A', group: 'dns', featured: false },
-      { cmd: 'ping darklab.sh', group: 'basics', featured: true },
-      { cmd: 'curl -I https://darklab.sh', group: 'web', featured: false },
-      { cmd: 'ping darklab.sh', group: 'basics', featured: true },
-    ], 3)
+    const sampled = _sampleWelcomeBlocks(
+      [
+        { cmd: 'dig darklab.sh A', group: 'dns', featured: false },
+        { cmd: 'ping darklab.sh', group: 'basics', featured: true },
+        { cmd: 'curl -I https://darklab.sh', group: 'web', featured: false },
+        { cmd: 'ping darklab.sh', group: 'basics', featured: true },
+      ],
+      3,
+    )
 
     expect(sampled[0].cmd).toBe('ping darklab.sh')
-    expect(sampled.map(item => item.cmd)).toEqual([
+    expect(sampled.map((item) => item.cmd)).toEqual([
       'ping darklab.sh',
       'dig darklab.sh A',
       'curl -I https://darklab.sh',

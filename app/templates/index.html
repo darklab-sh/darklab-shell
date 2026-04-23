@@ -11,6 +11,7 @@
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
+<script src="/vendor/jspdf.umd.min.js"></script>
 <script src="/static/js/export_html.js"></script>
 </head>
 <body data-theme="{{ current_theme.name }}">
@@ -27,28 +28,48 @@
 
 <header>
   <h1><span id="header-title">{{ app_name }}</span></h1>
-  <div class="header-btns" id="header-btns">
-    <button id="hist-btn" title="Run history">⧖ history</button>
-    <button id="options-btn" title="Display and preference options">≡ options</button>
-    <button id="theme-btn" title="Theme selector">◑ theme</button>
-    <button id="faq-btn">? FAQ</button>
-    <a id="diag-btn" href="/diag" title="Operator diagnostics" class="u-hidden" target="_blank" rel="noopener noreferrer">⊕ diag</a>
+  <div id="mobile-header-actions">
+    <button id="hamburger-btn" title="Open menu" aria-label="Menu">☰</button>
   </div>
-  <button id="hamburger-btn" title="Menu" aria-label="Menu">☰</button>
 </header>
 
 <div id="mobile-shell" aria-hidden="true">
   <div id="mobile-shell-chrome"></div>
   <div id="mobile-shell-transcript"></div>
+  <div id="mobile-recent-peek" class="recent-peek u-hidden" role="button" tabindex="0" aria-label="Show recent commands">
+    <span class="recent-peek-handle" aria-hidden="true"></span>
+    <span class="recent-peek-label">Recent</span>
+    <span class="recent-peek-count" id="mobile-recent-peek-count">0</span>
+    <span class="recent-peek-preview" id="mobile-recent-peek-preview"></span>
+  </div>
   <div id="mobile-shell-composer">
     <div id="mobile-composer-host" aria-hidden="true">
       <div id="mobile-composer">
         <div id="mobile-edit-bar" aria-label="Mobile edit controls">
-          <button type="button" data-mobile-edit="home" aria-label="Move to start">Home</button>
-          <button type="button" data-mobile-edit="left" aria-label="Move left">←</button>
-          <button type="button" data-mobile-edit="right" aria-label="Move right">→</button>
-          <button type="button" data-mobile-edit="end" aria-label="Move to end">End</button>
-          <button type="button" data-mobile-edit="delete-word" aria-label="Delete word">Del Word</button>
+          <button type="button" data-mobile-edit="home" data-edit-action="home" aria-label="Move to start">Home</button>
+          <button type="button" data-mobile-edit="word-left" data-edit-action="word-left" aria-label="Move left by word">Word ←</button>
+          <button type="button" data-mobile-edit="left" data-edit-action="left" aria-label="Move left">←</button>
+          <button type="button" data-mobile-edit="delete-word" data-edit-action="delete-word" aria-label="Delete word">Del Word</button>
+          <button type="button" data-mobile-edit="end" data-edit-action="end" aria-label="Move to end">End</button>
+          <button type="button" data-mobile-edit="word-right" data-edit-action="word-right" aria-label="Move right by word">Word →</button>
+          <button type="button" data-mobile-edit="right" data-edit-action="right" aria-label="Move right">→</button>
+          <button type="button" data-mobile-edit="delete-line" data-edit-action="delete-line" aria-label="Delete line">Del Line</button>
+        </div>
+        <div id="mobile-kb-helper" class="kb-helper u-hidden" aria-label="Edit helper" role="toolbar">
+          <button type="button" class="kb-key" data-kb-action="word-left" aria-label="Word left">⇤</button>
+          <button type="button" class="kb-key" data-kb-action="left" aria-label="Left">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M10 3 L5 8 L10 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="kb-key" data-kb-action="right" aria-label="Right">
+            <svg width="12" height="12" viewBox="0 0 16 16" fill="none" aria-hidden="true"><path d="M6 3 L11 8 L6 13" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+          </button>
+          <button type="button" class="kb-key" data-kb-action="word-right" aria-label="Word right">⇥</button>
+          <span class="kb-helper-sep" aria-hidden="true"></span>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="home" aria-label="Start of line">Home</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="end" aria-label="End of line">End</button>
+          <span class="kb-helper-sep" aria-hidden="true"></span>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="delete-word" aria-label="Delete word">⌫ word</button>
+          <button type="button" class="kb-key kb-key-text" data-kb-action="delete-line" aria-label="Delete line">⌫ line</button>
         </div>
         <div id="mobile-composer-row">
           <span class="mobile-prompt-label">$</span>
@@ -56,24 +77,164 @@
                  autocomplete="off" autocapitalize="none" autocorrect="off"
                  spellcheck="false" inputmode="text" enterkeyhint="go"
                  placeholder="Type a command" aria-label="Command">
-          <button id="mobile-run-btn" type="button">Run</button>
+          <button id="mobile-run-btn" type="button" title="Run command">Run</button>
+          <button id="mobile-kill-btn" type="button" title="Kill current run" aria-label="Kill current run">■ Kill</button>
         </div>
       </div>
     </div>
   </div>
   <div id="mobile-shell-overlays">
-    <div id="mobile-menu">
-      <button data-action="search">⌕ search</button>
-      <button data-action="history">⧖ history</button>
-      <button data-action="options">≡ options</button>
-      <button data-action="ln">line numbers: off</button>
-      <button data-action="ts">timestamps: off</button>
-      <button data-action="theme">◑ theme</button>
-      <button data-action="faq">? FAQ</button>
-      <button data-action="diag" class="u-hidden">⊕ diag</button>
-      <a class="mobile-menu-wordmark" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">
-        GitLab: {{ app_name }}{% if version %} v{{ version }}{% endif %}
-      </a>
+    <div id="mobile-recents-sheet-scrim" class="recents-sheet-scrim u-hidden" aria-hidden="true"></div>
+    <div id="mobile-recents-sheet" class="recents-sheet u-hidden" role="dialog" aria-label="History" aria-modal="true">
+      <div class="sheet-grab" role="button" tabindex="0" aria-label="Close recents"></div>
+      <div class="sheet-title">
+        <span class="sheet-title-label">History</span>
+        <span class="sheet-title-spacer"></span>
+        <button type="button" class="sheet-clear-btn" id="mobile-recents-clear" aria-label="Delete all history">delete all</button>
+      </div>
+      <div class="sheet-filters">
+        <input id="mobile-recents-search" class="sheet-filter-row" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
+        <button type="button" class="sheet-filter-row sheet-filter-toggle" id="mobile-recents-filters-toggle" aria-expanded="false"><span class="sheet-filter-toggle-label">filters</span><span class="disclosure-chev" aria-hidden="true">▸</span></button>
+        <div class="sheet-filter-expanded u-hidden" id="mobile-recents-filters-expanded">
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="type">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">type:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="runs">runs</button>
+              <button type="button" role="option" data-dropdown-value="snapshots">snapshots</button>
+            </div>
+          </div>
+          <label class="sheet-filter-row sheet-filter-input">
+            <span class="sheet-filter-label">command:</span>
+            <input type="text" id="mobile-recents-filter-root" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
+          </label>
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="exit">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">exit:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="success">success (0)</button>
+              <button type="button" role="option" data-dropdown-value="failed">failed (non-zero)</button>
+            </div>
+          </div>
+          <div class="sheet-filter-dropdown-wrap" data-recents-dropdown="date">
+            <button type="button" class="sheet-filter-row sheet-filter-dropdown" aria-haspopup="listbox" aria-expanded="false">
+              <span class="sheet-filter-label">date:</span>
+              <span class="sheet-filter-value" data-dropdown-label>all</span>
+              <span class="sheet-filter-caret" aria-hidden="true">▾</span>
+            </button>
+            <div class="sheet-filter-menu" role="listbox">
+              <button type="button" role="option" data-dropdown-value="all">all</button>
+              <button type="button" role="option" data-dropdown-value="today">today</button>
+              <button type="button" role="option" data-dropdown-value="week">this week</button>
+            </div>
+          </div>
+          <button type="button" class="sheet-filter-row sheet-filter-check" data-recents-filter="starred" aria-pressed="false" aria-label="Show starred only">
+            <span class="sheet-filter-checkbox" aria-hidden="true"></span>
+            <span class="sheet-filter-label">starred only</span>
+          </button>
+          <button type="button" class="sheet-filter-row sheet-filter-clear" id="mobile-recents-filters-clear">clear filters</button>
+        </div>
+        <div class="filter-chips" id="mobile-recents-chips"></div>
+      </div>
+      <div id="mobile-recents-pagination" class="history-pagination u-hidden" aria-live="polite">
+        <div id="mobile-recents-pagination-summary" class="history-pagination-summary"></div>
+        <div id="mobile-recents-pagination-controls" class="history-pagination-controls"></div>
+      </div>
+      <div class="sheet-list nice-scroll" id="mobile-recents-list" aria-live="polite"></div>
+    </div>
+    <div id="mobile-menu-sheet-scrim" class="menu-sheet-scrim u-hidden" aria-hidden="true"></div>
+    <div id="mobile-menu-sheet" class="menu-sheet u-hidden" role="dialog" aria-label="Menu" aria-modal="true">
+      <div class="sheet-grab" aria-hidden="true"></div>
+      <div class="menu-title">
+        <span class="menu-title-label">Menu</span>
+      </div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="search">
+          <span class="menu-item-icon" aria-hidden="true">⌕</span>
+          <span class="menu-item-label">search</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="clear">
+          <span class="menu-item-icon" aria-hidden="true">⌫</span>
+          <span class="menu-item-label">clear</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="ln" aria-pressed="false">
+          <span class="menu-item-icon" aria-hidden="true">#</span>
+          <span class="menu-item-label">line numbers</span>
+          <span class="menu-item-toggle" id="mobile-menu-ln-state">off</span>
+        </button>
+        <button type="button" class="menu-item menu-item-expander" data-menu-action="ts-toggle" aria-expanded="false" aria-controls="mobile-menu-ts-submenu">
+          <span class="menu-item-icon" aria-hidden="true">◷</span>
+          <span class="menu-item-label">timestamps</span>
+          <span class="menu-item-toggle" id="mobile-menu-ts-state">off</span>
+          <span class="disclosure-chev" aria-hidden="true">▸</span>
+        </button>
+        <div class="menu-submenu u-hidden" id="mobile-menu-ts-submenu" role="group" aria-label="Timestamps mode">
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="off">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">off</span>
+          </button>
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="elapsed">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">elapsed</span>
+            <span class="menu-subitem-hint">+1.2s</span>
+          </button>
+          <button type="button" class="menu-subitem" data-menu-action="ts-set" data-ts-mode="clock">
+            <span class="menu-subitem-radio" aria-hidden="true"></span>
+            <span class="menu-subitem-label">clock</span>
+            <span class="menu-subitem-hint">14:03:27</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="menu-group-divider" aria-hidden="true"></div>
+
+      <div class="menu-group">
+        <button type="button" class="menu-item" data-menu-action="options">
+          <span class="menu-item-icon" aria-hidden="true">≡</span>
+          <span class="menu-item-label">options</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="history">
+          <span class="menu-item-icon" aria-hidden="true">⧖</span>
+          <span class="menu-item-label">history</span>
+          <span class="menu-item-hint" id="mobile-menu-history-count"></span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="workflows">
+          <span class="menu-item-icon" aria-hidden="true">⚙</span>
+          <span class="menu-item-label">workflows</span>
+          <span class="menu-item-hint" id="mobile-menu-workflows-count"></span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="theme">
+          <span class="menu-item-icon" aria-hidden="true">◐</span>
+          <span class="menu-item-label">theme</span>
+          <span class="menu-item-hint" id="mobile-menu-theme-hint"></span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-item" data-menu-action="faq">
+          <span class="menu-item-icon" aria-hidden="true">?</span>
+          <span class="menu-item-label">FAQ</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+        <button type="button" class="menu-item u-hidden" id="mobile-menu-diag" data-menu-action="diag">
+          <span class="menu-item-icon" aria-hidden="true">◇</span>
+          <span class="menu-item-label">diag</span>
+          <span class="menu-item-chev drill-chev" aria-hidden="true">›</span>
+        </button>
+      </div>
+
+      <a class="menu-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>
@@ -82,62 +243,207 @@
   <span class="history-label">Recent:</span>
 </div>
 
-<div class="terminal-wrap">
-  <div class="terminal-bar">
-    <span class="dot dot-r"></span>
-    <span class="dot dot-y"></span>
-    <span class="dot dot-g"></span>
-    <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
-    <div class="tabs-bar" id="tabs-bar">
-      <!-- tabs injected here -->
-      <button id="new-tab-btn" title="New tab" aria-label="New tab">+</button>
+<div class="shell-root">
+  <aside class="rail" id="rail" aria-label="Shell sidebar">
+    <div class="rail-header">
+      <div class="rail-wordmark">
+        <div class="rail-wordmark-title">{{ app_name }}</div>
+        <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
+      </div>
+      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar (Alt+\)">«</button>
     </div>
-    <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
-    <div class="terminal-bar-btns">
-      <button id="search-toggle-btn" title="Search output (Ctrl+F)">search</button>
-      <button id="ln-btn" title="Toggle line numbers">line numbers: off</button>
-      <button id="ts-btn" title="Toggle timestamp display">timestamps: off</button>
+
+    <div class="rail-split-area" id="rail-split-area">
+      <div class="rail-section rail-section-recent" id="rail-section-recent">
+        <button class="rail-section-header" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
+          <span class="rail-section-header-left">
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
+            <span class="rail-section-label">Recent</span>
+          </span>
+          <span class="rail-section-count" id="rail-recent-count">0</span>
+        </button>
+        <div class="rail-section-body nice-scroll" id="rail-recent-list" aria-live="polite"></div>
+      </div>
+
+      <div class="rail-splitter" id="rail-splitter" hidden></div>
+
+      <div class="rail-section rail-section-workflows" id="rail-section-workflows">
+        <button class="rail-section-header" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
+          <span class="rail-section-header-left">
+            <span class="disclosure-chev" aria-hidden="true">▸</span>
+            <span class="rail-section-label">Workflows</span>
+          </span>
+          <span class="rail-section-count" id="rail-workflows-count">0</span>
+        </button>
+        <div class="rail-section-body nice-scroll" id="rail-workflows-list"></div>
+      </div>
     </div>
-    <span id="status" class="status-pill idle">IDLE</span>
-    <span id="run-timer" class="run-timer u-hidden"></span>
-  </div>
-  <div class="search-bar u-hidden" id="search-bar">
-    <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" aria-label="Search output">
-    <div class="search-toggles">
-      <button id="search-case-btn" class="search-toggle" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
-      <button id="search-regex-btn" class="search-toggle" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
+
+    <nav class="rail-nav" id="rail-nav">
+      <button class="rail-nav-item" data-action="options" type="button" title="Display and preference options (Alt+,)"><span class="rail-nav-glyph">≡</span><span class="rail-nav-label">options</span></button>
+      <button class="rail-nav-item" data-action="history" type="button" title="Run history (Alt+H)"><span class="rail-nav-glyph">⧖</span><span class="rail-nav-label">history</span></button>
+      <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
+      <button class="rail-nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
+      <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
+      <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
+    </nav>
+
+    <div class="rail-resize-handle" id="rail-resize-handle" title="Drag to resize"></div>
+  </aside>
+
+  <main class="main-col">
+    <div class="terminal-bar tabbar">
+      <div class="tabbar-scroll tab-scroll">
+        <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
+        <div class="tabs-bar" id="tabs-bar">
+          <!-- tabs injected here -->
+          <button id="new-tab-btn" title="New tab (Option+T / Alt+T)" aria-label="New tab">+</button>
+        </div>
+        <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
+      </div>
+      <div class="tabbar-chrome">
+        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Alt+S)">⌕ search</button>
+        <button id="ln-btn" class="chrome-btn" title="Toggle line numbers">ln: off</button>
+        <button id="ts-btn" class="chrome-btn" title="Toggle timestamp display">ts: off</button>
+      </div>
     </div>
-    <span class="search-count" id="search-count"></span>
-    <div class="search-nav">
-      <button id="search-prev">↑</button>
-      <button id="search-next">↓</button>
+
+    <div class="terminal-wrap">
+      <div class="search-bar u-hidden" id="search-bar">
+        <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search output">
+        <div class="search-toggles">
+          <button id="search-case-btn" class="toggle-btn" type="button" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
+          <button id="search-regex-btn" class="toggle-btn" type="button" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
+        </div>
+        <span class="search-count" id="search-count"></span>
+        <div class="search-nav">
+          <button id="search-prev" type="button" aria-label="Previous match" title="Previous match (Shift+Enter)">↑</button>
+          <button id="search-next" type="button" aria-label="Next match" title="Next match (Enter)">↓</button>
+        </div>
+        <button id="search-close-btn" class="close-btn search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
+      </div>
+      <div id="tab-panels">
+        <!-- panels injected here -->
+      </div>
+      <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
+        <span class="prompt-prefix">{{ prompt_prefix }}</span>
+        <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
+          <span class="shell-prompt-text" id="shell-prompt-text"></span>
+          <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
+        </div>
+      </div>
+      <div id="ac-dropdown" class="ac-dropdown nice-scroll u-hidden"></div>
+      <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
+      <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
+        <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
+        <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
+      </div>
     </div>
-    <button id="search-close-btn" class="search-close-btn" type="button" aria-label="Close search" title="Close search">✕</button>
-  </div>
-  <div id="tab-panels">
-    <!-- panels injected here -->
-  </div>
-  <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
-    <span class="prompt-prefix">{{ prompt_prefix }}</span>
-    <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
-      <span class="shell-prompt-text" id="shell-prompt-text"></span>
-      <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
+
+    <div class="hud" id="hud" aria-label="Run HUD">
+      <div class="hud-pills" id="hud-pills">
+        <div class="hud-cell hud-status" id="hud-status-cell">
+          <span class="hud-label">status</span>
+          <span class="hud-status-value-row">
+            <span id="status" class="status-pill idle hud-value">IDLE</span>
+            <span id="run-timer" class="run-timer hud-value-amber"></span>
+          </span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">last exit</span>
+          <span id="hud-last-exit" class="hud-value hud-muted">—</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">tabs</span>
+          <span id="hud-tabs" class="hud-value hud-muted">0</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">transport</span>
+          <span class="hud-value hud-value-green">SSE</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">latency</span>
+          <span id="hud-latency" class="hud-value hud-muted">— ms</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">mode</span>
+          <span class="hud-value">ISOLATED</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">session</span>
+          <span id="hud-session" class="hud-value hud-muted" title="Active session identity">ANON</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">uptime</span>
+          <span id="hud-uptime" class="hud-value hud-muted">—</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">clock</span>
+          <span id="hud-clock" class="hud-value hud-muted">—</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">db</span>
+          <span id="hud-db" class="hud-value hud-value-green hud-value-dot">ONLINE</span>
+        </div>
+        <div class="hud-cell">
+          <span class="hud-label">redis</span>
+          <span id="hud-redis" class="hud-value hud-muted hud-value-dot">—</span>
+        </div>
+      </div>
+      <div class="hud-spacer"></div>
+      <div class="hud-actions" id="hud-actions">
+        <!-- Kill + share/copy/save/clear mounted here by shell_chrome.js in step 2 -->
+      </div>
     </div>
-  </div>
-  <div id="ac-dropdown" class="ac-dropdown u-hidden"></div>
-  <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
-  <div class="shell-input-row" aria-hidden="true">
-    <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
-    <button id="run-btn" hidden aria-hidden="true" tabindex="-1">Run</button>
-  </div>
+  </main>
 </div>
 
 <!-- Run History panel -->
-<div id="history-panel">
+<div id="history-panel" class="mobile-sheet-surface">
   <div class="history-panel-header">
-    <span class="history-panel-title">RUN HISTORY</span>
-    <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">clear all</button>
-    <button class="history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
+    <span class="history-panel-title">HISTORY</span>
+    <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">delete all</button>
+    <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
+  </div>
+  <div class="history-panel-body nice-scroll">
+    <div class="history-panel-filters">
+      <input id="history-search-input" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
+      <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle" type="button" aria-expanded="false">filters</button>
+      <div id="history-advanced-filters" class="history-advanced-filters">
+        <select id="history-type-filter" aria-label="Filter by history item type">
+          <option value="all">type: all</option>
+          <option value="runs">type: runs</option>
+          <option value="snapshots">type: snapshots</option>
+        </select>
+        <div class="history-root-autocomplete">
+          <input id="history-root-input" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
+          <div id="history-root-dropdown" class="ac-dropdown history-root-dropdown nice-scroll u-hidden"></div>
+        </div>
+        <select id="history-exit-filter" aria-label="Filter by exit code">
+          <option value="all">exit: all</option>
+          <option value="0">exit: 0</option>
+          <option value="nonzero">exit: non-zero</option>
+          <option value="incomplete">exit: incomplete</option>
+        </select>
+        <select id="history-date-filter" aria-label="Filter by recent date range">
+          <option value="all">date: all</option>
+          <option value="24h">date: 24h</option>
+          <option value="7d">date: 7d</option>
+          <option value="30d">date: 30d</option>
+        </select>
+        <label class="history-filter-toggle">
+          <input id="history-starred-toggle" type="checkbox">
+          <span>starred</span>
+        </label>
+        <button id="history-clear-filters" class="history-action-btn history-filter-clear-btn" type="button">clear filters</button>
+      </div>
+    </div>
+    <div id="history-active-filters" class="history-active-filters u-hidden" aria-live="polite"></div>
+    <div id="history-pagination" class="history-pagination u-hidden" aria-live="polite">
+      <div id="history-pagination-summary" class="history-pagination-summary"></div>
+      <div id="history-pagination-controls" class="history-pagination-controls"></div>
+    </div>
+    <div id="history-list"></div>
   </div>
   <div id="history-load-overlay" aria-hidden="true">
     <div class="history-load-modal">
@@ -145,7 +451,6 @@
       <div class="history-load-text">Restoring output into a new tab…</div>
     </div>
   </div>
-  <div id="history-list"></div>
 </div>
 
 <!-- Permalink toast -->
@@ -160,40 +465,49 @@
 </div>
 
 
-<!-- Kill confirmation modal -->
-<div id="kill-overlay" class="modal-overlay u-hidden">
-  <div id="kill-modal" class="modal-card modal-card-danger">
-    <div class="modal-copy">
-      Kill the running process in this tab?<br>
-      <span class="modal-copy-note">This sends SIGTERM to the entire process group.</span>
-    </div>
-    <div class="modal-actions">
-      <button id="kill-cancel" class="term-action-btn">Cancel</button>
-      <button id="kill-confirm" class="modal-primary modal-primary-danger" type="button">■ Kill</button>
-    </div>
+<!-- Shared confirmation-dialog host. Pre-minted once; showConfirm()
+     populates the card on each open and resolves a promise with the
+     chosen action id (or null for cancel). See ui_confirm.js. -->
+<div id="confirm-host" class="modal-overlay mobile-sheet-overlay u-hidden">
+  <div class="modal-card modal-card-compact mobile-sheet-surface" data-confirm-card>
+    <div class="modal-copy" data-confirm-body></div>
+    <div class="modal-confirm-content" data-confirm-content></div>
+    <div class="modal-actions modal-actions-wrap" data-confirm-actions></div>
   </div>
 </div>
 
-<!-- History delete confirmation modal -->
-<div id="hist-del-overlay" class="modal-overlay u-hidden">
-  <div id="hist-del-modal" class="modal-card modal-card-warning">
-    <div id="hist-del-msg" class="modal-copy"></div>
-    <div class="modal-actions modal-actions-wrap">
-      <button id="hist-del-cancel" class="term-action-btn">Cancel</button>
-      <button id="hist-del-nonfav" class="modal-secondary modal-secondary-warning" type="button">Delete Non-Favorites</button>
-      <button id="hist-del-confirm" class="modal-primary modal-primary-warning" type="button">Delete</button>
+<!-- Workflows Modal -->
+<div id="workflows-overlay" class="mobile-sheet-overlay">
+  <div id="workflows-modal" class="mobile-sheet-surface">
+    <div class="faq-header">
+      <span class="faq-title">WORKFLOWS</span>
+      <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
     </div>
+    <div class="workflows-body nice-scroll"></div>
   </div>
 </div>
 
 <!-- FAQ Modal -->
-<div id="faq-overlay">
-  <div id="faq-modal">
+<div id="faq-overlay" class="mobile-sheet-overlay">
+  <div id="faq-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">FAQ</span>
-      <button class="faq-close" aria-label="Close FAQ">✕</button>
+      <button type="button" class="close-btn faq-close" aria-label="Close FAQ">✕</button>
     </div>
-    <div class="faq-body"></div>
+    <div class="faq-body nice-scroll"></div>
+  </div>
+</div>
+
+<!-- Keyboard Shortcuts Overlay (triggered by `?`) -->
+<div id="shortcuts-overlay" class="mobile-sheet-overlay" aria-hidden="true">
+  <div id="shortcuts-modal" class="mobile-sheet-surface" role="dialog" aria-modal="true" aria-labelledby="shortcuts-title">
+    <div class="faq-header">
+      <span class="faq-title" id="shortcuts-title">KEYBOARD SHORTCUTS</span>
+      <button type="button" class="close-btn shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
+    </div>
+    <div class="faq-body shortcuts-body nice-scroll">
+      <div id="shortcuts-list" class="shortcuts-list" aria-live="polite"></div>
+    </div>
   </div>
 </div>
 
@@ -202,26 +516,26 @@
   <div id="theme-modal">
     <div class="faq-header">
       <span class="faq-title">THEME</span>
-      <button class="theme-close" aria-label="Close theme selector">✕</button>
+      <button type="button" class="close-btn theme-close" aria-label="Close theme selector">✕</button>
     </div>
-    <div class="faq-body theme-body">
+    <div class="faq-body theme-body nice-scroll">
       <div id="theme-select" class="theme-picker-grid" aria-label="Theme selector" tabindex="-1"></div>
     </div>
   </div>
 </div>
 
 <!-- Options Modal -->
-<div id="options-overlay">
-  <div id="options-modal">
+<div id="options-overlay" class="mobile-sheet-overlay">
+  <div id="options-modal" class="mobile-sheet-surface">
     <div class="faq-header">
       <span class="faq-title">OPTIONS</span>
-      <button class="options-close" aria-label="Close options">✕</button>
+      <button type="button" class="close-btn options-close" aria-label="Close options">✕</button>
     </div>
-    <div class="faq-body options-body">
+    <div class="faq-body options-body nice-scroll">
       <div class="faq-item">
         <div class="faq-q">Timestamps</div>
         <div class="faq-a">
-          <select id="options-ts-select" class="options-select" aria-label="Timestamp mode">
+          <select id="options-ts-select" class="form-select" aria-label="Timestamp mode">
             <option value="off">Off</option>
             <option value="elapsed">Elapsed</option>
             <option value="clock">Clock</option>
@@ -230,17 +544,66 @@
       </div>
       <div class="faq-item">
         <div class="faq-q">Line Numbers</div>
-        <div class="faq-a options-fieldset">
-          <label class="options-choice">
+        <div class="faq-a form-fieldset">
+          <label class="form-check">
             <input type="checkbox" id="options-ln-toggle">
             <span>Show line numbers beside output and the live prompt</span>
           </label>
         </div>
       </div>
       <div class="faq-item">
-        <div class="faq-q">Persistence</div>
+        <div class="faq-q">Welcome Intro</div>
         <div class="faq-a">
-          These display preferences are saved in cookies for future sessions on this browser.
+          <select id="options-welcome-select" class="form-select" aria-label="Welcome intro mode">
+            <option value="animated">Animated</option>
+            <option value="disable_animation">Disable Animation</option>
+            <option value="remove">Remove Completely</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Share Snapshot Redaction</div>
+        <div class="faq-a">
+          <select id="options-share-redaction-select" class="form-select" aria-label="Share snapshot redaction default">
+            <option value="unset">Prompt Until Set</option>
+            <option value="redacted">Default To Redacted</option>
+            <option value="raw">Default To Raw</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item options-desktop-only">
+        <div class="faq-q">Run Notifications</div>
+        <div class="faq-a form-fieldset">
+          <label class="form-check">
+            <input type="checkbox" id="options-notify-toggle">
+            <span>Notify when a run completes or is killed</span>
+          </label>
+        </div>
+      </div>
+      <div class="faq-item options-desktop-only">
+        <div class="faq-q">HUD Clock</div>
+        <div class="faq-a">
+          <select id="options-hud-clock-select" class="form-select" aria-label="HUD clock timezone mode">
+            <option value="utc">UTC</option>
+            <option value="local">Local Time</option>
+          </select>
+        </div>
+      </div>
+      <div class="faq-item">
+        <div class="faq-q">Session Token</div>
+        <div class="faq-a form-fieldset">
+          <div class="options-session-token-desc">Carry your run history, starred commands and user options across browsers and devices without a login. Generate a token once, then use it on any other device to resume where you left off.</div>
+          <div class="options-session-token-status-row">
+            <div id="options-session-token-status" class="options-session-token-status"></div>
+            <button id="options-session-token-copy-btn" class="btn btn-secondary btn-compact" type="button" style="display:none" title="Copy session token to clipboard">Copy</button>
+          </div>
+          <div class="options-session-token-actions">
+            <button id="options-session-token-generate-btn" class="btn btn-secondary btn-compact" type="button">Generate</button>
+            <button id="options-session-token-set-btn" class="btn btn-secondary btn-compact" type="button">Set</button>
+            <button id="options-session-token-rotate-btn" class="btn btn-secondary btn-warning btn-compact" type="button">Rotate</button>
+            <button id="options-session-token-clear-btn" class="btn btn-destructive btn-compact" type="button">Clear</button>
+          </div>
+          <div id="options-session-token-msg" class="options-session-token-msg" style="display:none"></div>
         </div>
       </div>
     </div>
@@ -250,9 +613,17 @@
 <script src="/static/js/session.js"></script>
 <script src="/static/js/state.js"></script>
 <script src="/static/js/utils.js"></script>
+<script id="app-config-json" type="application/json">{{ frontend_config|tojson }}</script>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/dom.js"></script>
 <script src="/static/js/ui_helpers.js"></script>
+<script src="/static/js/ui_pressable.js"></script>
+<script src="/static/js/ui_disclosure.js"></script>
+<script src="/static/js/ui_dismissible.js"></script>
+<script src="/static/js/ui_focus_trap.js"></script>
+<script src="/static/js/ui_confirm.js"></script>
+<script src="/static/js/ui_outside_click.js"></script>
+<script src="/static/js/export_pdf.js"></script>
 <script src="/static/js/tabs.js"></script>
 <script src="/static/js/output.js"></script>
 <script src="/static/js/search.js"></script>
@@ -261,6 +632,9 @@
 <script src="/static/js/welcome.js"></script>
 <script src="/static/js/runner.js"></script>
 <script src="/static/js/app.js"></script>
+<script src="/static/js/mobile_sheet.js"></script>
 <script src="/static/js/controller.js"></script>
+<script src="/static/js/shell_chrome.js"></script>
+<script src="/static/js/mobile_chrome.js"></script>
 </body>
 </html>

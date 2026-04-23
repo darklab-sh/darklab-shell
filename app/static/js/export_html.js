@@ -1,4 +1,7 @@
 // ── Shared HTML export helpers ───────────────────────────────────────────────
+// Single source of truth for all export formatting (save html, save pdf,
+// permalink save html). All callers go through these helpers so the rendered
+// output is consistent across every save surface.
 (function () {
   // HTML export deliberately inlines the runtime theme variables so downloaded
   // files preserve the active palette without depending on the live app shell.
@@ -30,6 +33,7 @@
     '--terminal-font-size',
     '--terminal-line-height',
   ];
+  const PLAIN_CLASSES = new Set(['exit-ok', 'exit-fail', 'denied', 'notice']);
 
   function escapeExportHtml(text) {
     return String(text ?? '')
@@ -49,6 +53,65 @@
 
   function exportTimestamp() {
     return new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19);
+  }
+
+  function buildExportMetaLine({ label = '', createdText = '' }) {
+    const trimmedLabel = String(label || '').trim();
+    const trimmedCreated = String(createdText || '').trim();
+    if (trimmedLabel && trimmedCreated) return `${trimmedLabel} · ${trimmedCreated}`;
+    return trimmedLabel || trimmedCreated;
+  }
+
+  function normalizeExportTranscriptLine(line) {
+    if (typeof line === 'string') {
+      return { text: line, cls: '', tsC: '', tsE: '' };
+    }
+    if (line && typeof line.text === 'string') {
+      return {
+        text: line.text,
+        cls: String(line.cls || ''),
+        tsC: String(line.tsC || ''),
+        tsE: String(line.tsE || ''),
+      };
+    }
+    return null;
+  }
+
+  function normalizeExportTranscriptLines(lines, { stripTruncationNotices = false } = {}) {
+    return (Array.isArray(lines) ? lines : [])
+      .map(normalizeExportTranscriptLine)
+      .filter((line) => {
+        if (!line) return false;
+        if (!stripTruncationNotices) return true;
+        return !/^\[(?:preview|tab output) truncated/i.test(String(line.text || ''));
+      });
+  }
+
+  function normalizeExportRunMeta(runMeta) {
+    if (!runMeta) return null;
+    return {
+      exitCode: runMeta.exitCode !== undefined ? runMeta.exitCode : runMeta.exit_code,
+      duration: runMeta.duration || null,
+      lines: runMeta.lines || null,
+      version: runMeta.version || null,
+    };
+  }
+
+  function buildExportDocumentModel({
+    appName = '',
+    title = '',
+    label = '',
+    createdText = '',
+    runMeta = null,
+    rawLines = [],
+  }) {
+    return {
+      appName: String(appName || ''),
+      title: String(title || ''),
+      metaLine: buildExportMetaLine({ label, createdText }),
+      runMeta: normalizeExportRunMeta(runMeta),
+      rawLines: normalizeExportTranscriptLines(rawLines),
+    };
   }
 
   function getThemeExportVars() {
@@ -90,7 +153,96 @@
     return 'light dark';
   }
 
-  function buildTerminalExportStyles(fontFacesCss = '') {
+  // ── Line rendering ────────────────────────────────────────────────────────
+  // Shared helper used by all save surfaces (html, pdf prep, permalink).
+  // rawLines: array of { text, cls, tsC?, ... }
+  // getPrefix: (line, index) => string — caller controls what goes in the gutter
+  // ansiToHtml: (text) => html string — caller supplies the ansi_up instance
+  // Returns { linesHtml, prefixWidth } where prefixWidth is in characters.
+  function buildExportLinesHtml(rawLines, { getPrefix = () => '', ansiToHtml }) {
+    const prefixes = rawLines.map((line, i) => getPrefix(line, i));
+    const prefixWidth = Math.max(0, ...prefixes.map(p => p.length));
+    const linesHtml = rawLines.map(({ text, cls }, i) => {
+      const prefix = prefixes[i];
+      const prefixSpan = prefix
+        ? `<span class="perm-prefix">${escapeExportHtml(prefix)}</span>`
+        : '';
+      let content;
+      if (cls === 'prompt-echo') {
+        content = renderExportPromptEcho(text);
+      } else if (PLAIN_CLASSES.has(cls)) {
+        content = escapeExportHtml(text);
+      } else {
+        content = ansiToHtml(text);
+      }
+      return `<span class="line${cls ? ' ' + cls : ''}">${prefixSpan}<span class="perm-content">${content}</span></span>`;
+    }).join('');
+    return { linesHtml, prefixWidth };
+  }
+
+  // ── Header / run-meta model ───────────────────────────────────────────────
+  // Shared by permalink save html, tab save html, and PDF prep so the browser
+  // surfaces and the PDF renderer all consume the same content ordering.
+  function buildExportRunMetaItems(runMeta) {
+    if (!runMeta) return [];
+    const items = [];
+    const { exitCode, duration, lines, version } = runMeta;
+    if (exitCode !== null && exitCode !== undefined) {
+      items.push({
+        kind: 'badge',
+        tone: exitCode === 0 ? 'ok' : 'fail',
+        text: `exit ${exitCode}`,
+      });
+    }
+    if (duration) items.push({ kind: 'item', text: String(duration) });
+    if (lines)    items.push({ kind: 'item', text: String(lines) });
+    if (version)  items.push({ kind: 'item', text: `v${version}` });
+    return items;
+  }
+
+  function buildExportHeaderModel({ appName, metaLine = '', runMeta = null }) {
+    return {
+      appName: String(appName || ''),
+      metaLine: metaLine ? String(metaLine) : '',
+      runMetaItems: buildExportRunMetaItems(runMeta),
+    };
+  }
+
+  function buildExportRunMetaHtml(runMetaOrItems) {
+    const items = Array.isArray(runMetaOrItems)
+      ? runMetaOrItems
+      : buildExportRunMetaItems(runMetaOrItems);
+    return items.map((item) => {
+      if (item.kind === 'badge') {
+        const cls = item.tone === 'ok' ? 'meta-badge-ok' : 'meta-badge-fail';
+        return `<span class="meta-badge ${cls}">${escapeExportHtml(item.text)}</span>`;
+      }
+      return `<span class="meta-item">${escapeExportHtml(item.text)}</span>`;
+    }).join('');
+  }
+
+  function buildTerminalExportHeaderHtml(headerModel) {
+    const titleHtml = `<h1 class="export-title">${escapeExportHtml(headerModel.appName)}</h1>`;
+    const metaHtml = headerModel.metaLine
+      ? `<div class="export-meta">${escapeExportHtml(headerModel.metaLine)}</div>`
+      : '';
+    const runMetaHtml = headerModel.runMetaItems.length
+      ? `<div class="export-run-meta">${buildExportRunMetaHtml(headerModel.runMetaItems)}</div>`
+      : '';
+    return `<header class="export-header">
+  <div class="export-header-copy">
+    ${titleHtml}
+    ${metaHtml}
+    ${runMetaHtml}
+  </div>
+</header>`;
+  }
+
+  // ── Styles ────────────────────────────────────────────────────────────────
+  // Produces the full inline CSS for an export document. exportCss is the
+  // content of terminal_export.css (fetched and passed by the caller).
+  // prefixWidth sets the --perm-prefix-width custom property.
+  function buildTerminalExportStyles(fontFacesCss = '', prefixWidth = 0, exportCss = '') {
     const themeVars = getThemeExportVars();
     const themeDecls = Object.entries(themeVars)
       .map(([name, value]) => `    ${name}: ${value};`)
@@ -98,55 +250,43 @@
     return `${fontFacesCss}
   :root {
 ${themeDecls}
+    --perm-prefix-width: ${prefixWidth}ch;
   }
-  *, *::before, *::after { box-sizing: border-box; }
+  *, *::before, *::after { box-sizing: border-box; print-color-adjust: exact; -webkit-print-color-adjust: exact; }
+  html, body { height: 100%; margin: 0; }
   body {
-    background: var(--bg); color: var(--text);
-    font-family: 'JetBrains Mono', monospace; font-size: 13px;
-    padding: 28px 32px; margin: 0; line-height: 1.65;
+    display: flex;
+    flex-direction: column;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: var(--terminal-font-size, 14px);
+    line-height: var(--terminal-line-height, 1.65);
   }
-  .header {
-    margin-bottom: 20px;
-    padding: 16px 18px;
-    border: 1px solid var(--theme-terminal-bar-border, var(--border));
-    background: var(--theme-terminal-bar-bg, var(--bg));
-    border-radius: 4px 4px 0 0;
-  }
-  .app-name { color: var(--green); font-size: 18px; letter-spacing: 3px; margin-bottom: 6px; }
-  .meta { color: var(--muted); font-size: 11px; }
-  .output {
-    white-space: pre-wrap;
-    word-break: break-all;
-    background: var(--theme-panel-bg, var(--surface));
-    border: 1px solid var(--theme-panel-border, var(--border));
-    border-top: none;
-    border-radius: 0 0 4px 4px;
-    padding: 16px 18px 18px;
-    box-shadow: 0 12px 28px color-mix(in srgb, var(--theme-panel-shadow, transparent) 74%, transparent);
-  }
-  .line { display: block; }
-  .line.exit-ok   { color: var(--green); font-weight: 700; margin-top: 8px; }
-  .line.exit-fail { color: var(--red); font-weight: 700; margin-top: 8px; }
-  .line.denied    { color: var(--amber); font-weight: 700; }
-  .line.notice    { color: var(--blue); font-style: italic; }
-  .ts {
-    display: inline-block; min-width: 58px; text-align: right;
-    color: var(--muted); font-size: 10px; user-select: none;
-    padding-right: 8px; margin-right: 6px;
-    border-right: 1px solid var(--border);
-    font-variant-numeric: tabular-nums;
-  }
-  .prompt-prefix { color: var(--blue); font-weight: 700; margin-right: 8px; }`;
+  ${exportCss}`;
   }
 
+  // ── Document builder ──────────────────────────────────────────────────────
+  // appName   — displayed in the header (green, letter-spaced)
+  // title     — used in <title> tag
+  // metaLine  — subtitle shown below app name in muted/uppercase style
+  // runMeta   — optional { exitCode, duration, lines, version } for badge row
+  // linesHtml — pre-built via buildExportLinesHtml
+  // prefixWidth — gutter width in ch (for --perm-prefix-width)
+  // fontFacesCss — @font-face declarations (base64 fonts)
   function buildTerminalExportHtml({
     appName,
     title,
-    metaHtml = '',
+    metaLine = '',
+    runMeta = null,
     linesHtml = '',
+    prefixWidth = 0,
     fontFacesCss = '',
+    exportCss = '',
   }) {
     const colorScheme = getThemeExportColorScheme();
+    const headerModel = buildExportHeaderModel({ appName, metaLine, runMeta });
+    const styles = buildTerminalExportStyles(fontFacesCss, prefixWidth, exportCss);
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -154,19 +294,29 @@ ${themeDecls}
 <meta name="color-scheme" content="${escapeExportHtml(colorScheme)}">
 <title>${escapeExportHtml(title)} — ${escapeExportHtml(appName)}</title>
 <style>
-${buildTerminalExportStyles(fontFacesCss)}
+${styles}
 </style>
 </head>
 <body>
-<div class="header">
-  <div class="app-name">${escapeExportHtml(appName)}</div>
-  ${metaHtml ? `<div class="meta">${metaHtml}</div>` : ''}
-</div>
-<div class="output">
+${buildTerminalExportHeaderHtml(headerModel)}
+<main class="export-output nice-scroll">
 ${linesHtml}
-</div>
+</main>
 </body>
 </html>`;
+  }
+
+  let _cachedTerminalExportCss = null;
+
+  async function fetchTerminalExportCss() {
+    if (_cachedTerminalExportCss !== null) return _cachedTerminalExportCss;
+    try {
+      const res = await fetch('/static/css/terminal_export.css');
+      _cachedTerminalExportCss = res.ok ? await res.text() : '';
+    } catch (_) {
+      _cachedTerminalExportCss = '';
+    }
+    return _cachedTerminalExportCss;
   }
 
   async function fetchVendorFontFacesCss() {
@@ -197,10 +347,23 @@ ${linesHtml}
 
   window.ExportHtmlUtils = {
     exportTimestamp,
+    buildExportMetaLine,
+    normalizeExportTranscriptLine,
+    normalizeExportTranscriptLines,
+    normalizeExportRunMeta,
+    buildExportDocumentModel,
     escapeExportHtml,
     renderExportPromptEcho,
+    buildExportLinesHtml,
+    buildExportRunMetaItems,
+    buildExportHeaderModel,
+    buildExportRunMetaHtml,
+    buildTerminalExportHeaderHtml,
     buildTerminalExportHtml,
     buildTerminalExportStyles,
+    getThemeExportVars,
+    getThemeExportColorScheme,
     fetchVendorFontFacesCss,
+    fetchTerminalExportCss,
   };
 })();

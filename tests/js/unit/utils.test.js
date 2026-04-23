@@ -1,13 +1,27 @@
 import { vi } from 'vitest'
 import { fromScript } from './helpers/extract.js'
 
-const { escapeHtml, escapeRegex, renderMotd, showToast, copyTextToClipboard } = fromScript(
+const {
+  escapeHtml,
+  escapeRegex,
+  normalizeRedactionRules,
+  applyRedactionRules,
+  redactLineEntries,
+  renderMotd,
+  showToast,
+  copyTextToClipboard,
+  shareUrl,
+} = fromScript(
   'app/static/js/utils.js',
   'escapeHtml',
   'escapeRegex',
+  'normalizeRedactionRules',
+  'applyRedactionRules',
+  'redactLineEntries',
   'renderMotd',
   'showToast',
   'copyTextToClipboard',
+  'shareUrl',
 )
 
 // ── escapeHtml ────────────────────────────────────────────────────────────────
@@ -124,6 +138,44 @@ describe('renderMotd', () => {
   })
 })
 
+describe('normalizeRedactionRules', () => {
+  it('keeps valid rules and drops invalid ones', () => {
+    const rules = normalizeRedactionRules([
+      { pattern: 'token=\\w+', replacement: 'token=[redacted]', flags: 'i' },
+      { pattern: '(', replacement: '[bad]' },
+      { replacement: '[missing pattern]' },
+    ])
+
+    expect(rules).toHaveLength(1)
+    expect(rules[0].pattern).toBe('token=\\w+')
+    expect(rules[0].replacement).toBe('token=[redacted]')
+    expect(rules[0].flags).toBe('i')
+  })
+})
+
+describe('applyRedactionRules', () => {
+  it('applies regex replacements in order', () => {
+    const out = applyRedactionRules('Authorization: Bearer abc123', [
+      { pattern: 'Bearer\\s+\\S+', replacement: 'Bearer [redacted]' },
+    ])
+
+    expect(out).toBe('Authorization: Bearer [redacted]')
+  })
+})
+
+describe('redactLineEntries', () => {
+  it('redacts only the text field while preserving line metadata', () => {
+    const lines = redactLineEntries(
+      [{ text: 'token=abc123', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' }],
+      [{ pattern: 'token=\\w+', replacement: 'token=[redacted]' }],
+    )
+
+    expect(lines).toEqual([
+      { text: 'token=[redacted]', cls: 'notice', tsC: '10:00:00', tsE: '+0.1s' },
+    ])
+  })
+})
+
 describe('showToast', () => {
   beforeEach(() => {
     document.body.innerHTML = '<div id="permalink-toast"></div>'
@@ -147,6 +199,82 @@ describe('showToast', () => {
   })
 })
 
+describe('shareUrl', () => {
+  const TEST_URL = 'https://example.com/share/abc123'
+
+  function setupToast() {
+    document.body.innerHTML = '<div id="permalink-toast"></div>'
+  }
+
+  it('copies to clipboard and shows a share button in the toast when navigator.share is available', async () => {
+    setupToast()
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    Object.defineProperty(navigator, 'share', { configurable: true, value: vi.fn() })
+
+    await shareUrl(TEST_URL)
+
+    expect(writeText).toHaveBeenCalledWith(TEST_URL)
+    const toast = document.getElementById('permalink-toast')
+    expect(toast.textContent).toContain('Link copied to clipboard')
+    expect(toast.querySelector('.toast-action-btn')).not.toBeNull()
+    expect(toast.querySelector('.toast-action-btn').textContent).toBe('share ↗')
+
+    delete navigator.share
+  })
+
+  it('tapping the share button in the toast calls navigator.share with the url', async () => {
+    setupToast()
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const share = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'share', { configurable: true, value: share })
+
+    await shareUrl(TEST_URL)
+
+    document.querySelector('.toast-action-btn').click()
+
+    expect(share).toHaveBeenCalledWith({ url: TEST_URL })
+
+    delete navigator.share
+  })
+
+  it('copies to clipboard and shows a plain toast when navigator.share is unavailable', async () => {
+    setupToast()
+    const writeText = vi.fn(() => Promise.resolve())
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: { writeText } })
+    const originalShare = navigator.share
+    Object.defineProperty(navigator, 'share', { configurable: true, value: undefined })
+
+    await shareUrl(TEST_URL)
+
+    expect(writeText).toHaveBeenCalledWith(TEST_URL)
+    const toast = document.getElementById('permalink-toast')
+    expect(toast.textContent).toBe('Link copied to clipboard')
+    expect(toast.querySelector('.toast-action-btn')).toBeNull()
+
+    Object.defineProperty(navigator, 'share', { configurable: true, value: originalShare })
+  })
+
+  it('falls back to window.prompt when clipboard is unavailable', async () => {
+    setupToast()
+    Object.defineProperty(navigator, 'clipboard', {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error('not allowed')) },
+    })
+    document.execCommand = vi.fn(() => false)
+    const prompt = vi.fn()
+    window.prompt = prompt
+
+    await shareUrl(TEST_URL)
+
+    expect(prompt).toHaveBeenCalledWith('Copy the link:', TEST_URL)
+    expect(document.getElementById('permalink-toast').textContent).toBe('')
+
+    delete window.prompt
+  })
+})
+
 describe('copyTextToClipboard', () => {
   beforeEach(() => {
     document.body.innerHTML = ''
@@ -166,6 +294,10 @@ describe('copyTextToClipboard', () => {
     expect(execCommand).toHaveBeenCalledWith('copy')
 
     if (originalClipboard === undefined) delete navigator.clipboard
-    else Object.defineProperty(navigator, 'clipboard', { configurable: true, value: originalClipboard })
+    else
+      Object.defineProperty(navigator, 'clipboard', {
+        configurable: true,
+        value: originalClipboard,
+      })
   })
 })

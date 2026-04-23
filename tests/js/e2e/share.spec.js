@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistoryWithEntries, makeTestIp } from './helpers.js'
+import { runCommand, openHistoryWithEntries, makeTestIp, createShareSnapshot } from './helpers.js'
 
 const CMD = 'hostname'
 const MOBILE = { width: 375, height: 812 }
@@ -21,7 +21,7 @@ test.describe('permalink / share', () => {
     await page.addInitScript(() => {
       Object.defineProperty(navigator, 'clipboard', {
         value: {
-          writeText: text => {
+          writeText: (text) => {
             window.__clipboardText = text
             return Promise.resolve()
           },
@@ -37,10 +37,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     // Intercept the POST /share response so we can capture the share URL
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     expect(shareResp.status()).toBe(200)
 
     // Toast should appear with the "copied" message
@@ -51,10 +48,7 @@ test.describe('permalink / share', () => {
     await runCommand(page, CMD)
 
     // Click permalink and capture the share URL from the server response
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     // Navigate to the permalink page
@@ -67,23 +61,21 @@ test.describe('permalink / share', () => {
   test('permalink page honors the theme cookie for the live view and export', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
-    await page.context().addCookies([
-      { name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' },
-    ])
+    await page
+      .context()
+      .addCookies([{ name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' }])
     await page.goto(data.url)
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
 
+    await page.locator('#perm-save-btn').click()
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .html")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
     const htmlStream = await htmlDownload.createReadStream()
     const htmlChunks = []
@@ -94,14 +86,20 @@ test.describe('permalink / share', () => {
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {
+    // Wait for the welcome sequence to finish before opening a new tab.
+    // If the welcome animation has a scheduled step that fires after the new
+    // tab is created it can switch the active panel back to the welcome tab,
+    // leaving the new tab's permalink button in a non-active (invisible) panel.
+    await page.waitForFunction(() => window._welcomeDone === true, { timeout: 15_000 })
     await page.locator('#new-tab-btn').click()
-    await expect(page.locator('.tab.active')).toContainText('tab 2')
-    await page.locator('.tab-panel.active [data-action="permalink"]').click()
+    await page.locator('.hud-actions [data-action="permalink"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('No output')
   })
 
-  test('permalink button falls back to execCommand when clipboard writeText rejects', async ({ page }) => {
+  test('permalink button falls back to execCommand when clipboard writeText rejects', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await page.evaluate(() => {
@@ -118,13 +116,15 @@ test.describe('permalink / share', () => {
       })
     })
 
-    await page.locator('[data-action="permalink"]').click()
+    await createShareSnapshot(page)
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5_000 })
     await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
     await expect(page.evaluate(() => window.__copyFallbackUsed)).resolves.toBe(true)
   })
 
-  test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({ page }) => {
+  test('history entry permalink copies a single-run URL and the page renders JSON and HTML views', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
@@ -141,7 +141,9 @@ test.describe('permalink / share', () => {
     await expect(page.locator('body')).toContainText('"exit_code":0')
   })
 
-  test('fresh run permalink supports line-number and timestamp display toggles', async ({ page }) => {
+  test('fresh run permalink supports line-number and timestamp display toggles', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await openHistoryWithEntries(page)
@@ -165,13 +167,12 @@ test.describe('permalink / share', () => {
       .toContainEqual(expect.stringContaining('+'))
   })
 
-  test('snapshot permalink supports line-number and timestamp display toggles', async ({ page }) => {
+  test('snapshot permalink supports line-number and timestamp display toggles', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.goto(data.url)
@@ -193,10 +194,7 @@ test.describe('permalink / share', () => {
   test('permalink page honors line-number and timestamp cookies on load', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.context().addCookies([
@@ -214,46 +212,51 @@ test.describe('permalink / share', () => {
       .toContainEqual(expect.stringContaining('+'))
   })
 
-  test('permalink exports use timestamped filenames for txt and html downloads', async ({ page }) => {
+  test('permalink exports use timestamped filenames for txt and html downloads', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.goto(data.url)
 
+    await page.locator('#perm-save-btn').click()
     const [txtDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .txt")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("txt")').click(),
     ])
-    expect(txtDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/)
+    expect(txtDownload.suggestedFilename()).toMatch(
+      /^darklab_shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.txt$/,
+    )
 
+    await page.locator('#perm-save-btn').click()
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .html")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
-    expect(htmlDownload.suggestedFilename()).toMatch(/^darklab shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/)
+    expect(htmlDownload.suggestedFilename()).toMatch(
+      /^darklab_shell-\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}\.html$/,
+    )
   })
 
-  test('permalink exports include prompt echo and current prefix display state', async ({ page }) => {
+  test('permalink exports include prompt echo and current prefix display state', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.goto(data.url)
     await page.locator('#toggle-ln').click()
     await page.locator('#toggle-ts').click()
 
+    await page.locator('#perm-save-btn').click()
     const [txtDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .txt")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("txt")').click(),
     ])
     const txtStream = await txtDownload.createReadStream()
     const txtChunks = []
@@ -264,9 +267,10 @@ test.describe('permalink / share', () => {
     expect(txt).toMatch(/1\s+anon@darklab:~\$ hostname/)
     expect(txt).toContain('+')
 
+    await page.locator('#perm-save-btn').click()
     const [htmlDownload] = await Promise.all([
       page.waitForEvent('download'),
-      page.locator('button:has-text("save .html")').click(),
+      page.locator('#perm-save-wrap .save-menu button:has-text("html")').click(),
     ])
     const htmlStream = await htmlDownload.createReadStream()
     const htmlChunks = []
@@ -284,10 +288,7 @@ test.describe('permalink / share', () => {
   test('mobile permalink page toast hides after copy', async ({ page }) => {
     await runCommand(page, CMD)
 
-    const [shareResp] = await Promise.all([
-      page.waitForResponse(r => r.url().includes('/share') && r.request().method() === 'POST'),
-      page.locator('[data-action="permalink"]').click(),
-    ])
+    const shareResp = await createShareSnapshot(page)
     const data = await shareResp.json()
 
     await page.setViewportSize(MOBILE)
@@ -295,7 +296,7 @@ test.describe('permalink / share', () => {
 
     await page.locator('button:has-text("copy")').click()
 
-    const toast = page.locator('#copy-toast')
+    const toast = page.locator('#permalink-toast')
     await expect(toast).toHaveText('Copied to clipboard')
     await expect(toast).toHaveClass(/show/, { timeout: 5_000 })
     await expect(toast).toBeHidden({ timeout: 5_000 })

@@ -7,9 +7,11 @@ import os
 import pwd
 from pathlib import Path
 import yaml
+from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.4"
-PROJECT_README = "https://gitlab.com/darklab.sh/darklab-shell#darklab-shell"
+APP_VERSION = "1.5"
+PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
+APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 
 
 def _load_yaml_config(path):
@@ -59,17 +61,19 @@ def load_config(conf_dir=None):
     keys while leaving the checked-in defaults in place.
     """
     defaults = {
-        "app_name":                   "darklab shell",
+        "app_name":                   "darklab_shell",
         "prompt_prefix":              "anon@darklab:~$",
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,
-        "recent_commands_limit":      8,
+        "recent_commands_limit":      50,
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",
         "trusted_proxy_cidrs":        ["127.0.0.1/32", "::1/128"],
         "diagnostics_allowed_cidrs":  [],
+        "share_redaction_enabled":    True,
+        "share_redaction_rules":      [],
         "rate_limit_enabled":         True,
         "rate_limit_per_minute":      30,
         "rate_limit_per_second":      5,
@@ -90,7 +94,12 @@ def load_config(conf_dir=None):
         "welcome_hint_interval_ms":   4200,
         "welcome_hint_rotations":     0,
     }
-    conf_path = Path(conf_dir) if conf_dir is not None else Path(__file__).resolve().parent / "conf"
+    if conf_dir is not None:
+        conf_path = Path(conf_dir)
+    elif APP_CONF_DIR:
+        conf_path = Path(APP_CONF_DIR)
+    else:
+        conf_path = Path(__file__).resolve().parent / "conf"
     defaults.update(_load_yaml_config(conf_path / "config.yaml"))
     defaults.update(_load_yaml_config_optional(conf_path / "config.local.yaml"))
     legacy_full_output_max_bytes = defaults.pop("full_output_max_bytes", None)
@@ -107,10 +116,25 @@ def load_config(conf_dir=None):
         full_output_max_mb = 5
     defaults["full_output_max_mb"] = full_output_max_mb
     defaults["full_output_max_bytes"] = full_output_max_mb * 1024 * 1024
+    # Share/export redaction rules are normalized up front so the browser and
+    # the snapshot endpoint both receive the same validated rule set.
+    defaults["share_redaction_rules"] = normalize_redaction_rules(
+        defaults.get("share_redaction_rules", [])
+    )
     return defaults
 
 
 CFG = load_config()
+
+
+def get_share_redaction_rules(cfg=None):
+    """Return the effective share/export redaction rules for the current config."""
+    active_cfg = cfg or CFG
+    if not active_cfg.get("share_redaction_enabled", True):
+        return []
+    # Built-in rules provide a conservative baseline. Operator-defined rules are
+    # appended so deployments can add environment-specific masking on top.
+    return BUILTIN_SHARE_REDACTION_RULES + list(active_cfg.get("share_redaction_rules") or [])
 
 
 _THEME_DEFAULTS = {
@@ -193,8 +217,7 @@ _THEME_DEFAULTS = {
         "history_load_modal_shadow": "rgba(0,0,0,0.35)",
         "faq_modal_bg":         "#141414",
         "options_modal_bg":     "#141414",
-        "kill_modal_bg":        "#141414",
-        "hist_del_modal_bg":    "#141414",
+        "confirm_modal_bg":     "#141414",
         "dropdown_bg":          "color-mix(in srgb, var(--surface) 96%, transparent)",
         "dropdown_border":      "color-mix(in srgb, var(--green) 18%, transparent)",
         "dropdown_shadow":      "rgba(0,0,0,0.35)",
@@ -205,7 +228,7 @@ _THEME_DEFAULTS = {
         "overlay_backdrop_bg":  "rgba(0,0,0,0.76)",
         "faq_code_bg":          "#141414",
         "allowed_chip_bg":      "#141414",
-        "options_select_bg":    "#141414",
+        "form_control_bg":      "#141414",
         "tab_status_ok_bg":     "#39ff14",
         "toast_bg":             "#141414",
         "toast_text":           "#39ff14",
@@ -307,8 +330,7 @@ _THEME_DEFAULTS = {
         "history_load_modal_shadow": "rgba(0,0,0,0.35)",
         "faq_modal_bg":         "#e8eef6",
         "options_modal_bg":     "#e8eef6",
-        "kill_modal_bg":        "#d4e0ec",
-        "hist_del_modal_bg":    "#d4e0ec",
+        "confirm_modal_bg":     "#d4e0ec",
         "dropdown_bg":          "#d4e0ec",
         "dropdown_border":      "rgba(26,90,170,0.25)",
         "dropdown_shadow":      "rgba(0,0,0,0.14)",
@@ -319,7 +341,7 @@ _THEME_DEFAULTS = {
         "overlay_backdrop_bg":  "rgba(34,58,88,0.22)",
         "faq_code_bg":          "#dce6f0",
         "allowed_chip_bg":      "#dce6f0",
-        "options_select_bg":    "#e0e8f4",
+        "form_control_bg":      "#e0e8f4",
         "tab_status_ok_bg":     "#22a040",
         "toast_bg":             "#e4eef8",
         "toast_text":           "#2a5d18",
@@ -439,8 +461,7 @@ _THEME_CSS_ORDER = (
     "history_load_modal_shadow",
     "faq_modal_bg",
     "options_modal_bg",
-    "kill_modal_bg",
-    "hist_del_modal_bg",
+    "confirm_modal_bg",
     "dropdown_bg",
     "dropdown_border",
     "dropdown_shadow",
@@ -451,7 +472,7 @@ _THEME_CSS_ORDER = (
     "overlay_backdrop_bg",
     "faq_code_bg",
     "allowed_chip_bg",
-    "options_select_bg",
+    "form_control_bg",
     "tab_status_ok_bg",
     "toast_bg",
     "toast_text",

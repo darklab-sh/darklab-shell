@@ -5,7 +5,7 @@
 # Run this after upgrading the base image, apt packages, or any pinned
 # tool version in the Dockerfile (Go binaries, pip packages, gems).
 # It builds a fresh image with docker compose, starts the container, and
-# runs every command in app/conf/auto_complete.txt through /run, checking
+# runs every command from app/conf/autocomplete.yaml examples through /run, checking
 # each one against the expected output recorded in
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #
@@ -69,6 +69,7 @@ if [ -n "$PYTEST_ARGS" ]; then
     OLD_IFS=$IFS
     IFS='
 '
+    # shellcheck disable=SC2086  # word-splitting on $PYTEST_ARGS is intentional
     set -- $PYTEST_ARGS
     IFS=$OLD_IFS
 else
@@ -82,12 +83,12 @@ if [ -n "$SELECTED_COMMANDS" ]; then
         python3 -m pytest \
         "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
         --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
-        -x -v -s \
+        -v -s \
         "$@"
 fi
 
 exec env RUN_CONTAINER_SMOKE_TEST=1 python3 -m pytest \
     "$ROOT_DIR/tests/py/test_container_smoke_test.py" \
     --junitxml="$ROOT_DIR/test-results/container_smoke_test.xml" \
-    -x -v -s \
+    -v -s \
     "$@"

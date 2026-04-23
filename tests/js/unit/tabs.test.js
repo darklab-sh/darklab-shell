@@ -9,17 +9,32 @@ function touchPointerEvent(type, init) {
   return event
 }
 
+function touchEvent(type, touches = [], changedTouches = touches) {
+  const event = new Event(type, { bubbles: true, cancelable: true })
+  Object.defineProperty(event, 'touches', { value: touches, configurable: true })
+  Object.defineProperty(event, 'changedTouches', { value: changedTouches, configurable: true })
+  return event
+}
+
 function loadTabsFns({
   maxTabs = 3,
   maxOutputLines = 100,
   version = undefined,
   projectReadme = undefined,
+  shareRedactionEnabled = true,
+  shareRedactionRules = [],
+  confirmPermalinkRedactionChoice = () =>
+    Promise.resolve(shareRedactionEnabled ? 'redacted' : 'raw'),
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   welcomeBootPending = undefined,
   clipboardWrite = () => Promise.resolve(),
   doKill = vi.fn(),
   acFiltered: acFilteredOverride = [],
   acHide: acHideOverride = () => {},
+  urlImpl = {
+    createObjectURL: () => 'blob:mock',
+    revokeObjectURL: () => {},
+  },
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -46,50 +61,57 @@ function loadTabsFns({
     },
   }
 
-  const fns = fromDomScripts([
-    'app/static/js/utils.js',
-    'app/static/js/tabs.js',
-  ], {
-    document,
-    cmdInput,
-    tabsBar,
-    tabsScrollLeftBtn,
-    tabsScrollRightBtn,
-    tabPanels,
-    runBtn,
-    historyPanel,
-    mobileComposerHost,
-    mobileComposerRow,
-    mobileCmdInput,
-    newTabBtn,
-    resetCmdHistoryNav: () => {},
-    ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell', ...(version !== undefined && { version }), ...(projectReadme !== undefined && { project_readme: projectReadme }) },
-    setStatus: () => {},
-    clearSearch: () => {},
-    confirmKill: () => {},
-    doKill,
-    cancelWelcome: () => {},
-    apiFetch,
-    location: { origin: 'https://example.test' },
-    navigator,
-    URL: {
-      createObjectURL: () => 'blob:mock',
-      revokeObjectURL: () => {},
+  const fns = fromDomScripts(
+    ['app/static/js/utils.js', 'app/static/js/tabs.js'],
+    {
+      document,
+      cmdInput,
+      tabsBar,
+      tabsScrollLeftBtn,
+      tabsScrollRightBtn,
+      tabPanels,
+      runBtn,
+      historyPanel,
+      mobileComposerHost,
+      mobileComposerRow,
+      mobileCmdInput,
+      newTabBtn,
+      resetCmdHistoryNav: () => {},
+      _tabSessionRestoreInProgress: false,
+      ...(welcomeBootPending === undefined ? {} : { _welcomeBootPending: welcomeBootPending }),
+      APP_CONFIG: {
+        max_tabs: maxTabs,
+        max_output_lines: maxOutputLines,
+        app_name: 'darklab_shell',
+        share_redaction_enabled: shareRedactionEnabled,
+        share_redaction_rules: shareRedactionRules,
+        ...(version !== undefined && { version }),
+        ...(projectReadme !== undefined && { project_readme: projectReadme }),
+      },
+      setStatus: () => {},
+      clearSearch: () => {},
+      confirmKill: () => {},
+      doKill,
+      cancelWelcome: () => {},
+      confirmPermalinkRedactionChoice,
+      apiFetch,
+      location: { origin: 'https://example.test' },
+      navigator,
+      URL: urlImpl,
+      Blob,
+      ansi_up: { ansi_to_html: (s) => `<em>${s}</em>` },
+      shellPromptWrap,
+      setComposerValue: (val, start = null, end = null, opts = {}) => {
+        cmdInput.value = String(val ?? '')
+        if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
+      },
+      getComposerValue: () => cmdInput.value,
+      isHistSearchMode: () => false,
+      exitHistSearch: () => {},
+      acHide: acHideOverride,
+      acFiltered: acFilteredOverride,
     },
-    Blob,
-    ansi_up: { ansi_to_html: (s) => `<em>${s}</em>` },
-    shellPromptWrap,
-    setComposerValue: (val, start = null, end = null, opts = {}) => {
-      cmdInput.value = String(val ?? '')
-      if (opts.dispatch !== false) cmdInput.dispatchEvent(new Event('input'))
-    },
-    getComposerValue: () => cmdInput.value,
-    isHistSearchMode: () => false,
-    exitHistSearch: () => {},
-    acHide: acHideOverride,
-    acFiltered: acFilteredOverride,
-  }, `{
+    `{
     updateNewTabBtn,
     updateTabScrollButtons,
     updateOutputFollowButton,
@@ -101,14 +123,18 @@ function loadTabsFns({
     clearTab,
     setTabStatus,
     setTabLabel,
+    setTabRunningCommand,
+    createDefaultTabLabel,
     copyTab,
     saveTab,
     exportTabHtml,
+    exportTabPdf,
     permalinkTab,
     _getTabs: () => getTabs(),
     _getActiveTabId: () => getActiveTabId(),
     _getAcFiltered: () => acFiltered,
-  }`)
+  }`,
+  )
 
   return { ...fns, clipboardWrites, newTabBtn, shellPromptWrap, doKill }
 }
@@ -118,6 +144,8 @@ function loadTabsAndOutputFns({
   maxOutputLines = 100,
   apiFetch = () => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
   clipboardWrite = () => Promise.resolve(),
+  shareRedactionEnabled = true,
+  shareRedactionRules = [],
 } = {}) {
   const cmdInput = document.getElementById('cmd')
   cmdInput.focus = vi.fn()
@@ -135,59 +163,68 @@ function loadTabsAndOutputFns({
 
   const navigator = {
     clipboard: {
-      writeText: text => clipboardWrite(text),
+      writeText: (text) => clipboardWrite(text),
     },
   }
 
-  const fns = fromDomScripts([
-    'app/static/js/utils.js',
-    'app/static/js/output.js',
-    'app/static/js/tabs.js',
-  ], {
-    document,
-    AnsiUp: class {
-      constructor() {
-        this.use_classes = false
-      }
+  const fns = fromDomScripts(
+    ['app/static/js/utils.js', 'app/static/js/output.js', 'app/static/js/tabs.js'],
+    {
+      document,
+      AnsiUp: class {
+        constructor() {
+          this.use_classes = false
+        }
 
-      ansi_to_html(s) {
-        return '<em>' + s + '</em>'
-      }
+        ansi_to_html(s) {
+          return '<em>' + s + '</em>'
+        }
+      },
+      cmdInput,
+      tabsBar,
+      tabsScrollLeftBtn,
+      tabsScrollRightBtn,
+      tabPanels,
+      runBtn,
+      historyPanel,
+      mobileComposerHost,
+      mobileComposerRow,
+      newTabBtn,
+      resetCmdHistoryNav: () => {},
+      _tabSessionRestoreInProgress: false,
+      APP_CONFIG: {
+        max_tabs: maxTabs,
+        max_output_lines: maxOutputLines,
+        app_name: 'darklab_shell',
+        prompt_prefix: 'anon@darklab:~$',
+        share_redaction_enabled: shareRedactionEnabled,
+        share_redaction_rules: shareRedactionRules,
+      },
+      setStatus: () => {},
+      clearSearch: () => {},
+      confirmKill: () => {},
+      cancelWelcome: () => {},
+      apiFetch,
+      location: { origin: 'https://example.test' },
+      navigator,
+      URL: {
+        createObjectURL: () => 'blob:mock',
+        revokeObjectURL: () => {},
+      },
+      Blob,
+      shellPromptWrap,
+      getOutput: (id) => document.getElementById(`output-${id}`),
     },
-    cmdInput,
-    tabsBar,
-    tabsScrollLeftBtn,
-    tabsScrollRightBtn,
-    tabPanels,
-    runBtn,
-    historyPanel,
-    mobileComposerHost,
-    mobileComposerRow,
-    newTabBtn,
-    resetCmdHistoryNav: () => {},
-    APP_CONFIG: { max_tabs: maxTabs, max_output_lines: maxOutputLines, app_name: 'darklab shell' },
-    setStatus: () => {},
-    clearSearch: () => {},
-    confirmKill: () => {},
-    cancelWelcome: () => {},
-    apiFetch,
-    location: { origin: 'https://example.test' },
-    navigator,
-    URL: {
-      createObjectURL: () => 'blob:mock',
-      revokeObjectURL: () => {},
-    },
-    Blob,
-    shellPromptWrap,
-    getOutput: id => document.getElementById(`output-${id}`),
-  }, `{
+    `{
     createTab,
     mountShellPrompt,
+    renderRestoredTabOutput,
     _getTabs: () => getTabs(),
     _stickOutputToBottom,
     _maybeMountDeferredPrompt,
     _syncTabRawLines,
-  }`)
+  }`,
+  )
 
   return { ...fns, shellPromptWrap }
 }
@@ -214,6 +251,7 @@ describe('tabs helpers', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -235,27 +273,15 @@ describe('tabs helpers', () => {
     expect(document.getElementById('permalink-toast').textContent).toBe('Tab limit reached (max 1)')
   })
 
-  it('createTab renders a terminal-wordmark anchor with app name and version', () => {
-    const { createTab } = loadTabsFns({ version: '2.0', projectReadme: 'https://example.invalid/readme' })
-
-    createTab('tab 1')
-
-    const wordmark = document.querySelector('.terminal-wordmark')
-    expect(wordmark).not.toBeNull()
-    expect(wordmark.tagName).toBe('A')
-    expect(wordmark.textContent).toBe('darklab shell v2.0')
-    expect(wordmark.getAttribute('href')).toBe('https://example.invalid/readme')
-  })
-
-  it('createTab renders wordmark with just the app name when version is absent', () => {
+  it('createTab labels the active-tab permalink action as share snapshot', () => {
     const { createTab } = loadTabsFns()
 
-    createTab('tab 1')
+    const id = createTab('tab 1')
+    const btn = document.querySelector(
+      `#tab-panels .tab-panel[data-id="${id}"] [data-action="permalink"]`,
+    )
 
-    const wordmark = document.querySelector('.terminal-wordmark')
-    expect(wordmark).not.toBeNull()
-    expect(wordmark.textContent).toBe('darklab shell')
-    expect(wordmark.getAttribute('href')).toBe('#')
+    expect(btn.textContent).toBe('share snapshot')
   })
 
   it('activateTab resets the command input instead of repopulating from tab state', () => {
@@ -286,7 +312,7 @@ describe('tabs helpers', () => {
     input.value = 'nmap -sV darklab.sh'
     activateTab(id2)
 
-    expect(_getTabs().find(t => t.id === id1).draftInput).toBe('nmap -sV darklab.sh')
+    expect(_getTabs().find((t) => t.id === id1).draftInput).toBe('nmap -sV darklab.sh')
   })
 
   it('activateTab restores the draft of the new tab when switching back', () => {
@@ -310,12 +336,12 @@ describe('tabs helpers', () => {
     const id2 = createTab('tab 2')
     const input = document.getElementById('cmd')
 
-    _getTabs().find(t => t.id === id1).st = 'running'
+    _getTabs().find((t) => t.id === id1).st = 'running'
     activateTab(id1)
     input.value = 'should-not-be-saved'
     activateTab(id2)
 
-    expect(_getTabs().find(t => t.id === id1).draftInput).toBe('')
+    expect(_getTabs().find((t) => t.id === id1).draftInput).toBe('')
   })
 
   it('activateTab clears acFiltered so stale suggestions from a previous tab do not persist', () => {
@@ -354,7 +380,7 @@ describe('tabs helpers', () => {
     expect(_getTabs()[0].exitCode).toBeNull()
     expect(_getTabs()[0].killed).toBe(false)
     expect(_getTabs()[0].pendingKill).toBe(false)
-    expect(document.querySelector('.tab-label').textContent).toBe('tab 1')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
     expect(closeBtn.blur).toHaveBeenCalled()
     activeElementSpy.mockRestore()
   })
@@ -377,7 +403,9 @@ describe('tabs helpers', () => {
     expect(tab.runId).toBe('run-1')
     expect(tab.historyRunId).toBe('history-1')
     expect(tab.followOutput).toBe(true)
-    expect(document.querySelector(`.tab-panel[data-id="${id}"]`).contains(shellPromptWrap)).toBe(false)
+    expect(document.querySelector(`.tab-panel[data-id="${id}"]`).contains(shellPromptWrap)).toBe(
+      false,
+    )
   })
 
   it('clearTab clears the active un-ran composer input along with the tab output', () => {
@@ -415,15 +443,15 @@ describe('tabs helpers', () => {
 
     activateTab(secondId)
     document.getElementById('cmd').focus.mockClear()
-    const runningTab = _getTabs().find(tab => tab.id === secondId)
+    const runningTab = _getTabs().find((tab) => tab.id === secondId)
     runningTab.st = 'running'
     runningTab.runId = 'run-2'
 
     closeTab(secondId)
 
     expect(doKill).toHaveBeenCalledWith(secondId)
-    expect(_getTabs().map(tab => tab.id)).toEqual([firstId, secondId])
-    expect(_getTabs().find(tab => tab.id === secondId).closing).toBe(true)
+    expect(_getTabs().map((tab) => tab.id)).toEqual([firstId, secondId])
+    expect(_getTabs().find((tab) => tab.id === secondId).closing).toBe(true)
     expect(document.querySelector('.tab.active').dataset.id).toBe(firstId)
     expect(document.getElementById('cmd').focus).not.toHaveBeenCalled()
   })
@@ -482,7 +510,9 @@ describe('tabs helpers', () => {
     Object.defineProperty(output, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
-      set: value => { scrollTop = value },
+      set: (value) => {
+        scrollTop = value
+      },
     })
 
     output.dispatchEvent(new Event('scroll'))
@@ -545,7 +575,9 @@ describe('tabs helpers', () => {
     Object.defineProperty(output, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
-      set: value => { scrollTop = value },
+      set: (value) => {
+        scrollTop = value
+      },
     })
     tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
     tab.followOutput = false
@@ -570,7 +602,7 @@ describe('tabs helpers', () => {
     Object.defineProperty(output, 'scrollTop', {
       configurable: true,
       get: () => scrollTop,
-      set: value => {
+      set: (value) => {
         scrollTop = value
         output.dispatchEvent(new Event('scroll'))
       },
@@ -583,7 +615,8 @@ describe('tabs helpers', () => {
   })
 
   it('defers remounting the prompt until the output queue is drained', () => {
-    const { createTab, mountShellPrompt, _maybeMountDeferredPrompt, _getTabs, shellPromptWrap } = loadTabsAndOutputFns()
+    const { createTab, mountShellPrompt, _maybeMountDeferredPrompt, _getTabs, shellPromptWrap } =
+      loadTabsAndOutputFns()
     const id = createTab('tab 1')
     const tab = _getTabs()[0]
     tab.deferPromptMount = true
@@ -596,13 +629,28 @@ describe('tabs helpers', () => {
   })
 
   it('mountShellPrompt stays hidden during the desktop welcome boot', () => {
-    const { createTab, mountShellPrompt, shellPromptWrap } = loadTabsFns({ welcomeBootPending: true })
+    const { createTab, mountShellPrompt, shellPromptWrap } = loadTabsFns({
+      welcomeBootPending: true,
+    })
     const id = createTab('tab 1')
     const output = document.querySelector(`.tab-panel[data-id="${id}"] .output`)
 
     mountShellPrompt(id)
 
     expect(output.contains(shellPromptWrap)).toBe(false)
+  })
+
+  it('renderRestoredTabOutput rebuilds prompt-echo lines with the prompt prefix span', () => {
+    const { createTab, renderRestoredTabOutput } = loadTabsAndOutputFns()
+    const id = createTab('tab 1')
+
+    renderRestoredTabOutput(id, [
+      { text: 'anon@darklab:~$ dig darklab.sh', cls: 'prompt-echo', tsC: '', tsE: '' },
+    ])
+
+    const promptLine = document.querySelector(`#output-${id} .line.prompt-echo`)
+    expect(promptLine?.querySelector('.prompt-prefix')?.textContent).toBe('anon@darklab:~$')
+    expect(promptLine?.textContent).toBe('anon@darklab:~$dig darklab.sh')
   })
 
   it('keeps currentRunStartIndex aligned when old raw lines are pruned from the front', () => {
@@ -617,7 +665,7 @@ describe('tabs helpers', () => {
     _syncTabRawLines(tab, { text: 'three', cls: '', tsC: '', tsE: '' })
     _syncTabRawLines(tab, { text: 'four', cls: '', tsC: '', tsE: '' })
 
-    expect(tab.rawLines.map(line => line.text)).toEqual(['two', 'three', 'four'])
+    expect(tab.rawLines.map((line) => line.text)).toEqual(['two', 'three', 'four'])
     expect(tab.currentRunStartIndex).toBe(1)
   })
 
@@ -630,6 +678,89 @@ describe('tabs helpers', () => {
 
     expect(document.querySelector('.tab-label').textContent).toBe('abcdefghijklmnopqrstuvwxyz…')
     expect(_getTabs()[0].label).toBe(label)
+  })
+
+  it('uses shell-number defaults for new tabs', () => {
+    const { createTab, createDefaultTabLabel, _getTabs } = loadTabsFns()
+
+    const id = createTab()
+    const secondId = createTab()
+
+    expect(id).toBeTruthy()
+    expect(secondId).toBeTruthy()
+    expect(createDefaultTabLabel(2)).toBe('shell 2')
+    expect([...document.querySelectorAll('.tab-label')].map(el => el.textContent)).toEqual([
+      'shell 1',
+      'shell 2',
+    ])
+    expect(_getTabs()[0].label).toBe('shell 1')
+    expect(_getTabs()[1].label).toBe('shell 2')
+  })
+
+  it('shows commands temporarily while preserving the stable default label', () => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+    const { createTab, setTabRunningCommand, setTabStatus, _getTabs } = loadTabsFns()
+    const id = createTab('shell 1')
+
+    setTabRunningCommand(id, 'ping darklab.sh')
+    setTabStatus(id, 'running')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    vi.advanceTimersByTime(499)
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    vi.advanceTimersByTime(1)
+    expect(document.querySelector('.tab-label').textContent).toBe('ping darklab.sh')
+    expect(_getTabs()[0].label).toBe('shell 1')
+
+    setTabStatus(id, 'ok')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    expect(_getTabs()[0].runningLabel).toBe('')
+
+    setTabRunningCommand(id, 'dig darklab.sh')
+    setTabStatus(id, 'running')
+    vi.advanceTimersByTime(500)
+    expect(document.querySelector('.tab-label').textContent).toBe('dig darklab.sh')
+    expect(_getTabs()[0].label).toBe('shell 1')
+
+    setTabStatus(id, 'ok')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+  })
+
+  it('does not flash the command label when a run finishes before the delay', () => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+    const { createTab, setTabRunningCommand, setTabStatus, _getTabs } = loadTabsFns()
+    const id = createTab('shell 1')
+
+    setTabRunningCommand(id, 'hostname')
+    setTabStatus(id, 'running')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+
+    setTabStatus(id, 'ok')
+    vi.advanceTimersByTime(500)
+
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    expect(_getTabs()[0].runningLabel).toBe('')
+  })
+
+  it('shows the running command temporarily without overwriting a user rename', () => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+    const { createTab, setTabLabel, setTabRunningCommand, setTabStatus, _getTabs } = loadTabsFns()
+    const id = createTab('shell 1')
+    const tab = _getTabs()[0]
+    setTabLabel(id, 'ops')
+    tab.renamed = true
+
+    setTabRunningCommand(id, 'nmap example.com')
+    setTabStatus(id, 'running')
+    expect(document.querySelector('.tab-label').textContent).toBe('ops')
+    vi.advanceTimersByTime(500)
+    expect(document.querySelector('.tab-label').textContent).toBe('nmap example.com')
+    expect(tab.label).toBe('ops')
+
+    setTabStatus(id, 'ok')
+    expect(document.querySelector('.tab-label').textContent).toBe('ops')
   })
 
   it('permalinkTab shows a toast when there is no output to share', () => {
@@ -648,13 +779,17 @@ describe('tabs helpers', () => {
     _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
 
     permalinkTab(id)
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
-    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to create permalink')
+    expect(document.getElementById('permalink-toast').textContent).toBe(
+      'Failed to create permalink',
+    )
   })
 
   it('permalinkTab falls back to execCommand when clipboard writeText rejects', async () => {
-    const apiFetch = vi.fn(() => Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }))
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
+    )
     document.execCommand = vi.fn(() => true)
     const { createTab, permalinkTab, _getTabs } = loadTabsFns({
       apiFetch,
@@ -664,25 +799,74 @@ describe('tabs helpers', () => {
     _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
 
     permalinkTab(id)
-    await new Promise(resolve => setImmediate(resolve))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(document.execCommand).toHaveBeenCalledWith('copy')
     expect(document.getElementById('permalink-toast').textContent).toBe('Link copied to clipboard')
     expect(document.getElementById('permalink-toast').classList.contains('toast-error')).toBe(false)
   })
 
+  it('permalinkTab can bypass redaction when the confirmation chooses raw sharing', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/share')
+        return Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) })
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const confirmPermalinkRedactionChoice = vi.fn(() => Promise.resolve('raw'))
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      confirmPermalinkRedactionChoice,
+      shareRedactionRules: [
+        { pattern: '\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b', replacement: '[ip-redacted]' },
+      ],
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'connected to 203.0.113.10', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(confirmPermalinkRedactionChoice).toHaveBeenCalledTimes(1)
+    const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
+    const payload = JSON.parse(shareCall[1].body)
+    expect(payload.apply_redaction).toBe(false)
+    expect(payload.content[0].text).toBe('connected to 203.0.113.10')
+  })
+
+  it('permalinkTab cancels sharing when the redaction confirmation is dismissed', async () => {
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) }),
+    )
+    const confirmPermalinkRedactionChoice = vi.fn(() => Promise.resolve(null))
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      confirmPermalinkRedactionChoice,
+    })
+    const id = createTab('tab 1')
+    const cmdInput = document.getElementById('cmd')
+    _getTabs()[0].rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise((resolve) => setImmediate(resolve))
+
+    expect(apiFetch).not.toHaveBeenCalledWith('/share', expect.anything())
+    expect(cmdInput.focus).toHaveBeenCalled()
+  })
+
   it('permalinkTab does not append a truncation warning for a tab with full output already loaded', async () => {
     const apiFetch = vi.fn((url) => {
       if (url === '/history/run-1?json') {
         return Promise.resolve({
-          json: () => Promise.resolve({
-            output_entries: [
-              { text: 'full line 1', cls: '', tsC: '', tsE: '' },
-              { text: 'full line 2', cls: '', tsC: '', tsE: '' },
-            ],
-            output: ['full line 1', 'full line 2'],
-          }),
+          json: () =>
+            Promise.resolve({
+              output_entries: [
+                { text: 'full line 1', cls: '', tsC: '', tsE: '' },
+                { text: 'full line 2', cls: '', tsC: '', tsE: '' },
+              ],
+              output: ['full line 1', 'full line 2'],
+            }),
         })
       }
       return Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) })
@@ -698,27 +882,42 @@ describe('tabs helpers', () => {
     tab.rawLines.push({ text: '$ tab 1', cls: 'prompt-echo', tsC: '', tsE: '' })
     tab.rawLines.push({ text: '', cls: 'prompt-echo', tsC: '', tsE: '' })
     tab.rawLines.push({ text: 'preview line 1', cls: '', tsC: '', tsE: '' })
-    tab.rawLines.push({ text: '[preview truncated — only the last 2000 lines are shown here, but the full output had 6386 lines. Use the run history permalink for the full output]', cls: 'notice', tsC: '', tsE: '' })
-    tab.rawLines.push({ text: '[process exited with code 0 in 0.2s]', cls: 'exit-ok', tsC: '', tsE: '' })
+    tab.rawLines.push({
+      text: '[preview truncated — only the last 2000 lines are shown here, but the full output had 6386 lines. Use the run history permalink for the full output]',
+      cls: 'notice',
+      tsC: '',
+      tsE: '',
+    })
+    tab.rawLines.push({
+      text: '[process exited with code 0 in 0.2s]',
+      cls: 'exit-ok',
+      tsC: '',
+      tsE: '',
+    })
 
     permalinkTab(id)
-    await new Promise(resolve => setImmediate(resolve))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
 
     expect(apiFetch).toHaveBeenCalledWith('/history/run-1?json')
     const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
     expect(shareCall).toBeTruthy()
     const payload = JSON.parse(shareCall[1].body)
+    expect(payload.apply_redaction).toBe(true)
     expect(payload.content).toHaveLength(5)
-    expect(payload.content.map(entry => entry.text)).toEqual([
+    expect(payload.content.map((entry) => entry.text)).toEqual([
       '$ tab 1',
       '',
       'full line 1',
       'full line 2',
       '[process exited with code 0 in 0.2s]',
     ])
-    expect(payload.content.some(entry => String(entry.text || '').includes('tab output truncated'))).toBe(false)
-    expect(payload.content.some(entry => String(entry.text || '').includes('preview truncated'))).toBe(false)
+    expect(
+      payload.content.some((entry) => String(entry.text || '').includes('tab output truncated')),
+    ).toBe(false)
+    expect(
+      payload.content.some((entry) => String(entry.text || '').includes('preview truncated')),
+    ).toBe(false)
     expect(cmdInput.focus).toHaveBeenCalled()
   })
 
@@ -739,20 +938,31 @@ describe('tabs helpers', () => {
     tab.rawLines.push({ text: 'line 1', cls: '', tsC: '', tsE: '' })
 
     copyTab(id)
-    await new Promise(resolve => setImmediate(resolve))
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
     expect(cmdInput.focus).toHaveBeenCalled()
 
     cmdInput.focus.mockClear()
     saveTab(id)
-    await new Promise(resolve => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
     expect(cmdInput.focus).toHaveBeenCalled()
 
     cmdInput.focus.mockClear()
     window.ExportHtmlUtils = {
-      escapeExportHtml: s => s,
-      renderExportPromptEcho: s => s,
+      escapeExportHtml: (s) => s,
+      renderExportPromptEcho: (s) => s,
+      normalizeExportTranscriptLines: (lines) => lines,
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
       fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
       buildTerminalExportHtml: () => '<html><body>export</body></html>',
       exportTimestamp: () => '2026-01-01-00-00-00',
     }
@@ -774,11 +984,13 @@ describe('tabs helpers', () => {
       },
     }
 
-    const { buildTerminalExportStyles } = fromDomScripts([
-      'app/static/js/export_html.js',
-    ], {
-      document,
-    }, `ExportHtmlUtils`)
+    const { buildTerminalExportStyles } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+      },
+      'ExportHtmlUtils',
+    )
 
     const css = buildTerminalExportStyles('theme_light_blue')
     expect(css).toContain('--bg: #b8c4d0;')
@@ -808,26 +1020,86 @@ describe('tabs helpers', () => {
       },
     }
 
-    const { buildTerminalExportHtml } = fromDomScripts([
-      'app/static/js/export_html.js',
-    ], {
-      document,
-      window,
-    }, `ExportHtmlUtils`)
+    const { buildTerminalExportHtml } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+        window,
+      },
+      'ExportHtmlUtils',
+    )
 
     const html = buildTerminalExportHtml({
-      appName: 'darklab shell',
+      appName: 'darklab_shell',
       title: 'share export',
       metaHtml: '<span>meta</span>',
       linesHtml: '<span class="line">hello</span>',
+      exportCss: '.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }',
     })
 
     expect(html).toContain('<meta name="color-scheme" content="light">')
-    expect(html).toContain('background: var(--theme-terminal-bar-bg, var(--bg));')
-    expect(html).toContain('background: var(--theme-panel-bg, var(--surface));')
-    expect(html).toContain('border: 1px solid var(--theme-panel-border, var(--border));')
+    expect(html).toContain('--bg: #eef4fa;')
+    expect(html).toContain('--theme-panel-bg: #edf4fb;')
+    expect(html).toContain('.export-header { background: var(--theme-terminal-bar-bg, var(--bg)); }')
+    expect(html).toContain('<h1 class="export-title">darklab_shell</h1>')
 
     delete window.ThemeRegistry
+  })
+
+  it('builds a shared export header model with canonical run-meta ordering', () => {
+    const { buildExportHeaderModel } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+        window,
+      },
+      'ExportHtmlUtils',
+    )
+
+    const header = buildExportHeaderModel({
+      appName: 'darklab_shell',
+      metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
+      runMeta: { exitCode: 0, duration: '1.2s', lines: '42 lines', version: '1.5' },
+    })
+
+    expect(header).toEqual({
+      appName: 'darklab_shell',
+      metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
+      runMetaItems: [
+        { kind: 'badge', tone: 'ok', text: 'exit 0' },
+        { kind: 'item', text: '1.2s' },
+        { kind: 'item', text: '42 lines' },
+        { kind: 'item', text: 'v1.5' },
+      ],
+    })
+  })
+
+  it('renders export header html with the same title/meta/run-meta structure as permalink pages', () => {
+    const { buildTerminalExportHeaderHtml } = fromDomScripts(
+      ['app/static/js/export_html.js'],
+      {
+        document,
+        window,
+      },
+      'ExportHtmlUtils',
+    )
+
+    const html = buildTerminalExportHeaderHtml({
+      appName: 'darklab_shell',
+      metaLine: 'scan  ·  1/1/2026, 10:00:00 AM',
+      runMetaItems: [
+        { kind: 'badge', tone: 'fail', text: 'exit 1' },
+        { kind: 'item', text: '9 lines' },
+      ],
+    })
+
+    expect(html).toContain('<header class="export-header">')
+    expect(html).toContain('<h1 class="export-title">darklab_shell</h1>')
+    expect(html).toContain('<div class="export-meta">scan  ·  1/1/2026, 10:00:00 AM</div>')
+    expect(html).toContain('<div class="export-run-meta">')
+    expect(html).toContain('meta-badge-fail')
+    expect(html).toContain('exit 1')
+    expect(html).toContain('9 lines')
   })
 
   it('saveTab shows a toast when there is only welcome output', () => {
@@ -838,6 +1110,148 @@ describe('tabs helpers', () => {
     saveTab(id)
 
     expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
+  })
+
+  it('saveTab does not apply redaction rules to exported text', async () => {
+    let savedBlob = null
+    const { createTab, saveTab, _getTabs } = loadTabsFns({
+      shareRedactionRules: [{ pattern: 'Bearer\\s+\\S+', replacement: 'Bearer [redacted]' }],
+      urlImpl: {
+        createObjectURL: (blob) => {
+          savedBlob = blob
+          return 'blob:mock'
+        },
+        revokeObjectURL: () => {},
+      },
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'Authorization: Bearer abc123', cls: '', tsC: '', tsE: '' })
+
+    saveTab(id)
+
+    await expect(savedBlob.text()).resolves.toBe('Authorization: Bearer abc123')
+  })
+
+  it('exportTabHtml does not apply redaction rules to rendered HTML output', async () => {
+    window.ExportHtmlUtils = {
+      escapeExportHtml: (s) => s,
+      renderExportPromptEcho: (s) => s,
+      normalizeExportTranscriptLines: (lines) => lines,
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
+      fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: lines.map(l => l.text).join(''), prefixWidth: 0 }),
+      buildTerminalExportHtml: ({ linesHtml }) => linesHtml,
+      exportTimestamp: () => '2026-01-01-00-00-00',
+    }
+    let savedBlob = null
+    const { createTab, exportTabHtml, _getTabs } = loadTabsFns({
+      shareRedactionRules: [{ pattern: 'token=\\w+', replacement: 'token=[redacted]' }],
+      urlImpl: {
+        createObjectURL: (blob) => {
+          savedBlob = blob
+          return 'blob:mock'
+        },
+        revokeObjectURL: () => {},
+      },
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'token=abc123', cls: '', tsC: '', tsE: '' })
+
+    await exportTabHtml(id)
+
+    const html = await savedBlob.text()
+    expect(html).toContain('token=abc123')
+    expect(html).not.toContain('token=[redacted]')
+    delete window.ExportHtmlUtils
+  })
+
+  it('exportTabHtml shows a toast when the tab has no lines', async () => {
+    window.ExportHtmlUtils = {
+      buildExportDocumentModel: ({ appName, title, label, createdText, runMeta, rawLines }) => ({
+        appName,
+        title,
+        metaLine: `${label} · ${createdText}`,
+        runMeta,
+        rawLines,
+      }),
+      buildExportMetaLine: ({ label, createdText }) => `${label} · ${createdText}`,
+      fetchVendorFontFacesCss: () => Promise.resolve(''),
+      fetchTerminalExportCss: () => Promise.resolve(''),
+      buildExportLinesHtml: (lines) => ({ linesHtml: '', prefixWidth: 0 }),
+      buildTerminalExportHtml: () => '',
+      exportTimestamp: () => '2026-01-01-00-00-00',
+    }
+    const { createTab, exportTabHtml } = loadTabsFns()
+    const id = createTab('tab 1')
+
+    await exportTabHtml(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
+    delete window.ExportHtmlUtils
+  })
+
+  it('exportTabHtml shows a toast when ExportHtmlUtils is not loaded', async () => {
+    delete window.ExportHtmlUtils
+    const { createTab, exportTabHtml, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'hello', cls: '', tsC: '', tsE: '' })
+
+    await exportTabHtml(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('Failed to export html')
+  })
+
+  it('exportTabPdf shows a toast when the tab has no lines', () => {
+    const { createTab, exportTabPdf } = loadTabsFns()
+    const id = createTab('tab 1')
+
+    exportTabPdf(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('No output to export')
+  })
+
+  it('exportTabPdf shows a toast when jsPDF is not loaded', () => {
+    delete window.jspdf
+    const { createTab, exportTabPdf, _getTabs } = loadTabsFns()
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'hello', cls: '', tsC: '', tsE: '' })
+
+    exportTabPdf(id)
+
+    expect(document.getElementById('permalink-toast').textContent).toBe('PDF library not loaded')
+  })
+
+  it('permalinkTab applies configured redaction rules before creating a snapshot', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/share')
+        return Promise.resolve({ json: () => Promise.resolve({ url: '/share/abc' }) })
+      return Promise.resolve({ json: () => Promise.resolve({}) })
+    })
+    const { createTab, permalinkTab, _getTabs } = loadTabsFns({
+      apiFetch,
+      shareRedactionRules: [
+        { pattern: '\\b\\d{1,3}(?:\\.\\d{1,3}){3}\\b', replacement: '[ip-redacted]' },
+      ],
+    })
+    const id = createTab('tab 1')
+    _getTabs()[0].rawLines.push({ text: 'connected to 203.0.113.10', cls: '', tsC: '', tsE: '' })
+
+    permalinkTab(id)
+    await new Promise((resolve) => setImmediate(resolve))
+    await new Promise((resolve) => setImmediate(resolve))
+
+    const shareCall = apiFetch.mock.calls.find(([url]) => url === '/share')
+    const payload = JSON.parse(shareCall[1].body)
+    expect(payload.apply_redaction).toBe(true)
+    expect(payload.content[0].text).toBe('connected to [ip-redacted]')
   })
 
   it('startTabRename updates scroll buttons when the strip begins overflowing during edit', () => {
@@ -905,6 +1319,7 @@ describe('tabs helpers', () => {
   })
 
   it('reorders tabs through touch pointer dragging on mobile', () => {
+    vi.useFakeTimers()
     const { createTab, _getTabs } = loadTabsFns()
     const firstId = createTab('tab 1')
     const secondId = createTab('tab 2')
@@ -932,36 +1347,90 @@ describe('tabs helpers', () => {
       height: 40,
     })
     tabsBar.scrollBy = vi.fn()
+    document.body.classList.add('mobile-terminal-mode')
 
     const dragged = document.querySelector(`.tab[data-id="${thirdId}"]`)
-    dragged.dispatchEvent(touchPointerEvent('pointerdown', {
-      pointerId: 7,
-      pointerType: 'touch',
-      clientX: 250,
-      clientY: 12,
-    }))
-    document.dispatchEvent(touchPointerEvent('pointermove', {
-      pointerId: 7,
-      pointerType: 'touch',
-      clientX: 20,
-      clientY: 12,
-    }))
+    dragged.dispatchEvent(touchEvent('touchstart', [{ identifier: 7, clientX: 250, clientY: 12 }]))
+    vi.advanceTimersByTime(200)
+    document.dispatchEvent(touchEvent('touchmove', [{ identifier: 7, clientX: 20, clientY: 12 }]))
 
     expect(dragged.classList.contains('tab-touch-dragging')).toBe(true)
-    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(true)
-    expect(document.querySelector(`.tab[data-id="${firstId}"]`)?.classList.contains('tab-drop-before')).toBe(true)
+    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(
+      true,
+    )
+    expect(
+      document.querySelector(`.tab[data-id="${firstId}"]`)?.classList.contains('tab-drop-before'),
+    ).toBe(true)
 
-    document.dispatchEvent(touchPointerEvent('pointerup', {
-      pointerId: 7,
-      pointerType: 'touch',
-      clientX: 20,
-      clientY: 12,
-    }))
+    document.dispatchEvent(
+      touchEvent('touchend', [], [{ identifier: 7, clientX: 20, clientY: 12 }]),
+    )
 
-    expect(_getTabs().map(tab => tab.id)).toEqual([thirdId, firstId, secondId])
+    expect(_getTabs().map((tab) => tab.id)).toEqual([thirdId, firstId, secondId])
     expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
     expect(document.getElementById('cmd').focus).toHaveBeenCalled()
-    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(false)
+    expect(document.getElementById('tabs-bar').classList.contains('tabs-bar-touch-sorting')).toBe(
+      false,
+    )
+    expect(document.querySelector('.tab-drop-before, .tab-drop-after')).toBeNull()
+    vi.useRealTimers()
+  })
+
+  it('reorders desktop tabs through pointer dragging', () => {
+    const { createTab, _getTabs } = loadTabsFns()
+    const firstId = createTab('tab 1')
+    const secondId = createTab('tab 2')
+    const thirdId = createTab('tab 3')
+
+    const tabs = [...document.querySelectorAll('.tab')]
+    tabs.forEach((tab, index) => {
+      const left = index * 100
+      tab.getBoundingClientRect = () => ({
+        left,
+        right: left + 90,
+        top: 0,
+        bottom: 36,
+        width: 90,
+        height: 36,
+      })
+    })
+
+    const dragged = document.querySelector(`.tab[data-id="${thirdId}"]`)
+    dragged.dispatchEvent(
+      touchPointerEvent('pointerdown', {
+        pointerId: 9,
+        pointerType: 'mouse',
+        button: 0,
+        clientX: 250,
+        clientY: 12,
+      }),
+    )
+    document.dispatchEvent(
+      touchPointerEvent('pointermove', {
+        pointerId: 9,
+        pointerType: 'mouse',
+        clientX: 20,
+        clientY: 12,
+      }),
+    )
+
+    expect(dragged.classList.contains('tab-pointer-dragging')).toBe(true)
+    expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
+    expect(
+      document.querySelector(`.tab[data-id="${firstId}"]`)?.classList.contains('tab-drop-before'),
+    ).toBe(true)
+
+    document.dispatchEvent(
+      touchPointerEvent('pointerup', {
+        pointerId: 9,
+        pointerType: 'mouse',
+        clientX: 20,
+        clientY: 12,
+      }),
+    )
+
+    expect(_getTabs().map((tab) => tab.id)).toEqual([thirdId, firstId, secondId])
+    expect(document.querySelector('.tab')?.dataset.id).toBe(thirdId)
     expect(document.querySelector('.tab-drop-before, .tab-drop-after')).toBeNull()
   })
 })

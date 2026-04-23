@@ -1,4 +1,15 @@
-image: python:3.12-slim
+default:
+  tags:
+    - self-hosted
+
+variables:
+  CI_DEFAULT_IMAGE: "python:3.14-slim"
+  CI_PYTHON_E2E_IMAGE: "python:3.14"
+  CI_NODE_IMAGE: "node:22-slim"
+  CI_DOCKER_IMAGE: "docker:27"
+  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
+
+image: $CI_DEFAULT_IMAGE
 
 workflow:
   rules:
@@ -13,9 +24,6 @@ stages:
   - lint
   - audit
   - build
-
-variables:
-  PIP_CACHE_DIR: "$CI_PROJECT_DIR/.cache/pip"
 
 cache:
   key: "$CI_COMMIT_REF_SLUG"
@@ -32,12 +40,15 @@ test-py-pytest:
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
     - if: $CI_PIPELINE_SOURCE == "web"
     - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q git
+    - pip install -q -r app/requirements.txt -r requirements-dev.txt
   script:
     - pytest tests/py/ -v
 
 test-js-unit:
   stage: test
-  image: node:22-slim
+  image: $CI_NODE_IMAGE
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -54,7 +65,7 @@ test-js-unit:
 
 test-js-e2e:
   stage: test
-  image: python:3.12
+  image: $CI_PYTHON_E2E_IMAGE
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
@@ -74,7 +85,7 @@ test-js-e2e:
       - test-results/
     expire_in: 1 week
 
-lint:
+lint-py:
   stage: lint
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
@@ -84,8 +95,34 @@ lint:
   script:
     - flake8 app/ tests/py/
     - bandit -r app/ -ll -q
+    - yamllint -c config/yamllint.yml $(find . \( -name '*.yml' -o -name '*.yaml' \) -not -path './.git/*' -not -path './node_modules/*')
 
-audit:
+lint-js:
+  stage: lint
+  image: $CI_NODE_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - apt-get update -q && apt-get install -y -q shellcheck curl
+    - curl -sSL https://github.com/hadolint/hadolint/releases/latest/download/hadolint-Linux-x86_64 -o /usr/local/bin/hadolint && chmod +x /usr/local/bin/hadolint
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run lint:js
+    - npm run lint:css
+    - npm run lint:shell
+    - npm run lint:docker
+    - npm run lint:md
+    - npm run lint:json
+    - npm run vendor:check
+
+audit-py:
   stage: audit
   rules:
     - if: $CI_PIPELINE_SOURCE == "push"
@@ -95,6 +132,23 @@ audit:
   script:
     - pip install -q pip-audit
     - pip-audit -r app/requirements.txt
+
+audit-js:
+  stage: audit
+  image: $CI_NODE_IMAGE
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
+    - if: $CI_PIPELINE_SOURCE == "web"
+    - if: $CI_PIPELINE_SOURCE == "schedule"
+  before_script:
+    - npm ci
+  cache:
+    key: "node-$CI_COMMIT_REF_SLUG"
+    paths:
+      - node_modules/
+  script:
+    - npm run audit:js
 
 dependency-version-check:
   stage: audit
@@ -117,13 +171,12 @@ dependency-version-check:
 
 container-smoke-test:
   stage: build
-  image: docker:27
-  services:
-    - docker:27-dind
+  image: $CI_DOCKER_IMAGE
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
   before_script:
-    - apk add --no-cache python3 py3-pytest py3-yaml
+    - apk add --no-cache python3 py3-pytest py3-yaml docker-cli-compose
   rules:
     - if: $CI_PIPELINE_SOURCE == "web"
       when: manual
@@ -135,11 +188,10 @@ container-smoke-test:
 
 docker-build:
   stage: build
-  image: docker:27
-  services:
-    - docker:27-dind
+  image: $CI_DOCKER_IMAGE
   variables:
-    DOCKER_TLS_CERTDIR: "/certs"
+    DOCKER_HOST: "unix:///var/run/docker.sock"
+    DOCKER_TLS_CERTDIR: ""
     DOCKER_BUILDKIT: "1"
   before_script: []
   rules:

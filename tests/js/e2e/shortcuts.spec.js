@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp, waitForHistoryRuns } from './helpers.js'
 
 const CMD = 'curl http://localhost:5001/health'
 const TEST_IP = makeTestIp(70)
@@ -22,9 +22,12 @@ test.describe('keyboard shortcuts', () => {
     })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
-  test('macOS Option+T opens a new tab without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+T opens a new tab without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await expect(page.locator('.tab')).toHaveCount(1)
 
     await dispatchMacOptionKey(page, '#cmd', {
@@ -37,7 +40,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+W closes the active tab without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+W closes the active tab without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(2)
     await page.locator('.tab').nth(1).click()
@@ -52,7 +57,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+Shift+C copies active-tab output without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await dispatchMacOptionKey(page, '#cmd', {
@@ -67,7 +74,9 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({ page }) => {
+  test('macOS Option+P creates a permalink without inserting a symbol into the prompt', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     await dispatchMacOptionKey(page, '#cmd', {
@@ -76,6 +85,8 @@ test.describe('keyboard shortcuts', () => {
       altKey: true,
     })
 
+    await expect(page.locator('#confirm-host')).toBeVisible()
+    await page.locator('#confirm-host [data-confirm-action-id="redacted"]').click()
     await expect(page.locator('#permalink-toast')).toHaveClass(/show/, { timeout: 5000 })
     await expect(page.locator('#permalink-toast')).toContainText(/link copied/i)
     await expect(page.locator('#cmd')).toHaveValue('')
@@ -85,25 +96,27 @@ test.describe('keyboard shortcuts', () => {
     await page.locator('#new-tab-btn').click()
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(3)
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: 'ArrowLeft',
       code: 'ArrowLeft',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 2')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 2')
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: 'ArrowRight',
       code: 'ArrowRight',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
-  test('macOS Option+digit jumps directly to a tab without inserting a symbol', async ({ page }) => {
+  test('macOS Option+digit jumps directly to a tab without inserting a symbol', async ({
+    page,
+  }) => {
     await page.locator('#new-tab-btn').click()
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(3)
@@ -113,14 +126,14 @@ test.describe('keyboard shortcuts', () => {
       code: 'Digit3',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: '¡',
       code: 'Digit1',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 1')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
@@ -135,10 +148,12 @@ test.describe('keyboard shortcuts', () => {
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
   })
 
-  test('macOS Option+B and Option+F move by word without inserting symbols into the prompt', async ({ page }) => {
+  test('macOS Option+B and Option+F move by word without inserting symbols into the prompt', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     await input.fill('dig darklab.sh A')
-    await input.evaluate(el => el.setSelectionRange(el.value.length, el.value.length))
+    await input.evaluate((el) => el.setSelectionRange(el.value.length, el.value.length))
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: '∫',
@@ -146,7 +161,7 @@ test.describe('keyboard shortcuts', () => {
       altKey: true,
     })
 
-    let selection = await input.evaluate(el => ({
+    let selection = await input.evaluate((el) => ({
       value: el.value,
       start: el.selectionStart,
       end: el.selectionEnd,
@@ -161,7 +176,7 @@ test.describe('keyboard shortcuts', () => {
       altKey: true,
     })
 
-    selection = await input.evaluate(el => ({
+    selection = await input.evaluate((el) => ({
       value: el.value,
       start: el.selectionStart,
       end: el.selectionEnd,
@@ -171,21 +186,30 @@ test.describe('keyboard shortcuts', () => {
     expect(selection.end).toBe(16)
   })
 
-  test('desktop prompt cursor follows repeated caret moves while arrowing across the command', async ({ page }) => {
+  test('desktop prompt cursor follows repeated caret moves while arrowing across the command', async ({
+    page,
+  }) => {
     const input = page.locator('#cmd')
     await input.fill('curl darklab.sh')
     await input.focus()
 
     const promptCaret = page.locator('#shell-prompt-text .shell-caret-char')
 
-    for (const [pos, ch] of [[0, 'c'], [1, 'u'], [2, 'r'], [3, 'l']]) {
+    for (const [pos, ch] of [
+      [0, 'c'],
+      [1, 'u'],
+      [2, 'r'],
+      [3, 'l'],
+    ]) {
       await input.evaluate((el, nextPos) => el.setSelectionRange(nextPos, nextPos), pos)
       await page.evaluate(() => document.dispatchEvent(new Event('selectionchange')))
       await expect(promptCaret).toHaveText(ch)
     }
   })
 
-  test('history and submit shortcuts still work after transcript text is selected', async ({ page }) => {
+  test('history and submit shortcuts still work after transcript text is selected', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     const lineCountBefore = await page.locator('.tab-panel.active .output .line').count()
 
@@ -208,7 +232,7 @@ test.describe('keyboard shortcuts', () => {
     await page.waitForFunction(
       (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
       lineCountBefore,
-      { timeout: 15_000 }
+      { timeout: 15_000 },
     )
   })
 })
@@ -245,15 +269,21 @@ test.describe('Ctrl+R reverse-history search', () => {
     await page.waitForFunction(
       (before) => document.querySelectorAll('.tab-panel.active .output .line').length > before,
       linesBefore,
-      { timeout: 15_000 }
+      { timeout: 15_000 },
     )
   })
 
-  test('Tab in hist-search accepts the match into the input without running the command', async ({ page }) => {
+  test('Tab in hist-search accepts the match into the input without running the command', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
+    // Ensure the run is committed server-side so the debounced fetch finds it
+    await waitForHistoryRuns(page, 1)
     const linesBefore = await page.locator('.tab-panel.active .output .line').count()
     await page.locator('#cmd').press('Control+r')
     await page.locator('#cmd').type('host')
+    // Wait for the dropdown to show the match before accepting with Tab
+    await expect(page.locator('#hist-search-dropdown .hist-search-item')).toContainText('hostname')
     await page.locator('#cmd').press('Tab')
     // dropdown should close, input should have the accepted value
     await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
@@ -263,7 +293,9 @@ test.describe('Ctrl+R reverse-history search', () => {
     expect(linesAfter).toBe(linesBefore)
   })
 
-  test('ArrowDown in hist-search navigates to the next match and fills the input', async ({ page }) => {
+  test('ArrowDown in hist-search navigates to the next match and fills the input', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     await runCommand(page, 'dig darklab.sh A')
     await page.locator('#cmd').press('Control+r')
@@ -278,7 +310,9 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#cmd')).toHaveValue('hostname')
   })
 
-  test('Escape in hist-search closes the dropdown and restores the pre-search draft', async ({ page }) => {
+  test('Escape in hist-search closes the dropdown and restores the pre-search draft', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     await page.locator('#cmd').fill('my draft')
     await page.locator('#cmd').press('Control+r')
@@ -288,7 +322,9 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#cmd')).toHaveValue('my draft')
   })
 
-  test('Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input', async ({ page }) => {
+  test('Ctrl+C in hist-search closes the dropdown and keeps the typed query in the input', async ({
+    page,
+  }) => {
     await runCommand(page, 'hostname')
     await page.locator('#cmd').fill('my draft')
     await page.locator('#cmd').press('Control+r')
@@ -297,5 +333,149 @@ test.describe('Ctrl+R reverse-history search', () => {
     await expect(page.locator('#hist-search-dropdown')).toHaveClass(/u-hidden/)
     // keepCurrent: typed query stays, pre-draft is NOT restored
     await expect(page.locator('#cmd')).toHaveValue('host')
+  })
+})
+
+test.describe('? keyboard-shortcuts overlay', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(73) })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
+  })
+
+  test('? opens the overlay when no input is focused', async ({ page }) => {
+    await page.locator('#cmd').evaluate(el => el.blur())
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+    const rowCount = await page.locator('#shortcuts-list .shortcut-key').count()
+    expect(rowCount).toBeGreaterThan(10)
+    // Self-documenting: the overlay lists its own `?` trigger.
+    await expect(page.locator('#shortcuts-list')).toContainText('?')
+  })
+
+  test('Escape closes the overlay', async ({ page }) => {
+    await page.locator('#cmd').evaluate(el => el.blur())
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+    await page.keyboard.press('Escape')
+    await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('? opens the overlay from the empty command prompt', async ({ page }) => {
+    await page.locator('#cmd').focus()
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).toHaveClass(/\bopen\b/)
+    // The `?` character should NOT have been inserted into the prompt.
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('? types normally when the command prompt already has text', async ({ page }) => {
+    await page.locator('#cmd').focus()
+    await page.locator('#cmd').type('curl ')
+    await page.keyboard.press('?')
+    await expect(page.locator('#shortcuts-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('curl ?')
+  })
+
+  test('overlay and shortcuts built-in share the same source', async ({ page }) => {
+    // Built-in command output
+    await runCommand(page, 'shortcuts')
+    const termText = await page.locator('.tab-panel.active .output').innerText()
+    // Overlay payload (grouped into sections)
+    const overlay = await page.evaluate(async () => {
+      const resp = await fetch('/shortcuts')
+      const data = await resp.json()
+      const keys = []
+      for (const section of data.sections || []) {
+        for (const item of section.items || []) keys.push(item.key)
+      }
+      return { sectionTitles: (data.sections || []).map(s => s.title), keys }
+    })
+    // Section headers appear in both surfaces.
+    for (const title of overlay.sectionTitles) {
+      expect(termText).toContain(`${title}:`)
+    }
+    // Every overlay key appears in the terminal output (both render from the
+    // same source of truth).
+    for (const key of overlay.keys) {
+      expect(termText).toContain(key)
+    }
+  })
+})
+
+test.describe('desktop chrome keyboard shortcuts', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': makeTestIp(74) })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
+    // Keep the composer focused — that's the real-world default, and chords
+    // must fire without the Option glyph leaking into the prompt on macOS.
+    await page.locator('#cmd').focus()
+  })
+
+  test('Alt+H toggles the history drawer from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: '˙', code: 'KeyH', altKey: true })
+    await expect(page.locator('#history-panel')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: '˙', code: 'KeyH', altKey: true })
+    await expect(page.locator('#history-panel')).not.toHaveClass(/\bopen\b/)
+  })
+
+  test('Alt+, opens the options panel from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: '≤', code: 'Comma', altKey: true })
+    await expect(page.locator('#options-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+Shift+T opens the theme selector from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ˇ', code: 'KeyT', altKey: true, shiftKey: true })
+    await expect(page.locator('#theme-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+G opens the workflows overlay from the composer', async ({ page }) => {
+    await dispatchMacOptionKey(page, '#cmd', { key: '©', code: 'KeyG', altKey: true })
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('Alt+S toggles the transcript search bar from the composer', async ({ page }) => {
+    await expect(page.locator('#search-bar')).not.toBeVisible()
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ß', code: 'KeyS', altKey: true })
+    await expect(page.locator('#search-bar')).toBeVisible()
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: 'ß', code: 'KeyS', altKey: true })
+    await expect(page.locator('#search-bar')).not.toBeVisible()
+  })
+
+  test('Alt+\\ toggles the rail collapsed state from the composer', async ({ page }) => {
+    const rail = page.locator('#rail')
+    const startsCollapsed = await rail.evaluate(el => el.classList.contains('rail-collapsed'))
+    await dispatchMacOptionKey(page, '#cmd', { key: '«', code: 'Backslash', altKey: true })
+    if (startsCollapsed) {
+      await expect(rail).not.toHaveClass(/\brail-collapsed\b/)
+    } else {
+      await expect(rail).toHaveClass(/\brail-collapsed\b/)
+    }
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: '«', code: 'Backslash', altKey: true })
+    if (startsCollapsed) {
+      await expect(rail).toHaveClass(/\brail-collapsed\b/)
+    } else {
+      await expect(rail).not.toHaveClass(/\brail-collapsed\b/)
+    }
+  })
+
+  test('Alt+/ toggles the FAQ overlay from the composer', async ({ page }) => {
+    const faq = page.locator('#faq-overlay')
+    await expect(faq).not.toHaveClass(/\bopen\b/)
+    await dispatchMacOptionKey(page, '#cmd', { key: '÷', code: 'Slash', altKey: true })
+    await expect(faq).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#cmd')).toHaveValue('')
+    await dispatchMacOptionKey(page, '#cmd', { key: '÷', code: 'Slash', altKey: true })
+    await expect(faq).not.toHaveClass(/\bopen\b/)
   })
 })

@@ -1,20 +1,42 @@
 {
   "name": "darklab-shell",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "type": "module",
   "scripts": {
-    "test": "pytest; npm run test:unit; npm run test:e2e",
-    "test:unit": "vitest run",
-    "test:unit:watch": "vitest",
-    "test:e2e": "playwright test",
-    "test:e2e:ui": "playwright test --ui",
-    "capture:container-smoke-test": "node scripts/node/capture_output_for_smoke_test.mjs",
-    "capture:readme-screenshot": "playwright test tests/js/e2e/readme-screenshot.spec.js"
+    "test": "pytest && npm run test:unit && npm run test:e2e",
+    "test:pytest": "pytest",
+    "test:unit": "vitest run --config config/vitest.config.js",
+    "test:unit:watch": "vitest --config config/vitest.config.js",
+    "test:e2e": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js",
+    "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
+    "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
+    "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
+    "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
+    "lint:py": "flake8 app/ tests/py/ && bandit -r app/ -ll -q",
+    "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/ app/static/js/**/*.js",
+    "lint:css": "stylelint \"app/static/css/**/*.css\" --config config/stylelint.config.mjs",
+    "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",
+    "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
+    "lint:yaml": "yamllint -c config/yamllint.yml $(find . \\( -name '*.yml' -o -name '*.yaml' \\) -not -path './.git/*' -not -path './node_modules/*')",
+    "lint:json": "node scripts/lint_json.mjs",
+    "lint:md": "markdownlint-cli2 \"**/*.md\"",
+    "audit": "npm run audit:py && npm run audit:js",
+    "audit:py": "pip-audit -r app/requirements.txt",
+    "audit:js": "npm audit --audit-level=high",
+    "vendor:sync": "node scripts/build_vendor.mjs",
+    "vendor:check": "tmp=$(mktemp -d) && node scripts/build_vendor.mjs --out-dir \"$tmp\" && diff -qr \"$tmp\" app/static/js/vendor/"
+  },
+  "dependencies": {
+    "ansi_up": "6.0.6",
+    "jspdf": "4.2.1"
   },
   "devDependencies": {
     "@playwright/test": "^1.52.0",
     "@vitest/coverage-v8": "^4.1.4",
+    "eslint": "^10.2.0",
     "jsdom": "^29.0.2",
+    "markdownlint-cli2": "^0.22.0",
+    "stylelint": "^17.8.0",
     "vitest": "^4.1.4"
   }
 }

@@ -1,4 +1,4 @@
-# darklab shell — Light Theme: Rose Quartz
+# darklab_shell — Light Theme: Rose Quartz
 # Dusty pinks and warm slate for a softer editorial interface.
 
 label: "Rose Quartz"
@@ -88,8 +88,7 @@ history_load_modal_shadow: "rgba(96, 72, 84, 0.16)"
 
 faq_modal_bg: "#fff7f8"
 options_modal_bg: "#fff7f8"
-kill_modal_bg: "#e7d0d8"
-hist_del_modal_bg: "#e7d0d8"
+confirm_modal_bg: "#e7d0d8"
 
 dropdown_bg: "#f8ebef"
 dropdown_border: "rgba(111, 126, 168, 0.20)"
@@ -102,7 +101,7 @@ overlay_backdrop_bg: "rgba(28, 20, 24, 0.72)"
 
 faq_code_bg: "#f3e6ea"
 allowed_chip_bg: "#f3e6ea"
-options_select_bg: "#f8ebef"
+form_control_bg: "#f8ebef"
 
 tab_status_ok_bg: "#5c8a71"
 toast_bg: "#fff8fa"

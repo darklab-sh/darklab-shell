@@ -1,0 +1,14 @@
+# Custom workflow entries for this instance.
+# Each entry requires 'title', 'description', and 'steps'.
+# Each step requires 'cmd' and optionally 'note'.
+# Custom entries are appended after the built-in workflows.
+# Changes take effect immediately — no restart needed.
+#
+# Example:
+# - title: "DNS Troubleshooting"
+#   description: "Diagnose why a domain isn't resolving."
+#   steps:
+#     - cmd: "dig example.com A"
+#       note: "Does it resolve? Check the ANSWER section."
+#     - cmd: "dig @8.8.8.8 example.com A"
+#       note: "Does a public resolver see it differently?"

@@ -7,32 +7,25 @@ import json
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-from flask import Response, has_request_context, render_template, request
+from flask import Response, render_template
 
 from config import (
     CFG,
     DARK_THEME,
     THEME_REGISTRY,
-    THEME_REGISTRY_MAP,
     get_theme_entry,
     theme_runtime_css_vars,
 )
+from helpers import FONT_FILES, current_theme_name
 
 _FONT_DIR = Path(__file__).resolve().parent / "static" / "fonts"
-_FONT_FILES = [
-    ("JetBrains Mono", 300, "JetBrainsMono-300.ttf"),
-    ("JetBrains Mono", 400, "JetBrainsMono-400.ttf"),
-    ("JetBrains Mono", 700, "JetBrainsMono-700.ttf"),
-    ("Syne", 700, "Syne-700.ttf"),
-    ("Syne", 800, "Syne-800.ttf"),
-]
 
 
 def _font_face_css(*, embed: bool = False) -> str:
     # Downloaded HTML can either reference app-hosted font files or embed them
     # directly so the export stays portable offline.
     rules = []
-    for family, weight, filename in _FONT_FILES:
+    for family, weight, filename in FONT_FILES:
         font_path = _FONT_DIR / filename
         if embed:
             try:
@@ -52,27 +45,6 @@ def _font_face_css(*, embed: bool = False) -> str:
             " }"
         )
     return "\n".join(rules)
-
-
-def _current_theme() -> str:
-    """Return the current session theme if available, otherwise default to dark."""
-    # Permalink pages and HTML exports should follow the same theme-selection
-    # rules as the main shell whenever a request context exists.
-    if not has_request_context():
-        return CFG.get("default_theme", "darklab_obsidian.yaml")
-    try:
-        theme_name = request.cookies.get("pref_theme_name", "").strip()
-        if theme_name and theme_name in THEME_REGISTRY_MAP:
-            return theme_name
-        legacy = request.cookies.get("pref_theme", "").strip()
-        if legacy and legacy in THEME_REGISTRY_MAP:
-            return legacy
-        default_theme = CFG.get("default_theme", "darklab_obsidian.yaml")
-        if default_theme in THEME_REGISTRY_MAP:
-            return default_theme
-        return default_theme
-    except Exception:
-        return CFG.get("default_theme", "darklab_obsidian.yaml")
 
 
 def _format_retention(days: int) -> str:
@@ -100,20 +72,34 @@ def _format_retention(days: int) -> str:
     return ", ".join(parts[:-1]) + " and " + parts[-1]
 
 
+def _prompt_echo_text(label: str) -> str:
+    # Single server-side source of truth for prompt-echo text on synthesized
+    # history/snapshot lines. Reads CFG["prompt_prefix"] so permalinks render
+    # the full configured prefix (e.g. "anon@darklab:~$ ls -la") rather than a
+    # reduced "$ ls -la" echo that drifts from the live shell. Paired with the
+    # JS export helper (ExportHtmlUtils.renderExportPromptEcho) that consumes
+    # this text by splitting on its first space to colorize the prefix.
+    prefix = str(CFG.get("prompt_prefix", "$")).strip() or "$"
+    return f"{prefix} {label}".rstrip()
+
+
 def _normalize_permalink_lines(content_lines, label: str):
     # History pages, share pages, and HTML exports feed slightly different line
     # shapes into this layer; normalize them once for the shared template.
     content_items = list(content_lines or [])
     is_structured_snapshot = any(isinstance(entry, dict) for entry in content_items)
     normalized_lines = []
+    echo_text = _prompt_echo_text(label)
 
     if is_structured_snapshot:
         has_prompt_echo = any(
-            isinstance(entry, dict) and str(entry.get("cls", "")) == "prompt-echo"
+            isinstance(entry, dict)
+            and str(entry.get("cls", "")) == "prompt-echo"
+            and len(str(entry.get("text", "")).split(None, 1)) > 1
             for entry in content_items
         )
         if not has_prompt_echo:
-            normalized_lines.append({"text": f"$ {label}", "cls": "prompt-echo", "tsC": "", "tsE": ""})
+            normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
             normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
         for entry in content_items:
             if isinstance(entry, str):
@@ -126,7 +112,7 @@ def _normalize_permalink_lines(content_lines, label: str):
                     "tsE": str(entry.get("tsE", "")),
                 })
     else:
-        normalized_lines.append({"text": f"$ {label}", "cls": "prompt-echo", "tsC": "", "tsE": ""})
+        normalized_lines.append({"text": echo_text, "cls": "prompt-echo", "tsC": "", "tsE": ""})
         normalized_lines.append({"text": "", "cls": "", "tsC": "", "tsE": ""})
         for entry in content_items:
             normalized_lines.append({"text": str(entry), "cls": "", "tsC": "", "tsE": ""})
@@ -149,6 +135,61 @@ def _format_duration(started: str, finished: str) -> str | None:
         return f"{hours}h {mins:02d}m {secs:02d}s"
     except Exception:
         return None
+
+
+def _build_export_meta_line(label: str, created_text: str) -> str:
+    trimmed_label = str(label or "").strip()
+    trimmed_created = str(created_text or "").strip()
+    if trimmed_label and trimmed_created:
+        return f"{trimmed_label} · {trimmed_created}"
+    return trimmed_label or trimmed_created
+
+
+def _normalize_permalink_run_meta(meta: dict | None) -> dict | None:
+    if not meta:
+        return None
+    return {
+        "exitCode": meta.get("exit_code"),
+        "duration": meta.get("duration") or None,
+        "lines": meta.get("lines") or None,
+        "version": meta.get("version") or None,
+    }
+
+
+def _build_permalink_run_meta_items(run_meta: dict | None) -> list[dict]:
+    if not run_meta:
+        return []
+    items = []
+    exit_code = run_meta.get("exitCode")
+    if exit_code is not None:
+        items.append({
+            "kind": "badge",
+            "tone": "ok" if exit_code == 0 else "fail",
+            "text": f"exit {exit_code}",
+        })
+    if run_meta.get("duration"):
+        items.append({"kind": "item", "text": str(run_meta["duration"])})
+    if run_meta.get("lines"):
+        items.append({"kind": "item", "text": str(run_meta["lines"])})
+    if run_meta.get("version"):
+        items.append({"kind": "item", "text": f"v{run_meta['version']}"})
+    return items
+
+
+def _build_permalink_header_model(
+    app_name: str,
+    label: str,
+    created_display: str,
+    run_meta: dict | None,
+    expiry_html: str,
+) -> dict:
+    return {
+        "appName": app_name,
+        "metaLine": _build_export_meta_line(label, created_display),
+        "runMetaItems": _build_permalink_run_meta_items(run_meta),
+        "expiryHtml": expiry_html,
+        "createdDisplay": created_display,
+    }
 
 
 def _expiry_note(created: str) -> str:
@@ -179,33 +220,48 @@ def _expiry_note(created: str) -> str:
 def _permalink_context(title, label, created, content_lines, json_url, extra_actions=None, meta=None):
     # Build one context shape for both live responses and downloadable HTML so
     # metadata/actions stay in sync across both surfaces.
-    app_name = CFG.get("app_name", "darklab shell")
-    theme_entry = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    app_name = CFG.get("app_name", "darklab_shell")
+    theme_entry = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     normalized_lines = _normalize_permalink_lines(content_lines, label)
     has_timestamp_metadata = any(line.get("tsC") or line.get("tsE") for line in normalized_lines)
     created_fmt = created[:19].replace("T", " ") + " UTC"
+    expiry_html = _expiry_note(created)
+    run_meta = _normalize_permalink_run_meta(meta)
+    header_model = _build_permalink_header_model(
+        app_name=app_name,
+        label=label,
+        created_display=created_fmt,
+        run_meta=run_meta,
+        expiry_html=expiry_html,
+    )
+    page_model = {
+        "header": header_model,
+        "transcript": {
+            "lines": normalized_lines,
+            "hasTimestampMetadata": has_timestamp_metadata,
+        },
+        "export": {
+            "appName": app_name,
+            "label": label,
+            "created": created,
+            "createdDisplay": created_fmt,
+            "fontFacesCss": _font_face_css(embed=True),
+            "runMeta": run_meta,
+        },
+        "actions": {
+            "jsonUrl": json_url,
+            "extraActions": extra_actions or [],
+        },
+    }
 
     return {
         "page_title": f"{app_name} — {title}",
-        "app_name": app_name,
         "current_theme": theme_entry,
         "current_theme_css": theme_entry["vars"],
         "theme_registry": {"current": theme_entry, "themes": THEME_REGISTRY},
-        "label": label,
-        "created_fmt": created_fmt,
-        "created_json": json.dumps(created),
-        "expiry_html": _expiry_note(created),
-        "json_url": json_url,
-        "extra_actions": extra_actions or [],
-        "lines_json": json.dumps(normalized_lines),
-        "has_timestamp_metadata": has_timestamp_metadata,
-        "toggle_ts_disabled": not has_timestamp_metadata,
-        "app_name_json": json.dumps(app_name),
-        "label_json": json.dumps(label),
-        "font_faces_css": _font_face_css(embed=True),
         "fallback_theme_css": theme_runtime_css_vars(DARK_THEME),
-        "meta": meta,
-        "meta_json": json.dumps(meta),
+        "page_model": page_model,
+        "page_model_json": json.dumps(page_model),
     }
 
 
@@ -215,17 +271,17 @@ def _permalink_error_page(noun: str) -> Response:
     retention_str = _format_retention(retention)
     if retention == 0:
         detail = (
-            f"The {noun} ID is invalid, the {noun} was never saved, "
-            f"or it was manually deleted."
+            f"This {noun} link is no longer available. The ID may be invalid, "
+            f"the {noun} may never have been saved, or it may have been deleted."
         )
     else:
         detail = (
-            f"The {noun} ID is invalid, it was manually deleted, or it was "
-            f"automatically deleted after exceeding the configured retention "
-            f"period ({retention_str})."
+            f"This {noun} link is no longer available. The ID may be invalid, "
+            f"the {noun} may have been deleted, or it may have expired under "
+            f"the current retention period ({retention_str})."
         )
-    app_name = CFG.get("app_name", "darklab shell")
-    current_theme = get_theme_entry(_current_theme(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
+    app_name = CFG.get("app_name", "darklab_shell")
+    current_theme = get_theme_entry(current_theme_name(), fallback=CFG.get("default_theme", "darklab_obsidian.yaml"))
     html = render_template(
         "permalink_error.html",
         page_title=f"{app_name} — {noun} not found",

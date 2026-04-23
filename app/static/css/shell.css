@@ -1,4 +1,4 @@
-/* darklab shell CSS module: shell
+/* darklab_shell CSS module: shell
    Terminal frame, transcript surfaces, history row, utility buttons, and modals. */
 
 /* ── Terminal ── */
@@ -179,49 +179,29 @@ body.mobile-terminal-mode { padding: 0; gap: 0; }
   -webkit-overflow-scrolling: touch;
 }
 
-.output,
-.ac-dropdown,
-.faq-body,
-#history-list,
-body.permalink-page .permalink-output {
+.nice-scroll {
   scrollbar-width: thin;
   scrollbar-color:
     color-mix(in srgb, var(--muted) 44%, var(--border-bright))
     color-mix(in srgb, var(--surface) 72%, transparent);
 }
 
-.output::-webkit-scrollbar,
-.ac-dropdown::-webkit-scrollbar,
-.faq-body::-webkit-scrollbar,
-#history-list::-webkit-scrollbar,
-body.permalink-page .permalink-output::-webkit-scrollbar {
+.nice-scroll::-webkit-scrollbar {
   width: 10px;
   height: 10px;
 }
 
-.output::-webkit-scrollbar-track,
-.ac-dropdown::-webkit-scrollbar-track,
-.faq-body::-webkit-scrollbar-track,
-#history-list::-webkit-scrollbar-track,
-body.permalink-page .permalink-output::-webkit-scrollbar-track {
+.nice-scroll::-webkit-scrollbar-track {
   background: color-mix(in srgb, var(--surface) 72%, transparent);
 }
 
-.output::-webkit-scrollbar-thumb,
-.ac-dropdown::-webkit-scrollbar-thumb,
-.faq-body::-webkit-scrollbar-thumb,
-#history-list::-webkit-scrollbar-thumb,
-body.permalink-page .permalink-output::-webkit-scrollbar-thumb {
+.nice-scroll::-webkit-scrollbar-thumb {
   background: color-mix(in srgb, var(--muted) 44%, var(--border-bright));
   border-radius: 999px;
   border: 2px solid color-mix(in srgb, var(--surface) 72%, transparent);
 }
 
-.output::-webkit-scrollbar-thumb:hover,
-.ac-dropdown::-webkit-scrollbar-thumb:hover,
-.faq-body::-webkit-scrollbar-thumb:hover,
-#history-list::-webkit-scrollbar-thumb:hover,
-body.permalink-page .permalink-output::-webkit-scrollbar-thumb:hover {
+.nice-scroll::-webkit-scrollbar-thumb:hover {
   background: color-mix(in srgb, var(--text) 38%, var(--border-bright));
 }
 
@@ -277,17 +257,13 @@ body.ts-clock .output .shell-prompt-wrap::before {
   display: flex;
 }
 
-body.ln-on .output .line-content,
-body.ts-elapsed .output .line-content,
-body.ts-clock .output .line-content,
-body.ln-on .output .shell-prompt-wrap > .prompt-prefix,
-body.ts-elapsed .output .shell-prompt-wrap > .prompt-prefix,
-body.ts-clock .output .shell-prompt-wrap > .prompt-prefix,
-body.ln-on .output .shell-prompt-line,
-body.ts-elapsed .output .shell-prompt-line,
-body.ts-clock .output .shell-prompt-line {
-  transform: translateX(calc(var(--output-prefix-width, 0ch) + 1ch));
-  transform-origin: left top;
+body.ln-on .output .line,
+body.ts-elapsed .output .line,
+body.ts-clock .output .line,
+body.ln-on .output .shell-prompt-wrap,
+body.ts-elapsed .output .shell-prompt-wrap,
+body.ts-clock .output .shell-prompt-wrap {
+  padding-left: calc(var(--output-prefix-width, 0ch) + 1ch);
 }
 
 .output .line[class*="welcome-"]::before,
@@ -401,31 +377,90 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 5px 11px;
 }
 
-.term-action-btn {
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  border: 1px solid color-mix(in srgb, var(--border-bright) 88%, transparent);
+/* ── Save menu dropdown ── */
+.save-menu-wrap {
+  position: relative;
+  display: inline-flex;
+}
+
+.save-menu {
+  display: none;
+  position: absolute;
+  bottom: calc(100% - 1px);
+  right: 0;
+  background: var(--theme-dropdown-bg);
+  border: 1px solid var(--theme-dropdown-border);
+  border-radius: 4px 4px 0 0;
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--theme-dropdown-shadow) 24%, transparent),
+    0 -6px 18px var(--theme-dropdown-shadow);
+  z-index: 200;
+  min-width: 160px;
+  overflow: hidden;
+}
+
+.save-menu-wrap.open .save-menu {
+  display: block;
+}
+
+.save-menu button {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
   color: color-mix(in srgb, var(--muted) 86%, var(--text));
   font-family: var(--font-mono);
   font-size: 10px;
   letter-spacing: 0.3px;
-  padding: 4px 9px;
-  border-radius: 3px;
+  padding: 6px 12px;
   cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background 0.2s, transform 0.2s;
+  white-space: nowrap;
 }
-.term-action-btn:focus:not(:focus-visible),
-.term-action-btn:focus-visible {
-  outline: none;
-  box-shadow: none;
-  background: color-mix(in srgb, var(--surface) 66%, transparent);
-  color: color-mix(in srgb, var(--muted) 86%, var(--text));
-  border-color: color-mix(in srgb, var(--border-bright) 88%, transparent);
-}
-.term-action-btn:hover {
-  border-color: color-mix(in srgb, var(--green-dim) 72%, var(--border-bright));
-  color: var(--text);
+
+.save-menu button:hover {
   background: color-mix(in srgb, var(--green) 7%, transparent);
-  transform: translateY(-1px);
+  color: var(--text);
+}
+
+/* Dropdown indicator arrow on the save trigger button (direct child of the
+   wrap — class-agnostic so it survives primitive migrations). Base state is
+   an up-pointing triangle (▴) because the default menu opens upward; the
+   `.save-menu-down` variant (permalink) rotates it so the chevron points
+   down (▾) to match its downward-opening menu. Adding `.open` flips each
+   by 180° so the chevron always points away from the currently-visible menu. */
+.save-menu-wrap > button::after,
+.hud-save-wrap > button::after {
+  content: '';
+  flex: none;
+  align-self: center;
+  margin-left: 4px;
+  width: 0;
+  height: 0;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
+  border-bottom: 3px solid currentColor;
+  transition: transform 0.15s ease;
+}
+
+.save-menu-wrap.save-menu-down > button::after {
+  transform: rotate(180deg);
+}
+
+.save-menu-wrap.open > button::after,
+.hud-save-wrap.open > button::after {
+  transform: rotate(180deg);
+}
+
+.save-menu-wrap.save-menu-down.open > button::after {
+  transform: rotate(0deg);
+}
+
+/* Downward-opening variant — used when the trigger is near the top of the page (e.g. permalink header) */
+.save-menu-wrap.save-menu-down .save-menu {
+  bottom: auto;
+  top: calc(100% - 1px);
+  border-radius: 0 0 4px 4px;
 }
 
 .terminal-body {
@@ -505,33 +540,11 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 .hist-chip-overflow { color: var(--green); }
 
-/* ── Header utility buttons ── */
-#faq-btn,
-#theme-btn,
-#options-btn,
-#diag-btn {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 1px;
-  padding: 4px 12px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s;
-  text-decoration: none;
-}
-#faq-btn:hover,
-#theme-btn:hover,
-#options-btn:hover,
-#diag-btn:hover { border-color: var(--green-dim); color: var(--green); }
-
 /* ── Modals ── */
 .modal-overlay,
-#faq-overlay,
-#theme-overlay,
-#options-overlay {
+.mobile-sheet-overlay,
+#shortcuts-overlay,
+#theme-overlay {
   display: none;
   position: fixed;
   inset: 0;
@@ -541,14 +554,14 @@ body.mobile-terminal-mode .output-follow-btn {
   justify-content: center;
   backdrop-filter: blur(3px);
 }
-#faq-overlay.open,
-#theme-overlay.open,
-#options-overlay.open { display: flex; }
+.mobile-sheet-overlay.open,
+#shortcuts-overlay.open,
+#theme-overlay.open { display: flex; }
 
 .modal-card,
-#faq-modal,
-#theme-modal,
-#options-modal {
+.mobile-sheet-surface,
+#shortcuts-modal,
+#theme-modal {
   background: var(--theme-panel-bg);
   border: 1px solid var(--theme-panel-border);
   border-radius: 6px;
@@ -560,6 +573,7 @@ body.mobile-terminal-mode .output-follow-btn {
 
 #faq-modal {
   width: min(960px, 92vw);
+  height: 85vh;
 }
 
 #options-modal {
@@ -575,17 +589,20 @@ body.mobile-terminal-mode .output-follow-btn {
   border-color: var(--theme-panel-border);
 }
 
-#kill-modal,
-#hist-del-modal {
+.modal-card-compact {
   width: min(520px, 92vw);
   padding: 18px 20px;
+}
+
+.modal-confirm-content:empty {
+  display: none;
 }
 
 .modal-copy {
   font-family: var(--font-mono);
   font-size: 13px;
   color: var(--text);
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
 
 .modal-copy-note {
@@ -600,51 +617,33 @@ body.mobile-terminal-mode .output-follow-btn {
 }
 
 .modal-actions-wrap {
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
-.modal-primary,
-.modal-secondary {
-  border-radius: 4px;
-  padding: 6px 18px;
-  font-family: var(--font-mono);
-  font-size: 12px;
-  cursor: pointer;
+@media (max-width: 480px) {
+  .modal-actions-wrap {
+    gap: 6px;
+  }
 }
 
-.modal-primary {
-  border: none;
+.modal-actions.modal-actions-stacked {
+  flex-direction: column;
+  align-items: stretch;
+  flex-wrap: nowrap;
 }
 
-.modal-primary-danger {
-  background: var(--red);
-  color: var(--theme-modal-danger-btn-text);
+.modal-actions.modal-actions-stacked .btn {
+  width: 100%;
 }
 
-.modal-secondary-warning {
-  background: transparent;
-  color: color-mix(in srgb, var(--muted) 82%, var(--text));
-  border: 1px solid color-mix(in srgb, var(--theme-panel-border) 92%, transparent);
+.modal-inline-field {
+  margin-bottom: 14px;
 }
 
-.modal-secondary-warning:hover {
-  color: var(--amber);
-  border-color: color-mix(in srgb, var(--amber) 52%, transparent);
-  background: color-mix(in srgb, var(--amber) 6%, transparent);
-}
-
-.modal-primary-warning {
-  background: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
-  color: var(--theme-modal-warning-btn-text);
-  border: 1px solid color-mix(in srgb, var(--amber) 58%, transparent);
-}
-
-.modal-primary-warning:hover {
-  background: color-mix(in srgb, var(--amber) 92%, var(--theme-panel-bg));
-}
-
-.modal-primary-danger {
-  border: 1px solid color-mix(in srgb, var(--red) 54%, transparent);
+@media (max-width: 480px) {
+  .modal-card-compact { padding: 14px 16px; }
+  .modal-copy { margin-bottom: 12px; }
+  .modal-inline-field { margin-bottom: 10px; }
 }
 
 .faq-header {
@@ -663,46 +662,8 @@ body.mobile-terminal-mode .output-follow-btn {
   text-shadow: 0 0 16px var(--green-glow);
 }
 
-.faq-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-.faq-close:hover,
-.options-close:hover,
-.theme-close:hover { color: var(--text); }
-
-.options-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-
-.theme-close {
-  margin-left: auto;
-  background: transparent;
-  border: none;
-  color: var(--muted);
-  font-size: 16px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px 6px;
-  transition: color 0.15s;
-}
-
-.faq-body {
+.faq-body,
+.workflows-body {
   overflow-y: auto;
   padding: 20px;
   display: flex;
@@ -806,22 +767,18 @@ body.mobile-terminal-mode .output-follow-btn {
   min-height: 260px;
 }
 
-.theme-card:hover {
+/* :hover and :focus-visible defer to the selected-card primitive so the
+   selected visual is not overridden when the user mouses or tabs onto an
+   already-selected card. See .is-selected-card in components.css. */
+.theme-card:hover:not(.is-selected-card) {
   transform: translateY(-1px);
   border-color: var(--green-dim);
   box-shadow: 0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
 }
 
-.theme-card:focus-visible {
+.theme-card:focus-visible:not(.is-selected-card) {
   outline: 1px solid var(--green-dim);
   box-shadow: 0 0 0 3px var(--green-glow);
-}
-
-.theme-card.theme-card-active {
-  border-color: var(--green-dim);
-  box-shadow:
-    0 0 0 1px var(--green-glow),
-    0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
 }
 
 .theme-card-preview {
@@ -917,13 +874,13 @@ body.mobile-terminal-mode .output-follow-btn {
   color: var(--text);
 }
 
-.options-fieldset {
+.form-fieldset {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-.options-choice {
+.form-check {
   display: flex;
   align-items: center;
   gap: 10px;
@@ -931,12 +888,104 @@ body.mobile-terminal-mode .output-follow-btn {
   cursor: pointer;
 }
 
-.options-choice input {
-  accent-color: var(--green);
+.form-check:hover {
+  color: var(--text);
 }
 
-.options-select {
+.form-check input[type="checkbox"],
+.form-check input[type="radio"] {
+  accent-color: var(--green);
+  width: 14px;
+  height: 14px;
+  margin: 0;
+  cursor: pointer;
+}
+
+.form-check input[type="checkbox"]:focus-visible,
+.form-check input[type="radio"]:focus-visible {
+  outline: 1px solid var(--green-dim);
+  outline-offset: 2px;
+  box-shadow: 0 0 0 3px var(--green-glow);
+}
+
+.form-select {
+  appearance: none;
+  -webkit-appearance: none;
   width: min(240px, 100%);
+  background-color: var(--surface);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text) 50%),
+    linear-gradient(135deg, var(--text) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) calc(50% - 2px),
+    calc(100% - 9px) calc(50% - 2px);
+  background-size: 5px 5px, 5px 5px;
+  background-repeat: no-repeat;
+  color: var(--text);
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  padding: 8px 28px 8px 10px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.form-select:hover {
+  border-color: var(--green-dim);
+}
+
+.form-select:focus-visible {
+  outline: 1px solid var(--green-dim);
+  box-shadow: 0 0 0 3px var(--green-glow);
+}
+
+.options-session-token-desc {
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+  line-height: 1.5;
+}
+
+.options-session-token-status {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.options-session-token-status.is-active {
+  color: var(--green);
+}
+
+/* Confirmation primitive must sit above the options overlay (z-index 320)
+   so Set / Migrate prompts remain reachable while the options surface is open. */
+#confirm-host {
+  z-index: 340;
+}
+
+.modal-token-input {
+  margin: 2px 0 6px;
+}
+
+.options-session-token-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.options-session-token-status-row .options-session-token-status {
+  margin-bottom: 0;
+}
+
+.options-session-token-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.options-token-input {
+  width: 100%;
   background: var(--surface);
   color: var(--text);
   border: 1px solid var(--border-bright);
@@ -944,11 +993,22 @@ body.mobile-terminal-mode .output-follow-btn {
   padding: 8px 10px;
   font-family: var(--font-mono);
   font-size: 12px;
+  box-sizing: border-box;
 }
 
-.options-select:focus-visible {
+.options-token-input:focus-visible {
   outline: 1px solid var(--green-dim);
   box-shadow: 0 0 0 3px var(--green-glow);
+}
+
+.options-session-token-msg {
+  font-size: 12px;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.options-session-token-msg.is-error {
+  color: var(--red);
 }
 
 .faq-q {
@@ -992,7 +1052,7 @@ body.mobile-terminal-mode .output-follow-btn {
   border: 1px solid var(--border-bright);
   border-radius: 3px;
   padding: 1px 6px;
-  color: var(--amber);
+  color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
 }
@@ -1008,6 +1068,59 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .faq-a .faq-kill-verb {
   color: var(--red);
+}
+
+.faq-limits-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.faq-limits-row {
+  display: grid;
+  gap: 6px 18px;
+  grid-template-columns: minmax(180px, 220px) minmax(0, 1fr);
+  align-items: start;
+  padding: 8px 0;
+  border-top: 1px solid color-mix(in srgb, var(--border) 70%, transparent);
+}
+
+.faq-limits-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.faq-limits-label {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
+}
+
+.faq-limits-value {
+  color: var(--muted);
+  line-height: 1.7;
+  min-width: 0;
+}
+
+.faq-limits-value strong {
+  color: var(--text);
+  font-weight: 700;
+}
+
+.faq-limits-note {
+  display: block;
+  margin-top: 12px;
+  color: var(--muted);
+  font-style: italic;
+}
+
+@media (max-width: 720px) {
+  .faq-limits-row {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 
 .allowed-group {
@@ -1035,7 +1148,7 @@ body.mobile-terminal-mode .output-follow-btn {
   background: var(--surface);
   border: 1px solid var(--border-bright);
   border-radius: 3px;
-  color: var(--amber);
+  color: var(--muted);
   font-family: var(--font-mono);
   font-size: 11px;
   padding: 2px 8px;
@@ -1051,6 +1164,86 @@ body.mobile-terminal-mode .output-follow-btn {
 
 .line.denied { color: var(--amber); font-weight: 700; margin-top: 4px; }
 .line.notice { color: var(--blue); font-style: italic; margin-bottom: 4px; }
+.line.fake-section {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 6px;
+  margin-bottom: 2px;
+}
+.line.fake-kv .line-content {
+  white-space: pre-wrap;
+}
+.line.fake-kv .line-content,
+.line.fake-shortcut .line-content {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.line.fake-help-row,
+.line.fake-catalog-item,
+.line.fake-plain,
+.line.fake-ps-row,
+.line.fake-history-row,
+.line.fake-last-row {
+  color: var(--text);
+  white-space: pre-wrap;
+}
+.line.fake-help-row {
+  margin: 1px 0;
+}
+.line.fake-help-note {
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 2px;
+}
+.line.fake-catalog-item {
+  color: color-mix(in srgb, var(--text) 94%, var(--blue));
+}
+.line.fake-identity {
+  color: var(--green);
+  font-weight: 700;
+  margin-top: 1px;
+}
+.line.fake-ps-header {
+  color: var(--blue);
+  font-weight: 700;
+  white-space: pre-wrap;
+}
+.line.fake-ps-row {
+  color: var(--text);
+}
+.line.fake-history-row {
+  color: color-mix(in srgb, var(--text) 96%, var(--blue));
+}
+.line.fake-last-row {
+  color: var(--text);
+}
+.line.fake-last-ok {
+  color: color-mix(in srgb, var(--text) 88%, var(--green));
+}
+.line.fake-last-fail {
+  color: color-mix(in srgb, var(--text) 88%, var(--red));
+}
+.line.fake-shortcut {
+  margin: 1px 0;
+}
+.line.fake-note {
+  color: var(--blue);
+  font-style: italic;
+  margin-top: 4px;
+}
+.line.fake-faq-q {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 8px;
+}
+.line.fake-faq-a {
+  color: var(--text);
+  padding-left: 1.5rem;
+  white-space: pre-wrap;
+}
+.line.fake-spacer {
+  min-height: 0.45rem;
+}
 
 /* ── Theme overrides
    Body-scoped selectors apply --theme-* variables with higher specificity
@@ -1059,6 +1252,7 @@ body.mobile-terminal-mode .output-follow-btn {
 body #output { color: var(--text); }
 body #faq-modal { background: var(--theme-faq-modal-bg); }
 body #options-modal { background: var(--theme-options-modal-bg); }
+body #workflows-modal { background: var(--theme-faq-modal-bg); }
 body .faq-a {
   color: var(--text);
 }
@@ -1072,17 +1266,220 @@ body .welcome-command-badge {
   color: var(--blue);
   border-color: color-mix(in srgb, var(--blue) 40%, transparent);
 }
-body #kill-modal {
-  background: var(--theme-kill-modal-bg) !important;
-  border-color: var(--theme-panel-border) !important;
-  box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
-}
-body #hist-del-modal {
-  background: var(--theme-hist-del-modal-bg) !important;
+body .modal-card-compact {
+  background: var(--theme-confirm-modal-bg) !important;
   border-color: var(--theme-panel-border) !important;
   box-shadow: 0 24px 60px color-mix(in srgb, var(--theme-panel-shadow) 88%, transparent) !important;
 }
 body .faq-a code { background: var(--theme-faq-code-bg); }
 body .allowed-chip { background: var(--theme-allowed-chip-bg); }
-body .options-select { background: var(--theme-options-select-bg); }
+body .form-select { background-color: var(--theme-form-control-bg); }
 body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
+
+/* ── FAQ accordion ────────────────────────────────────────────────── */
+#faq-modal .faq-body .faq-item .faq-q {
+  cursor: pointer;
+  user-select: none;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 0;
+  gap: 16px;
+}
+#faq-modal .faq-body .faq-item .faq-q::after {
+  content: '+';
+  font-family: var(--font-mono);
+  font-size: 14px;
+  font-weight: 400;
+  line-height: 1;
+  color: var(--green-dim);
+  min-width: 22px;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: color 0.2s;
+}
+#faq-modal .faq-body .faq-item.faq-open .faq-q::after {
+  content: '−';
+  color: var(--green);
+}
+#faq-modal .faq-body .faq-item .faq-q:hover {
+  color: var(--text);
+}
+#faq-modal .faq-body .faq-item .faq-q:hover::after {
+  color: var(--green);
+}
+#faq-modal .faq-body .faq-item .faq-a {
+  display: none;
+  margin-top: 10px;
+}
+#faq-modal .faq-body .faq-item.faq-open .faq-a {
+  display: block;
+}
+
+/* ── Keyboard shortcuts overlay (`?` trigger) ─────────────────────── */
+#shortcuts-overlay {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: var(--theme-overlay-backdrop-bg);
+  z-index: 330;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(3px);
+}
+#shortcuts-overlay.open { display: flex; }
+#shortcuts-modal {
+  width: min(1150px, 92vw);
+  max-height: 82vh;
+}
+#shortcuts-modal .faq-header {
+  cursor: default;
+}
+.shortcuts-body {
+  overflow-y: auto;
+  padding: 10px 16px 14px;
+}
+.shortcuts-list {
+  column-count: 2;
+  column-gap: 28px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.shortcuts-list .shortcuts-section {
+  break-inside: avoid;
+  margin-bottom: 14px;
+}
+.shortcuts-list .shortcuts-section:last-child {
+  margin-bottom: 0;
+}
+.shortcuts-list .shortcut-section-title {
+  color: var(--blue);
+  font-weight: 700;
+  margin-bottom: 6px;
+}
+.shortcuts-list .shortcuts-pairs {
+  display: grid;
+  grid-template-columns: minmax(140px, max-content) 1fr;
+  gap: 6px 16px;
+}
+.shortcuts-list .shortcut-key {
+  color: var(--green);
+  white-space: nowrap;
+}
+.shortcuts-list .shortcut-desc {
+  color: var(--text);
+}
+@media (max-width: 720px) {
+  .shortcuts-list {
+    column-count: 1;
+  }
+}
+.shortcuts-note {
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 1px dashed var(--border);
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  line-height: 1.5;
+}
+.shortcuts-close {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.shortcuts-close:hover { color: var(--green); }
+
+/* ── Workflows overlay & modal ────────────────────────────────────── */
+#workflows-modal {
+  width: min(960px, 92vw);
+}
+
+/* ── Workflow cards ───────────────────────────────────────────────── */
+.workflow-card {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 16px 18px;
+}
+
+.workflow-title {
+  font-family: var(--font-display);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--green);
+  letter-spacing: 0.3px;
+  margin-bottom: 6px;
+}
+
+.workflow-desc {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+  margin-bottom: 14px;
+}
+
+.workflow-steps {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  counter-reset: workflow-step;
+}
+
+.workflow-step {
+  display: grid;
+  grid-template-columns: 18px 1fr;
+  column-gap: 8px;
+  row-gap: 4px;
+  counter-increment: workflow-step;
+}
+
+.workflow-step::before {
+  content: counter(workflow-step) '.';
+  color: var(--muted);
+  font-size: 11px;
+  font-family: var(--font-mono);
+  padding-top: 3px;
+  grid-row: 1;
+  grid-column: 1;
+}
+
+.workflow-step-main {
+  grid-row: 1;
+  grid-column: 2;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+  min-width: 0;
+}
+
+.workflow-step-cmd {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+}
+
+.workflow-step-run {
+  flex-shrink: 0;
+  font-size: 9px;
+  line-height: 1;
+}
+
+.workflow-step-note {
+  grid-row: 2;
+  grid-column: 2;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}

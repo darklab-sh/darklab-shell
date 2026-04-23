@@ -62,16 +62,72 @@
     if (start > end) [start, end] = [end, start];
     return { start, end };
   };
-  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
-    const target = input || global.getVisibleComposerInput();
-    if (!target || typeof target.focus !== 'function') return false;
+  global.applyMobileTextInputDefaults = (input) => {
+    if (!input || typeof input.setAttribute !== 'function') return;
+    input.setAttribute('autocomplete', 'off');
+    input.setAttribute('autocapitalize', 'none');
+    input.setAttribute('autocorrect', 'off');
+    input.setAttribute('spellcheck', 'false');
+    input.setAttribute('inputmode', 'text');
+  };
+  function _estimateComposerTextWidth(input, text) {
+    if (!input || typeof window === 'undefined' || typeof window.getComputedStyle !== 'function') return 0;
+    const style = window.getComputedStyle(input);
+    const fontSize = parseFloat(style.fontSize || '16') || 16;
+    const rawLetterSpacing = parseFloat(style.letterSpacing || '0');
+    const letterSpacing = Number.isFinite(rawLetterSpacing) ? rawLetterSpacing : 0;
+    const len = String(text || '').length;
+    if (!len) return 0;
+    return (len * (fontSize * 0.62)) + (Math.max(0, len - 1) * letterSpacing);
+  }
+  function _syncComposerCaretVisibility(input, start, end) {
+    if (!input || typeof input.scrollLeft !== 'number') return;
+    if (typeof input.clientWidth !== 'number' || input.clientWidth <= 0) return;
+    const value = typeof input.value === 'string' ? input.value : '';
+    const caret = Math.max(0, Math.min(typeof end === 'number' ? end : start, value.length));
+    const anchor = Math.max(0, Math.min(typeof start === 'number' ? start : caret, value.length));
+    if (caret === 0 && anchor === 0) {
+      input.scrollLeft = 0;
+      return;
+    }
+    const style = typeof window !== 'undefined' && typeof window.getComputedStyle === 'function'
+      ? window.getComputedStyle(input)
+      : null;
+    const paddingLeft = style ? (parseFloat(style.paddingLeft || '0') || 0) : 0;
+    const paddingRight = style ? (parseFloat(style.paddingRight || '0') || 0) : 0;
+    const viewport = Math.max(24, input.clientWidth - paddingLeft - paddingRight);
+    const caretX = _estimateComposerTextWidth(input, value.slice(0, caret));
+    const leftEdge = input.scrollLeft;
+    const rightEdge = leftEdge + viewport;
+    const gutter = 12;
+    if (caretX < leftEdge + gutter) {
+      input.scrollLeft = Math.max(0, Math.round(caretX - gutter));
+      return;
+    }
+    if (caretX > rightEdge - gutter) {
+      input.scrollLeft = Math.max(0, Math.round(caretX - viewport + gutter));
+    }
+  }
+  global.focusElement = (el, { preventScroll = false } = {}) => {
+    if (!el || typeof el.focus !== 'function') return false;
     try {
-      if (preventScroll) target.focus({ preventScroll: true });
-      else target.focus();
+      if (preventScroll) el.focus({ preventScroll: true });
+      else el.focus();
     } catch (_) {
-      target.focus();
+      el.focus();
     }
     return true;
+  };
+  global.blurActiveElement = () => {
+    if (typeof document === 'undefined') return false;
+    const active = document.activeElement;
+    if (!active || typeof active.blur !== 'function') return false;
+    active.blur();
+    return true;
+  };
+  global.focusComposerInput = (input = null, { preventScroll = false } = {}) => {
+    const target = input || global.getVisibleComposerInput();
+    return global.focusElement(target, { preventScroll });
   };
   global.focusVisibleComposerInput = ({ preventScroll = false } = {}) => {
     if (isMobileTerminalViewportActive()) return false;
@@ -128,6 +184,7 @@
         _mobileKeyboardVisibilityTimer = null;
       }
       document.body.classList.remove('mobile-keyboard-open');
+      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: false });
       return false;
     }
     if (typeof state._mobileKeyboardOffsetBaseline !== 'number') {
@@ -137,6 +194,7 @@
     if (nextOpen && nextOffset > 0) state._mobileKeyboardLastOpenOffset = nextOffset;
     if (!nextOpen) state._mobileKeyboardOffsetBaseline = nextOffset;
     document.body.classList.toggle('mobile-keyboard-open', nextOpen);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: !!nextOpen });
     return nextOpen;
   };
   global.setMobileKeyboardOpenState = (open, { delay = 0 } = {}) => {
@@ -156,6 +214,7 @@
         }
         if (typeof acHide === 'function') acHide();
       }
+      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: !!open });
       return !!open;
     };
 
@@ -180,6 +239,7 @@
       );
       if (keyboardStillOpen) return;
       document.body.classList.remove('mobile-keyboard-open');
+      if (typeof emitUiEvent === 'function') emitUiEvent('app:mobile-keyboard-state', { open: false });
       // Reset keyboard CSS vars to their closed-keyboard values. Use window.innerHeight
       // rather than visualViewport.height — the keyboard animation may still be in
       // progress at this point, leaving visualViewport.height at a mid-animation
@@ -221,6 +281,7 @@
       if (typeof target.setSelectionRange === 'function') {
         target.setSelectionRange(nextStart, nextEnd);
       }
+      _syncComposerCaretVisibility(target, nextStart, nextEnd);
     }
     if (dispatch && target && target !== exclude) {
       target.dispatchEvent(new Event('input'));
@@ -254,6 +315,7 @@
     if (target && typeof target.setSelectionRange === 'function') {
       target.setSelectionRange(orderedStart, orderedEnd);
     }
+    _syncComposerCaretVisibility(target, orderedStart, orderedEnd);
     return { start: orderedStart, end: orderedEnd };
   };
   global.handleComposerInputChange = (sourceInput) => {
@@ -286,13 +348,22 @@
       if (typeof acHide === 'function') acHide();
       return;
     }
-    const q = value.toLowerCase();
-    acFiltered = (typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
-      .filter(s => s.toLowerCase().startsWith(q))
-      .slice(0, 12);
-    if (acFiltered.some(s => s.toLowerCase() === q)) {
+    const usedContextMatcher = typeof getAutocompleteMatches === 'function';
+    acFiltered = usedContextMatcher
+      ? getAutocompleteMatches(value, start).slice(0, 12)
+      : ((typeof acSuggestions !== 'undefined' && acSuggestions ? acSuggestions : [])
+        .filter(s => s.toLowerCase().startsWith(value.toLowerCase()))
+        .slice(0, 12));
+    if (!acFiltered.length) {
       if (typeof acHide === 'function') acHide();
       return;
+    }
+    if (!usedContextMatcher) {
+      const q = value.trim().toLowerCase();
+      if (acFiltered.some(s => String(s || '').toLowerCase() === q)) {
+        if (typeof acHide === 'function') acHide();
+        return;
+      }
     }
     if (typeof acShow === 'function') acShow(acFiltered);
   };
@@ -302,18 +373,38 @@
   global.hidePanelOverlay = (el) => {
     if (el && el.classList) el.classList.remove('open');
   };
-  global.refocusComposerAfterAction = ({ preventScroll = true } = {}) => {
+  // Canonical post-action refocus path for chrome interactions. Every
+  // "return focus to the terminal after a button/overlay/sheet action" call
+  // site routes through here so mobile-skip, preventScroll, and timing
+  // semantics stay consistent across modules.
+  //
+  // Options:
+  //   preventScroll: avoid scrolling the focused input into view (default true;
+  //     right for all chrome refocus paths — the composer is already visible).
+  //   defer: wrap the refocus in setTimeout(..., 0) so any pending blur events
+  //     from the triggering click finish first before focus returns. Use for
+  //     handlers that close overlays, dispatch into other modules, or run
+  //     inside a pointerdown/click where the current event is still propagating.
+  function _doRefocusComposer(preventScroll) {
     const isMobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+    // Intentional no-op on the mobile terminal viewport: programmatically
+    // refocusing would re-pop the software keyboard, which users don't want
+    // after every chrome action.
+    if (isMobileMode) return false;
+    if (typeof global.isConfirmOpen === 'function' && global.isConfirmOpen()) return false;
     const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
-    if (!isMobileMode && target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
+    if (target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
       return true;
     }
     if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll })) return true;
-    if (typeof refocusTerminalInput === 'function') {
-      refocusTerminalInput();
-      return false;
-    }
     return false;
+  }
+  global.refocusComposerAfterAction = ({ preventScroll = true, defer = false } = {}) => {
+    if (defer) {
+      setTimeout(() => { _doRefocusComposer(preventScroll); }, 0);
+      return undefined;
+    }
+    return _doRefocusComposer(preventScroll);
   };
   global.togglePanelOverlay = (el, force = null) => {
     if (!el || !el.classList) return false;
@@ -335,27 +426,38 @@
     return next;
   };
   global.isModalOverlayOpen = (el, display = 'flex') => !!(el && el.style && el.style.display === display);
-  global.showKillOverlay = () => showModalOverlay(killOverlay, 'flex');
-  global.hideKillOverlay = () => hideModalOverlay(killOverlay);
-  global.isKillOverlayOpen = () => isModalOverlayOpen(killOverlay, 'flex');
   global.showHistoryPanel = () => showPanelOverlay(historyPanel);
   global.hideHistoryPanel = () => {
     hidePanelOverlay(historyPanel);
     if (typeof refocusComposerAfterAction === 'function') refocusComposerAfterAction({ preventScroll: true });
   };
   global.isHistoryPanelOpen = () => isPanelOverlayOpen(historyPanel);
+  global.showWorkflowsOverlay = () => showPanelOverlay(workflowsOverlay || null);
+  global.hideWorkflowsOverlay = () => hidePanelOverlay(workflowsOverlay || null);
+  global.isWorkflowsOverlayOpen = () => isPanelOverlayOpen(workflowsOverlay || null);
   global.showFaqOverlay = () => showPanelOverlay(faqOverlay || null);
   global.hideFaqOverlay = () => hidePanelOverlay(faqOverlay || null);
   global.isFaqOverlayOpen = () => isPanelOverlayOpen(faqOverlay || null);
+  global.showShortcutsOverlay = () => {
+    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+    if (el) el.setAttribute('aria-hidden', 'false');
+    showPanelOverlay(el);
+  };
+  global.hideShortcutsOverlay = () => {
+    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+    if (el) el.setAttribute('aria-hidden', 'true');
+    hidePanelOverlay(el);
+  };
+  global.isShortcutsOverlayOpen = () => {
+    const el = typeof shortcutsOverlay !== 'undefined' ? shortcutsOverlay : null;
+    return isPanelOverlayOpen(el);
+  };
   global.showThemeOverlay = () => showPanelOverlay(themeOverlay || null);
   global.hideThemeOverlay = () => hidePanelOverlay(themeOverlay || null);
   global.isThemeOverlayOpen = () => isPanelOverlayOpen(themeOverlay || null);
   global.showOptionsOverlay = () => showPanelOverlay(optionsOverlay || null);
   global.hideOptionsOverlay = () => hidePanelOverlay(optionsOverlay || null);
   global.isOptionsOverlayOpen = () => isPanelOverlayOpen(optionsOverlay || null);
-  global.showHistoryDeleteOverlay = () => showModalOverlay(histDelOverlay, 'flex');
-  global.hideHistoryDeleteOverlay = () => hideModalOverlay(histDelOverlay);
-  global.isHistoryDeleteOverlayOpen = () => isModalOverlayOpen(histDelOverlay, 'flex');
   global.showHistoryLoadOverlay = () => {
     if (historyLoadOverlay && historyLoadOverlay.classList) historyLoadOverlay.classList.add('open');
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'false');
@@ -365,14 +467,6 @@
     if (historyLoadOverlay) historyLoadOverlay.setAttribute('aria-hidden', 'true');
   };
   global.isHistoryLoadOverlayOpen = () => !!(historyLoadOverlay && historyLoadOverlay.classList && historyLoadOverlay.classList.contains('open'));
-  global.showHistoryDeleteNonfav = () => {
-    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
-    if (btn && btn.style) btn.style.display = 'inline-block';
-  };
-  global.hideHistoryDeleteNonfav = () => {
-    const btn = typeof histDelNonfavBtn !== 'undefined' ? histDelNonfavBtn : null;
-    if (btn && btn.style) btn.style.display = 'none';
-  };
   // Initialise inline display so the inline style takes precedence over the
   // conflicting .search-bar { display: flex } class rule (same specificity,
   // later in the sheet) when .u-hidden is also present on the element.
@@ -382,13 +476,7 @@
   };
   global.hideSearchBar = () => {
     if (searchBar && searchBar.style) searchBar.style.display = 'none';
-    const refocused = typeof refocusComposerAfterAction === 'function'
-      ? refocusComposerAfterAction({ preventScroll: true })
-      : false;
-    if (!refocused && !(typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode())
-      && typeof cmdInput !== 'undefined' && cmdInput && typeof cmdInput.focus === 'function') {
-      cmdInput.focus();
-    }
+    refocusComposerAfterAction({ preventScroll: true });
   };
   global.isSearchBarOpen = () => !!(searchBar && searchBar.style && searchBar.style.display === 'flex');
   global.showHistoryRow = () => {
@@ -420,31 +508,58 @@
     return disabled;
   };
   global.isRunButtonDisabled = () => !!((runBtn && runBtn.disabled) || (typeof mobileRunBtn !== 'undefined' && mobileRunBtn && mobileRunBtn.disabled));
+  const syncTerminalActionLayout = (tabId) => {
+    const btn = (typeof tabPanels !== 'undefined' && tabPanels)
+      ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`)
+      : null;
+    const actions = btn && btn.parentElement && btn.parentElement.classList && btn.parentElement.classList.contains('terminal-actions')
+      ? btn.parentElement
+      : null;
+    if (!actions) return;
+    const hasVisibleKill = !!(btn.style ? btn.style.display !== 'none' : !btn.hidden);
+    actions.classList.toggle('terminal-actions-has-visible-kill', hasVisibleKill);
+  };
   global.showTabKillBtn = (tabId) => {
     const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-    if (btn && btn.style) btn.style.display = 'inline-block';
+    if (btn) {
+      btn.hidden = false;
+      if (btn.style) btn.style.display = 'inline-block';
+    }
+    syncTerminalActionLayout(tabId);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-kill-visibility-changed', { tabId, visible: true });
   };
   global.hideTabKillBtn = (tabId) => {
     const btn = (typeof tabPanels !== 'undefined' && tabPanels) ? tabPanels.querySelector(`.tab-kill-btn[data-tab="${tabId}"]`) : null;
-    if (btn && btn.style) btn.style.display = 'none';
+    if (btn) {
+      btn.hidden = true;
+      if (btn.style) btn.style.display = 'none';
+    }
+    syncTerminalActionLayout(tabId);
+    if (typeof emitUiEvent === 'function') emitUiEvent('app:tab-kill-visibility-changed', { tabId, visible: false });
   };
+  // Fallbacks. mobile_chrome.js overrides these with sheet-aware versions when
+  // the mobile shell initializes; these stubs only run if that init didn't.
   global.showMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();
-    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('open');
+    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('u-hidden');
   };
   global.hideMobileMenu = () => {
     const mobileMenu = getMobileMenuEl();
-    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.remove('open');
+    if (mobileMenu && mobileMenu.classList) mobileMenu.classList.add('u-hidden');
   };
   global.isMobileMenuOpen = () => {
     const mobileMenu = getMobileMenuEl();
-    return !!(mobileMenu && mobileMenu.classList && mobileMenu.classList.contains('open'));
+    return !!(mobileMenu && mobileMenu.classList && !mobileMenu.classList.contains('u-hidden'));
   };
   global.showAcDropdown = () => {
-    if (acDropdown && acDropdown.style) acDropdown.style.display = 'block';
+    if (!acDropdown) return;
+    if (acDropdown.classList) acDropdown.classList.remove('u-hidden');
+    if (acDropdown.style) acDropdown.style.display = 'block';
   };
   global.hideAcDropdown = () => {
-    if (acDropdown && acDropdown.style) acDropdown.style.display = 'none';
+    if (!acDropdown) return;
+    if (acDropdown.classList) acDropdown.classList.add('u-hidden');
+    if (acDropdown.style) acDropdown.style.display = 'none';
   };
   global.isAcDropdownOpen = () => !!(acDropdown && acDropdown.style && acDropdown.style.display !== 'none');
   global.setVisibilityState = (el, hidden, ariaHidden = null) => {

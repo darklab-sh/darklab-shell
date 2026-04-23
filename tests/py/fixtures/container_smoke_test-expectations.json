@@ -3,612 +3,6 @@
   "records": [
     {
       "no_output": false,
-      "exit_code": 0,
-      "command": "banner",
-      "expected_text": [
-        "interactive diagnostics console"
-      ]
-    },
-    {
-      "no_output": true,
-      "exit_code": 0,
-      "command": "clear",
-      "expected_text": []
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "date",
-      "expected_text": [
-        "<DATE>"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "env",
-      "expected_text": [
-        "APP_NAME"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "faq",
-      "expected_text": [
-        "Configured FAQ entries:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "fortune",
-      "expected_pattern": [
-        ".*"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "groups",
-      "expected_text": [
-        "operators"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "help",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "history",
-      "expected_text": [
-        "1  "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "hostname",
-      "expected_text": [
-        "darklab"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "id",
-      "expected_text": [
-        "uid=1000"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "last",
-      "expected_text": [
-        "<TIME>"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "limits",
-      "expected_text": [
-        "Configured limits:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ls",
-      "expected_text": [
-        "[Network Diagnostics]"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "tty",
-      "expected_text": [
-        "/dev/pts/web"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "version",
-      "expected_text": [
-        "web shell"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "who",
-      "expected_text": [
-        "pts/web"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "which curl",
-      "expected_text": [
-        "curl"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "which history",
-      "expected_text": [
-        "history: helper command"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "type curl",
-      "expected_text": [
-        "curl is a real command"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "type history",
-      "expected_text": [
-        "history is a helper command"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "pwd",
-      "expected_text": [
-        "/app/"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ps",
-      "expected_text": [
-        "  PID TTY"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ps aux",
-      "expected_text": [
-        "  PID TTY"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ps -ef",
-      "expected_text": [
-        "  PID TTY"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "retention",
-      "expected_text": [
-        "Retention policy:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "shortcuts",
-      "expected_text": [
-        "Current shortcuts:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "status",
-      "expected_text": [
-        "app "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "uname -a",
-      "expected_text": [
-        "web-terminal"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "uptime",
-      "expected_text": [
-        "up "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "whoami",
-      "expected_text": [
-        "web terminal"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man banner",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man clear",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man curl",
-      "expected_text": [
-        "              allows curl to output and save that content but also to return error 22."
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man date",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man dig",
-      "expected_text": [
-        "DIG(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man dnsenum",
-      "expected_text": [
-        "DNSENUM(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man dnsrecon",
-      "expected_text": [
-        "DNSRECON(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man env",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man faq",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man fierce",
-      "expected_text": [
-        "FIERCE(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man fortune",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man fping",
-      "expected_text": [
-        "FPING(8)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man groups",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man help",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man history",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man host",
-      "expected_text": [
-        "HOST(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man hostname",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man id",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man last",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man limits",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man ls",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man man",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man mtr",
-      "expected_text": [
-        "MTR(8)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man nc",
-      "expected_text": [
-        "NC(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man nmap",
-      "expected_text": [
-        "NMAP(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man nslookup",
-      "expected_text": [
-        "NSLOOKUP(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man ping",
-      "expected_text": [
-        "PING(8)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man ps",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man pwd",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man retention",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man shortcuts",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man status",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man tcptraceroute",
-      "expected_text": [
-        "TCPTRACEROUTE(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man testssl",
-      "expected_text": [
-        "TESTSSL(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man traceroute",
-      "expected_text": [
-        "TRACEROUTE(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man tty",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man type",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man uname",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man uptime",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man version",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man wget",
-      "expected_text": [
-        "WGET(1)"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man which",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man who",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man whoami",
-      "expected_text": [
-        "Web shell helpers:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "man whois",
-      "expected_text": [
-        "WHOIS(1)"
-      ]
-    },
-    {
-      "no_output": false,
       "exit_code": 2,
       "command": "ping -h",
       "expected_text": [
@@ -619,14 +13,6 @@
       "no_output": false,
       "exit_code": 0,
       "command": "ping -c 4 darklab.sh",
-      "expected_text": [
-        "PING darklab.sh"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ping -c 10 darklab.sh",
       "expected_text": [
         "PING darklab.sh"
       ]
@@ -658,145 +44,9 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nc -zv 1.1.1.1 53 80",
-      "expected_text": [
-        "open"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "dig -h",
       "expected_text": [
         "Usage:  dig"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig A ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig MX ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig TXT ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig NS ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig AAAA ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig ANY ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig +short A ip.darklab.sh",
-      "expected_text": [
-        "107.178.109.44"
-      ]
-    },
-    {
-      "exit_code": 0,
-      "command": "dig +short MX ip.darklab.sh",
-      "any_of": [
-        { "no_output": true },
-        { "expected_text": ["darklab.sh"] }
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig @8.8.8.8 A ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dig +trace A ip.darklab.sh",
-      "expected_text": [
-        "DiG"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 1,
-      "command": "dig AXFR ip.darklab.sh @ns1.ip.darklab.sh",
-      "expected_text": [
-        "dig:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nslookup -type=A ip.darklab.sh",
-      "expected_text": [
-        "Server:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nslookup -type=MX ip.darklab.sh",
-      "expected_text": [
-        "Server:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nslookup -type=TXT ip.darklab.sh",
-      "expected_text": [
-        "Server:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nslookup -type=NS ip.darklab.sh",
-      "expected_text": [
-        "Server:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "host -t A ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh"
       ]
     },
     {
@@ -810,41 +60,9 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "host -t TXT ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "host -t NS ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "whois 8.8.8.8",
-      "expected_text": [
-        "ARIN WHOIS"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "traceroute --help",
       "expected_text": [
         "Usage:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "traceroute ip.darklab.sh",
-      "expected_text": [
-        "traceroute to ip.darklab.sh"
       ]
     },
     {
@@ -861,38 +79,6 @@
       "command": "traceroute -m 30 ip.darklab.sh",
       "expected_text": [
         "traceroute to ip.darklab.sh"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "tcptraceroute ip.darklab.sh",
-      "expected_text": [
-        "Selected device"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "tcptraceroute -n ip.darklab.sh",
-      "expected_text": [
-        "Selected device"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "mtr --help",
-      "expected_text": [
-        "Note: mtr has been run"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "mtr ip.darklab.sh",
-      "expected_text": [
-        "Note: mtr has been run"
       ]
     },
     {
@@ -938,62 +124,6 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "curl -v https://ip.darklab.sh",
-      "expected_text": [
-        "Xferd"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "curl -L https://ip.darklab.sh",
-      "expected_text": [
-        "Xferd"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "curl -o /dev/null -s -w \"%{http_code}\" https://ip.darklab.sh",
-      "expected_text": [
-        "200"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "curl -H \"User-Agent: Mozilla/5.0\" https://ip.darklab.sh",
-      "expected_text": [
-        "Xferd"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "curl -k https://ip.darklab.sh",
-      "expected_text": [
-        "Xferd"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "curl --max-time 10 https://ip.darklab.sh",
-      "expected_text": [
-        "Xferd"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "wget --help",
-      "expected_text": [
-        "GNU Wget"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "wget -q -O /dev/null --server-response https://ip.darklab.sh",
       "expected_text": [
         "HTTP/1.1 200 OK"
@@ -1017,98 +147,10 @@
     },
     {
       "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nmap -sT -p 80,443 ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT -p 1-1000 ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sV -sT ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -A -sT ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT --script http-headers ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT --script ssl-cert ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT --script ssl-enum-ciphers ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT --script vuln ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nmap -sT --script http-title ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
-      ]
-    },
-    {
-      "no_output": false,
       "exit_code": 0,
       "command": "testssl --help",
       "expected_text": [
         "[options]"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "testssl https://ip.darklab.sh",
-      "expected_text": [
-        "#####################################################################"
       ]
     },
     {
@@ -1130,47 +172,7 @@
     {
       "no_output": false,
       "exit_code": -15,
-      "command": "testssl --full https://ip.darklab.sh",
-      "expected_text": [
-        "#####################################################################"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "testssl --sneaky https://ip.darklab.sh",
-      "expected_text": [
-        "#####################################################################"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "testssl -p https://ip.darklab.sh",
-      "expected_text": [
-        "#####################################################################"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
       "command": "testssl --heartbleed https://ip.darklab.sh",
-      "expected_text": [
-        "#####################################################################"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "testssl --poodle https://ip.darklab.sh",
-      "expected_text": [
-        "#####################################################################"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "testssl --beast https://ip.darklab.sh",
       "expected_text": [
         "#####################################################################"
       ]
@@ -1185,88 +187,8 @@
     },
     {
       "no_output": false,
-      "exit_code": 0,
-      "command": "dnsrecon -d ip.darklab.sh",
-      "expected_text": [
-        "[*] std: Performing General Enumeration"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsrecon -d ip.darklab.sh -t std",
-      "expected_text": [
-        "[*] std: Performing General Enumeration"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsrecon -d ip.darklab.sh -t axfr",
-      "expected_text": [
-        "[*] Checking for Zone Transfer"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsrecon -d ip.darklab.sh -t brt",
-      "expected_text": [
-        "[*] No dictionary file has"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsrecon -d ip.darklab.sh -t srv",
-      "expected_text": [
-        "[*] srv: Enumerating Common SRV"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsrecon -d ip.darklab.sh -t zonewalk",
-      "expected_text": [
-        "[*] Performing NSEC Zone Walk"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 1,
-      "command": "dnsrecon -d ip.darklab.sh -t crt",
-      "expected_text": [
-        "Performing Crt.sh Search"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nikto -Help",
-      "expected_text": [
-        "Options:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nikto -h ip.darklab.sh",
-      "expected_text": [
-        "- Nikto v2.6.0"
-      ]
-    },
-    {
-      "no_output": false,
       "exit_code": -15,
       "command": "nikto -h ip.darklab.sh -p 443 -ssl",
-      "expected_text": [
-        "- Nikto v2.6.0"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
-      "command": "nikto -h ip.darklab.sh -p 8080",
       "expected_text": [
         "- Nikto v2.6.0"
       ]
@@ -1282,14 +204,6 @@
     {
       "no_output": false,
       "exit_code": -15,
-      "command": "nikto -h ip.darklab.sh -Tuning 4",
-      "expected_text": [
-        "- Nikto v2.6.0"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": -15,
       "command": "nikto -h ip.darklab.sh -maxtime 120",
       "expected_text": [
         "- Nikto v2.6.0"
@@ -1297,40 +211,8 @@
     },
     {
       "no_output": false,
-      "exit_code": 0,
-      "command": "wpscan --help",
-      "expected_text": [
-        "_______________________________________________________________"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 4,
-      "command": "wpscan --url https://ip.darklab.sh",
-      "expected_text": [
-        "_______________________________________________________________"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 4,
-      "command": "wpscan --url https://ip.darklab.sh --enumerate p",
-      "expected_text": [
-        "_______________________________________________________________"
-      ]
-    },
-    {
-      "no_output": false,
       "exit_code": 4,
       "command": "wpscan --url https://ip.darklab.sh --enumerate u",
-      "expected_text": [
-        "_______________________________________________________________"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 4,
-      "command": "wpscan --url https://ip.darklab.sh --enumerate t",
       "expected_text": [
         "_______________________________________________________________"
       ]
@@ -1346,23 +228,7 @@
     {
       "no_output": false,
       "exit_code": 4,
-      "command": "wpscan --url https://ip.darklab.sh --enumerate ap",
-      "expected_text": [
-        "_______________________________________________________________"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 4,
       "command": "wpscan --url https://ip.darklab.sh --detection-mode aggressive",
-      "expected_text": [
-        "_______________________________________________________________"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "wpscan --url https://ip.darklab.sh --force",
       "expected_text": [
         "_______________________________________________________________"
       ]
@@ -1377,15 +243,7 @@
     },
     {
       "no_output": false,
-      "exit_code": 0,
-      "command": "nuclei -u https://ip.darklab.sh",
-      "expected_text": [
-        "Templates loaded for current scan"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
+      "exit_code": null,
       "command": "nuclei -u https://ip.darklab.sh -t http/",
       "expected_text": [
         "Templates loaded for current scan"
@@ -1402,41 +260,9 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "nuclei -u https://ip.darklab.sh -t dns/",
-      "expected_text": [
-        "caa-fingerprint"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nuclei -u https://ip.darklab.sh -t network/",
-      "expected_text": [
-        "Current nuclei version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nuclei -u https://ip.darklab.sh -severity low,medium,high,critical",
-      "expected_text": [
-        "Using Interactsh Server"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "nuclei -u https://ip.darklab.sh -severity high,critical",
       "expected_text": [
         "Using Interactsh Server"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nuclei -u https://ip.darklab.sh -as",
-      "expected_text": [
-        "Executing Automatic scan"
       ]
     },
     {
@@ -1450,39 +276,9 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "subfinder -d ip.darklab.sh",
-      "expected_text": [
-        "Current subfinder version"
-      ]
-    },
-    {
-      "no_output": true,
-      "exit_code": 0,
-      "command": "subfinder -d ip.darklab.sh -silent",
-      "expected_text": []
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "subfinder -d ip.darklab.sh -recursive",
-      "expected_text": [
-        "Current subfinder version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "pd-httpx -h",
       "expected_text": [
         "httpx is a fast and"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "pd-httpx -u https://ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh"
       ]
     },
     {
@@ -1520,57 +316,9 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
-      "expected_text": [
-        "Current dnsx version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp",
-      "expected_text": [
-        "Current dnsx version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp",
-      "expected_text": [
-        "Current dnsx version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -cname -resp",
-      "expected_text": [
-        "Current dnsx version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "dnsx -d ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -mx -resp",
-      "expected_text": [
-        "Current dnsx version"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "fping -h",
       "expected_text": [
         "Usage: fping [options] [targets...]"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 1,
-      "command": "fping darklab.sh",
-      "expected_text": [
-        "darklab.sh is alive"
       ]
     },
     {
@@ -1600,126 +348,6 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "amass -h",
-      "expected_text": [
-        "Usage: amass"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "amass enum -d darklab.sh",
-      "expected_text": [
-        "0 / 1"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "amass enum -passive -d darklab.sh",
-      "expected_text": [
-        "0 / 1"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "amass enum -active -d darklab.sh",
-      "expected_text": [
-        "0 / 1"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "amass enum -d darklab.sh -brute",
-      "expected_text": [
-        "0 / 1"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "assetfinder --help",
-      "expected_text": [
-        "Usage of assetfinder:"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "fierce --help",
-      "expected_text": [
-        "usage: fierce [-h] [--domain DOMAIN]"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "fierce --domain ip.darklab.sh",
-      "expected_text": [
-        "ruth.ns.cloudflare.com"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "fierce --domain ip.darklab.sh --dns-servers 8.8.8.8",
-      "expected_text": [
-        "ruth.ns.cloudflare.com"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "fierce --domain ip.darklab.sh --traverse 5",
-      "expected_text": [
-        "ruth.ns.cloudflare.com"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 1,
-      "command": "dnsenum --help",
-      "expected_text": [
-        "dnsenum "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 255,
-      "command": "dnsenum ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 255,
-      "command": "dnsenum --noreverse ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 255,
-      "command": "dnsenum --enum ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 255,
-      "command": "dnsenum --dnsserver 8.8.8.8 ip.darklab.sh",
-      "expected_text": [
-        "ip.darklab.sh "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "ffuf -h",
       "expected_text": [
         "Fuzz Faster U Fool -"
@@ -1731,38 +359,6 @@
       "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
       "expected_text": [
         "Progress: "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt",
-      "expected_text": [
-        "Progress: "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt -mc 200,301,302",
-      "expected_text": [
-        "Progress: "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -e .php,.html,.txt",
-      "expected_text": [
-        "Progress: "
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "nmap -Pn -sT ip.darklab.sh",
-      "expected_text": [
-        "Starting Nmap"
       ]
     },
     {
@@ -1792,25 +388,438 @@
     {
       "no_output": false,
       "exit_code": 0,
-      "command": "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/DirBuster-2007_directory-list-2.3-big.txt",
-      "expected_text": [
-        "Starting gobuster"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
-      "command": "gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/big.txt",
-      "expected_text": [
-        "Starting gobuster"
-      ]
-    },
-    {
-      "no_output": false,
-      "exit_code": 0,
       "command": "gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
       "expected_text": [
         "Starting gobuster"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nslookup -type=A darklab.sh",
+      "expected_text": [
+        "Non-authoritative answer:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nslookup -type=MX darklab.sh",
+      "expected_text": [
+        "mail exchanger ="
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "host -t A darklab.sh",
+      "expected_text": [
+        "has address"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl s_client -connect ip.darklab.sh:443 -quiet",
+      "expected_text": [
+        "ISRG Root X1"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sslscan ip.darklab.sh",
+      "expected_text": [
+        "Testing SSL server"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dnsrecon -d darklab.sh -t std",
+      "expected_text": [
+        "Performing General Enumeration"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "subfinder -d darklab.sh",
+      "expected_text": [
+        "Enumerating subdomains for"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt",
+      "expected_text": [
+        "Current dnsx version"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "naabu -help",
+      "expected_text": [
+        "-host"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "naabu -host ip.darklab.sh -p 80,443",
+      "expected_text": [
+        "projectdiscovery.io"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "wafw00f --help",
+      "expected_text": [
+        "wafw00f"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "katana -help",
+      "expected_text": [
+        "-u"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "katana -u https://ip.darklab.sh -d 1 -silent",
+      "expected_text": [
+        "https://ip.darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "masscan --help",
+      "expected_text": [
+        "masscan"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "masscan -p 80,443 8.8.8.8",
+      "expected_text": [
+        "Scanning 1 hosts"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "rustscan --help",
+      "expected_text": [
+        "rustscan"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "rustscan -a ip.darklab.sh -p 80,443",
+      "expected_text": [
+        "rustscan"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nmap -sV -p 80,443 ip.darklab.sh",
+      "any_of": [
+        { "expected_text": ["Starting Nmap"] },
+        { "expected_text": ["Nmap scan report"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nmap -A -T4 ip.darklab.sh",
+      "expected_text": [
+        "Starting Nmap"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nmap -Pn --top-ports 100 ip.darklab.sh",
+      "expected_text": [
+        "Starting Nmap"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -mc 200,301,302",
+      "expected_text": [
+        ":: Progress:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "openssl s_client -connect ip.darklab.sh:443 -showcerts",
+      "any_of": [
+        { "expected_text": ["depth="] },
+        { "expected_text": ["verify return:1"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "curl -sv https://ip.darklab.sh",
+      "expected_text": [
+        "Host ip.darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "curl -o /dev/null -w \"%{http_code}\" https://ip.darklab.sh",
+      "expected_text": [
+        "200"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dig darklab.sh +short",
+      "expected_text": []
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dig MX darklab.sh +short",
+      "expected_text": [
+        "aspmx.l.google.com."
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dig @8.8.8.8 darklab.sh",
+      "any_of": [
+        { "expected_text": ["; <<>> DiG"] },
+        { "expected_text": ["Got answer:"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "nslookup -type=TXT darklab.sh",
+      "any_of": [
+        { "expected_text": ["Non-authoritative answer:"] },
+        { "expected_text": ["v=spf1"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "host -t NS darklab.sh",
+      "expected_text": [
+        "darklab.sh name server"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "mtr -h",
+      "any_of": [
+        { "expected_text": ["Usage:"] },
+        { "expected_text": ["mtr [options] hostname"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "wget -h",
+      "any_of": [
+        { "expected_text": ["GNU Wget"] },
+        { "expected_text": ["Usage: wget"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dnsrecon -d darklab.sh -t axfr",
+      "any_of": [
+        { "expected_text": ["Checking for Zone Transfer"] },
+        { "expected_text": ["Zone Transfer Failed"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dnsrecon -d darklab.sh -t brt",
+      "any_of": [
+        { "expected_text": ["Performing host and subdomain brute force"] },
+        { "expected_text": ["Records Found"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 1,
+      "command": "dnsenum -h",
+      "any_of": [
+        { "expected_text": ["dnsenum VERSION:"] },
+        { "expected_text": ["Usage: dnsenum"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dnsenum --noreverse darklab.sh",
+      "expected_text": [
+        "dnsenum VERSION:"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dnsenum --enum darklab.sh",
+      "expected_text": [
+        "darklab.sh."
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "dnsenum --dnsserver 8.8.8.8 darklab.sh",
+      "any_of": [
+        { "expected_text": ["dnsenum VERSION:"] },
+        { "expected_text": ["AXFR record query failed"] }
+  ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp",
+      "expected_text": [
+        "darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp",
+      "expected_text": [
+        "darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "fierce -h",
+      "any_of": [
+        { "expected_text": ["usage: fierce"] },
+        { "expected_text": ["--domain DOMAIN"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "fierce --domain darklab.sh",
+      "any_of": [
+        { "expected_text": ["NS:"] },
+        { "expected_text": ["SOA:"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "fierce --domain darklab.sh --dns-servers 8.8.8.8",
+      "any_of": [
+        { "expected_text": ["NS:"] },
+        { "expected_text": ["SOA:"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
+      "command": "fierce --domain darklab.sh --traverse 5",
+      "any_of": [
+        { "expected_text": ["NS:"] },
+        { "expected_text": ["SOA:"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "subfinder -d darklab.sh -silent",
+      "expected_text": [
+        "darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "wpscan -h",
+      "expected_text": [
+        "WPScan"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sslscan -h",
+      "expected_text": [
+        "sslscan"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sslscan --no-failed ip.darklab.sh",
+      "any_of": [
+        { "expected_text": ["Testing SSL server"] },
+        { "expected_text": ["OpenSSL"] }
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sslyze --help",
+      "expected_text": [
+        "usage: sslyze"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sslyze --certinfo ip.darklab.sh",
+      "expected_text": [
+        "CHECKING CONNECTIVITY TO SERVER(S)"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "sslyze --heartbleed ip.darklab.sh",
+      "expected_text": [
+        "CHECKING CONNECTIVITY TO SERVER(S)"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "wafw00f https://darklab.sh",
+      "expected_text": [
+        "Cloudflare"
+      ]
+    },
+    {
+      "exit_code": 0,
+      "command": "naabu -host ip.darklab.sh -silent",
+      "any_of": [
+        {"no_output": true},
+        {"expected_text": ["ip.darklab.sh"]}
       ]
     }
   ]

@@ -1,14 +1,12 @@
 {% extends "permalink_base.html" %}
 
-{% block header_meta %}
-  <div class="permalink-meta">{{ noun }} permalink unavailable</div>
-{% endblock %}
+{% block header_meta %}{% endblock %}
 
 {% block header_actions %}
-  <a class="term-action-btn" href="/">← back to shell</a>
+  <a class="btn btn-secondary btn-compact" href="/">← back to shell</a>
 {% endblock %}
 
-{% block output %}
-  <div class="permalink-error-heading">{{ noun }} not found</div>
+{% block output %}<div class="permalink-error-state">
+  <div class="permalink-error-heading">{{ noun|title }} Unavailable</div>
   <div class="permalink-error-detail">{{ detail }}</div>
-{% endblock %}
+</div>{% endblock %}

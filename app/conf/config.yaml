@@ -1,10 +1,10 @@
-# darklab shell — Configuration
+# darklab_shell — Configuration
 # ----------------------------------
 # Changes to this file take effect after a container restart (docker compose restart).
 # No rebuild is needed.
 # Optional: add sibling *.local.* files for untracked server-specific overrides.
 # Examples: app/conf/config.local.yaml, app/conf/allowed_commands.local.txt,
-# app/conf/ascii.local.txt, app/conf/auto_complete.local.txt,
+# app/conf/ascii.local.txt, app/conf/autocomplete_context.local.yaml,
 # app/conf/app_hints.local.txt, app/conf/faq.local.yaml,
 # app/conf/welcome.local.yaml, app/conf/themes/<name>.local.yaml.
 # If present, each local overlay is applied after its checked-in base file.
@@ -14,8 +14,8 @@
 # ── Branding ──────────────────────────────────────────────────────────────────
 
 # Name displayed in the browser tab, header, and permalink pages
-# Server default if unset: "darklab shell"
-# app_name: "darklab shell"
+# Server default if unset: "darklab_shell"
+# app_name: "darklab_shell"
 
 # Prompt prefix shown at the start of the terminal prompt and welcome samples.
 # Server default if unset: "anon@darklab:~$"
@@ -39,9 +39,40 @@
 # Server default if unset: 50
 # history_panel_limit: 50
 
-# Number of recent commands shown as clickable chips below the input box
-# Server default if unset: 8
-# recent_commands_limit: 8
+# Number of recent commands surfaced in the Recent row
+# (desktop rail chips; mobile peek row and pull-up recents sheet)
+# Server default if unset: 50
+# recent_commands_limit: 50
+
+# Enable the built-in basic redaction model for snapshot permalinks and local
+# export actions (`save txt` / `save html`). When enabled, the app applies a
+# conservative built-in baseline before any operator-defined rules:
+#   - bearer tokens / Authorization: Bearer ...
+#   - email addresses
+#   - IPv4 addresses
+#   - IPv6 addresses
+#   - hostnames / dotted domains
+# The app then appends any operator-defined rules from `share_redaction_rules`.
+# Normal run history remains unchanged in this first version.
+# Server default if unset: true
+# share_redaction_enabled: true
+#
+# Optional operator-defined regex rules appended after the built-in share/export
+# redaction rules.
+# Each rule supports:
+#   label:       optional human-readable name
+#   pattern:     required regular expression
+#   replacement: replacement text (default: [redacted])
+#   flags:       optional regex flags from: i, m
+# Server default if unset: []
+# share_redaction_rules:
+#   - label: bearer token
+#     pattern: 'Bearer\s+\S+'
+#     replacement: 'Bearer [redacted]'
+#     flags: i
+#   - label: ipv4
+#     pattern: '\b\d{1,3}(?:\.\d{1,3}){3}\b'
+#     replacement: '[ip-redacted]'
 
 # Permalink retention in days. Runs and snapshots older than this will be
 # deleted from the database on startup. Set to 0 for unlimited retention.

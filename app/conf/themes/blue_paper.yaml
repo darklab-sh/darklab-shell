@@ -1,4 +1,4 @@
-# darklab shell — Light Theme Example: Blue Paper
+# darklab_shell — Light Theme Example: Blue Paper
 # -------------------------------------------------
 # A cooler, more editorial light theme with clearer layer separation.
 # This file is an example only; copy values into app/conf/theme_light.yaml.example
@@ -91,8 +91,7 @@ history_load_modal_shadow: "rgba(34, 58, 88, 0.16)"
 
 faq_modal_bg: "#f8fbff"
 options_modal_bg: "#f8fbff"
-kill_modal_bg: "#c9d8e8"
-hist_del_modal_bg: "#c9d8e8"
+confirm_modal_bg: "#c9d8e8"
 
 dropdown_bg: "#edf4fb"
 dropdown_border: "rgba(36, 91, 153, 0.20)"
@@ -105,7 +104,7 @@ overlay_backdrop_bg: "rgba(14, 24, 38, 0.72)"
 
 faq_code_bg: "#e6eff7"
 allowed_chip_bg: "#e6eff7"
-options_select_bg: "#edf4fb"
+form_control_bg: "#edf4fb"
 
 tab_status_ok_bg: "#2f8d59"
 toast_bg: "#f4f8fd"

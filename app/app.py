@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-darklab shell - Real-time bash command execution web app
+darklab_shell - Real-time bash command execution web app
 Run: python3 app.py
 Then open http://localhost:8888 or read the README.md for Docker instructions.
 """
@@ -30,12 +30,11 @@ log = logging.getLogger("shell")
 # Import blueprints and shared helpers after logging is configured.
 from extensions import limiter  # noqa: E402
 from helpers import get_client_ip, get_session_id  # noqa: E402, F401 — get_session_id re-exported
-from blueprints.assets import (  # noqa: E402, F401 — re-exported for test compatibility
-    assets_bp, _ANSI_UP_PATH, _ANSI_UP_FALLBACK, _FONT_DIR, _FONT_FALLBACK_DIR,
-)
+from blueprints.assets import assets_bp  # noqa: E402
 from blueprints.content import content_bp  # noqa: E402
 from blueprints.run import run_bp, SUDO_BIN, KILL_BIN  # noqa: E402, F401 — re-exported
 from blueprints.history import history_bp  # noqa: E402
+from blueprints.session import session_bp  # noqa: E402
 
 app = Flask(__name__, template_folder="templates")
 app.config["RATELIMIT_ENABLED"] = CFG.get("rate_limit_enabled", True)
@@ -77,10 +76,11 @@ app.register_blueprint(assets_bp)
 app.register_blueprint(content_bp)
 app.register_blueprint(run_bp)
 app.register_blueprint(history_bp)
+app.register_blueprint(session_bp)
 
 
 if __name__ == "__main__":
     # For local development only. In production, Gunicorn is used as the WSGI server
     # via the Dockerfile CMD. Run locally with: python3 app.py
-    print("darklab shell running at http://localhost:8888")
+    print("darklab_shell running at http://localhost:8888")
     app.run(host="0.0.0.0", port=8888, threaded=True)  # nosec B104

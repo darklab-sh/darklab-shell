@@ -1,18 +1,433 @@
 // ── Shared history/permalink logic ──
-// Stored in localStorage as a JSON array of command strings.
-// Stars float starred items to the top of both the chips row and history panel.
+// Stars are server-backed via /session/starred. A local in-memory cache
+// (_starredCache) avoids blocking the UI on every render. Until the cache
+// loads, render code sees an empty Set rather than reading localStorage —
+// a stale localStorage value from before stars moved server-side would
+// silently mask the user's server-side stars.
+
+let _starredCache = null; // null = not yet loaded from server
 
 function _getStarred() {
-  try { return new Set(JSON.parse(localStorage.getItem('starred') || '[]')); }
-  catch { return new Set(); }
+  return _starredCache !== null ? _starredCache : new Set();
 }
+
 function _saveStarred(set) {
-  localStorage.setItem('starred', JSON.stringify([...set]));
+  _starredCache = new Set(set);
 }
+
 function _toggleStar(cmd) {
   const s = _getStarred();
-  if (s.has(cmd)) s.delete(cmd); else s.add(cmd);
-  _saveStarred(s);
+  const adding = !s.has(cmd);
+  if (adding) s.add(cmd); else s.delete(cmd);
+  _starredCache = s;
+  // fire-and-forget server sync — UI is already updated optimistically
+  apiFetch('/session/starred', {
+    method: adding ? 'POST' : 'DELETE',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ command: cmd }),
+  }).catch(() => {});
+}
+
+async function loadStarredFromServer() {
+  try {
+    const resp = await apiFetch('/session/starred');
+    if (!resp.ok) return;
+    const data = await resp.json();
+    _starredCache = new Set(data.commands || []);
+  } catch (_) {}
+}
+
+async function reloadSessionHistory() {
+  await loadStarredFromServer();
+  try {
+    const limit = Math.max(1, Number(APP_CONFIG.recent_commands_limit) || 50);
+    const resp = await apiFetch(`/history/commands?limit=${encodeURIComponent(String(limit))}`);
+    if (resp.ok) {
+      const data = await resp.json();
+      hydrateCmdHistory(data.runs || []);
+    }
+  } catch (_) {}
+  if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) refreshHistoryPanel();
+}
+
+// History drawer filters are deliberately simple in the first pass:
+// server-backed search/filtering for persisted run attributes, plus a local
+// starred-only toggle backed by the server cache.
+let _historyFilterRefreshTimer = null;
+let _historyFilters = {
+  type: 'all',
+  q: '',
+  commandRoot: '',
+  exitCode: 'all',
+  dateRange: 'all',
+  starredOnly: false,
+};
+let _historyMobileAdvancedOpen = false;
+let _historyRootSuggestions = [];
+let _historyRootFiltered = [];
+let _historyRootIndex = -1;
+let _historyRootSuppressInputOnce = false;
+let _historyPaging = {
+  page: 1,
+  pageSize: (typeof APP_CONFIG !== 'undefined' && APP_CONFIG && APP_CONFIG.history_panel_limit)
+    ? Math.max(1, Number(APP_CONFIG.history_panel_limit) || 50)
+    : 50,
+  totalCount: 0,
+  pageCount: 0,
+  hasPrev: false,
+  hasNext: false,
+};
+
+function _normalizeHistoryFilterValue(value) {
+  return typeof value === 'string' ? value.trim() : '';
+}
+
+function _syncHistoryFilterControls() {
+  if (typeof historySearchInput !== 'undefined' && historySearchInput) historySearchInput.value = _historyFilters.q;
+  if (typeof historyMobileFiltersToggle !== 'undefined' && historyMobileFiltersToggle) {
+    const activeCount = _historyActiveFilterItems().length;
+    const baseLabel = _historyMobileAdvancedOpen ? 'hide filters' : 'filters';
+    historyMobileFiltersToggle.textContent = activeCount > 0 ? `${baseLabel} (${activeCount})` : baseLabel;
+    historyMobileFiltersToggle.setAttribute('aria-expanded', _historyMobileAdvancedOpen ? 'true' : 'false');
+  }
+  if (typeof historyPanel !== 'undefined' && historyPanel) {
+    historyPanel.classList.toggle('mobile-history-filters-open', !!_historyMobileAdvancedOpen);
+  }
+  if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) historyTypeFilter.value = _historyFilters.type;
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = _historyFilters.commandRoot;
+  if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.value = _historyFilters.exitCode;
+  if (typeof historyDateFilter !== 'undefined' && historyDateFilter) historyDateFilter.value = _historyFilters.dateRange;
+  if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.checked = !!_historyFilters.starredOnly;
+  const runOnlyEnabled = _historyFilters.type !== 'snapshots';
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.disabled = !runOnlyEnabled;
+  if (typeof historyExitFilter !== 'undefined' && historyExitFilter) historyExitFilter.disabled = !runOnlyEnabled;
+  if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) historyStarredToggle.disabled = !runOnlyEnabled;
+  if (typeof histClearAllBtn !== 'undefined' && histClearAllBtn) {
+    histClearAllBtn.classList.toggle('u-hidden', _historyFilters.type === 'snapshots');
+  }
+}
+
+function _historyHasActiveServerFilters() {
+  return Boolean(
+    _historyFilters.type !== 'all'
+    || _historyFilters.q
+    || _historyFilters.commandRoot
+    || _historyFilters.exitCode !== 'all'
+    || _historyFilters.dateRange !== 'all'
+  );
+}
+
+function _historyHasAnyFilters() {
+  return _historyHasActiveServerFilters() || !!_historyFilters.starredOnly;
+}
+
+function _historyResetRunOnlyFilters() {
+  _historyFilters.commandRoot = '';
+  _historyFilters.exitCode = 'all';
+  _historyFilters.starredOnly = false;
+}
+
+function _historyLabelForType(type = _historyFilters.type) {
+  if (type === 'runs') return 'runs';
+  if (type === 'snapshots') return 'snapshots';
+  return 'history items';
+}
+
+function _historySummaryLabel(totalCount = _historyPaging.totalCount) {
+  const singular = totalCount === 1;
+  if (_historyFilters.type === 'runs') return singular ? 'stored run' : 'stored runs';
+  if (_historyFilters.type === 'snapshots') return singular ? 'stored snapshot' : 'stored snapshots';
+  return singular ? 'stored item' : 'stored items';
+}
+
+function _historyCommandRootsFromRuns(runs) {
+  const roots = new Set();
+  for (const run of Array.isArray(runs) ? runs : []) {
+    const root = typeof run === 'string'
+      ? run.trim()
+      : (run && typeof run.command === 'string' ? run.command.trim().split(/\s+/, 1)[0] : '');
+    if (root) roots.add(root);
+  }
+  return [...roots].sort((a, b) => a.localeCompare(b));
+}
+
+function _renderHistoryRootSuggestions(runs) {
+  _historyRootSuggestions = _historyCommandRootsFromRuns(runs);
+  _historyRefreshRootDropdown();
+}
+
+function _appendHistoryCommandEcho(tabId, command) {
+  if (typeof appendCommandEcho === 'function') {
+    appendCommandEcho(command, tabId);
+    return;
+  }
+  appendLine(command, 'prompt-echo', tabId);
+}
+
+function _hideHistoryRootDropdown() {
+  if (typeof historyRootDropdown === 'undefined' || !historyRootDropdown) return;
+  historyRootDropdown.replaceChildren();
+  historyRootDropdown.classList.add('u-hidden');
+  _historyRootFiltered = [];
+  _historyRootIndex = -1;
+}
+
+function _historyRootMatches(query) {
+  const value = _normalizeHistoryFilterValue(query).toLowerCase();
+  if (!value) return [];
+  return _historyRootSuggestions
+    .filter(root => root.toLowerCase().startsWith(value))
+    .slice(0, 12);
+}
+
+function _acceptHistoryRootSuggestion(root) {
+  _historyRootSuppressInputOnce = true;
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) historyRootInput.value = root;
+  _hideHistoryRootDropdown();
+  _setHistoryFilter('commandRoot', root);
+  if (typeof historyRootInput !== 'undefined' && historyRootInput) {
+    setTimeout(() => focusElement(historyRootInput, { preventScroll: true }), 0);
+  }
+}
+
+function _renderHistoryRootDropdown(items, query) {
+  if (typeof historyRootDropdown === 'undefined' || !historyRootDropdown) return;
+  historyRootDropdown.replaceChildren();
+  if (!items.length) {
+    _hideHistoryRootDropdown();
+    return;
+  }
+  const normalizedQuery = _normalizeHistoryFilterValue(query).toLowerCase();
+  if (items.length === 1 && normalizedQuery && items[0].toLowerCase() === normalizedQuery) {
+    _hideHistoryRootDropdown();
+    return;
+  }
+  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  historyRootDropdown.classList.toggle('ac-mobile', mobileMode);
+  items.forEach((root, index) => {
+    const item = document.createElement('div');
+    item.className = 'ac-item' + (index === _historyRootIndex ? ' ac-active' : '');
+    const matchIndex = normalizedQuery ? root.toLowerCase().indexOf(normalizedQuery) : -1;
+    if (matchIndex >= 0 && normalizedQuery) {
+      item.innerHTML = escapeHtml(root.slice(0, matchIndex))
+        + '<span class="ac-match">' + escapeHtml(root.slice(matchIndex, matchIndex + normalizedQuery.length)) + '</span>'
+        + escapeHtml(root.slice(matchIndex + normalizedQuery.length));
+    } else {
+      item.textContent = root;
+    }
+    item.addEventListener('mousedown', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      _acceptHistoryRootSuggestion(root);
+    });
+    item.addEventListener('touchstart', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      _acceptHistoryRootSuggestion(root);
+    }, { passive: false });
+    historyRootDropdown.appendChild(item);
+  });
+  historyRootDropdown.classList.remove('u-hidden');
+}
+
+function _historyRefreshRootDropdown() {
+  const query = typeof historyRootInput !== 'undefined' && historyRootInput ? historyRootInput.value : _historyFilters.commandRoot;
+  _historyRootFiltered = _historyRootMatches(query);
+  if (_historyRootIndex >= _historyRootFiltered.length) _historyRootIndex = _historyRootFiltered.length - 1;
+  _renderHistoryRootDropdown(_historyRootFiltered, query);
+}
+
+function _historyActiveFilterItems() {
+  const items = [];
+  if (_historyFilters.type !== 'all') items.push({ key: 'type', label: `type: ${_historyFilters.type}` });
+  if (_historyFilters.q) items.push({ key: 'q', label: `search: ${_historyFilters.q}` });
+  if (_historyFilters.commandRoot) items.push({ key: 'commandRoot', label: `command: ${_historyFilters.commandRoot}` });
+  if (_historyFilters.exitCode === '0') items.push({ key: 'exitCode', label: 'exit: 0' });
+  else if (_historyFilters.exitCode === 'nonzero') items.push({ key: 'exitCode', label: 'exit: non-zero' });
+  else if (_historyFilters.exitCode === 'incomplete') items.push({ key: 'exitCode', label: 'exit: incomplete' });
+  if (_historyFilters.dateRange !== 'all') items.push({ key: 'dateRange', label: `date: ${_historyFilters.dateRange}` });
+  if (_historyFilters.starredOnly) items.push({ key: 'starredOnly', label: 'starred' });
+  return items;
+}
+
+function _historySetPage(nextPage, { refresh = true } = {}) {
+  const page = Math.max(1, Number(nextPage) || 1);
+  if (_historyPaging.page !== page) {
+    _historyPaging.page = page;
+  }
+  if (refresh) refreshHistoryPanel();
+}
+
+function _historyRenderPagination(visibleCount = 0) {
+  if (typeof historyPagination === 'undefined' || !historyPagination) return;
+  if (typeof historyPaginationSummary === 'undefined' || !historyPaginationSummary) return;
+  if (typeof historyPaginationControls === 'undefined' || !historyPaginationControls) return;
+
+  const { page, pageSize, totalCount, pageCount } = _historyPaging;
+  const totalLabel = _historySummaryLabel(totalCount);
+  if (totalCount > 0) {
+    const start = ((page - 1) * pageSize) + 1;
+    const count = Math.max(0, Number(visibleCount) || 0);
+    const end = count > 0 ? Math.min(totalCount, start + count - 1) : start;
+    historyPaginationSummary.textContent = `Showing ${start}-${end} of ${totalCount} ${totalLabel}`;
+  } else {
+    historyPaginationSummary.textContent = `Showing 0 of 0 ${_historySummaryLabel(0)}`;
+  }
+
+  historyPaginationControls.replaceChildren();
+
+  const prevPage = page > 1 ? page - 1 : 1;
+  const prevBtn = document.createElement('button');
+  prevBtn.type = 'button';
+  prevBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
+  prevBtn.textContent = '‹ Prev';
+  prevBtn.disabled = page <= 1;
+  prevBtn.setAttribute('aria-label', 'Previous page');
+  prevBtn.addEventListener('click', () => _historySetPage(prevPage));
+  historyPaginationControls.appendChild(prevBtn);
+
+  const pageLabel = document.createElement('span');
+  pageLabel.className = 'history-pagination-status';
+  pageLabel.textContent = `Page ${pageCount > 0 ? page : 0} of ${pageCount}`;
+  pageLabel.setAttribute('aria-live', 'polite');
+  historyPaginationControls.appendChild(pageLabel);
+
+  const nextPage = pageCount > page ? page + 1 : page;
+  const nextBtn = document.createElement('button');
+  nextBtn.type = 'button';
+  nextBtn.className = 'btn btn-secondary btn-compact history-pagination-chevron';
+  nextBtn.textContent = 'Next ›';
+  nextBtn.disabled = page >= pageCount;
+  nextBtn.setAttribute('aria-label', 'Next page');
+  nextBtn.addEventListener('click', () => _historySetPage(nextPage));
+  historyPaginationControls.appendChild(nextBtn);
+
+  historyPagination.classList.remove('u-hidden');
+}
+
+function _renderHistoryActiveFilters() {
+  if (typeof historyActiveFilters === 'undefined' || !historyActiveFilters) return;
+  historyActiveFilters.replaceChildren();
+  const items = _historyActiveFilterItems();
+  historyActiveFilters.classList.toggle('u-hidden', !items.length);
+  items.forEach(item => {
+    const chip = document.createElement('div');
+    chip.className = 'history-active-filter-chip';
+    chip.dataset.filterKey = item.key;
+    const label = document.createElement('span');
+    label.textContent = item.label;
+    chip.appendChild(label);
+    const removeBtn = document.createElement('button');
+    removeBtn.className = 'history-active-filter-remove';
+    removeBtn.type = 'button';
+    removeBtn.setAttribute('aria-label', `Remove ${item.label} filter`);
+    removeBtn.textContent = '✕';
+    removeBtn.addEventListener('click', e => {
+      e.preventDefault();
+      e.stopPropagation();
+      const resetValue = item.key === 'starredOnly' ? false : (item.key === 'q' || item.key === 'commandRoot' ? '' : 'all');
+      _setHistoryFilter(item.key, resetValue);
+    });
+    chip.appendChild(removeBtn);
+    historyActiveFilters.appendChild(chip);
+  });
+}
+
+function _buildHistoryRequestUrl() {
+  const params = new URLSearchParams();
+  params.set('page', String(_historyPaging.page || 1));
+  params.set('page_size', String(_historyPaging.pageSize || 1));
+  params.set('include_total', '1');
+  if (_historyFilters.type !== 'all') params.set('type', _historyFilters.type);
+  if (_historyFilters.q) params.set('q', _historyFilters.q);
+  if (_historyFilters.commandRoot) params.set('command_root', _historyFilters.commandRoot);
+  if (_historyFilters.exitCode !== 'all') params.set('exit_code', _historyFilters.exitCode);
+  if (_historyFilters.dateRange !== 'all') params.set('date_range', _historyFilters.dateRange);
+  if (_historyFilters.starredOnly) params.set('starred_only', '1');
+  const query = params.toString();
+  return query ? `/history?${query}` : '/history';
+}
+
+function _applyHistoryClientFilters(runs) {
+  return Array.isArray(runs) ? runs.slice() : [];
+}
+
+function _renderHistoryEmptyState() {
+  if (typeof historyList === 'undefined' || !historyList) return;
+  const empty = document.createElement('div');
+  empty.className = 'history-empty-state';
+  const title = document.createElement('div');
+  title.className = 'history-empty-state-title';
+  const typeLabel = _historyLabelForType();
+  title.textContent = _historyHasAnyFilters()
+    ? `No matching ${typeLabel}.`
+    : _historyFilters.type === 'snapshots'
+      ? 'No snapshots yet.'
+      : _historyFilters.type === 'runs'
+        ? 'No runs yet.'
+        : 'No history yet.';
+  empty.appendChild(title);
+
+  const detail = document.createElement('div');
+  detail.className = 'history-empty-state-detail';
+  detail.textContent = _historyHasAnyFilters()
+    ? 'Adjust or clear the current filters to widen the history results.'
+    : _historyFilters.type === 'snapshots'
+      ? 'Saved snapshots will appear here for this browser session.'
+      : _historyFilters.type === 'runs'
+        ? 'Completed commands will appear here for this browser session.'
+        : 'Completed commands and saved snapshots will appear here for this browser session.';
+  empty.appendChild(detail);
+  historyList.appendChild(empty);
+  if (typeof historyPagination !== 'undefined' && historyPagination) {
+    historyPagination.classList.remove('u-hidden');
+  }
+}
+
+function _scheduleHistoryPanelRefresh() {
+  if (_historyFilterRefreshTimer) clearTimeout(_historyFilterRefreshTimer);
+  _historyFilterRefreshTimer = setTimeout(() => {
+    _historyFilterRefreshTimer = null;
+    refreshHistoryPanel();
+  }, 120);
+}
+
+function _setHistoryFilter(key, value, { debounce = false } = {}) {
+  if (key === 'starredOnly') _historyFilters.starredOnly = !!value;
+  else _historyFilters[key] = _normalizeHistoryFilterValue(value) || (key === 'q' || key === 'commandRoot' ? '' : 'all');
+  if (key === 'type' && _historyFilters.type === 'snapshots') _historyResetRunOnlyFilters();
+  _historyPaging.page = 1;
+  if (debounce) _scheduleHistoryPanelRefresh();
+  else refreshHistoryPanel();
+}
+
+function clearHistoryFilters() {
+  _historyFilters = {
+    type: 'all',
+    q: '',
+    commandRoot: '',
+    exitCode: 'all',
+    dateRange: 'all',
+    starredOnly: false,
+  };
+  _historyPaging.page = 1;
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  _hideHistoryRootDropdown();
+  refreshHistoryPanel();
+}
+
+function resetHistoryMobileFilters() {
+  _historyMobileAdvancedOpen = false;
+  _syncHistoryFilterControls();
+  _hideHistoryRootDropdown();
+}
+
+function toggleHistoryMobileFilters(force = null) {
+  const next = force === null ? !_historyMobileAdvancedOpen : !!force;
+  _historyMobileAdvancedOpen = next;
+  _syncHistoryFilterControls();
+  return _historyMobileAdvancedOpen;
 }
 
 
@@ -68,6 +483,12 @@ function addToHistory(cmd) {
   renderHistory();
 }
 
+function addToRecentPreview(cmd) {
+  recentPreviewHistory = [cmd, ...recentPreviewHistory.filter(c => c !== cmd)]
+    .slice(0, APP_CONFIG.recent_commands_limit);
+  renderHistory();
+}
+
 function hydrateCmdHistory(runs) {
   const items = Array.isArray(runs) ? runs : [];
   const seen = new Set();
@@ -76,6 +497,15 @@ function hydrateCmdHistory(runs) {
     .filter(cmd => {
       if (!cmd || seen.has(cmd)) return false;
       seen.add(cmd);
+      return true;
+    })
+    .slice(0, APP_CONFIG.recent_commands_limit);
+  const previewSeen = new Set();
+  recentPreviewHistory = items
+    .map(run => run && typeof run.command === 'string' ? run.command : '')
+    .filter(cmd => {
+      if (!cmd || previewSeen.has(cmd)) return false;
+      previewSeen.add(cmd);
       return true;
     })
     .slice(0, APP_CONFIG.recent_commands_limit);
@@ -90,6 +520,7 @@ function _makeOverflowChip(_count) {
   chip.title = 'Open history panel';
   chip.addEventListener('click', () => {
     if (!historyPanel) return;
+    if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
     showHistoryPanel();
     if (typeof refreshHistoryPanel === 'function') refreshHistoryPanel();
   });
@@ -131,9 +562,22 @@ function _applyDesktopChipOverflow() {
   }
 }
 
+function _emitHistoryRendered() {
+  if (typeof emitUiEvent === 'function') {
+    emitUiEvent('app:history-rendered', {
+      cmdHistory: Array.isArray(cmdHistory) ? cmdHistory.slice() : [],
+      recentPreviewHistory: Array.isArray(recentPreviewHistory) ? recentPreviewHistory.slice() : [],
+    });
+  }
+}
+
 function renderHistory() {
   while (histRow.children.length > 1) histRow.removeChild(histRow.lastChild);
-  if (!cmdHistory.length) { hideHistoryRow(); return; }
+  if (!cmdHistory.length) {
+    hideHistoryRow();
+    _emitHistoryRendered();
+    return;
+  }
   showHistoryRow();
 
   const starred = _getStarred();
@@ -170,9 +614,9 @@ function renderHistory() {
 
     chip.appendChild(textEl);
     chip.addEventListener('click', () => {
-      chip.blur();
+      blurActiveElement();
       setComposerValue(cmd, cmd.length, cmd.length);
-      if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput({ preventScroll: true })) return;
+      if (refocusComposerAfterAction({ preventScroll: true })) return;
       resetCmdHistoryNav();
     });
     histRow.appendChild(chip);
@@ -183,6 +627,8 @@ function renderHistory() {
   } else if (!isMobile) {
     _applyDesktopChipOverflow();
   }
+
+  _emitHistoryRendered();
 }
 
 // Re-measure chip overflow when the window is resized on desktop.
@@ -195,34 +641,70 @@ if (typeof window !== 'undefined' && typeof window.addEventListener === 'functio
 }
 
 
-function _setHistoryDeleteMessage(title, detail) {
-  const msg = histDelMsg;
-  if (!msg) return;
-  msg.replaceChildren();
-  msg.appendChild(document.createTextNode(title));
-  msg.appendChild(document.createElement('br'));
-  const note = document.createElement('span');
-  note.className = 'history-delete-note';
-  note.textContent = detail;
-  msg.appendChild(note);
+function _historyRelativeTime(startedAt, now = new Date()) {
+  if (!(startedAt instanceof Date) || Number.isNaN(startedAt.getTime())) return '';
+  const diffSec = Math.round((now.getTime() - startedAt.getTime()) / 1000);
+  if (diffSec < 45) return 'just now';
+  if (diffSec < 60 * 60) return `${Math.round(diffSec / 60)}m ago`;
+  if (diffSec < 60 * 60 * 24) return `${Math.round(diffSec / 3600)}h ago`;
+  if (diffSec < 60 * 60 * 24 * 7) return `${Math.round(diffSec / 86400)}d ago`;
+  return startedAt.toLocaleDateString(undefined, { month: 'short', day: 'numeric' });
+}
+
+function _historyMetaKindBadge(kind, label = kind.toUpperCase()) {
+  const badge = document.createElement('span');
+  badge.className = `history-entry-kind history-entry-kind-${kind}`;
+  badge.textContent = label;
+  return badge;
 }
 
 function _createHistoryEntry(run, isStarred) {
   const entry = document.createElement('div');
   entry.className = 'history-entry' + (isStarred ? ' starred' : '');
   const exitCls = run.exit_code === 0 ? 'exit-ok' : 'exit-fail';
-  const time = new Date(run.started).toLocaleTimeString();
+  const startedAt = new Date(run.started);
+  const now = new Date();
+  const validDate = !Number.isNaN(startedAt.getTime());
+  const time = startedAt.toLocaleTimeString();
+  const showDate = validDate && (
+    startedAt.getFullYear() !== now.getFullYear()
+    || startedAt.getMonth() !== now.getMonth()
+    || startedAt.getDate() !== now.getDate()
+  );
+
+  const header = document.createElement('div');
+  header.className = 'history-entry-header';
+
+  const starBtn = document.createElement('button');
+  starBtn.className = 'history-entry-star' + (isStarred ? ' starred' : '');
+  starBtn.dataset.action = 'star';
+  starBtn.type = 'button';
+  const starLabel = isStarred
+    ? 'Unstar — stop pinning this command to the top of history'
+    : 'Star — keep this command pinned at the top of history';
+  starBtn.setAttribute('aria-label', starLabel);
+  starBtn.title = starLabel;
+  starBtn.textContent = isStarred ? '★' : '☆';
+  header.appendChild(starBtn);
 
   const cmd = document.createElement('div');
   cmd.className = 'history-entry-cmd';
   cmd.textContent = run.command || '';
-  entry.appendChild(cmd);
+  header.appendChild(cmd);
+  entry.appendChild(header);
 
   const meta = document.createElement('div');
   meta.className = 'history-entry-meta';
+  meta.appendChild(_historyMetaKindBadge('run'));
   const timeEl = document.createElement('span');
   timeEl.textContent = time;
   meta.appendChild(timeEl);
+  if (showDate) {
+    const dateEl = document.createElement('span');
+    dateEl.className = 'history-entry-date';
+    dateEl.textContent = startedAt.toLocaleDateString();
+    meta.appendChild(dateEl);
+  }
   const exitEl = document.createElement('span');
   exitEl.className = exitCls;
   exitEl.textContent = `exit ${run.exit_code}`;
@@ -232,17 +714,11 @@ function _createHistoryEntry(run, isStarred) {
   const actions = document.createElement('div');
   actions.className = 'history-actions';
 
-  const starBtn = document.createElement('button');
-  starBtn.className = 'history-action-btn star-btn' + (isStarred ? ' starred' : '');
-  starBtn.dataset.action = 'star';
-  starBtn.textContent = isStarred ? '★ starred' : '☆ star';
-  actions.appendChild(starBtn);
-
-  const copyBtn = document.createElement('button');
-  copyBtn.className = 'history-action-btn';
-  copyBtn.dataset.action = 'copy';
-  copyBtn.textContent = 'copy command';
-  actions.appendChild(copyBtn);
+  const restoreBtn = document.createElement('button');
+  restoreBtn.className = 'history-action-btn';
+  restoreBtn.dataset.action = 'restore';
+  restoreBtn.textContent = 'restore';
+  actions.appendChild(restoreBtn);
 
   const permalinkBtn = document.createElement('button');
   permalinkBtn.className = 'history-action-btn';
@@ -260,43 +736,139 @@ function _createHistoryEntry(run, isStarred) {
   return entry;
 }
 
+function _createSnapshotHistoryEntry(snapshot) {
+  const entry = document.createElement('div');
+  entry.className = 'history-entry history-entry-snapshot';
+
+  const header = document.createElement('div');
+  header.className = 'history-entry-header';
+
+  const title = document.createElement('div');
+  title.className = 'history-entry-cmd';
+  title.textContent = snapshot.label || 'snapshot';
+  header.appendChild(title);
+  entry.appendChild(header);
+
+  const meta = document.createElement('div');
+  meta.className = 'history-entry-meta';
+  meta.appendChild(_historyMetaKindBadge('snapshot'));
+  const createdAt = new Date(snapshot.created);
+  const timeEl = document.createElement('span');
+  timeEl.textContent = Number.isNaN(createdAt.getTime())
+    ? ''
+    : _historyRelativeTime(createdAt);
+  if (!Number.isNaN(createdAt.getTime())) timeEl.title = createdAt.toLocaleString();
+  meta.appendChild(timeEl);
+  entry.appendChild(meta);
+
+  const actions = document.createElement('div');
+  actions.className = 'history-actions';
+
+  const openBtn = document.createElement('button');
+  openBtn.className = 'history-action-btn';
+  openBtn.dataset.action = 'open';
+  openBtn.textContent = 'open';
+  actions.appendChild(openBtn);
+
+  const linkBtn = document.createElement('button');
+  linkBtn.className = 'history-action-btn';
+  linkBtn.dataset.action = 'link';
+  linkBtn.textContent = 'copy link';
+  actions.appendChild(linkBtn);
+
+  const deleteBtn = document.createElement('button');
+  deleteBtn.className = 'history-action-btn';
+  deleteBtn.dataset.action = 'delete';
+  deleteBtn.textContent = 'delete';
+  actions.appendChild(deleteBtn);
+
+  entry.appendChild(actions);
+  return entry;
+}
+
+function _snapshotUrl(snapshot) {
+  return `${location.origin}/share/${snapshot.id}`;
+}
+
+function openSnapshotLink(snapshot) {
+  if (!snapshot || !snapshot.id) return;
+  const url = _snapshotUrl(snapshot);
+  if (typeof window !== 'undefined' && window && typeof window.open === 'function') {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
+function _historyActionKeepsPanelOpen(action) {
+  if (action === 'star') return true;
+  const mobileMode = typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode();
+  if (!mobileMode) return false;
+  return action === 'permalink';
+}
+
 
 // ── Run history panel ──
 let pendingHistAction = null;
 
-function confirmHistAction(type, id, command) {
-  pendingHistAction = { type, id, command };
-  const msg      = histDelMsg;
-  const confirm  = histDelConfirmBtn;
-  if (type === 'clear') {
-    _setHistoryDeleteMessage('Clear run history?', 'This cannot be undone.');
-    showHistoryDeleteNonfav();
-    confirm.textContent   = 'Delete all';
-  } else {
-    _setHistoryDeleteMessage('Remove this run from history?', 'This cannot be undone.');
-    hideHistoryDeleteNonfav();
-    confirm.textContent   = 'Delete';
-  }
-  showHistoryDeleteOverlay();
+function confirmHistAction(type, id, command, itemType = 'run') {
+  pendingHistAction = { type, id, command, itemType };
+  const isBulk = type === 'clear';
+  const body = isBulk
+    ? { text: 'Delete all runs and snapshots?', note: 'This cannot be undone.' }
+    : itemType === 'snapshot'
+      ? { text: 'Remove this snapshot from history?', note: 'This cannot be undone.' }
+      : { text: 'Remove this run from history?', note: 'This cannot be undone.' };
+  const actions = isBulk
+    ? [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'nonfav', label: 'Delete Non-Favorites', role: 'secondary', tone: 'warning' },
+        { id: 'all',    label: 'Delete all', role: 'primary', tone: 'warning' },
+      ]
+    : [
+        { id: 'cancel', label: 'Cancel', role: 'cancel' },
+        { id: 'one',    label: 'Delete', role: 'primary', tone: 'warning' },
+      ];
+  showConfirm({ body, tone: 'warning', actions }).then((choice) => {
+    if (!choice || choice === 'cancel') {
+      pendingHistAction = null;
+      return;
+    }
+    if (choice === 'nonfav') executeHistAction('clear-nonfav');
+    else if (choice === 'all') executeHistAction();
+    else if (choice === 'one') executeHistAction('delete');
+  });
 }
 
 function executeHistAction(type) {
   const action  = type || (pendingHistAction && pendingHistAction.type);
   const id      = pendingHistAction && pendingHistAction.id;
   const command = pendingHistAction && pendingHistAction.command;
+  const itemType = pendingHistAction && pendingHistAction.itemType;
   pendingHistAction = null;
   if (action === 'delete') {
-    apiFetch(`/history/${id}`, { method: 'DELETE' }).then(() => {
+    const deleteUrl = itemType === 'snapshot' ? `/share/${id}` : `/history/${id}`;
+    apiFetch(deleteUrl, { method: 'DELETE' }).then(() => {
+      if (itemType === 'snapshot') {
+        refreshHistoryPanel();
+        return;
+      }
       // Remove from starred set and chips — deleted history should not stay pinned
       const s = _getStarred();
-      s.delete(command);
-      _saveStarred(s);
+      if (s.has(command)) {
+        s.delete(command);
+        _saveStarred(s);
+        apiFetch('/session/starred', {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ command }),
+        }).catch(() => {});
+      }
       cmdHistory = cmdHistory.filter(c => c !== command);
+      recentPreviewHistory = recentPreviewHistory.filter(c => c !== command);
       renderHistory();
       refreshHistoryPanel();
     }).catch(() => showToast('Failed to delete run'));
   } else if (action === 'clear-nonfav') {
-    apiFetch('/history')
+    apiFetch('/history?type=runs')
       .then(r => r.json())
       .then(data => {
         const starred   = _getStarred();
@@ -304,6 +876,7 @@ function executeHistAction(type) {
         const deleteCmds = new Set(toDelete.map(r => r.command));
         // Remove deleted commands from chips; starred commands remain
         cmdHistory = cmdHistory.filter(c => !deleteCmds.has(c));
+        recentPreviewHistory = recentPreviewHistory.filter(c => !deleteCmds.has(c));
         renderHistory();
         return Promise.all(toDelete.map(r => apiFetch(`/history/${r.id}`, { method: 'DELETE' })));
       })
@@ -313,7 +886,9 @@ function executeHistAction(type) {
     apiFetch('/history', { method: 'DELETE' }).then(() => {
       // Wipe all starred state and chips — nothing left in history to pin
       _saveStarred(new Set());
+      apiFetch('/session/starred', { method: 'DELETE' }).catch(() => {});
       cmdHistory = [];
+      recentPreviewHistory = [];
       renderHistory();
       refreshHistoryPanel();
     }).catch(() => showToast('Failed to clear history'));
@@ -326,123 +901,282 @@ function _setHistoryLoadState(loading) {
   else hideHistoryLoadOverlay();
 }
 
+function restoreHistoryRunIntoTab(run, { targetTabId = null, hidePanelOnSuccess = true } = {}) {
+  if (!run || !run.id) return Promise.reject(new Error('missing run id'));
+  const existing = targetTabId ? getTab(targetTabId) : tabs.find(t => t.command === run.command);
+  const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
+  const restoreUrl = run.full_output_available
+    ? `/history/${run.id}?json`
+    : `/history/${run.id}?json&preview=1`;
+
+  return apiFetch(restoreUrl)
+    .then(r => r.json())
+    .then(fullRun => {
+      const previewNotice = fullRun.preview_notice || null;
+      const tabId = targetTabId || (canUpgradeExisting ? existing.id : createTab(fullRun.command));
+      if (!tabId) throw new Error('failed to create restore tab');
+      if (typeof clearTab === 'function') clearTab(tabId);
+      const t = getTab(tabId);
+      if (t) {
+        t.command = fullRun.command;
+        t.runId = null;
+        t.historyRunId = fullRun.id || run.id;
+        t.exitCode = fullRun.exit_code;
+        t.previewTruncated = !!previewNotice;
+        t.fullOutputAvailable = !!fullRun.full_output_available;
+        t.fullOutputLoaded = !!fullRun.full_output_available && !previewNotice;
+        t.reconnectedRun = false;
+      }
+      _appendHistoryCommandEcho(tabId, fullRun.command);
+      (fullRun.output || []).forEach(line => appendLine(line, '', tabId));
+      if (previewNotice) appendLine(previewNotice, 'notice', tabId);
+      appendLine(
+        `[history — exit ${fullRun.exit_code}]`,
+        fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail',
+        tabId
+      );
+      if (typeof setTabStatus === 'function') {
+        setTabStatus(tabId, fullRun.exit_code === 0 ? 'ok' : 'fail');
+      }
+      if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
+      if (hidePanelOnSuccess) hideHistoryPanel();
+      return tabId;
+    });
+}
+
 function refreshHistoryPanel() {
   // The panel is populated on demand so we always fetch the latest persisted
   // history instead of assuming the in-memory tab state is authoritative.
-  apiFetch('/history').then(r => r.json()).then(data => {
+  _syncHistoryFilterControls();
+  _renderHistoryActiveFilters();
+  apiFetch(_buildHistoryRequestUrl()).then(r => r.json()).then(data => {
     historyList.replaceChildren();
-    if (!data.runs.length) {
-      const empty = document.createElement('div');
-      empty.className = 'history-empty-state';
-      empty.textContent = 'No runs yet.';
-      historyList.appendChild(empty);
+    _historyPaging.page = Math.max(1, Number(data.page) || _historyPaging.page || 1);
+    _historyPaging.pageSize = Math.max(1, Number(data.page_size) || _historyPaging.pageSize || 1);
+    _historyPaging.totalCount = Math.max(0, Number(data.total_count ?? data.items?.length ?? data.runs?.length ?? 0) || 0);
+    _historyPaging.pageCount = Math.max(0, Number(data.page_count) || 0);
+    _historyPaging.hasPrev = !!data.has_prev;
+    _historyPaging.hasNext = !!data.has_next;
+    const visibleItems = _applyHistoryClientFilters(Array.isArray(data.items) ? data.items : data.runs);
+    _renderHistoryRootSuggestions(_historyFilters.type === 'snapshots' ? [] : (Array.isArray(data.roots) ? data.roots : data.runs));
+    if (!visibleItems.length) {
+      _historyRenderPagination(0);
+      _renderHistoryEmptyState();
+      if (typeof emitUiEvent === 'function') {
+        emitUiEvent('app:history-panel-refreshed', {
+          items: [],
+          runs: [],
+          roots: Array.isArray(data.roots) ? data.roots.slice() : [],
+          paging: { ..._historyPaging },
+          filters: { ..._historyFilters },
+        });
+      }
       return;
     }
 
     const starred = _getStarred();
-    // Starred runs first, then by recency (server already sorts by recency)
-    const sorted = [
-      ...data.runs.filter(r => starred.has(r.command)),
-      ...data.runs.filter(r => !starred.has(r.command)),
-    ];
+    visibleItems.forEach(item => {
+      if (item.type === 'snapshot') {
+        const entry = _createSnapshotHistoryEntry(item);
+        entry.addEventListener('click', e => {
+          if (e.target.closest('[data-action]')) return;
+          openSnapshotLink(item);
+          hideHistoryPanel();
+        });
 
-    sorted.forEach(run => {
+        bindPressable(entry.querySelector('[data-action="open"]'), {
+          onActivate: () => {
+            openSnapshotLink(item);
+            hideHistoryPanel();
+          },
+        });
+        bindPressable(entry.querySelector('[data-action="link"]'), {
+          onActivate: () => {
+            shareUrl(_snapshotUrl(item)).catch(() => showToast('Failed to copy link', 'error'));
+            if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+          },
+        });
+        bindPressable(entry.querySelector('[data-action="delete"]'), {
+          onActivate: () => {
+            confirmHistAction('delete', item.id, item.label || 'snapshot', 'snapshot');
+          },
+        });
+        historyList.appendChild(entry);
+        return;
+      }
+
+      const run = item;
       const isStarred = starred.has(run.command);
       const entry = _createHistoryEntry(run, isStarred);
 
-      // Click anywhere on the entry (except buttons) to load into a new tab,
-      // or switch to the existing tab if this command is already loaded there.
+      // Click anywhere on the entry (except buttons) to load the command into
+      // the composer for re-run. Full tab-restore is available via the
+      // dedicated `restore` action button.
       entry.addEventListener('click', e => {
-        if (e.target.closest('.history-action-btn')) return;
-
-        // If a tab already has this command and already has the full output,
-        // switch to it instead of duplicating. If the tab is still showing a
-        // truncated preview and the full artifact exists, upgrade that tab in
-        // place so the restored view stays consistent.
-        const existing = tabs.find(t => t.command === run.command);
-        const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
-        if (existing && !canUpgradeExisting) {
-          activateTab(existing.id);
-          hideHistoryPanel();
-          return;
+        if (e.target.closest('[data-action]')) return;
+        const cmd = run.command || '';
+        if (typeof setComposerValue === 'function') {
+          setComposerValue(cmd, cmd.length, cmd.length);
         }
+        hideHistoryPanel();
+        if (typeof refocusComposerAfterAction === 'function') {
+          refocusComposerAfterAction({ preventScroll: true });
+        }
+        resetCmdHistoryNav();
+      });
 
-        const cmdEl = entry.querySelector('.history-entry-cmd');
-        cmdEl.textContent = 'loading…';
-        _setHistoryLoadState(true);
-        const restoreUrl = run.full_output_available
-          ? `/history/${run.id}?json`
-          : `/history/${run.id}?json&preview=1`
-        apiFetch(restoreUrl)
-          .then(r => r.json())
-          .then(fullRun => {
-            const previewNotice = fullRun.preview_notice || null;
-            const newId = canUpgradeExisting ? existing.id : createTab(fullRun.command);
-            if (canUpgradeExisting) clearTab(newId);
-            const t = getTab(newId);
-            if (t) {
-              t.command = fullRun.command;
-              t.previewTruncated = !!previewNotice;
-              t.fullOutputAvailable = !!fullRun.full_output_available;
-              t.fullOutputLoaded = !!fullRun.full_output_available && !previewNotice;
-            }
-            appendLine(`$ ${fullRun.command}`, '', newId);
-            appendLine('', '', newId);
-            (fullRun.output || []).forEach(line => appendLine(line, '', newId));
-            if (previewNotice) {
-              appendLine(previewNotice, 'notice', newId);
-            }
-            appendLine(`[history — exit ${fullRun.exit_code}]`, fullRun.exit_code === 0 ? 'exit-ok' : 'exit-fail', newId);
+      bindPressable(entry.querySelector('[data-action="star"]'), {
+        onActivate: () => {
+          const wasStarred = _getStarred().has(run.command);
+          _toggleStar(run.command);
+          if (!wasStarred && !cmdHistory.includes(run.command)) {
+            cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
+          }
+          if (!_historyActionKeepsPanelOpen('star')) hideHistoryPanel();
+          refreshHistoryPanel();
+          renderHistory();
+        },
+      });
+
+      bindPressable(entry.querySelector('[data-action="restore"]'), {
+        onActivate: () => {
+          const existing = tabs.find(t => t.command === run.command);
+          const canUpgradeExisting = !!(existing && run.full_output_available && existing.previewTruncated);
+          if (existing && !canUpgradeExisting) {
+            activateTab(existing.id);
             hideHistoryPanel();
+            return;
+          }
+          const cmdEl = entry.querySelector('.history-entry-cmd');
+          cmdEl.textContent = 'loading…';
+          _setHistoryLoadState(true);
+          restoreHistoryRunIntoTab(run, {
+            targetTabId: canUpgradeExisting ? existing.id : null,
+            hidePanelOnSuccess: true,
           })
-          .catch(() => {
-            entry.querySelector('.history-entry-cmd').textContent = run.command;
-            showToast('Failed to load run');
-          })
-          .finally(() => _setHistoryLoadState(false));
+            .catch(() => {
+              entry.querySelector('.history-entry-cmd').textContent = run.command;
+              showToast('Failed to load run');
+            })
+            .finally(() => _setHistoryLoadState(false));
+        },
       });
 
-      entry.querySelector('[data-action="star"]').addEventListener('click', () => {
-        const wasStarred = _getStarred().has(run.command);
-        _toggleStar(run.command);
-        // If the command is being starred and isn't in the chips list, add it
-        if (!wasStarred && !cmdHistory.includes(run.command)) {
-          cmdHistory = [run.command, ...cmdHistory].slice(0, APP_CONFIG.recent_commands_limit);
-        }
-        hideHistoryPanel();
-        refreshHistoryPanel();
-        renderHistory(); // keep chips in sync
+      bindPressable(entry.querySelector('[data-action="permalink"]'), {
+        onActivate: () => {
+          const url = `${location.origin}/history/${run.id}`;
+          shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));
+          if (!_historyActionKeepsPanelOpen('permalink')) hideHistoryPanel();
+        },
       });
-
-      entry.querySelector('[data-action="copy"]').addEventListener('click', () => {
-        copyTextToClipboard(run.command)
-          .then(() => showToast('Command copied to clipboard'))
-          .catch(() => showToast('Failed to copy command', 'error'));
-        const btn = entry.querySelector('[data-action="copy"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        hideHistoryPanel();
-      });
-
-      entry.querySelector('[data-action="permalink"]').addEventListener('click', () => {
-        const url = `${location.origin}/history/${run.id}`;
-        copyTextToClipboard(url)
-          .then(() => showToast('Link copied to clipboard'))
-          .catch(() => showToast('Failed to copy link', 'error'));
-        const btn = entry.querySelector('[data-action="permalink"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
-        hideHistoryPanel();
-      });
-      entry.querySelector('[data-action="delete"]').addEventListener('click', () => {
-        confirmHistAction('delete', run.id, run.command);
-        hideHistoryPanel();
-        const btn = entry.querySelector('[data-action="delete"]');
-        if (btn && typeof btn.blur === 'function') setTimeout(() => btn.blur(), 0);
+      bindPressable(entry.querySelector('[data-action="delete"]'), {
+        onActivate: () => {
+          confirmHistAction('delete', run.id, run.command);
+        },
       });
 
       historyList.appendChild(entry);
     });
+    _historyRenderPagination(visibleItems.length);
+    if (typeof emitUiEvent === 'function') {
+      emitUiEvent('app:history-panel-refreshed', {
+        items: visibleItems.slice(),
+        runs: visibleItems.filter(item => item.type === 'run').slice(),
+        roots: Array.isArray(data.roots) ? data.roots.slice() : [],
+        paging: { ..._historyPaging },
+        filters: { ..._historyFilters },
+      });
+    }
   });
 }
+
+if (typeof historySearchInput !== 'undefined' && historySearchInput) {
+  historySearchInput.addEventListener('input', e => {
+    _setHistoryFilter('q', e.target.value, { debounce: true });
+  });
+}
+
+if (typeof historyMobileFiltersToggle !== 'undefined' && historyMobileFiltersToggle) {
+  historyMobileFiltersToggle.addEventListener('click', e => {
+    e.preventDefault();
+    e.stopPropagation();
+    toggleHistoryMobileFilters();
+  });
+}
+
+if (typeof historyRootInput !== 'undefined' && historyRootInput) {
+  historyRootInput.addEventListener('input', e => {
+    if (_historyRootSuppressInputOnce) {
+      _historyRootSuppressInputOnce = false;
+      return;
+    }
+    _historyRootIndex = -1;
+    _historyRefreshRootDropdown();
+    _setHistoryFilter('commandRoot', e.target.value, { debounce: true });
+  });
+  historyRootInput.addEventListener('focus', () => {
+    _historyRootIndex = -1;
+    _historyRefreshRootDropdown();
+  });
+  historyRootInput.addEventListener('blur', () => {
+    setTimeout(() => _hideHistoryRootDropdown(), 0);
+  });
+  historyRootInput.addEventListener('keydown', e => {
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      _hideHistoryRootDropdown();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      if (!_historyRootFiltered.length) return;
+      e.preventDefault();
+      _historyRootIndex = (_historyRootIndex + 1) % _historyRootFiltered.length;
+      _renderHistoryRootDropdown(_historyRootFiltered, historyRootInput.value);
+      return;
+    }
+    if (e.key === 'ArrowUp') {
+      if (!_historyRootFiltered.length) return;
+      e.preventDefault();
+      _historyRootIndex = _historyRootIndex <= 0 ? _historyRootFiltered.length - 1 : _historyRootIndex - 1;
+      _renderHistoryRootDropdown(_historyRootFiltered, historyRootInput.value);
+      return;
+    }
+    if (e.key === 'Enter' && _historyRootIndex >= 0 && _historyRootFiltered[_historyRootIndex]) {
+      e.preventDefault();
+      _acceptHistoryRootSuggestion(_historyRootFiltered[_historyRootIndex]);
+    }
+  });
+}
+
+if (typeof historyTypeFilter !== 'undefined' && historyTypeFilter) {
+  historyTypeFilter.addEventListener('change', e => {
+    _setHistoryFilter('type', e.target.value);
+  });
+}
+
+if (typeof historyExitFilter !== 'undefined' && historyExitFilter) {
+  historyExitFilter.addEventListener('change', e => {
+    _setHistoryFilter('exitCode', e.target.value);
+  });
+}
+
+if (typeof historyDateFilter !== 'undefined' && historyDateFilter) {
+  historyDateFilter.addEventListener('change', e => {
+    _setHistoryFilter('dateRange', e.target.value);
+  });
+}
+
+if (typeof historyStarredToggle !== 'undefined' && historyStarredToggle) {
+  historyStarredToggle.addEventListener('change', e => {
+    _setHistoryFilter('starredOnly', e.target.checked);
+  });
+}
+
+if (typeof historyClearFiltersBtn !== 'undefined' && historyClearFiltersBtn) {
+  historyClearFiltersBtn.addEventListener('click', () => clearHistoryFilters());
+}
+
+_syncHistoryFilterControls();
 
 
 // ── Ctrl+R reverse-history search ──
@@ -451,14 +1185,56 @@ let _histSearchMode = false;
 let _histSearchQuery = '';
 let _histSearchIndex = -1;
 let _histSearchPreDraft = '';
+let _histSearchRuns = null;     // null = not yet fetched; string[] = ready
+let _histSearchFetchTimer = null;
 
 function isHistSearchMode() { return _histSearchMode; }
 
 function _histSearchMatches() {
-  if (!cmdHistory.length) return [];
+  if (!_histSearchQuery) return [];
+  // Always include client-side matches from the in-memory recents so the
+  // dropdown can't "clear" on the user when a server fetch returns fewer
+  // items (or is stale from a prior keystroke). This mirrors bash reverse-
+  // i-search, which searches in-memory history. Server results extend this
+  // list with older runs beyond the recents cap; both lists are re-filtered
+  // against the current query to guard against race conditions.
   const q = _histSearchQuery.toLowerCase();
-  if (!q) return cmdHistory.slice(0, 20);
-  return cmdHistory.filter(c => c.toLowerCase().includes(q)).slice(0, 20);
+  const fromClient = cmdHistory.filter(c => c.toLowerCase().includes(q));
+  const seen = new Set();
+  const merged = [];
+  for (const cmd of fromClient) {
+    if (!seen.has(cmd)) { merged.push(cmd); seen.add(cmd); }
+  }
+  if (_histSearchRuns !== null) {
+    for (const cmd of _histSearchRuns) {
+      if (!seen.has(cmd) && cmd.toLowerCase().includes(q)) {
+        merged.push(cmd);
+        seen.add(cmd);
+      }
+    }
+  }
+  return merged.slice(0, 10);
+}
+
+// Fetch /history?q=<query> from the server (same endpoint as the drawer).
+// The query filter is applied server-side before LIMIT, so searches match
+// the full history — not just the most-recent-N unfiltered runs.
+// scope=command keeps this bash-like: match typed command text only, not
+// output text (which FTS would otherwise mix in and surface unrelated runs).
+function _histSearchFetch(q) {
+  const url = q
+    ? `/history?type=runs&q=${encodeURIComponent(q)}&scope=command`
+    : '/history?type=runs&scope=command';
+  apiFetch(url).then(r => r.json()).then(data => {
+    if (!_histSearchMode) return;
+    _histSearchRuns = Array.isArray(data.runs)
+      ? [...new Set(data.runs.map(r => r.command))]
+      : [];
+    _histSearchIndex = _histSearchRuns.length > 0 ? 0 : -1;
+    _renderHistSearch();
+  }).catch(() => {
+    if (_histSearchRuns === null) _histSearchRuns = [];
+  });
 }
 
 function _hideHistSearchDropdown() {
@@ -518,15 +1294,31 @@ function _renderHistSearch() {
     });
   }
 
-  // Position above the prompt line, like the ac-dropdown does
+  // Flip above/below based on available space, mirroring the ac-dropdown so
+  // the list stays on-screen when the prompt is near the top of the viewport.
   histSearchDropdown.classList.remove('u-hidden');
   if (shellPromptWrap) {
     const rect = shellPromptWrap.getBoundingClientRect();
     histSearchDropdown.style.position = 'fixed';
     histSearchDropdown.style.left = rect.left + 'px';
     histSearchDropdown.style.width = rect.width + 'px';
-    const dropH = histSearchDropdown.offsetHeight;
-    histSearchDropdown.style.top = (rect.top - dropH - 4) + 'px';
+    histSearchDropdown.style.bottom = 'auto';
+    histSearchDropdown.style.maxHeight = '';
+    const desired = histSearchDropdown.offsetHeight;
+    const spaceBelow = Math.max(0, window.innerHeight - rect.bottom - 8);
+    const spaceAbove = Math.max(0, rect.top - 8);
+    const safetyPad = 20;
+    const canFitBelow = spaceBelow >= (desired + safetyPad);
+    const canFitAbove = spaceAbove >= (desired + safetyPad);
+    const showAbove = canFitAbove && (!canFitBelow || spaceAbove >= spaceBelow);
+    const available = showAbove ? spaceAbove : spaceBelow;
+    const edgeBuffer = showAbove ? 20 : 30;
+    const maxHeight = Math.max(0, available > edgeBuffer ? available - edgeBuffer : available);
+    const visibleHeight = Math.max(0, Math.min(desired, maxHeight || desired));
+    histSearchDropdown.style.maxHeight = `${Math.round(maxHeight)}px`;
+    histSearchDropdown.style.top = showAbove
+      ? `${Math.max(8, Math.round(rect.top - visibleHeight - 4))}px`
+      : `${Math.max(8, Math.round(rect.bottom + 4))}px`;
   }
 }
 
@@ -553,6 +1345,8 @@ function enterHistSearch() {
     setComposerValue('', 0, 0, { dispatch: false });
   }
   if (typeof acHide === 'function') acHide();
+
+  _histSearchRuns = null;
   _renderHistSearch();
 }
 
@@ -574,17 +1368,30 @@ function exitHistSearch(accept, { keepCurrent = false } = {}) {
   _histSearchQuery = '';
   _histSearchIndex = -1;
   _histSearchPreDraft = '';
+  _histSearchRuns = null;
+  if (_histSearchFetchTimer) { clearTimeout(_histSearchFetchTimer); _histSearchFetchTimer = null; }
   if (typeof acHide === 'function') acHide();
 }
 
 function handleHistSearchInput(value) {
   _histSearchQuery = value;
   _histSearchIndex = -1;
-  const matches = _histSearchMatches();
-  if (matches.length > 0) {
-    _histSearchIndex = 0;
+  if (_histSearchFetchTimer) { clearTimeout(_histSearchFetchTimer); _histSearchFetchTimer = null; }
+  if (!value) {
+    _histSearchRuns = null;
+    _renderHistSearch();
+    return;
   }
+  // Initialise index from the current pool (cmdHistory fallback or previous fetch results)
+  // so keyboard navigation works immediately while the server fetch is in-flight.
+  const matches = _histSearchMatches();
+  if (matches.length > 0) _histSearchIndex = 0;
   _renderHistSearch();
+  // Re-fetch with the new query so the server applies the filter before LIMIT.
+  _histSearchFetchTimer = setTimeout(() => {
+    _histSearchFetchTimer = null;
+    _histSearchFetch(value);
+  }, 120);
 }
 
 function handleHistSearchKey(e) {

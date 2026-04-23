@@ -9,16 +9,18 @@ from flask import Blueprint, Response, jsonify, render_template, request
 import config as _config
 from commands import (
     load_all_faq,
+    load_all_workflows,
     load_allowed_commands,
     load_allowed_commands_grouped,
     load_ascii_art,
     load_ascii_mobile_art,
-    load_autocomplete,
+    load_autocomplete_context,
     load_mobile_welcome_hints,
     load_welcome,
     load_welcome_hints,
 )
-from helpers import get_client_ip, get_session_id, ip_is_in_cidrs
+from fake_commands import get_current_shortcuts, get_special_command_keys
+from helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs, resolve_theme
 
 log = logging.getLogger("shell")
 
@@ -30,106 +32,42 @@ def _log_content_view(route: str, **extra):
         "CONTENT_VIEWED",
         extra={
             "ip": get_client_ip(),
-            "session": get_session_id(),
+            "session": get_log_session_id(),
             "route": route,
             **extra,
         },
     )
 
 
-def _current_theme_name():
-    # Keep cookie/default theme resolution in one place so HTML templates and
-    # JSON endpoints report the same active selection.
-    theme_name = request.cookies.get("pref_theme_name", "").strip()
-    if theme_name and theme_name in _config.THEME_REGISTRY_MAP:
-        log.debug(
-            "THEME_SELECTED",
-            extra={
-                "ip": get_client_ip(),
-                "session": get_session_id(),
-                "route": request.path,
-                "theme": theme_name,
-                "source": "pref_theme_name",
-            },
-        )
-        return theme_name
-    legacy = request.cookies.get("pref_theme", "").strip()
-    if legacy and legacy in _config.THEME_REGISTRY_MAP:
-        log.debug(
-            "THEME_SELECTED",
-            extra={
-                "ip": get_client_ip(),
-                "session": get_session_id(),
-                "route": request.path,
-                "theme": legacy,
-                "source": "pref_theme",
-            },
-        )
-        return legacy
-    default_theme = _config.CFG.get("default_theme", "darklab_obsidian.yaml")
-    if default_theme in _config.THEME_REGISTRY_MAP:
-        log.debug(
-            "THEME_SELECTED",
-            extra={
-                "ip": get_client_ip(),
-                "session": get_session_id(),
-                "route": request.path,
-                "theme": default_theme,
-                "source": "default_theme",
-            },
-        )
-        return default_theme
+def _current_theme_entry():
+    name, source = resolve_theme()
     log.debug(
         "THEME_SELECTED",
         extra={
             "ip": get_client_ip(),
-            "session": get_session_id(),
+            "session": get_log_session_id(),
             "route": request.path,
-            "theme": default_theme,
-            "source": "fallback",
+            "theme": name,
+            "source": source,
         },
     )
-    return default_theme
-
-
-def _current_theme_entry():
     return _config.get_theme_entry(
-        _current_theme_name(),
+        name,
         fallback=_config.CFG.get("default_theme", "darklab_obsidian.yaml"),
     )
 
 
-@content_bp.route("/")
-def index():
-    current_theme = _current_theme_entry()
-    log.info(
-        "PAGE_LOAD",
-        extra={
-            "ip": get_client_ip(),
-            "session": get_session_id(),
-            "theme": current_theme["name"],
-        },
-    )
-    return render_template(
-        "index.html",
-        app_name=_config.CFG["app_name"],
-        prompt_prefix=_config.CFG["prompt_prefix"],
-        current_theme=current_theme,
-        current_theme_css=current_theme["vars"],
-        theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
-        fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
-    )
-
-@content_bp.route("/config")
-def get_config():
-    """Return frontend-relevant config values."""
+def _frontend_config_payload():
+    """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
-    payload = {
+    return {
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
         "prompt_prefix":         cfg["prompt_prefix"],
         "project_readme":        _config.PROJECT_README,
         "default_theme":         cfg["default_theme"],
+        "share_redaction_enabled": cfg["share_redaction_enabled"],
+        "share_redaction_rules": _config.get_share_redaction_rules(cfg),
         "motd":                  cfg["motd"],
         "recent_commands_limit": cfg["recent_commands_limit"],
         "max_output_lines":      cfg["max_output_lines"],
@@ -152,6 +90,37 @@ def get_config():
             cfg.get("diagnostics_allowed_cidrs") or [],
         ),
     }
+
+
+@content_bp.route("/")
+def index():
+    current_theme = _current_theme_entry()
+    log.info(
+        "PAGE_LOAD",
+        extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(),
+            "theme": current_theme["name"],
+        },
+    )
+    return render_template(
+        "index.html",
+        app_name=_config.CFG["app_name"],
+        version=_config.APP_VERSION,
+        project_readme=_config.PROJECT_README,
+        prompt_prefix=_config.CFG["prompt_prefix"],
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+        theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
+        fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
+        frontend_config=_frontend_config_payload(),
+    )
+
+
+@content_bp.route("/config")
+def get_config():
+    """Return frontend-relevant config values."""
+    payload = _frontend_config_payload()
     _log_content_view("/config", key_count=len(payload))
     return jsonify(payload)
 
@@ -188,12 +157,32 @@ def faq():
     return jsonify({"items": items})
 
 
+@content_bp.route("/workflows")
+def workflows():
+    """Return built-in workflow entries plus any custom workflows.yaml entries."""
+    items = load_all_workflows()
+    _log_content_view("/workflows", count=len(items))
+    return jsonify({"items": items})
+
+
+@content_bp.route("/shortcuts")
+def shortcuts():
+    """Return the keyboard shortcut reference used by the `shortcuts` built-in
+    command and the browser-side shortcuts overlay (`?` key).
+    """
+    payload = get_current_shortcuts()
+    total = sum(len(section["items"]) for section in payload["sections"])
+    _log_content_view("/shortcuts", count=total)
+    return jsonify(payload)
+
+
 @content_bp.route("/autocomplete")
 def autocomplete():
-    """Return the list of autocomplete suggestions from auto_complete.txt."""
-    suggestions = load_autocomplete()
-    _log_content_view("/autocomplete", count=len(suggestions))
-    return jsonify({"suggestions": suggestions})
+    """Return external-tool autocomplete context from autocomplete.yaml."""
+    context = load_autocomplete_context()
+    special_commands = get_special_command_keys()
+    _log_content_view("/autocomplete")
+    return jsonify({"suggestions": [], "context": context, "special_commands": special_commands})
 
 
 @content_bp.route("/welcome")

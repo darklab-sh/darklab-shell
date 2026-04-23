@@ -1,5 +1,13 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, openHistory, openHistoryWithEntries, waitForHistoryRuns, closeHistory, makeTestIp } from './helpers.js'
+import {
+  runCommand,
+  openHistory,
+  openHistoryWithEntries,
+  waitForHistoryRuns,
+  closeHistory,
+  makeTestIp,
+  createShareSnapshot,
+} from './helpers.js'
 
 // Use fake shell commands — they bypass the allowlist and complete instantly.
 const CMD_A = 'hostname'
@@ -15,33 +23,51 @@ test.describe('history drawer', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('loading a run from history opens output in a tab without repopulating command input', async ({ page }) => {
+  test('clicking a history entry injects the command into the composer and closes the drawer', async ({
+    page,
+  }) => {
     await runCommand(page, CMD_A)
 
     // Navigate away by opening a new tab (clears the input)
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('#cmd')).toHaveValue('')
+    const tabCountBefore = await page.locator('.tab').count()
 
-    // Open history and click the entry
     await openHistoryWithEntries(page)
     await page.locator('.history-entry').first().click()
 
-    // Command input remains neutral; loaded output appears in the active tab.
+    // Row click is the re-run path: command is ready in the input, drawer
+    // is closed, and no new tab is created (restoring would spawn one).
+    await expect(page.locator('#cmd')).toHaveValue(CMD_A)
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
+    await expect(page.locator('.tab')).toHaveCount(tabCountBefore)
+  })
+
+  test('the history restore button loads output into a tab without touching the composer', async ({
+    page,
+  }) => {
+    await runCommand(page, CMD_A)
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
+
     await expect(page.locator('#cmd')).toHaveValue('')
     await expect(page.locator('.tab-panel.active .output')).toContainText(CMD_A)
   })
 
-  test('clicking a history entry that is already open switches to that tab', async ({ page }) => {
+  test('the history restore button switches to an existing tab instead of duplicating it', async ({
+    page,
+  }) => {
     await runCommand(page, CMD_A)
     const initialTabCount = await page.locator('.tab').count()
 
-    // Open history and click the same entry
     await openHistoryWithEntries(page)
-    await page.locator('.history-entry').first().click()
+    await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
 
-    // No new tab should have been created
     await expect(page.locator('.tab')).toHaveCount(initialTabCount)
-    // The existing tab should be active without repopulating the command input
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
@@ -60,11 +86,22 @@ test.describe('history drawer', () => {
     await openHistory(page)
     await page.locator('.history-entry').first().locator('[data-action="delete"]').click()
     // Confirm deletion in the modal
-    await page.locator('#hist-del-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="one"]').click()
 
     // The starred chip should be gone
     await expect(page.locator('.hist-chip.starred')).toHaveCount(0)
     await expect(page.locator('.hist-chip')).toHaveCount(0)
+  })
+
+  test('toggling the history star keeps the desktop drawer open', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    await openHistoryWithEntries(page)
+    const firstEntry = page.locator('.history-entry').first()
+    await firstEntry.locator('[data-action="star"]').click()
+
+    await expect(page.locator('#history-panel')).toHaveClass(/open/)
+    await expect(firstEntry).toHaveClass(/starred/)
   })
 
   test('clear all history removes all chips including starred ones', async ({ page }) => {
@@ -77,7 +114,6 @@ test.describe('history drawer', () => {
     await openHistoryWithEntries(page)
     let entries = page.locator('.history-entry')
     await entries.nth(0).locator('[data-action="star"]').click()
-    await openHistory(page)
     entries = page.locator('.history-entry')
     await entries.nth(1).locator('[data-action="star"]').click()
     await closeHistory(page)
@@ -88,9 +124,9 @@ test.describe('history drawer', () => {
     await openHistory(page)
     await page.locator('#hist-clear-all-btn').click()
     await page.keyboard.press('Escape')
-    await expect(page.locator('#hist-del-overlay')).toBeHidden()
+    await expect(page.locator('#confirm-host')).toBeHidden()
     await page.locator('#hist-clear-all-btn').click()
-    await page.locator('#hist-del-confirm').click()
+    await page.locator('#confirm-host [data-confirm-action-id="all"]').click()
 
     // All chips should be gone
     await expect(page.locator('.hist-chip')).toHaveCount(0)
@@ -131,12 +167,80 @@ test.describe('history drawer', () => {
 
     await openHistory(page)
     await page.locator('#hist-clear-all-btn').click()
-    await expect(page.locator('#hist-del-nonfav')).toBeVisible()
-    await page.locator('#hist-del-nonfav').click()
+    await expect(page.locator('#confirm-host [data-confirm-action-id="nonfav"]')).toBeVisible()
+    await page.locator('#confirm-host [data-confirm-action-id="nonfav"]').click()
 
     await expect(page.locator('.hist-chip.starred')).toHaveCount(1)
     await expect(page.locator('.hist-chip')).toHaveCount(1)
     await expect(page.locator('.history-entry')).toHaveCount(1)
     await expect(page.locator('.history-entry.starred')).toHaveCount(1)
+  })
+
+  test('starred commands are remembered across page reload', async ({ page }) => {
+    await runCommand(page, CMD_A)
+
+    // Star the run from the history panel
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="star"]').click()
+    await closeHistory(page)
+
+    // Set up the response waiter before reload so it captures the /session/starred
+    // request that loadStarredFromServer() makes on page initialization.
+    const starredResponse = page.waitForResponse(
+      resp => resp.url().includes('/session/starred') && resp.status() === 200,
+    )
+
+    // Reload without clearing localStorage — session_id is preserved, so starred
+    // commands are still in the server DB for this session.
+    await page.reload()
+    await page.locator('#cmd').waitFor()
+    await starredResponse
+
+    // History panel entries should reflect the server-side starred state.
+    await openHistoryWithEntries(page)
+    await expect(page.locator('.history-entry.starred')).toHaveCount(1)
+  })
+
+  test('loading a synthetic tail run from history restores the filtered transcript', async ({
+    page,
+  }) => {
+    await runCommand(page, 'help | tail -n 3')
+
+    await page.locator('#new-tab-btn').click()
+    await expect(page.locator('#cmd')).toHaveValue('')
+
+    await openHistoryWithEntries(page)
+    await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
+
+    const output = page.locator('.tab-panel.active .output')
+    await expect(output).toContainText('wc -l')
+    await expect(output).toContainText('command | wc -l')
+    await expect(output).toContainText('sort')
+    await expect(output).toContainText('command | sort -u')
+    await expect(output).toContainText('uniq')
+    await expect(output).toContainText('command | uniq -c')
+    await expect(output).not.toContainText('command | head -n')
+    await expect(output).not.toContainText('command | tail -n')
+    await expect(page.locator('#cmd')).toHaveValue('')
+  })
+
+  test('history drawer can filter to snapshots and shows snapshot actions', async ({ page }) => {
+    await runCommand(page, CMD_A)
+    await createShareSnapshot(page)
+
+    await openHistory(page)
+    await page.locator('#history-type-filter').selectOption('snapshots')
+
+    const entry = page.locator('#history-list .history-entry').first()
+    await expect(entry).toBeVisible()
+    await expect(entry.locator('.history-entry-kind-snapshot')).toHaveText('SNAPSHOT')
+    await expect(entry.locator('.history-entry-cmd')).toContainText(CMD_A)
+    await expect(entry.locator('[data-action="open"]')).toHaveText('open')
+    await expect(entry.locator('[data-action="link"]')).toHaveText('copy link')
+    await expect(entry.locator('[data-action="delete"]')).toHaveText('delete')
+
+    await entry.locator('[data-action="link"]').click()
+    await expect(page.locator('#permalink-toast')).toContainText('Link copied to clipboard')
+    await expect(page.locator('#history-panel')).not.toHaveClass(/open/)
   })
 })

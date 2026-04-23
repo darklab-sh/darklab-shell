@@ -1,65 +1,266 @@
 # TODO
 
+This file tracks open work items, known issues, and product ideas for darklab_shell. Open TODOs, known issues, and technical debt are confirmed items. Ideas are speculative — not committed or planned.
+
+---
+
+## Table of Contents
+
+- [Open TODOs](#open-todos)
+- [Research](#research)
+- [Known Issues](#known-issues)
+- [Technical Debt](#technical-debt)
+- [Ideas](#ideas)
+  - [Near-term](#near-term)
+  - [Later](#later)
+  - [Mobile](#mobile)
+  - [Safety and Policy](#safety-and-policy)
+  - [Content and Guidance](#content-and-guidance)
+  - [Architecture](#architecture)
+
+---
+
 ## Open TODOs
+
+---
+
+## Research
+
+---
+
+## Known Issues
+
+---
+
+## Technical Debt
+
+---
 
 ## Ideas
 
 These are product ideas and possible enhancements, not committed TODOs or planned work.
 
-### Highest-Value Ideas
+### Priority order
 
-- **Redacted permalinks and exports**
-  - Allow masking IPs, hostnames, tokens, cookies, or regex-matched values before creating a permalink or export.
-  - Strong fit for a security-oriented sharing tool.
+Ranked by user benefit weighted against implementation complexity. Benefit and complexity use a three-point scale (H / M / L). Items marked ⬡ are foundational — they unlock multiple later features and should be designed before the features that depend on them are built.
+
+**Tier 1 — Quick wins (high benefit, low complexity)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Better output navigation | H | L | Line classes already exist; only navigation logic needed |
+| Run labels from terminal | M | L | Fake command + DB column + history drawer display |
+| Richer run metadata in history UI | M | L | Data already stored; surfacing only |
+
+**Tier 2 — High value, moderate effort**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Command outcome summaries | H | M | Start narrow (nmap, dig, curl, openssl); highest signal-to-noise value of any feature on the list |
+| Additional export formats | M | L–M | JSONL is straightforward; Markdown needs formatting logic |
+| Bulk history operations | M | L–M | Checkbox mode in history drawer + bulk endpoints |
+| Share package | H | M | Unified design reduces total work vs building annotations, notes, and lifecycle separately |
+| Mobile share ergonomics | M | L–M | Basic native share-sheet done (v1.5); remaining work is one-handed save/share UX and clearer affordances |
+| Tool-specific guidance + onboarding hints | M | L | Primarily content work |
+| Session dashboards (`stats` command) | M | L | Fake command + queries that already exist for the diagnostics page |
+
+**Tier 3 — Foundational ⬡ (unlock multiple later features)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Structured command catalog ⬡ | H | H | Unblocks parameterized forms, improved autocomplete, and policy metadata; design forms against this before building them |
+| Structured output model ⬡ | H | H | Unblocks command summaries, run comparison, and richer exports; build summaries to be retro-fittable once this is in place |
+
+**Tier 4 — Moderate value, moderate effort**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| History bookmarks beyond stars | M | M | Schema change + label management UI; complements run labels from terminal |
+| Saved command presets | M | M | New DB table + preset management UI |
+| Workflow replay and promotion | M | M–H | Promotion from history is the core feature; YAML parameterization is secondary |
+| Run comparison | M | H | Diff algorithm + run-selection UI; more compelling once history filtering is stronger |
+| Per-command policy metadata | M | M | Allowlist format extension + hint surfaces |
+| Richer audit trail | L–M | L | Logging additions only |
+| Autocomplete from output context | L–M | M | Narrow use case; useful but not on the critical path |
+
+**Tier 5 — Major initiatives (high benefit, high complexity)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Ephemeral per-session workspace | H | H | Needs allowlist workspace mode, quota, cleanup, and isolation model — not just tmpfs allocation |
+| Parameterized command forms | M | H | Depends on structured command catalog; do not build independently |
+| Run collections / case folders | M | H | New data model + grouping UI |
+| Snapshot diff against current tab | M | H | Builds on run comparison; defer until comparison is done |
+
+**Tier 6 — Defer (high complexity relative to incremental value)**
+
+| Idea | Benefit | Complexity | Notes |
+|------|---------|------------|-------|
+| Full reconnectable live stream | M | H | Separate architecture pass; do not conflate with incremental UI polish |
+| Environment capability hints | L–M | M | Pre-run hints have lower per-use value than post-run summaries |
+| Interactive PTY mode | M | H | Full PTY + WebSocket architecture for a small allowlisted set |
+| Plugin-style helper command registry | L | M | Internal quality; revisit when fake-command layer needs more structure |
+
+---
+
+### Near-term
+
+- **Workflow inputs and runnable forms**
+  - Let workflows declare required inputs so the user can fill in the needed values and launch the full workflow directly from the UI instead of treating workflows as static reference text.
+  - The first version should stay narrowly scoped:
+    - declare required values in the workflow definition
+    - collect them in a lightweight app-native form
+    - render the final command sequence clearly before execution
+  - This should build on the existing workflows system rather than becoming a second parallel command-form feature.
+
+- **Share package** (annotations, notes, and lifecycle controls)
+  - Snapshots currently have no metadata beyond the raw output. Add optional title, note, and tags as a unified share package rather than building annotations, operator notes, and sharing controls as disconnected features — they compose into one coherent model.
+  - Share package surface:
+    - operator-facing title and note on the snapshot
+    - tags
+    - optional operator / team label
+    - redaction mode used
+    - a small generated summary block for the shared run
+    - private notes attached to history entries (visible locally, never in public snapshots)
+  - Share lifecycle controls:
+    - expiring share links
+    - one-time reveal links for sensitive snapshot sharing
+  - Design all three (annotations, notes, lifecycle) together so the data model is consistent from the start.
+
+- **Additional export formats**
+  - Add Markdown and JSONL export in addition to `.txt` and themed `.html`.
+  - Pairs naturally with the existing export system and structured output work.
+  - Make structured exports first-class:
+    - include command, timestamps, exit code, line classes, and preview/full-output metadata
+    - treat `JSONL` as a real machine-readable export, not just another text dump
+
+- **Better output navigation**
+  - For security tool output, 90% of lines are noise and 10% are findings. The most valuable part of this idea is jump-between-errors/warnings, not jump-to-top/bottom.
+  - Primary value:
+    - jump between warnings / errors / notices (uses existing line classes; this is the core feature)
+    - highlight matched lines from search more aggressively
+  - Secondary, lower cost:
+    - sticky command header for long runs (near-free CSS position: sticky change)
+  - Deferred until primary is done:
+    - collapse long low-signal sections (genuinely complex, lower incremental value)
+
+- **Run comparison**
+  - Compare two runs side by side, especially for repeated scans or before/after checks.
+  - More compelling once history filtering is stronger.
+  - Focus the first version on repeated commands:
+    - compare two runs of the same command
+    - show added / removed lines
+    - surface exit-code and elapsed-time changes
+    - allow a "differences only" view
+  - The diff target should explicitly include permalinks and snapshots (not just history entries) — the most common real-world case is comparing a new scan against last month's saved permalink, not two history rows in the same session.
+
+- **Tool-specific guidance**
+  - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `wapiti`, or `nuclei`.
+  - Good fit for the existing help / FAQ / welcome surfaces.
+  - Merge this with onboarding and command hints into a broader operator-guidance layer:
+    - command-specific caveats
+    - runtime expectations
+    - examples of when to use one tool vs another
+
+- **Richer run metadata in the history UI**
+  - Surface preview/full-output availability, retention expectations, and share/export readiness more clearly.
+  - Good fit for the existing history drawer and permalink model.
+  - Include retention-aware UX:
+    - "preview only" vs "full output available"
+    - share readiness
+    - export readiness
+    - expiry / retention timing
+
+- **Command outcome summaries**
+  - For selected tools, generate short app-native summaries above the raw output. Security tool output is high-volume; a structured findings layer is what separates a purpose-built tool from a raw terminal.
+  - Keep raw output primary — the summary is additive, never a replacement.
+  - Start narrow: nmap (open ports + service table), dig (records returned), curl (status code + redirect chain), openssl s_client (cert expiry + trust chain).
+  - The structured output model (see Architecture) is the right long-term foundation; build this feature to be retro-fittable once that model is in place rather than requiring it up front.
+
+- **Capture pack review manifest**
+  - Generate a simple HTML or Markdown index alongside screenshot packs so designers, themers, and reviewers can browse labeled scenes quickly without opening dozens of PNGs by hand.
+  - Include theme, viewport, and scene labels in one place so capture packs are easier to share and audit.
+
+### Later
 
 - **Saved command presets**
   - Let users save named command templates beyond history/starred entries.
   - Better for repeat workflows like DNS checks, HTTP triage, or common scan recipes.
-
-- **Richer history filtering and search**
-  - Add filtering by command root, exit code, starred status, date, and full-output availability.
-  - Current history is useful, but it will become harder to navigate as usage grows.
-
-- **Context-aware autocomplete**
-  - Move beyond a flat suggestion list and tailor completions by command root and prior tokens.
-  - Especially useful for long scanner commands with many flags.
-
-### Medium-Size Product Ideas
+  - Converge this with structured forms:
+    - reusable saved workflows
+    - optional structured parameters
+    - always editable back to raw shell text
 
 - **Parameterized command forms**
   - Add optional structured builders for common tools like `curl`, `dig`, `nmap`, and `ffuf`.
   - Keep raw-shell usage intact while making common tasks easier.
+  - Build these on top of a reusable command/workflow preset model rather than as a disconnected UI feature.
+  - The autocomplete YAML already models command structure (`flags`, `expects_value`, `arg_hints`, `__positional__`). Forms should be a structured render of that same data — not a parallel model — so the two features stay consistent and share maintenance. Design against the structured command catalog (see Architecture) before building.
 
-- **Better long-run continuity**
-  - Let users reconnect to running commands after a reload instead of only finding them later in history.
+- **Session dashboards**
+  - Add a compact session summary view. The lowest-complexity version of this is a `session` or `stats` built-in command rather than a dedicated page — it fits the shell-primary interaction model and reuses the existing fake-command layer.
+  - Built-in command output:
+    - command breakdown by tool root
+    - success/fail rates and average scan durations
+    - starred artifact count
+    - active session token status
+  - Natural fit with history, diagnostics, and session tokens.
 
-- **Run comparison**
-  - Compare two runs side by side, especially for repeated scans or before/after checks.
+- **Run collections / case folders**
+  - Let users group related runs and snapshots into named investigations or cases.
+  - Better long-term organization than tabs/history alone.
 
-- **Share annotations**
-  - Add optional title, note, and tags to a snapshot permalink.
+- **History bookmarks beyond stars**
+  - Add richer saved-state labels like `important`, `baseline`, `follow-up`, or `customer-facing`.
+  - Stronger foundation for compare/share/history workflows than a single star state.
 
-- **Additional export formats**
-  - Add Markdown and JSONL export in addition to `.txt` and themed `.html`.
+- **Snapshot diff against current tab**
+  - Compare the live tab against a previous run or snapshot without leaving the shell flow.
 
-- **Better output navigation**
-  - Jump to top/bottom, jump between warnings/errors, sticky command header for long runs, and optional output collapsing.
+- **Workflow replay and promotion**
+  - Guided workflows are currently stateless prompt-fillers — you cannot save a customized version of a built-in workflow, and there is no way to replay a sequence you discovered through normal use.
+  - The compelling feature is "promote this run sequence to a workflow": select 3–5 history entries and save them as a named reusable sequence. That is more useful than just parameterizing the existing YAML format.
+  - Turn guided workflows into reusable multi-step sequences that can be replayed, edited, and saved.
 
-### Mobile-Focused Ideas
+- **Additional built-in workflow candidates**
+  - Candidate workflow cards that still complement the current guided workflows panel:
+  - **WAF Detection** — wafw00f to identify the WAF vendor, curl with unexpected headers/paths to observe the blocking behavior, nmap WAF NSE scripts for a second opinion.
+  - **WordPress Audit** — wpscan for known plugin/theme CVEs and user enumeration, curl to confirm common WP paths and the XML-RPC endpoint.
+  - **DNS Delegation Diff** — host/nslookup for quick answers, dig @authoritative vs @public-resolver for disagreement checks, dig +trace to walk the delegation chain. More focused than the existing DNS card when the problem is split-brain or propagation lag.
+  - **Hostname / Virtual Host Discovery** — gobuster vhost or ffuf Host-header fuzzing to identify name-based virtual hosts, then curl -H 'Host: ...' to validate which ones actually answer. Useful when an IP serves multiple sites and plain HTTP triage is too shallow.
+  - **Surface Crawl to Endpoint Follow-up** — katana to crawl reachable URLs, pd-httpx or curl -I to classify what came back, then targeted curl checks against the interesting endpoints. Good middle ground between HTTP triage and heavier vuln scanning.
+  - **Screenshot / Tech Fingerprint Sweep** — pd-httpx with title/tech-detect/status probes to quickly map many hosts, then curl on the standouts. Strong fit for the modal because it helps operators decide where to spend deeper scanning budget next.
+  - **Certificate Inventory Across Hosts** — subfinder or assetfinder to build a host set, dnsx to keep only resolvable names, then openssl s_client or testssl against the likely HTTPS services. More operationally useful than a single-host TLS check when reviewing a whole domain footprint.
+  - **Resolver Reputation / Mail Deliverability Baseline** — dig MX/TXT, nslookup against multiple resolvers, and whois on the sending domain or mail host. Distinct from the existing email card because it aims at “will this domain look sane to remote receivers?” rather than just “is SMTP open?”
+  - **Crawlable Web App Triage** — curl -sIL for redirect/header shape, katana for path discovery, nikto for quick misconfig findings. A better default web-app sequence than running nikto cold against an unknown target.
+  - **Service Exposure Drift** — repeatable baseline using nmap -F, nc -zv on expected ports, and curl or openssl s_client on the important services. This is less about discovery and more about quickly validating that a host still looks like the last known-good state.
+  - Prefer workflow cards that chain 3-4 commands with a clear operator decision at each step; avoid modal entries that are just “run one big scanner.”
+  - Prefer sequences that mix cheap classification first and heavier scanning second so the modal remains useful on mobile and in constrained environments.
 
-- **More mobile-native history actions**
-  - Larger tap targets and less drawer churn for common actions like copy command and permalink.
+- **Environment capability hints**
+  - Surface when a tool is likely to be slow, noisy, truncated, or constrained by the container/runtime before it runs.
 
-- **Mobile share flow**
-  - Better native share-sheet integration where the platform allows it.
+- **Run labels from the terminal**
+  - A `tag <label>` built-in command that attaches a label to the most recent completed run directly from the shell flow, without opening the history drawer.
+  - Labels like `baseline`, `finding`, `follow-up`, `customer-facing` are more precise than a binary star and set up richer compare/share/history workflows.
+  - Complements "History bookmarks beyond stars" — the terminal command is the primary way to label, the history drawer is where labels are visible and filterable.
 
-- **Mobile keyboard enhancements**
-  - Optional compact edit presets, faster cursor movement, or gesture-friendly editing helpers.
+- **Bulk history operations**
+  - The history drawer can delete all or delete non-favorites. Adding multi-select (checkbox mode) with bulk delete, bulk export to JSONL/txt, and bulk share would close a real gap when clearing out a session after an engagement or exporting selected findings.
 
-### Safety / Policy Ideas
+- **Autocomplete suggestions from output context**
+  - When a previous command's output is in the active tab, `| grep` completions could suggest patterns already present in that output — IP addresses, hostnames, status codes, CVE strings — as candidates alongside the generic flag list.
+  - Narrow but would make the pipe stage feel predictive rather than generic.
 
-- **Output redaction rules**
-  - Add instance-level masking rules before persistence/share for secrets, tokens, or internal identifiers.
+### Mobile
+
+- **Mobile share ergonomics**
+  - The native share-sheet for permalink URLs is done (v1.5, `navigator.share()` with clipboard fallback). What remains is making the broader mobile save/share experience feel intentional:
+    - save/share actions tuned for one-handed use
+    - clearer copy/share/export affordances inside the mobile shell
+    - better share handoff after snapshot creation
+
+### Safety and Policy
 
 - **Richer audit trail**
   - Optional logging around share creation, deletions, and run access patterns.
@@ -68,177 +269,73 @@ These are product ideas and possible enhancements, not committed TODOs or planne
   - Allowlist entries could carry metadata like `risky`, `slow`, `high-output`, or `full-output recommended`.
   - The UI could surface this in help, warnings, or command builders.
 
-### Content / Guidance Ideas
+### Content and Guidance
 
-- **Starter workflows**
-  - Curated task-oriented entry points such as DNS troubleshooting, TLS checks, quick HTTP triage, or subdomain discovery.
+- **Tool-tips and onboarding hints**
+  - Extend the welcome flow and help surfaces so onboarding suggests real tasks and tool combinations, not just isolated commands and hints.
+  - Fold this together with tool-specific guidance:
+    - "what to run next" suggestions
+    - common operator playbooks
+    - guidance tied to workflows, autocomplete, and command metadata
 
-- **Tool-specific guidance**
-  - Add lightweight inline notes for tools with non-obvious web-shell behavior like `mtr`, `nmap`, `wapiti`, or `nuclei`.
+### Architecture
 
-- **Task-driven welcome hints**
-  - Make the onboarding flow suggest real tasks, not just commands and hints.
-
-### Architecture-Driven Product Bets
+- **Full reconnectable live stream**
+  - Explore a true reconnectable live-output path that can resume active command streams after reload rather than only restoring a placeholder tab and polling for completion.
+  - This is a separate architecture step from the current active-run reconnect support and would likely require:
+    - a per-run live output buffer
+    - resumable stream offsets or event IDs
+    - multi-consumer fan-out instead of one transient SSE consumer
+    - explicit lifecycle cleanup once runs complete
+  - Best fit is a dedicated live-stream architecture pass rather than incremental UI polish.
 
 - **Structured command catalog**
   - Move from plain-text allowlist-only metadata toward a richer command catalog model.
   - This would unlock better autocomplete, command forms, grouped help, and policy hints.
+  - Design parameterized command forms (see Later) against this catalog model before building them — both features need the same structured command data and will diverge if built independently.
 
 - **Structured output model**
   - Preserve richer line/event metadata consistently for all runs.
   - This would improve search, comparison, redaction, exports, and permalink fidelity.
+  - Command outcome summaries (see Near-term) are buildable without this foundation, but design them to be retro-fittable once the structured model is in place — the summary parsers should consume structured line events, not re-parse raw text.
+
+- **Unified terminal built-in lifecycle**
+  - Browser-owned built-ins (`theme`, `config`, and `session-token`) need browser execution for DOM state, local storage, clipboard, and transcript-owned confirmations, while server-owned built-ins naturally flow through `/run`.
+  - The long-term cleanup target is one terminal-command lifecycle after execution:
+    - normalize built-in output into a shared result shape
+    - apply pipe helpers against that shape
+    - mask sensitive command arguments once
+    - render transcript output once
+    - persist server-backed history once
+    - hydrate recents and prompt history from the same saved run model
+  - Keep execution ownership separate where it matters, but remove duplicated recents/history/pipe/persistence glue so browser-owned and server-owned built-ins cannot drift.
 
 - **Plugin-style helper command registry**
   - Turn the fake-command layer into a cleaner extension surface for future app-native helpers.
 
----
+- **Ephemeral per-session workspace mode**
+  - Add an optional tmpfs-backed per-session working directory so users can create short-lived files and use more natural shell workflows such as `ls`, `cat`, `rm`, and output redirection into files.
+  - Treat this as a separate execution mode with its own validation, cleanup, quota, and audit model rather than as a small shell-ergonomics enhancement.
+  - The existing allowed_commands system would need a paired workspace mode — `ls`, `cat`, `rm`, `mv`, and output redirection (`>`, `>>`) are either blocked metacharacters or not in the allowlist today. A workspace mode needs explicit allowlist support, not just a tmpfs allocation.
+  - Scope the safety model explicitly:
+    - per-session byte quota
+    - max file size
+    - max file count / inode-style limit
+    - aggressive cleanup on expiry
+    - optional app-mediated file download support from the active session workspace
+  - Consider a stronger isolation path as a later phase:
+    - a real per-session chroot-style jail or equivalent container-level filesystem jail so the shell process cannot see outside the session workspace at all
+    - this would make the feature feel much more like a real shell while reducing accidental filesystem exposure
 
-## Completed
+- **Lightweight Jinja base template**
+  - `index.html`, `permalink_base.html`, and `diag.html` now all share the same ~10 lines of `<head>` bootstrap (charset, viewport, color-scheme meta, favicon, `fonts.css`, `styles.css`, theme var includes, and the two vendor scripts). With three templates the duplication is starting to pay for the indirection.
+  - A `base.html` factoring out the common `<head>` and `data-theme` body attribute would prevent drift and make adding a fourth page type trivial.
 
-### UI Polish Pass
-
-- Differentiated the shell button groups so header navigation, recent-command chips, tabs, and terminal action buttons no longer all share the same flat rectangular treatment.
-- Reworked the terminal search, line-number, and timestamp controls so utilities, toggles, and status no longer read like one flat button strip; search now uses a dedicated utility treatment and the mode toggles use explicit on/off indicators.
-- Restyled the new-tab `+` control as a secondary ghost tab so it reads as an additive action instead of another normal tab.
-- Tightened the live prompt presentation so it remains terminal-native while separating more cleanly from the welcome block and control area through spacing and welcome-to-prompt handoff tuning.
-- Reworked the terminal window chassis so the app shell now has a visible right/bottom 3D lift instead of a flat single-line border, with the shadow geometry handled in CSS and the shadow color controlled per theme through `terminal_wrap_shadow`.
-- Made the terminal window buttons theme-aware via `window_btn_close`, `window_btn_minimize`, and `window_btn_maximize`, with defaults and per-theme values wired through the theme system.
-- Applied a unified thin, theme-aware scrollbar treatment across the main scrollable surfaces instead of leaving browser-default scrollbars in the output, history, permalink, autocomplete, and modal areas.
-- Refined the footer wordmark link so it reads as a muted shell link at rest and picks up a subtle monospace-style hover underline without competing with the action buttons.
-- Tightened the welcome-to-output transition so the settled welcome block now owns a faint separator and a little more breathing room before normal transcript content begins, instead of relying on the prompt line to create that boundary.
-
-### Logging Review
-
-- Expanded the main content-route logging surface so config, theme, FAQ, autocomplete, and welcome reads emit `CONTENT_VIEWED` info logs with route/session context.
-- Added `PAGE_LOAD` theme/session context and a `THEME_SELECTED` DEBUG breadcrumb so startup theme resolution is easier to trace when debugging browser or cookie state.
-- Added `HISTORY_VIEWED` info logging for plain `/history` list reads so history-panel access has the same structured visibility as run and snapshot permalink reads.
-
-### Command Recall (Ctrl+R) and Per-Tab Draft Persistence
-
-**Command recall (Ctrl+R reverse-history search):**
-- `Ctrl+R` in the prompt enters reverse-i-search mode. A dropdown appears above the prompt showing up to 20 history matches with the query highlighted in the matching substring.
-- Typing narrows the results in real time and auto-fills the top match. `Ctrl+R` again cycles to the next match. `Enter` accepts; `Escape` or `Ctrl+G` cancels and restores the pre-search draft.
-- Implemented as a new section in `history.js` (`enterHistSearch`, `exitHistSearch`, `handleHistSearchInput`, `handleHistSearchKey`, `_renderHistSearch`). The dropdown `#hist-search-dropdown` is anchored above the shell prompt via fixed positioning mirroring the autocomplete dropdown. CSS classes added to `styles.css`. DOM ref added to `dom.js`. `controller.js` routes keydown events through `handleHistSearchKey` first when in search mode and intercepts `Ctrl+R` to call `enterHistSearch`.
-- 10 new Vitest tests in `history.test.js`.
-
-**Per-tab draft input persistence:**
-- Unrun composer text is now saved per tab when switching away and restored when switching back.
-- If the tab was running when you left it, the draft is discarded rather than restored (the command was submitted).
-- Implemented via a `draftInput: ''` field added to each tab object in `tabs.js` and a save/restore path in `activateTab`: draft is read via `getComposerValue()` before changing tabs and written back via `setComposerValue(..., { dispatch: false })` on arrival.
-- 4 new Vitest tests in `tabs.test.js`.
-
-
-### Snapshot Metadata Block
-
-Every permalink page (`/history/<run_id>` and `/share/<id>`) and downloaded HTML export now shows a metadata strip in the header:
-- **Run permalinks**: exit code badge (green for 0, red for non-zero), duration (`1m 30s`), line count with full/preview/truncated scope, app version.
-- **Snapshot permalinks**: line count and app version (no exit code or duration — snapshots are tab captures with no single exit state).
-- **Downloaded HTML exports**: same metadata rendered in the header using inline styles so the self-contained file stays portable.
-- `_format_duration()` helper added to `permalinks.py`. `_permalink_context()` and `_permalink_page()` accept a new `meta` keyword argument (dict or None). Both `get_run()` and `get_share()` in `blueprints/history.py` build and pass the metadata. CSS classes `.permalink-run-meta`, `.meta-badge`, `.meta-badge-ok`, `.meta-badge-fail`, `.meta-item` added to `styles.css`.
-- 7 new pytest tests in `TestRunPermalinkRoute` (exit 0 badge, non-zero badge, duration, line count, app version) and 2 in `TestShareRoute` (line count + version present, exit code badge absent).
-
-### Operator Diagnostics Page (`/diag`)
-
-- New IP-gated `/diag` route in `blueprints/assets.py` returns a themed HTML page (or `?format=json` for scripting) covering app version/name, operational config values, SQLite run/snapshot counts, Redis connectivity, vendor-asset source, and per-tool availability from the allowlist.
-- Returns 404 unless the direct TCP peer IP (`request.remote_addr`) falls within `diagnostics_allowed_cidrs` in `config.yaml`. X-Forwarded-For spoofing cannot bypass the gate.
-- Denied access logged as `DIAG_DENIED` with peer IP and configured CIDRs; allowed access logged as `DIAG_VIEWED`.
-- `ip_is_in_cidrs()` helper added to `helpers.py`, reusing the existing `_trusted_proxy_networks` CIDR cache.
-- `diagnostics_allowed_cidrs` added to `config.yaml` (commented out with full description) and to `config.py` defaults.
-- Desktop header shows `⊕ diag` button alongside history/options/theme/FAQ when `diag_enabled: true` in `/config` response. Mobile hamburger menu shows matching entry. Both hidden by default and revealed after config fetch.
-- `diag_enabled` field added to `/config` response, computed per-request from `request.remote_addr`.
-- CSS theme-override block updated so `#diag-btn` follows `--theme-toolbar-button-*` variables like all other header buttons.
-- 7 new pytest tests: 4 in `TestConfigRoute` (diag_enabled true/false/X-Forwarded-For isolation), 3 in `TestDiagRoute` (DIAG_VIEWED log, HTML content, `?format=json` content-type); existing denied-log test extended to assert `allowed_cidrs` field.
-
-### Search Highlighting Hardening
-
-`app/static/js/search.js` now highlights matches by walking text nodes and cloning the line structure instead of rewriting serialized `innerHTML`. That keeps mixed-content lines intact, preserves prompt/helper markup, and still supports plain-text search, regex mode, case sensitivity, current-match navigation, and scroll-into-view.
-
-Validation:
-- `npx vitest run tests/js/unit/search.test.js`
-- `npx vitest run tests/js/unit/*.test.js`
-
-### Trust Boundary And Request Identity
-
-`trusted_proxy_cidrs` is now a config key in `app/conf/config.yaml`. The `get_client_ip()` helper in `app/helpers.py` only honors `X-Forwarded-For` when the direct peer IP falls within those CIDRs; all other requests use `remote_addr` directly. Rate-limiting and all request-log fields use this resolver. Regression coverage lives in `test_routes.py`. Docs updated in `README.md` and `ARCHITECTURE.md`.
-
-### Runtime Theme Selector
-
-The implementation now uses named YAML themes under `app/conf/themes/`, a filename-based `default_theme` in `app/conf/config.yaml`, and the baked-in dark fallback palette in `app/config.py` when a selected theme cannot be resolved.
-
-The selector itself is a dedicated preview-card modal launched from the top-bar theme button. Theme metadata is explicit and operator-controlled: `label:` provides the friendly card name, `group:` controls the modal section header, and `sort:` controls ordering within the grouped preview grid. The modal applies the chosen theme live, persists it in `localStorage` / cookies, and keeps permalinks and downloadable HTML exports aligned with the selected variant.
-
-Theme resolution follows the documented order:
-
-1. `localStorage.theme`
-2. `default_theme` from `app/conf/config.yaml`
-3. baked-in dark fallback palette
-
-Mobile uses the same selector with a full-screen chooser and a two-column preview layout on wider phones. The root `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files are generated reference artifacts from `_THEME_DEFAULTS` in `app/config.py`; the runtime selector reads the registry in `app/conf/themes/`.
-
-### Shell-Style Input Refactor
-
-- Shared state, desktop/mobile composer splitting, the dedicated mobile shell, transcript/output layout, autocomplete, session/history navigation, welcome flow, overlays, and browser hardening are complete.
-- Unit coverage in place: `tests/js/unit/app.test.js`, `tests/js/unit/autocomplete.test.js`, `tests/js/unit/history.test.js`, `tests/js/unit/runner.test.js`, `tests/js/unit/tabs.test.js`, `tests/js/unit/welcome.test.js`.
-- Playwright coverage in place: `tests/js/e2e/mobile.spec.js`, `tests/js/e2e/share.spec.js`, `tests/js/e2e/kill.spec.js`, `tests/js/e2e/tabs.spec.js`.
-
-### Composer-State Input Refactor
-
-- Introduced a shared `composerState` store for command text, selection, and active-input tracking; switched composer rendering and caret helpers to read from the shared store; made input events publish state one-way into `composerState`; moved keydown, submit, draft, history, autocomplete, and shell-prompt paths off direct `cmdInput` ownership; and removed the dead hidden/visible mirroring helpers.
-- Validation completed with full Vitest coverage, mobile/tabs Playwright checks, and the focused regressions for state-driven caret movement, prompt rendering, run-button sync, active-input-only composer writes, and mobile shell layout guardrails.
-- Documentation updated in `ARCHITECTURE.md`, `README.md`, `tests/README.md`, `CHANGELOG.md`, and the `/tmp/*.md` release notes.
-
-### Mobile Keyboard Shell Rebuild
-
-- Used a stripped-down control surface during debugging to isolate the keyboard issue to the main app integration layer, then rebuilt the real mobile shell around that simpler normal-flow layout.
-- The final mobile shell keeps the composer anchored by normal flow, uses the simplified bottom composer block instead of the old fixed-shell / page-scroll / `visualViewport` compensation stack, and preserves the stable output-follow behavior when the keyboard opens.
-- Supporting regressions cover the repro route, the simplified mobile shell DOM structure, the mobile composer-host spacing guard, and the output-follow / open-close stability fixes. The repro route remains available as a manual diagnostic control.
-
-### Permalink Page Template Refactor
-
-- Split the live permalink rendering into Jinja templates:
-  - a shared permalink base/layout template for header, action row, output mount, and toast
-  - a small error template for missing `/share/<id>` and `/history/<run_id>` pages
-- Move reusable permalink page chrome and theme rules into shared CSS instead of maintaining the full live-page stylesheet inside `app/permalinks.py`.
-- Keep permalink pages server-rendered and self-contained at request time; do not turn them into client-fetched shells.
-- Extract the repeated permalink-page data shaping in `permalinks.py` into smaller helpers:
-  - theme selection
-  - line normalization / prompt-echo injection
-  - timestamp-availability detection
-  - action-button / extra-action context building
-- Preserve the current behavior exactly:
-  - current theme parity with the main shell
-  - line-number and timestamp toggles
-  - copy / `save .txt` / `save .html` actions
-  - `view json` and back-to-shell links
-  - snapshot/run permalink title, metadata, expiry note, and prompt rendering
-- Keep the downloadable/exported HTML path fully rendered and portable:
-  - do not make saved `.html` depend on live app routes after download
-  - keep embedded fonts / inline CSS / inline JS decisions explicit for the export path, even if the live permalink page moves to shared templates and shared CSS
-- Keep vendor asset behavior intact for the live page:
-  - local `ansi_up` browser build
-  - local vendor font routes for the hosted permalink page
-- Add regression coverage for both permalink classes and both render paths:
-  - `/share/<id>` and `/history/<run_id>`
-  - missing/expired permalink error pages
-  - live page theme parity and toggle availability
-  - exported `.html` output staying portable and free of external asset fetches
-- Refresh docs and release notes to describe the template split, the remaining inline export path, and any shared style changes.
-
-### FAQ Single Source Of Truth
-
-- Built-in FAQ entries now live in the backend alongside custom `faq.yaml` entries, and `/faq` is the canonical source for both the modal and terminal `faq` helper output.
-- Result: rich HTML in modal, plain text in `faq` helper command.
-- Follow-up: keep modal-only `answer_html` content aligned with the plain-text `answer` used by the `faq` helper command, and extend the same backend FAQ schema if future modal sections need new dynamic render kinds.
-
-### Version Source Cleanup
-
-- The backend `/config` response is the canonical version source, the initial header label is generic, and the frontend updates the visible version label only after config loads.
-- Result: `app/config.py` defines the backend version, `/config` exposes it to the frontend, and the version label is empty until config loads.
-
-### Welcome / Helper Follow-ups
-
-- Keep the hint rotation running until interrupted, on both the main welcome and the mobile welcome.
-- Create separate app hints for mobile that are mobile specific.
-- Add a few more snarky easter-egg comments for `sudo`, `rm -fr /`, and `reboot`.
-- Add subtle section headers above the recommended commands and hints on the main welcome, and carry the same treatment through to mobile hints.
+- **Interactive PTY mode for screen-based tools**
+  - Explore an optional PTY + WebSocket + browser terminal emulator path for a small allowlisted set of interactive or screen-redrawing tools such as `mtr`, without turning the app into a general-purpose remote shell.
+  - Best fit is a separate interactive-command mode or tab type, not a full browser shell session.
+  - This would be a larger architecture change because it needs:
+    - server-side PTY management
+    - bidirectional browser transport
+    - terminal resize handling
+    - stricter command scoping and lifecycle cleanup

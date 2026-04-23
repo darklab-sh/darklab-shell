@@ -15,6 +15,7 @@ Run with: pytest tests/ (from the repo root)
 import gzip
 import importlib.util
 import os
+import re
 import sqlite3
 import tempfile
 import textwrap
@@ -27,14 +28,15 @@ import database
 import app as shell_app
 import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
+import fake_commands
 from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
-    load_mobile_welcome_hints, load_autocomplete,
+    load_mobile_welcome_hints, load_autocomplete_context,
     load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
-from permalinks import _format_retention, _expiry_note, _permalink_error_page
+from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -126,6 +128,34 @@ class TestLoadConfig:
         assert cfg["full_output_max_bytes"] == 7 * 1024 * 1024
         assert cfg["rate_limit_per_minute"] == 99
         assert cfg["trusted_proxy_cidrs"] == ["127.0.0.1/32", "::1/128"]
+
+    def test_share_redaction_enabled_defaults_true(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with open(os.path.join(tmp, "config.yaml"), "w") as f:
+                f.write("app_name: test-shell\n")
+            cfg = app_config.load_config(tmp)
+        assert cfg["share_redaction_enabled"] is True
+
+    def test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled(self):
+        rules = app_config.get_share_redaction_rules({
+            "share_redaction_enabled": True,
+            "share_redaction_rules": [
+                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+            ],
+        })
+        labels = [rule["label"] for rule in rules]
+        assert "bearer token" in labels
+        assert "email address" in labels
+        assert labels[-1] == "custom"
+
+    def test_get_share_redaction_rules_returns_empty_when_disabled(self):
+        rules = app_config.get_share_redaction_rules({
+            "share_redaction_enabled": False,
+            "share_redaction_rules": [
+                {"label": "custom", "pattern": "internal", "replacement": "[custom]"},
+            ],
+        })
+        assert rules == []
 
 class TestLoadAllowedCommands:
     def _write(self, content, tmp_dir):
@@ -506,7 +536,7 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
         assert result[0]["question"] == "What is this?"
@@ -519,10 +549,75 @@ class TestThemeRegistry:
             path = f.name
         try:
             with mock.patch("commands.FAQ_FILE", path):
-                result = load_all_faq("darklab shell", "https://example.invalid/README.md")
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
         finally:
             os.unlink(path)
+        assert "https://example.invalid/README.md" in result[0]["answer"]
         assert "https://example.invalid/README.md" in result[0]["answer_html"]
+
+    def test_load_all_faq_uses_config_project_readme_by_default(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path), mock.patch(
+                "config.PROJECT_README",
+                "https://example.invalid/config-readme",
+            ):
+                result = load_all_faq("darklab_shell")
+        finally:
+            os.unlink(path)
+        assert "https://example.invalid/config-readme" in result[0]["answer"]
+        assert "https://example.invalid/config-readme" in result[0]["answer_html"]
+
+    def test_load_all_faq_clarifies_snapshot_vs_run_permalink(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        by_question = {item["question"]: item for item in result}
+        share_html = by_question["How do I save or share my results?"]["answer_html"]
+        tabs_html = by_question["How do tabs and permalinks work?"]["answer_html"]
+        shortcuts_html = by_question["Are there keyboard shortcuts?"]["answer_html"]
+        assert "share snapshot" in share_html
+        assert "run permalink" in share_html
+        assert "/share" in share_html
+        assert "/history/&lt;run_id&gt;" in share_html
+        assert "share snapshot" in tabs_html
+        assert "run permalink" in tabs_html
+        # Shortcuts answer is now a pointer to the `?` overlay and the `shortcuts`
+        # built-in command (single source of truth, no duplicated shortcut list).
+        assert "<code>?</code>" in shortcuts_html
+        assert "<code>shortcuts</code>" in shortcuts_html
+
+    def test_load_all_faq_describes_built_in_shell_features(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path):
+                result = load_all_faq("darklab_shell", "https://example.invalid/README.md")
+        finally:
+            os.unlink(path)
+        by_question = {item["question"]: item for item in result}
+        built_in_html = by_question["What built-in shell features are supported?"]["answer_html"]
+        assert "Built-in commands" in built_in_html
+        assert "help</code>" in built_in_html
+        assert "history</code>" in built_in_html
+        assert "command | grep pattern" in built_in_html
+        assert "command | head -n 20" in built_in_html
+        assert "command | head -20" in built_in_html
+        assert "command | tail -n 20" in built_in_html
+        assert "command | tail -20" in built_in_html
+        assert "command | wc -l" in built_in_html
+        assert "command | sort -rn" in built_in_html
+        assert "command | uniq -c" in built_in_html
+        assert "command | grep pattern | wc -l" in built_in_html
+        assert "General shell piping, arbitrary chaining, and redirection are still blocked." in built_in_html
 
 
 # ── Path blocking edge cases ──────────────────────────────────────────────────
@@ -945,58 +1040,314 @@ class TestMobileWelcomeHintLoading:
             os.unlink(path)
 
 
-# ── load_autocomplete ─────────────────────────────────────────────────────────
+class TestAutocompleteContextLoading:
+    def test_missing_context_file_returns_empty_mapping(self):
+        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nonexistent/autocomplete_context.yaml"):
+            result = load_autocomplete_context()
+        assert result == {}
 
-class TestAutocompleteLoading:
-    def test_missing_file_returns_empty_list(self):
-        with mock.patch("commands.AUTOCOMPLETE_FILE", "/nonexistent/auto_complete.txt"):
-            result = load_autocomplete()
-        assert result == []
-
-    def test_valid_entries_returned(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("nmap -sV\nping -c 4\ndig @1.1.1.1\n")
+    def test_valid_context_entries_are_normalized(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              nmap:
+                flags:
+                  - value: -sV
+                    description: Service detection
+                  - -Pn
+                  - value: -p
+                    description: Port list
+                    takes_value: true
+                    value_hint:
+                      placeholder: "<ports>"
+                      description: Port list
+              wc:
+                pipe:
+                  enabled: true
+                  insert: wc -l
+                  label: wc -l
+                  description: Count lines
+            """))
             path = f.name
         try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
-                result = load_autocomplete()
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
         finally:
             os.unlink(path)
-        assert result == ["nmap -sV", "ping -c 4", "dig @1.1.1.1"]
+        assert result["nmap"]["flags"][0] == {"value": "-sV", "description": "Service detection"}
+        assert result["nmap"]["flags"][1] == {"value": "-Pn", "description": ""}
+        assert result["nmap"]["expects_value"] == ["-p"]
+        assert result["nmap"]["arg_hints"]["-p"][0]["value"] == "<ports>"
+        assert result["wc"]["pipe_command"] is True
+        assert result["wc"]["pipe_insert_value"] == "wc -l"
+        assert result["wc"]["pipe_label"] == "wc -l"
+        assert result["wc"]["pipe_description"] == "Count lines"
 
-    def test_comment_lines_filtered(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("# this is a comment\nnmap -sV\n# another comment\n")
+    def test_value_hints_preserve_insert_with_trailing_whitespace(self):
+        # YAML authors use `insert: "set "` to leave the caret past a
+        # trailing space so the next argument can be typed. The normalizer
+        # must not strip the space or drop the key.
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              session-token:
+                subcommands:
+                  - value: set
+                    description: Activate an existing session token
+                    takes_value: true
+                    value_hint:
+                      placeholder: "<token>"
+                      description: Paste a tok_ token
+                  - value: clear
+                    description: Remove the session token
+                    closes: true
+            """))
             path = f.name
         try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
-                result = load_autocomplete()
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
         finally:
             os.unlink(path)
-        assert result == ["nmap -sV"]
+        positional = result["session-token"]["arg_hints"]["__positional__"]
+        set_entry = next(p for p in positional if p["value"] == "set <token>")
+        assert set_entry["insertValue"] == "set "  # preserves trailing space
+        clear_entry = next(p for p in positional if p["value"] == "clear")
+        assert "insertValue" not in clear_entry  # not set → key absent
+        # arg_hints value without insertValue is an intentional placeholder;
+        # the frontend detects <placeholder> and flags it hintOnly.
+        set_hint = result["session-token"]["arg_hints"]["set"][0]
+        assert set_hint["value"] == "<token>"
+        assert "insertValue" not in set_hint
 
-    def test_blank_lines_filtered(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".txt", delete=False) as f:
-            f.write("ping -c 4\n\n\ndig google.com\n")
+    def test_arguments_and_subcommands_normalize_into_runtime_hints(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              ping:
+                argument_limit: 1
+                flags:
+                  - value: -c
+                    description: Count
+                    takes_value: true
+                    suggest:
+                      - value: "4"
+                        description: Four probes
+                arguments:
+                  - placeholder: "<host>"
+                    description: Hostname or IP address
+              session-token:
+                subcommands:
+                  - value: generate
+                    description: Generate a new token
+                    closes: true
+                  - value: set
+                    description: Activate an existing token
+                    takes_value: true
+                    value_hint:
+                      placeholder: "<token>"
+                      description: Paste a token
+              grep:
+                pipe:
+                  enabled: true
+                  description: Filter lines by pattern
+            """))
             path = f.name
         try:
-            with mock.patch("commands.AUTOCOMPLETE_FILE", path):
-                result = load_autocomplete()
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
         finally:
             os.unlink(path)
-        assert result == ["ping -c 4", "dig google.com"]
 
-    def test_local_overlay_appends_unique_entries(self):
+        assert result["ping"]["expects_value"] == ["-c"]
+        assert result["ping"]["arg_hints"]["-c"][0]["value"] == "4"
+        assert result["ping"]["arg_hints"]["__positional__"][0]["value"] == "<host>"
+        assert result["ping"]["argument_limit"] == 1
+
+        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
+        assert session_positionals[0]["value"] == "generate"
+        set_entry = next(item for item in session_positionals if item["value"] == "set <token>")
+        assert set_entry["insertValue"] == "set "
+        assert result["session-token"]["expects_value"] == ["set"]
+        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert result["session-token"]["arg_hints"]["generate"] == []
+
+        assert result["grep"]["pipe_command"] is True
+        assert result["grep"]["pipe_description"] == "Filter lines by pattern"
+
+    def test_value_taking_flags_preserve_case_distinct_tokens(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write(textwrap.dedent("""
+            context:
+              ping:
+                flags:
+                  - value: -W
+                    description: Per-packet timeout
+                    takes_value: true
+                  - value: -w
+                    description: Deadline before ping exits
+                    takes_value: true
+            """))
+            path = f.name
+        try:
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
+                result = load_autocomplete_context()
+        finally:
+            os.unlink(path)
+
+        assert result["ping"]["expects_value"] == ["-W", "-w"]
+
+    def test_local_overlay_merges_unique_context_entries(self):
         with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "auto_complete.txt")
-            local_path = os.path.join(tmp, "auto_complete.local.txt")
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
             with open(base_path, "w") as f:
-                f.write("nmap -sV\nping -c 4\n")
+                f.write(textwrap.dedent("""
+                context:
+                  nmap:
+                    flags:
+                      - -sV
+                      - value: -p
+                        description: Port list
+                        takes_value: true
+                  wc:
+                    pipe:
+                      enabled: true
+                      insert: wc -l
+                """))
             with open(local_path, "w") as f:
-                f.write("ping -c 4\ncurl http://localhost:5001/health\n")
-            with mock.patch("commands.AUTOCOMPLETE_FILE", base_path):
-                result = load_autocomplete()
-        assert result == ["nmap -sV", "ping -c 4", "curl http://localhost:5001/health"]
+                f.write(textwrap.dedent("""
+                context:
+                  nmap:
+                    flags:
+                      - -Pn
+                      - value: --top-ports
+                        description: Top ports
+                        takes_value: true
+                  ffuf:
+                    flags:
+                      - -u
+                  wc:
+                    pipe:
+                      label: wc -l
+                      description: Count lines
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+        assert [item["value"] for item in result["nmap"]["flags"]] == ["-sV", "-p", "-Pn", "--top-ports"]
+        assert result["nmap"]["expects_value"] == ["-p", "--top-ports"]
+        assert [item["value"] for item in result["ffuf"]["flags"]] == ["-u"]
+        assert result["wc"]["pipe_command"] is True
+        assert result["wc"]["pipe_insert_value"] == "wc -l"
+        assert result["wc"]["pipe_label"] == "wc -l"
+        assert result["wc"]["pipe_description"] == "Count lines"
+
+    def test_local_overlay_preserves_case_distinct_value_taking_flags(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  ping:
+                    flags:
+                      - value: -W
+                        description: Per-packet timeout
+                        takes_value: true
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  ping:
+                    flags:
+                      - value: -w
+                        description: Deadline before exit
+                        takes_value: true
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+
+        assert result["ping"]["expects_value"] == ["-W", "-w"]
+
+    def test_local_overlay_merges_arguments_and_subcommands_without_duplication(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  session-token:
+                    subcommands:
+                      - value: generate
+                        description: Generate a new token
+                        closes: true
+                      - value: set
+                        description: Activate an existing token
+                        takes_value: true
+                        value_hint:
+                          placeholder: "<token>"
+                          description: Paste a token
+                  curl:
+                    arguments:
+                      - placeholder: "<url>"
+                        description: Target URL
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  session-token:
+                    subcommands:
+                      - value: revoke
+                        description: Revoke a token
+                        takes_value: true
+                        value_hint:
+                          placeholder: "<token>"
+                          description: Token to revoke
+                  curl:
+                    arguments:
+                      - value: "https://"
+                        description: Start an HTTP or HTTPS URL
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+
+        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
+        assert [item["value"] for item in session_positionals] == ["generate", "set <token>", "revoke <token>"]
+        assert result["session-token"]["expects_value"] == ["set", "revoke"]
+        assert result["session-token"]["arg_hints"]["generate"] == []
+        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
+        assert result["session-token"]["arg_hints"]["revoke"][0]["value"] == "<token>"
+
+        curl_positionals = result["curl"]["arg_hints"]["__positional__"]
+        assert [item["value"] for item in curl_positionals] == ["<url>", "https://"]
+
+    def test_local_overlay_can_override_argument_limit(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            base_path = os.path.join(tmp, "autocomplete_context.yaml")
+            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
+            with open(base_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  man:
+                    argument_limit: 1
+                    arguments:
+                      - value: curl
+                        description: curl manual page
+                """))
+            with open(local_path, "w") as f:
+                f.write(textwrap.dedent("""
+                context:
+                  man:
+                    argument_limit: 2
+                    arguments:
+                      - value: ping
+                        description: ping manual page
+                """))
+            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
+                result = load_autocomplete_context()
+
+        assert result["man"]["argument_limit"] == 2
+        man_positionals = result["man"]["arg_hints"]["__positional__"]
+        assert [item["value"] for item in man_positionals] == ["curl", "ping"]
 
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────
@@ -1136,6 +1487,57 @@ class TestExpiryNote:
         # Should include a YYYY-MM-DD formatted date
         import re
         assert re.search(r'\d{4}-\d{2}-\d{2}', result)
+
+
+# ── _prompt_echo_text + synthesized prompt-echo lines ────────────────────────
+
+class TestPromptEchoText:
+    def test_uses_configured_prompt_prefix(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            assert _prompt_echo_text("ls -la") == "ops@darklab:~$ ls -la"
+
+    def test_falls_back_to_dollar_when_prefix_missing(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": ""}):
+            assert _prompt_echo_text("ls -la") == "$ ls -la"
+
+    def test_strips_trailing_space_when_label_empty(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "anon@darklab:~$"}):
+            assert _prompt_echo_text("") == "anon@darklab:~$"
+
+
+class TestNormalizePermalinkLinesPromptEcho:
+    """Regression guard: when a history snapshot does not already carry a
+    prompt-echo line, the normalizer synthesizes one using the configured
+    prompt_prefix — not a reduced bare `$` — so permalink pages render the
+    same prompt identity as the live shell."""
+
+    def test_unstructured_content_uses_configured_prefix(self):
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            lines = _normalize_permalink_lines(["hello", "world"], label="echo hello")
+        assert lines[0]["cls"] == "prompt-echo"
+        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+
+    def test_structured_snapshot_without_echo_gets_configured_prefix(self):
+        content = [
+            {"text": "hello", "cls": "", "tsC": "", "tsE": ""},
+            {"text": "[process exited with code 0 in 0.1s]", "cls": "exit-ok"},
+        ]
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            lines = _normalize_permalink_lines(content, label="echo hello")
+        assert lines[0]["cls"] == "prompt-echo"
+        assert lines[0]["text"] == "ops@darklab:~$ echo hello"
+
+    def test_structured_snapshot_with_existing_echo_is_preserved(self):
+        content = [
+            {"text": "anon@darklab:~$ echo hello", "cls": "prompt-echo"},
+            {"text": "hello", "cls": ""},
+        ]
+        with mock.patch.dict("permalinks.CFG", {"prompt_prefix": "ops@darklab:~$"}):
+            lines = _normalize_permalink_lines(content, label="echo hello")
+        # Existing echo survives; normalizer does not prepend a second one.
+        echo_lines = [entry for entry in lines if entry["cls"] == "prompt-echo"]
+        assert len(echo_lines) == 1
+        assert echo_lines[0]["text"] == "anon@darklab:~$ echo hello"
 
 
 # ── _permalink_error_page ─────────────────────────────────────────────────────
@@ -1350,3 +1752,49 @@ class TestDatabaseInit:
 
         assert conn.execute.call_count >= 1
         assert conn.execute.call_args_list[0].args[0] == "ALTER TABLE runs ADD COLUMN session_id TEXT NOT NULL DEFAULT ''"
+
+
+class TestFakeStatus:
+    def test_includes_session_summary_counts(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "status.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                ("run-1", "tok_statusdemo", "ping darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started) VALUES (?, ?, ?, datetime('now'))",
+                ("run-2", "tok_statusdemo", "curl darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-1", "tok_statusdemo", "demo snapshot", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                ("tok_statusdemo", "ping darklab.sh"),
+            )
+            conn.execute(
+                "INSERT INTO session_preferences (session_id, preferences, updated) VALUES (?, ?, datetime('now'))",
+                ("tok_statusdemo", '{"theme":"matrix"}'),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    lines = fake_commands._run_fake_status("tok_statusdemo")
+
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        assert re.search(r"session\s+tok_statusdemo", text)
+        assert re.search(r"session type\s+named token", text)
+        assert re.search(r"runs in session\s+2", text)
+        assert re.search(r"snapshots\s+1", text)
+        assert re.search(r"starred commands\s+1", text)
+        assert re.search(r"saved options\s+yes", text)
+        assert re.search(r"active jobs\s+1", text)

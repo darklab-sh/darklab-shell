@@ -1,4 +1,4 @@
-.-------[ darklab shell :: interactive diagnostics console ]---------.
+.-------[ darklab_shell :: interactive diagnostics console ]---------.
 |                                                                    |
 |         /$$                     /$$       /$$           /$$        |
 |        | $$                    | $$      | $$          | $$        |
@@ -9,4 +9,4 @@
 |  |  $$$$$$$|  $$$$$$$| $$      | $$ \  $$| $$|  $$$$$$$| $$$$$$$/  |
 |   \_______/ \_______/|__/      |__/  \__/|__/ \_______/|_______/   |
 |                                                                    |
-'----[ status: ready ]---[ transport: sse ]---[ mode: sandboxed ]----'
+'----[ status: ready ]---[ transport: sse ]---[ mode: isolated ]-----'

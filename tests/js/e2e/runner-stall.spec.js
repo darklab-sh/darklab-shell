@@ -21,9 +21,9 @@ test.describe('runner stall handling', () => {
         if (url.endsWith('/run') && init?.method === 'POST') {
           const body = new ReadableStream({
             start(controller) {
-              controller.enqueue(encoder.encode(
-                'data: {"type":"started","run_id":"stall-test-run"}\n\n',
-              ))
+              controller.enqueue(
+                encoder.encode('data: {"type":"started","run_id":"stall-test-run"}\n\n'),
+              )
               // Leave the stream open so the client-side stall timer fires.
             },
           })
@@ -41,13 +41,15 @@ test.describe('runner stall handling', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('a stalled SSE stream shows the recovery notice and clears the running state', async ({ page }) => {
+  test('a stalled SSE stream shows the recovery notice and clears the running state', async ({
+    page,
+  }) => {
     await runCommand(page, CMD)
 
     const output = page.locator('.tab-panel.active .output')
     await expect(output).toContainText('connection stalled', { timeout: 5_000 })
-    await expect(page.locator('.status-pill')).toHaveText('ERROR')
-    await expect(page.locator('.tab-kill-btn')).toBeHidden()
+    await expect(page.locator('.status-pill')).toHaveText('IDLE')
+    await expect(page.locator('#hud-actions [data-action="kill"]')).toBeHidden()
     await expect(page.locator('#run-btn')).toBeHidden()
     await expect(page.locator('#run-btn')).toHaveJSProperty('disabled', true)
 

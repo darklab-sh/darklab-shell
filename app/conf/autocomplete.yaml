@@ -1,0 +1,1344 @@
+# Unified autocomplete configuration.
+#
+# Preferred authoring shape:
+# context:
+#   <command-root>:
+#     argument_limit: <max-number-of-positional-arguments-to-suggest>
+#     examples:
+#       - value: <full-command>
+#         description: <what it does>
+#     pipe:
+#       enabled: true
+#       description: <pipe menu help text>
+#       insert: <inserted text>
+#       label: <optional display label>
+#     flags:
+#       - value: <flag>
+#         description: <short help text>
+#         takes_value: true
+#         closes: true
+#         value_hint:
+#           placeholder: <display-only placeholder>
+#           description: <what should be typed next>
+#         suggest:
+#           - value: <suggested-value>
+#             description: <short help text>
+#     arguments:
+#       - placeholder: <display-only placeholder>
+#         description: <what should be typed next>
+#     subcommands:
+#       - value: <subcommand>
+#         description: <short help text>
+#         takes_value: true
+#         closes: true
+#         insert: <optional inserted text>
+#         value_hint:
+#           placeholder: <display-only placeholder>
+#           description: <what should be typed next>
+#         suggest:
+#           - value: <suggested-value>
+#             description: <short help text>
+#
+# Readability notes:
+# - Keep related behavior together. If a flag takes a value, describe that
+#   under the flag instead of splitting it across multiple top-level keys.
+# - Use `arguments` for normal ordered argument slots such as `<host>` or
+#   `<target>`.
+# - Use `argument_limit` when a command should stop suggesting additional
+#   positional arguments after a fixed number of slots are filled, while still
+#   allowing flags and other non-positional hints.
+# - Use `subcommands` for external-tool command trees. darklab_shell-owned
+#   built-ins are completed by the runtime context in app/static/js/app.js.
+# - Use `placeholder: "<...>"` for display-only guidance. The frontend shows
+#   these as hints and does not insert the literal placeholder text on Tab.
+# - Use `closes: true` for flags or subcommands that should suppress further
+#   autocomplete once accepted.
+# - `examples` appear while the user is still typing the command root.
+#
+# Diverse examples:
+# - `ping` shows a simple flag + argument command.
+# - `curl` shows starter values plus a persistent `<url>` placeholder.
+# - `openssl` shows a subcommand-style positional argument plus value hints.
+# - `grep` and `wc` show pipe-stage entries.
+#
+# The container smoke test runs every example command defined here. Add or
+# remove examples to add or remove commands from the regression suite.
+
+context:
+  grep:
+    pipe:
+      enabled: true
+      description: Filter lines by pattern
+    flags:
+      - value: -i
+        description: Ignore case
+      - value: -v
+        description: Invert match
+      - value: -E
+        description: Extended regex
+    arguments:
+      - placeholder: <pattern>
+        description: Text or regex to match
+  head:
+    pipe:
+      enabled: true
+      description: Show the first lines
+    flags:
+      - value: -n
+        description: Show the first N lines
+        takes_value: true
+        suggest:
+          - value: '5'
+            description: Show the first 5 lines
+          - value: '10'
+            description: Show the first 10 lines
+          - value: '20'
+            description: Show the first 20 lines
+          - value: '50'
+            description: Show the first 50 lines
+  tail:
+    pipe:
+      enabled: true
+      description: Show the last lines
+    flags:
+      - value: -n
+        description: Show the last N lines
+        takes_value: true
+        suggest:
+          - value: '5'
+            description: Show the last 5 lines
+          - value: '10'
+            description: Show the last 10 lines
+          - value: '20'
+            description: Show the last 20 lines
+          - value: '50'
+            description: Show the last 50 lines
+  wc:
+    pipe:
+      enabled: true
+      description: Count lines
+      insert: wc -l
+      label: wc -l
+    flags:
+      - value: -l
+        description: Count lines
+  sort:
+    pipe:
+      enabled: true
+      description: Sort lines
+    flags:
+      - value: -r
+        description: Reverse order
+      - value: -n
+        description: Numeric sort
+      - value: -u
+        description: Remove duplicate lines
+      - value: -rn
+        description: Reverse numeric sort
+      - value: -ru
+        description: Reverse and deduplicate
+      - value: -nu
+        description: Numeric sort and deduplicate
+      - value: -rnu
+        description: Reverse numeric sort and deduplicate
+  uniq:
+    pipe:
+      enabled: true
+      description: Remove duplicate lines
+    flags:
+      - value: -c
+        description: Prefix each line with its occurrence count
+  nmap:
+    examples:
+      - value: nmap -h
+        description: Show help and usage
+      - value: nmap -sV -p 80,443 ip.darklab.sh
+        description: Service version detection on web ports
+      - value: nmap -A -T4 ip.darklab.sh
+        description: Aggressive scan with OS and service detection
+      - value: nmap -Pn --top-ports 100 ip.darklab.sh
+        description: Top 100 ports, skip host discovery
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -sT
+        description: TCP connect scan
+      - value: -sV
+        description: Service/version detection
+      - value: -Pn
+        description: Skip host discovery
+      - value: -p
+        description: Ports to scan
+        takes_value: true
+        suggest:
+          - placeholder: <ports>
+            description: Comma-separated ports or ranges
+          - value: 80,443
+            description: Common web ports
+          - value: 1-1000
+            description: First thousand TCP ports
+      - value: --script
+        description: Run NSE script or script category
+        takes_value: true
+        suggest:
+          - value: http-headers
+            description: Fetch HTTP response headers
+          - value: http-title
+            description: Fetch HTTP page title
+          - value: ssl-cert
+            description: Inspect the TLS certificate
+          - value: ssl-enum-ciphers
+            description: Enumerate supported TLS ciphers
+          - value: vuln
+            description: Run vulnerability-focused scripts
+      - value: --top-ports
+        description: Scan common ports
+        takes_value: true
+        suggest:
+          - placeholder: <number>
+            description: Number of top ports to scan
+          - value: '100'
+            description: Top hundred ports
+          - value: '1000'
+            description: Top thousand ports
+      - value: -T4
+        description: Faster timing template
+      - value: -A
+        description: Aggressive detection bundle
+      - value: -n
+        description: Do not resolve DNS names
+      - value: -vv
+        description: More verbose output
+    arguments:
+      - placeholder: <target>
+        description: Hostname, IP, or CIDR
+  ffuf:
+    examples:
+      - value: ffuf -h
+        description: Show help and usage
+      - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+        description: Directory brute force with common wordlist
+      - value: ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt -mc 200,301,302
+        description: Filter for successful and redirect responses
+      - value: 'ffuf -u https://FUZZ.ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -H "Host: FUZZ.ip.darklab.sh"'
+        description: Virtual host brute force with Host header injection
+    flags:
+      - value: -h
+        description: Show help and usage
+        takes_value: true
+        closes: true
+      - value: -u
+        description: Target URL with FUZZ marker
+        takes_value: true
+        value_hint:
+          placeholder: <url-with-FUZZ>
+          description: Target URL including FUZZ
+      - value: -w
+        description: Wordlist path
+        takes_value: true
+        suggest:
+          - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+            description: Common web-content wordlist
+      - value: -mc
+        description: Match status codes
+        takes_value: true
+      - value: -fc
+        description: Filter status codes
+        takes_value: true
+      - value: -H
+        description: Add request header
+        takes_value: true
+      - value: -t
+        description: Concurrent threads
+        takes_value: true
+    arguments:
+      - placeholder: <target-url>
+        description: Usually provided through -u
+  openssl:
+    examples:
+      - value: openssl s_client -connect ip.darklab.sh:443 -quiet
+        description: Inspect TLS connection and certificate
+      - value: openssl s_client -connect ip.darklab.sh:443 -showcerts
+        description: Show full certificate chain
+    flags:
+      - value: -connect
+        description: Host and port to connect to (host:port)
+        takes_value: true
+        suggest:
+          - value: <host>:443
+            description: HTTPS port
+          - value: <host>:465
+            description: SMTPS port
+          - value: <host>:993
+            description: IMAPS port
+      - value: -servername
+        description: SNI hostname (required for virtual-hosted TLS)
+        takes_value: true
+        value_hint:
+          placeholder: <hostname>
+          description: SNI hostname matching the certificate
+      - value: -showcerts
+        description: Display the full certificate chain
+      - value: -starttls
+        description: Use STARTTLS for the specified protocol (smtp, ftp, imap, pop3)
+        takes_value: true
+        suggest:
+          - value: smtp
+            description: STARTTLS for SMTP (port 25 or 587)
+          - value: ftp
+            description: STARTTLS for FTP
+          - value: imap
+            description: STARTTLS for IMAP
+          - value: pop3
+            description: STARTTLS for POP3
+      - value: -verify
+        description: Set certificate verification depth
+        takes_value: true
+      - value: -tls1_2
+        description: Force TLS 1.2
+      - value: -tls1_3
+        description: Force TLS 1.3
+      - value: -quiet
+        description: Suppress session and certificate details
+    arguments:
+      - value: s_client -connect <host>:443
+        description: Inspect TLS certificate and connection
+      - value: ciphers -v
+        description: List all supported cipher suites verbosely
+  curl:
+    examples:
+      - value: curl -h
+        description: Show help and usage
+      - value: curl -I https://ip.darklab.sh
+        description: HEAD request — show response headers only
+      - value: curl -sv https://ip.darklab.sh
+        description: Verbose — full request and response headers
+      - value: curl -o /dev/null -w "%{http_code}" https://ip.darklab.sh
+        description: Print just the HTTP status code
+    flags:
+      - value: -h
+        description: Show help and usage
+        takes_value: true
+        closes: true
+      - value: -I
+        description: HEAD request only
+      - value: -s
+        description: Silent mode
+      - value: -v
+        description: Verbose request and response details
+      - value: -o
+        description: Write body to file
+        takes_value: true
+        suggest:
+          - value: /dev/null
+            description: Discard body and keep metadata
+      - value: -w
+        description: Write selected metadata after the transfer
+        takes_value: true
+        suggest:
+          - value: '"%{http_code}"'
+            description: Print the final HTTP status code
+          - value: '"%{remote_ip} %{http_code}"'
+            description: Print remote IP and status code
+      - value: -H
+        description: Add request header
+        takes_value: true
+        suggest:
+          - value: '"User-Agent: Mozilla/5.0"'
+            description: Example browser-style user agent
+          - value: '"Authorization: Bearer <token>"'
+            description: Example bearer token header
+      - value: -L
+        description: Follow redirects
+      - value: -k
+        description: Skip TLS verification
+      - value: --max-time
+        description: Maximum transfer time in seconds
+        takes_value: true
+        suggest:
+          - value: '10'
+            description: Ten-second transfer limit
+    arguments:
+      - placeholder: <url>
+        description: Target URL to request
+  dig:
+    examples:
+      - value: dig -h
+        description: Show help and usage
+      - value: dig darklab.sh +short
+        description: A record lookup, short output
+      - value: dig MX darklab.sh +short
+        description: Mail exchanger records
+      - value: dig @8.8.8.8 darklab.sh
+        description: Query using Google's public resolver
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: +short
+        description: Short answer output
+      - value: +trace
+        description: Trace delegation path
+      - value: '@8.8.8.8'
+        description: Query a specific resolver
+      - value: AXFR
+        description: Attempt zone transfer
+      - value: AAAA
+        description: IPv6 address lookup
+      - value: MX
+        description: Mail exchanger lookup
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to query
+  nuclei:
+    examples:
+      - value: nuclei -h
+        description: Show help and usage
+      - value: nuclei -u https://ip.darklab.sh -t http/
+        description: Run HTTP detection templates
+      - value: nuclei -u https://ip.darklab.sh -severity high,critical
+        description: Run only high and critical severity templates
+      - value: nuclei -u https://ip.darklab.sh -t ssl/
+        description: Run TLS/SSL detection templates
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -u
+        description: Single target URL
+        takes_value: true
+      - value: -l
+        description: File with targets
+        takes_value: true
+      - value: -t
+        description: Template or template directory
+        takes_value: true
+      - value: -severity
+        description: Filter by severity
+        takes_value: true
+        suggest:
+          - value: low,medium,high,critical
+            description: Comma-separated severities
+      - value: -tags
+        description: Filter by tags
+        takes_value: true
+      - value: -rl
+        description: Rate limit requests
+        takes_value: true
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -u or -l
+  ping:
+    examples:
+      - value: ping -h
+        description: Show help and usage
+      - value: ping -c 4 darklab.sh
+        description: Send 4 pings to a host
+      - value: ping -i 0.5 -c 20 darklab.sh
+        description: Fast probe — 20 pings at half-second intervals
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -c
+        description: Stop after count replies
+        takes_value: true
+        suggest:
+          - value: '4'
+            description: Send four probes
+          - value: '10'
+            description: Send ten probes
+      - value: -i
+        description: Wait interval seconds between probes
+        takes_value: true
+        suggest:
+          - value: '0.5'
+            description: Half-second probe interval
+      - value: -W
+        description: Per-packet timeout in seconds
+        takes_value: true
+      - value: -w
+        description: Deadline before ping exits
+        takes_value: true
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP address to probe
+  nc:
+    examples:
+      - value: nc -zv ip.darklab.sh 80
+        description: Check if port 80 is open
+      - value: nc -zv ip.darklab.sh 443 80
+        description: Check multiple ports at once
+    flags:
+      - value: -z
+        description: Zero-I/O mode for port scanning
+      - value: -v
+        description: Verbose connection results
+      - value: -w
+        description: Timeout before giving up
+        takes_value: true
+        suggest:
+          - value: '3'
+            description: Short timeout in seconds
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP followed by one or more ports
+  nslookup:
+    examples:
+      - value: nslookup -type=A darklab.sh
+        description: IPv4 address lookup
+      - value: nslookup -type=MX darklab.sh
+        description: Mail exchanger lookup
+      - value: nslookup -type=TXT darklab.sh
+        description: TXT record lookup
+    flags:
+      - value: -type=A
+        description: IPv4 address lookup
+      - value: -type=AAAA
+        description: IPv6 address lookup
+      - value: -type=MX
+        description: Mail exchanger lookup
+      - value: -type=TXT
+        description: TXT record lookup
+      - value: -type=NS
+        description: Name server lookup
+      - value: -type=CNAME
+        description: Canonical name lookup
+      - value: -debug
+        description: Print extra resolver details
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to query
+  host:
+    examples:
+      - value: host -t A darklab.sh
+        description: IPv4 address lookup
+      - value: host -t MX darklab.sh
+        description: Mail exchanger lookup
+      - value: host -t NS darklab.sh
+        description: Name server lookup
+    flags:
+      - value: -t
+        description: Select DNS record type
+        takes_value: true
+        suggest:
+          - value: A
+            description: IPv4 address lookup
+          - value: AAAA
+            description: IPv6 address lookup
+          - value: MX
+            description: Mail exchanger lookup
+          - value: TXT
+            description: TXT record lookup
+          - value: NS
+            description: Name server lookup
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to query
+  traceroute:
+    examples:
+      - value: traceroute --help
+        description: Show help and usage
+      - value: traceroute -n ip.darklab.sh
+        description: Trace route without hostname resolution
+      - value: traceroute -m 30 ip.darklab.sh
+        description: Trace with a 30-hop maximum
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: -n
+        description: Do not resolve hop addresses
+      - value: -m
+        description: Set maximum hop count
+        takes_value: true
+        suggest:
+          - value: '30'
+            description: Common maximum hop count
+      - value: -w
+        description: Wait timeout per probe
+        takes_value: true
+        suggest:
+          - value: '2'
+            description: Two-second per-hop timeout
+      - value: -q
+        description: Number of probes per hop
+        takes_value: true
+        suggest:
+          - value: '3'
+            description: Three probes per hop
+      - value: -f
+        description: Set the first hop TTL
+        takes_value: true
+        suggest:
+          - value: '1'
+            description: Start probing from the first hop
+      - value: -I
+        description: Use ICMP ECHO probes
+      - value: -T
+        description: Use TCP SYN probes
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP to trace
+  mtr:
+    examples:
+      - value: mtr -h
+        description: Show help and usage
+      - value: mtr -n ip.darklab.sh
+        description: Trace without hostname resolution
+      - value: mtr -c 20 ip.darklab.sh
+        description: Stop after 20 probes
+      - value: mtr -n -c 20 ip.darklab.sh
+        description: 20 probes, no DNS resolution
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -n
+        description: Do not resolve hostnames
+      - value: -c
+        description: Stop after count pings
+        takes_value: true
+        suggest:
+          - value: '20'
+            description: Twenty probes before exit
+      - value: -r
+        description: Report mode summary
+      - value: -w
+        description: Wide report output
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP to trace
+  wget:
+    examples:
+      - value: wget -h
+        description: Show help and usage
+      - value: wget --spider https://ip.darklab.sh
+        description: Check URL without downloading
+      - value: wget -q -O /dev/null --server-response https://ip.darklab.sh
+        description: Show server response headers, discard body
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: --spider
+        description: Check URL without downloading
+      - value: -q
+        description: Quiet output
+      - value: -O
+        description: Write output to a specific file
+        takes_value: true
+        suggest:
+          - value: /dev/null
+            description: Discard response body
+      - value: --server-response
+        description: Print server response headers
+      - value: --timeout
+        description: Network timeout in seconds
+        takes_value: true
+        suggest:
+          - value: '10'
+            description: Ten-second network timeout
+      - value: --tries
+        description: Number of retry attempts
+        takes_value: true
+        suggest:
+          - value: '1'
+            description: Single attempt only
+      - value: --no-check-certificate
+        description: Skip TLS certificate validation
+    arguments:
+      - placeholder: <url>
+        description: Target URL to download or probe
+  testssl:
+    examples:
+      - value: testssl --help
+        description: Show help and usage
+      - value: testssl --fast https://ip.darklab.sh
+        description: Quick, lightweight TLS scan
+      - value: testssl --severity HIGH https://ip.darklab.sh
+        description: Report only high-severity findings
+      - value: testssl --heartbleed https://ip.darklab.sh
+        description: Check for the Heartbleed vulnerability
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: --fast
+        description: Faster, lighter scan profile
+      - value: --severity
+        description: Restrict findings by severity
+        takes_value: true
+        suggest:
+          - value: HIGH
+            description: High-severity findings only
+          - value: LOW
+            description: Low-severity findings only
+      - value: --full
+        description: Full test suite
+      - value: --sneaky
+        description: Slower, quieter checks
+      - value: -p
+        description: Protocol checks only
+      - value: --heartbleed
+        description: Check for Heartbleed
+      - value: --poodle
+        description: Check for POODLE
+      - value: --beast
+        description: Check for BEAST
+    arguments:
+      - placeholder: <url>
+        description: HTTPS target URL
+  dnsrecon:
+    examples:
+      - value: dnsrecon -h
+        description: Show help and usage
+      - value: dnsrecon -d darklab.sh -t std
+        description: Standard DNS record enumeration
+      - value: dnsrecon -d darklab.sh -t axfr
+        description: Attempt zone transfer
+      - value: dnsrecon -d darklab.sh -t brt
+        description: Brute-force subdomain enumeration
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -d
+        description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
+      - value: -t
+        description: Discovery mode
+        takes_value: true
+        suggest:
+          - value: std
+            description: Standard DNS record checks
+          - value: axfr
+            description: Attempt zone transfer
+          - value: brt
+            description: Brute-force subdomains
+          - value: srv
+            description: Enumerate SRV records
+          - value: zonewalk
+            description: Attempt DNSSEC zone walk
+          - value: crt
+            description: Query certificate transparency data
+      - value: -n
+        description: Specific name server to query
+        takes_value: true
+      - value: -D
+        description: Wordlist for brute force mode
+        takes_value: true
+    arguments:
+      - placeholder: <domain>
+        description: Usually provided through -d
+  dnsenum:
+    examples:
+      - value: dnsenum -h
+        description: Show help and usage
+      - value: dnsenum --noreverse darklab.sh
+        description: Enumerate without reverse lookups
+      - value: dnsenum --enum darklab.sh
+        description: Full enumeration set
+      - value: dnsenum --dnsserver 8.8.8.8 darklab.sh
+        description: Enumerate using Google's public resolver
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: --noreverse
+        description: Skip reverse lookups
+      - value: --enum
+        description: Run full enumeration set
+      - value: --dnsserver
+        description: Query a specific resolver
+        takes_value: true
+        suggest:
+          - value: 8.8.8.8
+            description: Example public resolver
+      - value: --threads
+        description: Number of worker threads
+        takes_value: true
+    arguments:
+      - placeholder: <domain>
+        description: Domain name to enumerate
+  dnsx:
+    examples:
+      - value: dnsx -h
+        description: Show help and usage
+      - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+        description: Brute-force subdomains with a wordlist
+      - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp
+        description: Brute-force subdomains and show DNS responses
+      - value: dnsx -d darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -a -resp
+        description: Filter for A records and show responses
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -d
+        description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
+      - value: -w
+        description: Wordlist for brute force
+        takes_value: true
+        suggest:
+          - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            description: Common subdomain wordlist
+      - value: -resp
+        description: Show DNS responses
+      - value: -a
+        description: Query A records
+      - value: -cname
+        description: Query CNAME records
+      - value: -mx
+        description: Query MX records
+    arguments:
+      - placeholder: <domain>
+        description: Usually provided through -d
+  fierce:
+    examples:
+      - value: fierce -h
+        description: Show help and usage
+      - value: fierce --domain darklab.sh
+        description: Enumerate subdomains for a domain
+      - value: fierce --domain darklab.sh --dns-servers 8.8.8.8
+        description: Enumerate using a specific resolver
+      - value: fierce --domain darklab.sh --traverse 5
+        description: Set traversal depth to 5
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: --domain
+        description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
+      - value: --dns-servers
+        description: Resolver or name server to use
+        takes_value: true
+        suggest:
+          - value: 8.8.8.8
+            description: Example resolver address
+      - value: --traverse
+        description: Maximum recursive traversal depth
+        takes_value: true
+  subfinder:
+    examples:
+      - value: subfinder -h
+        description: Show help and usage
+      - value: subfinder -d darklab.sh
+        description: Discover subdomains for a domain
+      - value: subfinder -d darklab.sh -silent
+        description: Subdomain discovery with minimal output
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -d
+        description: Target domain
+        takes_value: true
+        value_hint:
+          placeholder: <domain>
+          description: Target domain to enumerate
+      - value: -silent
+        description: Minimal output
+      - value: -recursive
+        description: Recurse through discovered subdomains
+      - value: -all
+        description: Use all available sources
+  pd-httpx:
+    examples:
+      - value: pd-httpx -h
+        description: Show help and usage
+      - value: pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect
+        description: Full recon — title, status code, and tech fingerprint
+      - value: pd-httpx -u https://ip.darklab.sh -status-code
+        description: Check HTTP status code
+      - value: pd-httpx -u https://ip.darklab.sh -follow-redirects
+        description: Follow and report redirects
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -u
+        description: Single target URL
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target URL to probe
+        suggest:
+          - value: https://
+            description: Start an HTTP or HTTPS URL
+      - value: -title
+        description: Show page title
+      - value: -status-code
+        description: Show HTTP status code
+      - value: -tech-detect
+        description: Detect technologies
+      - value: -follow-redirects
+        description: Follow redirects
+  nikto:
+    examples:
+      - value: nikto -h ip.darklab.sh -p 443 -ssl
+        description: Scan HTTPS target on port 443
+      - value: nikto -h ip.darklab.sh -Tuning 1
+        description: Scan for interesting files only
+      - value: nikto -h ip.darklab.sh -maxtime 120
+        description: Time-limited scan of two minutes
+    flags:
+      - value: -h
+        description: Target host or URL
+        takes_value: true
+        value_hint:
+          placeholder: <host>
+          description: Target host, hostname, or URL
+      - value: -p
+        description: Target port
+        takes_value: true
+        suggest:
+          - value: '443'
+            description: Common HTTPS port
+          - value: '8080'
+            description: Common alternate HTTP port
+      - value: -ssl
+        description: Force SSL mode
+      - value: -Tuning
+        description: Select tuning category set
+        takes_value: true
+        suggest:
+          - value: '1'
+            description: Interesting file checks
+          - value: '4'
+            description: Injection checks
+      - value: -maxtime
+        description: Maximum scan duration
+        takes_value: true
+  wpscan:
+    examples:
+      - value: wpscan -h
+        description: Show help and usage
+      - value: wpscan --url https://ip.darklab.sh --enumerate vp
+        description: Enumerate vulnerable plugins
+      - value: wpscan --url https://ip.darklab.sh --enumerate u
+        description: Enumerate WordPress users
+      - value: wpscan --url https://ip.darklab.sh --detection-mode aggressive
+        description: Aggressive detection mode
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: --url
+        description: Target WordPress URL
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target WordPress URL
+        suggest:
+          - value: https://
+            description: Target WordPress URL
+      - value: --enumerate
+        description: Enumerate selected object types
+        takes_value: true
+        suggest:
+          - value: p
+            description: Enumerate plugins
+          - value: u
+            description: Enumerate users
+          - value: t
+            description: Enumerate themes
+          - value: vp
+            description: Enumerate vulnerable plugins
+          - value: ap
+            description: Enumerate all plugins
+      - value: --detection-mode
+        description: Detection mode strategy
+        takes_value: true
+        suggest:
+          - value: aggressive
+            description: Aggressive detection mode
+      - value: --force
+        description: Scan even if WordPress is not detected
+  gobuster:
+    examples:
+      - value: gobuster -h
+        description: Show help and usage
+      - value: gobuster dir -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+        description: Directory brute force with common wordlist
+      - value: gobuster vhost -u https://ip.darklab.sh -w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+        description: Virtual host brute force
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: dir
+        description: Directory or file brute force mode
+      - value: vhost
+        description: Virtual host brute force mode
+      - value: -u
+        description: Target URL
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target base URL
+        suggest:
+          - value: https://
+            description: Target base URL
+      - value: -w
+        description: Wordlist path
+        takes_value: true
+        suggest:
+          - value: /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt
+            description: Common web-content wordlist
+          - value: /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt
+            description: Common virtual-host wordlist
+      - value: -x
+        description: File extensions to append
+        takes_value: true
+        suggest:
+          - value: php,html,txt
+            description: Common extension list
+      - value: -k
+        description: Skip TLS certificate verification
+  fping:
+    examples:
+      - value: fping -h
+        description: Show help and usage
+      - value: fping -c 4 darklab.sh
+        description: Send 4 probes with a summary
+      - value: fping -s darklab.sh
+        description: Probe with summary stats only
+      - value: fping -e darklab.sh
+        description: Show elapsed time per reply
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: -c
+        description: Count and summary mode
+        takes_value: true
+        suggest:
+          - value: '4'
+            description: Send four probes
+      - value: -s
+        description: Print summary only
+      - value: -e
+        description: Show elapsed time
+      - value: -t
+        description: Timeout per target
+        takes_value: true
+    arguments:
+      - placeholder: <host>
+        description: Hostname or IP to probe
+  sslscan:
+    examples:
+      - value: sslscan -h
+        description: Show help and usage
+      - value: sslscan ip.darklab.sh
+        description: Full TLS scan of a host
+      - value: sslscan --no-failed ip.darklab.sh
+        description: Scan but suppress failed cipher output
+    flags:
+      - value: -h
+        description: Show help and usage
+        closes: true
+      - value: --tls12
+        description: Only test TLS 1.2
+      - value: --tls13
+        description: Only test TLS 1.3
+      - value: --no-failed
+        description: Suppress failed cipher output
+      - value: --show-certificate
+        description: Display the full certificate chain
+      - value: --bugs
+        description: Enable SSL implementation bug workarounds
+      - value: --timeout
+        description: Socket timeout in seconds
+        takes_value: true
+        suggest:
+          - value: '10'
+            description: Ten-second socket timeout
+    arguments:
+      - placeholder: <host>
+        description: Hostname or host:port to scan
+  sslyze:
+    examples:
+      - value: sslyze --help
+        description: Show help and usage
+      - value: sslyze --certinfo ip.darklab.sh
+        description: Validate the certificate chain
+      - value: sslyze --heartbleed ip.darklab.sh
+        description: Test for the Heartbleed vulnerability
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: --certinfo
+        description: Retrieve and validate the certificate chain
+      - value: --heartbleed
+        description: Test for the Heartbleed vulnerability
+      - value: --robot
+        description: Test for the ROBOT vulnerability
+      - value: --http_headers
+        description: Test for security HTTP headers
+      - value: --early_data
+        description: Test for TLS 1.3 0-RTT early data support
+      - value: --compression
+        description: Test for TLS compression (CRIME)
+      - value: --reneg
+        description: Test for insecure TLS renegotiation
+      - value: --tlsv1_2
+        description: Run TLS 1.2 cipher suite scan
+      - value: --tlsv1_3
+        description: Run TLS 1.3 cipher suite scan
+    arguments:
+      - placeholder: <host>
+        description: Hostname or host:port to scan
+  wafw00f:
+    examples:
+      - value: wafw00f --help
+        description: Show help and usage
+      - value: wafw00f https://darklab.sh
+        description: Check darklab.sh for a WAF
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: -a
+        description: Find all matching WAFs (do not stop at first)
+      - value: -v
+        description: Verbose output
+      - value: -r
+        description: Disable automatic redirect following
+      - value: -t
+        description: Test for a specific WAF product
+        takes_value: true
+        value_hint:
+          placeholder: <waf-name>
+          description: Specific WAF to test for (e.g. Cloudflare)
+    arguments:
+      - placeholder: <url>
+        description: Target URL to fingerprint
+  naabu:
+    examples:
+      - value: naabu -help
+        description: Show help and usage
+      - value: naabu -host ip.darklab.sh -p 80,443
+        description: Scan web ports on a host
+      - value: naabu -host ip.darklab.sh -silent
+        description: Scan with minimal output
+    flags:
+      - value: -help
+        description: Show help and usage
+        closes: true
+      - value: -host
+        description: Target host or IP
+        takes_value: true
+        value_hint:
+          placeholder: <host>
+          description: Target hostname or IP address
+      - value: -p
+        description: Ports or port ranges to scan
+        takes_value: true
+        suggest:
+          - value: 80,443
+            description: Common web ports
+          - value: 1-1000
+            description: First thousand ports
+          - value: '-'
+            description: All 65535 ports
+      - value: -rate
+        description: Packets per second rate limit
+        takes_value: true
+        suggest:
+          - value: '100'
+            description: Conservative rate limit
+          - value: '500'
+            description: Moderate rate limit
+      - value: -silent
+        description: Minimal output
+      - value: -v
+        description: Verbose output
+      - value: -exclude-ports
+        description: Ports to exclude from scan
+        takes_value: true
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -host
+  katana:
+    examples:
+      - value: katana -help
+        description: Show help and usage
+      - value: katana -u https://ip.darklab.sh -d 1 -silent
+        description: Shallow crawl with minimal output
+    flags:
+      - value: -help
+        description: Show help and usage
+        closes: true
+      - value: -u
+        description: Single target URL to crawl
+        takes_value: true
+        value_hint:
+          placeholder: <url>
+          description: Target URL to start crawling from
+        suggest:
+          - value: https://
+            description: Target URL to start crawling from
+      - value: -d
+        description: Maximum crawl depth
+        takes_value: true
+        suggest:
+          - value: '2'
+            description: Shallow crawl depth
+          - value: '3'
+            description: Moderate crawl depth
+          - value: '5'
+            description: Deep crawl
+      - value: -jc
+        description: Enable JavaScript parsing and crawling
+      - value: -kf
+        description: Crawl known files (robots.txt, sitemap.xml, etc.)
+        suggest:
+          - value: all
+            description: All known file types
+      - value: -ef
+        description: Exclude file extensions
+        takes_value: true
+      - value: -ct
+        description: Concurrency level
+        takes_value: true
+      - value: -timeout
+        description: Request timeout in seconds
+        takes_value: true
+      - value: -silent
+        description: Suppress banner and output headers
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -u
+  masscan:
+    examples:
+      - value: masscan --help
+        description: Show help and usage
+      - value: masscan -p 80,443 8.8.8.8
+        description: Fast scan of web ports
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: -p
+        description: Ports or port ranges to scan
+        takes_value: true
+        suggest:
+          - value: 80,443
+            description: Common web ports
+          - value: 1-1000
+            description: First thousand ports
+          - value: 1-65535
+            description: Full port range
+      - value: --rate
+        description: Transmit rate in packets per second
+        takes_value: true
+        suggest:
+          - value: '500'
+            description: Conservative rate
+          - value: '1000'
+            description: Moderate rate
+      - value: --banner
+        description: Capture service banners
+      - value: --exclude
+        description: Exclude a host or range from scanning
+        takes_value: true
+    arguments:
+      - placeholder: <target>
+        description: IP address or CIDR range
+  rustscan:
+    examples:
+      - value: rustscan --help
+        description: Show help and usage
+      - value: rustscan -a ip.darklab.sh -p 80,443
+        description: Scan specific ports on a host
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: -a
+        description: Target address or IP
+        takes_value: true
+        value_hint:
+          placeholder: <host>
+          description: Target hostname or IP address
+      - value: -p
+        description: Specific ports to scan
+        takes_value: true
+        suggest:
+          - value: 80,443
+            description: Common web ports
+      - value: --range
+        description: Port range to scan
+        takes_value: true
+        suggest:
+          - value: 1-1000
+            description: First thousand ports
+          - value: 1-65535
+            description: Full port range
+      - value: -b
+        description: Batch size (ports scanned simultaneously)
+        takes_value: true
+        suggest:
+          - value: '500'
+            description: Conservative batch size
+      - value: --ulimit
+        description: File descriptor ulimit override
+        takes_value: true
+      - value: -t
+        description: Timeout per port in milliseconds
+        takes_value: true
+        suggest:
+          - value: '1500'
+            description: 1.5 second per-port timeout
+    arguments:
+      - placeholder: <target>
+        description: Usually provided through -a
+  whois:
+    examples:
+      - value: whois --help
+        description: Show help and usage
+      - value: whois darklab.sh
+        description: Domain registration lookup
+      - value: whois 104.21.4.35
+        description: IP allocation lookup
+      - value: whois -h whois.iana.org darklab.sh
+        description: Query a specific WHOIS server
+    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
+      - value: -h
+        description: WHOIS server to query
+        takes_value: true
+        suggest:
+          - value: whois.iana.org
+            description: IANA WHOIS server
+          - value: whois.verisign-grs.com
+            description: Verisign .com/.net WHOIS server
+          - value: whois.arin.net
+            description: ARIN WHOIS server for IP allocations
+      - value: -p
+        description: WHOIS server port
+        takes_value: true
+        suggest:
+          - value: '43'
+            description: Standard WHOIS port
+      - value: -H
+        description: Hide legal disclaimers when supported
+    arguments:
+      - placeholder: <domain-or-ip>
+        description: Domain name, IP address, or ASN to query

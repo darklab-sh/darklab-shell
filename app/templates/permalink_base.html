@@ -8,26 +8,32 @@
 <link rel="icon" type="image/x-icon" href="/favicon.ico">
 <link rel="stylesheet" href="/static/css/fonts.css">
 <link rel="stylesheet" href="/static/css/styles.css">
+<link rel="stylesheet" href="/static/css/terminal_export.css">
 {% include "theme_vars_style.html" %}
 {% include "theme_vars_script.html" %}
 <script src="/vendor/ansi_up.js"></script>
+<script src="/vendor/jspdf.umd.min.js"></script>
+<script src="/static/js/utils.js"></script>
 <script src="/static/js/export_html.js"></script>
+<script src="/static/js/export_pdf.js"></script>
+<script src="/static/js/ui_outside_click.js"></script>
 {% block extra_head %}{% endblock %}
 </head>
 <body class="permalink-page" data-theme="{{ current_theme.name }}">
-<header class="permalink-header">
-  <div class="permalink-header-copy">
-    <h1 class="permalink-title">{{ app_name }}</h1>
+<header class="export-header">
+  <div class="export-header-copy">
+    <h1 class="export-title">{{ page_model.header.appName if page_model is defined else app_name }}</h1>
     {% block header_meta %}{% endblock %}
   </div>
   <div class="permalink-actions">
     {% block header_actions %}{% endblock %}
   </div>
 </header>
-<main id="output" class="output permalink-output">
+<main id="output" class="output export-output nice-scroll">
   {% block output %}{% endblock %}
 </main>
 {% block footer %}{% endblock %}
 {% block scripts %}{% endblock %}
+<script src="/static/js/permalink.js"></script>
 </body>
 </html>

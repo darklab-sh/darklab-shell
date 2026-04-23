@@ -1,22 +1,59 @@
 # Theme System
 
-This document is the full reference for the completed shell theme system. It explains how the theme files are loaded, how the values flow into the browser, and what every configurable key does.
+This document is the full reference for the shell theme system. It explains how theme files are loaded, how values flow into the browser, and what every configurable key does.
+
+---
+
+## Table of Contents
+
+- [Overview](#overview)
+- [Semantic Color Contract](#semantic-color-contract)
+- [Theme Resolution Order](#theme-resolution-order)
+- [Baked-In Fallback Palette](#baked-in-fallback-palette)
+- [How the Code Works](#how-the-code-works)
+- [File Roles](#file-roles)
+- [Runtime Theme Selector](#runtime-theme-selector)
+- [Editing Rules](#editing-rules)
+- [Practical Notes](#practical-notes)
+- [Keeping example files in sync](#keeping-example-files-in-sync)
+- [Theme Key Reference](#theme-key-reference)
+- [Related Docs](#related-docs)
+
+---
 
 ## Overview
 
-Theme support is split into a small pipeline:
+The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, exported HTML, and PDF export all read from the same resolved semantic tokens rather than each maintaining a separate palette. Themes are selectable at runtime through the preview modal or the `theme` terminal command without requiring code changes or a container rebuild.
 
-1. `app/conf/themes/` holds the selectable named variants that the runtime preview modal can expose without code changes. Each base theme can also have a sibling `<name>.local.yaml` overlay that merges into that theme without becoming a selectable card on its own.
-2. `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated reference templates only; they are not loaded into the runtime selector. [scripts/generate_theme_examples.py](scripts/generate_theme_examples.py) regenerates both files directly from `_THEME_DEFAULTS` in `app/config.py`.
-3. `app/config.py` loads the YAML files under `app/conf/themes/`, merges them with the matching built-in dark or light fallback defaults, filters out unknown keys, and builds the selectable theme registry. `color_scheme:` selects which fallback family (`dark` or `light`) fills any missing keys. If a YAML file includes `label:`, that value becomes the friendly preview-card label; if it includes `group:`, that value becomes the preview-section header; if it includes `sort:`, that numeric value controls the modal ordering. `default_theme` in `app/conf/config.yaml` uses the full filename, while the registry still persists the stem for theme selection and localStorage.
-4. `theme_css_vars()` converts the component-chrome keys into CSS custom properties such as `--theme-panel-bg`, while `theme_runtime_css_vars()` exposes the full live CSS var map used by the runtime selector.
-5. `app/templates/theme_vars_style.html` injects the resolved CSS variables into the page so `styles.css` can use them directly.
-6. `app/templates/theme_vars_script.html` exposes the current theme plus the registry as `window.ThemeCssVars` / `window.ThemeRegistry` for browser-side theme switching and export helpers.
-7. `app/app.py` exposes `/themes` so the browser can inspect the active registry.
-8. `app/static/js/app.js` applies the selected theme on the fly from the dedicated theme selector modal preview cards, and persists the choice in cookies/localStorage. On desktop the selector now opens as a right-side drawer so the shell remains visible behind it while you compare themes. On mobile, the selector remains a full-screen chooser with a two-column preview layout on wider phones so the preview cards remain readable and the grouped sections keep a consistent width.
-9. `app/static/js/export_html.js` reads the injected theme vars when generating downloadable HTML, so exported snapshots stay portable and match the active theme, including the same panel/bar token family and resolved `color-scheme` hint.
+---
 
-The live app, permalink pages, runtime preview modal, and exported HTML all read from the same resolved theme values. That is the main reason the theme system was externalized.
+## Semantic Color Contract
+
+Every theme provides four semantic colors with fixed meanings. Themes may choose any visual tone for each color, but the four must stay visually distinct within a single theme so each meaning remains recognizable.
+
+| Semantic | Token | Meaning |
+|----------|-------|---------|
+| yellow | `--amber` | caution / reversible destructive / expiring / in-progress (running, live, pending) |
+| red | `--red` | destructive / kill / error / irreversible |
+| green | `--green` | completed success / enabled / current-focus (the "done/selected" tier) |
+| dim | `--muted` | neutral metadata — labels, timestamps, non-critical values |
+
+### Rules
+
+- **Binary, not graded.** One color, one meaning. If a surface needs a softer treatment (e.g. dimmed expiry text) it uses the `dim` token plus the semantic color on the label only, not a second intensity tier of the same color.
+- **All four must stay distinct per theme.** A theme that collapses caution into danger (yellow ≈ red) defeats the purpose of the contract. Theme authors must verify red, yellow, green, and dim are visually separable inside each theme, not just in aggregate across the palette family.
+- **In-progress belongs to yellow, not green.** A "running" task is yellow; a "completed success" task is green. This keeps the two states visually distinct even when both are "active" in the loose sense. Use yellow for running, live, pending, and the HUD `RUNNING` pill; use green only for completed success, enabled switches, and current-focus indicators.
+- **Use existing theme tokens.** Do not introduce surface-local amber / red / green variants. If a surface needs tuning, add a new `--theme-*` chrome token derived from the base semantic token via `color-mix()` in the theme file — never hardcode a one-off color.
+
+### Documented exceptions
+
+These uses of yellow do not match the strict semantic meaning above, but are retained because they match widely established cross-product conventions. They should not be cited as precedent for introducing further exceptions.
+
+- **Starred items.** A yellow star icon on favorited / starred entries (history rows, chips, sheet items) — matches the universal star-is-yellow convention (GitHub, Gmail, etc.).
+- **Search-hit highlights.** `mark.search-hl` tints matches yellow — matches browser and IDE find-in-page convention.
+- **macOS-style minimize button.** `window_btn_minimize` in every theme renders the amber traffic-light dot — decorative chrome that mirrors the macOS window-control convention, not a semantic signal.
+
+---
 
 ## Theme Resolution Order
 
@@ -26,26 +63,61 @@ The runtime theme choice is resolved in this order:
 2. `default_theme` from `app/conf/config.yaml`
 3. the baked-in dark fallback palette in `app/config.py`
 
-That means the browser always prefers the user’s last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. During the selector migration, legacy `pref_theme_name` / `pref_theme` cookies may still be read for compatibility, but they are not the canonical source of truth.
+That means the browser always prefers the user's last selected theme, then the instance default filename, and only falls back to the built-in dark values if the saved or configured theme cannot be loaded. The selector does not promote the first registry theme as a hidden third fallback, and an empty registry simply leaves the preview modal empty while the app uses the baked-in fallback colors. Legacy `pref_theme_name` / `pref_theme` cookies are still read for backwards compatibility, but `localStorage.theme` is the canonical value.
+
+---
 
 ## Baked-In Fallback Palette
 
-The hardcoded fallback lives in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. Those are the built-in base palettes used when a selected theme cannot be loaded, and they are also the source of truth for the generated `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` files. The dark example is intentionally aligned with the active `app/conf/themes/darklab_obsidian.yaml` theme file.
+The theme framework has two built-in, hard-coded palettes: a dark palette and a light palette. Both live in `app/config.py` under `_THEME_DEFAULTS["dark"]` and `_THEME_DEFAULTS["light"]`. These are not selectable theme files — they are the compile-time baseline that the loader falls back to for any key a custom theme file does not specify.
 
-The fallback palette includes the full set of supported keys: base colors, typography, terminal chrome, toolbar buttons, chips, tabs, history, modals, dropdowns, FAQ controls, status/toasts, the mobile shell/menu, and welcome/onboarding styling. In other words, every key listed in the appendix below has a baked-in dark default in code. If you need the exact source of truth, inspect `_THEME_DEFAULTS["dark"]` in [app/config.py](app/config.py).
+Every key listed in the [Theme Key Reference](#theme-key-reference) section below has a baked-in value in both palettes. If you need the exact source of truth, inspect `_THEME_DEFAULTS` in [app/config.py](app/config.py).
 
-## Editing Rules
+### Which built-in palette fills in missing keys
 
-- The example template files are generated from `_THEME_DEFAULTS` in `app/config.py`. Regenerate them with `./.venv/bin/python scripts/generate_theme_examples.py` after changing the built-in defaults. Then copy one into `app/conf/themes/<filename>.yaml` if you want the runtime selector to pick it up. If you want a private overlay for an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges that overlay after the checked-in base file.
-- Unknown keys are ignored by `app/config.py`; only keys that exist in `_THEME_DEFAULTS` are accepted.
-- Values may be any valid CSS color, length, gradient, or shadow string, depending on the key. You can also reference other resolved theme variables with CSS `var(--name)` syntax; the browser resolves those references after the vars are injected.
-- If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing the app. That means a bad edit will not take down the runtime selector, but the file should still be fixed before it is considered usable.
-- Restart the container after changing any loaded theme file under `app/conf/themes/` or after changing `config.yaml`. No rebuild is required.
-- Example variants under `app/conf/themes/` and the ad-hoc light-theme files in `app/conf/` can live beside the canonical files as inspiration or starting points. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
-- Theme YAMLs may include optional `label:`, `group:`, and `sort:` fields plus a `color_scheme:` field. `label:` is the visible card name, `group:` becomes the section header in the theme modal, and `sort:` controls ordering between cards and sections. `color_scheme:` should be set to `dark` or `light` so missing keys inherit from the correct built-in fallback family. If `label:` is missing, the selector falls back to a humanized filename stem. If `group:` is missing, the selector uses `Other`. There is no filename-based or palette-based group inference. If `sort:` is missing, the selector orders the entry after any explicitly sorted themes. If `color_scheme:` is missing or invalid, the loader falls back to the dark default family.
-- If you want one theme value to inherit or derive from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; they are interpreted by the browser, not by YAML parsing.
-- The base palette keys are exposed as normal CSS variables such as `--bg`, `--surface`, `--text`, `--green`, and `--blue`.
-- The component chrome keys are exposed as `--theme-*` variables, for example `--theme-panel-bg`, `--theme-tab-active-text`, and `--theme-toast-border`.
+Each theme file in `app/conf/themes/` declares its intended palette family with a `color_scheme` field:
+
+```yaml
+color_scheme: dark   # or: light
+```
+
+When `load_theme(name)` merges a custom theme file, it uses `color_scheme` to pick the right built-in as the base:
+
+- `color_scheme: dark` → missing keys are filled from `_THEME_DEFAULTS["dark"]`
+- `color_scheme: light` → missing keys are filled from `_THEME_DEFAULTS["light"]`
+- absent → falls back to `_THEME_DEFAULTS["dark"]`
+
+This means a light-family custom theme only needs to specify the values it actually changes. All unspecified keys automatically inherit the built-in light defaults rather than the dark ones. The two built-in palettes were designed as complementary starting points: all keys have sensible values in both, and any theme file is free to override as many or as few as it needs.
+
+### Generated example files
+
+The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated directly from `_THEME_DEFAULTS` by `scripts/generate_theme_examples.py`. They serve as full annotated references that show every supported key and its built-in default value. The dark example is intentionally aligned with the active `app/conf/themes/darklab_obsidian.yaml` theme file. See [Keeping example files in sync](#keeping-example-files-in-sync) for when to regenerate them.
+
+---
+
+## How the Code Works
+
+### 1. Load and merge
+
+`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, reads the `color_scheme` field (`dark` or `light`, defaulting to `dark`), merges the file values on top of the matching `_THEME_DEFAULTS` palette, and then applies an optional sibling `app/conf/themes/<name>.local.yaml` overlay if one exists. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. Any key absent from the file (and from the local overlay) retains the built-in default for the chosen palette family.
+
+### 2. Export as CSS vars
+
+`theme_css_vars(theme)` walks `_THEME_CSS_ORDER` and converts each accepted key into a CSS custom property named `--theme-<key>`. The ordering is stable so the injected CSS is deterministic.
+
+### 3. Inject into the templates
+
+`app.py` and `permalinks.py` pass runtime CSS vars built from the built-in default palettes into the templates. `theme_vars_style.html` turns the selected theme's variables into a `<style>` block containing `:root { ... }` declarations. That means the browser never needs to guess at the current palette.
+
+### 4. Expose the values to JS
+
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, runtime theme selector, and `theme` terminal command, can then read the exact runtime theme without duplicating a hardcoded palette.
+
+### 5. Consume from CSS and export helpers
+
+`styles.css` uses the shared vars for the live shell, tabs, history drawer, FAQ, modals, mobile UI, welcome art, and toast surfaces. `app.js` applies the selected theme live by swapping the root CSS variables on `:root`. `export_html.js` uses the same vars when building downloadable HTML snapshots so the saved file matches the active theme instead of drifting over time, and `export_pdf.js` resolves the same semantic tokens into RGB values for jsPDF so PDF export follows the active theme as closely as the PDF renderer allows.
+
+---
 
 ## File Roles
 
@@ -61,44 +133,93 @@ The fallback palette includes the full set of supported keys: base colors, typog
 | `app/templates/theme_vars_script.html` | Exposes resolved theme values and the theme registry to browser JS |
 | `app/static/css/styles.css` | Consumes the theme vars for live UI styling |
 | `app/static/js/app.js` | Applies the selected theme on the fly from the theme selector modal preview cards |
-| `app/static/js/export_html.js` | Builds downloadable HTML snapshots from the resolved vars |
+| `app/static/js/export_html.js` | Builds downloadable HTML snapshots and the shared browser export header model from the resolved vars |
+| `app/static/js/export_pdf.js` | Resolves the active theme tokens for jsPDF and renders PDF export against the same semantic palette |
 
-## How The Code Works
-
-### 1. Load and merge
-
-`load_theme(name)` in `app/config.py` loads the YAML file from `app/conf/themes/<name>.yaml`, merges any values from that file with the built-in defaults, and then applies an optional sibling `app/conf/themes/<name>.local.yaml` overlay if one exists. It accepts either the filename stem or the full filename, so `darklab_obsidian.yaml` and `darklab_obsidian` both resolve to the same registry entry. If a key is missing, the built-in default remains in effect.
-
-### 2. Export as CSS vars
-
-`theme_css_vars(theme)` walks `_THEME_CSS_ORDER` and converts each accepted key into a CSS custom property named `--theme-<key>`. The ordering is stable so the injected CSS is deterministic.
-
-### 3. Inject into the templates
-
-`app.py` and `permalinks.py` pass runtime CSS vars built from the built-in default palettes into the templates. `theme_vars_style.html` turns the selected theme's variables into a `<style>` block containing `:root { ... }` declarations. That means the browser never needs to guess at the current palette.
-
-### 4. Expose the values to JS
-
-`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder and the runtime theme selector, can then read the exact runtime theme without duplicating a hardcoded palette.
-
-### 5. Consume from CSS and export helpers
-
-`styles.css` now uses the shared vars for the live shell, tabs, history drawer, FAQ, modals, mobile UI, welcome art, and toast surfaces. `app.js` applies the selected theme live by swapping the root CSS variables on `:root`. `export_html.js` uses the same vars when building downloadable HTML snapshots so the saved file matches the active theme instead of drifting over time.
+---
 
 ## Runtime Theme Selector
 
-The completed theme preview grid in the dedicated theme selector modal is driven by the runtime theme registry. The browser:
+The theme preview grid is driven by the runtime theme registry. Clicking a preview card immediately applies that theme and persists the selection to `localStorage`. On desktop, the selector opens as a right-side drawer so the shell remains visible behind it while comparing themes. On mobile, it remains a full-screen chooser with a two-column preview layout on wider phones.
 
-1. reads the selected theme from `pref_theme_name` / `localStorage.theme`
-2. uses the registry to find the matching entry and apply its CSS vars
-3. persists the exact theme name back to cookies and localStorage
-4. updates the current export state so tab HTML and permalinks stay in sync
+The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
 
-The built-in `theme` button is a shortcut to the theme selector, but the preview grid is the source of truth for named variants. Desktop keeps the selector open as a side drawer while mobile keeps the full-screen chooser; in both cases, clicking a preview card immediately applies that theme and persists the selection.
+---
 
-## Appendix: Theme Options
+## Editing Rules
 
-The tables below list every supported theme key from `_THEME_DEFAULTS`. The runtime selector simply applies one resolved theme entry at a time. The extra columns are reference data for theme authors and for the example templates; they are not a runtime mode switch.
+### Authoring a theme
+
+- Copy `theme_dark.yaml.example` or `theme_light.yaml.example` into `app/conf/themes/<filename>.yaml` to expose it in the runtime selector. The loader reads the canonical files plus every YAML file in `app/conf/themes/`.
+- For a private overlay on an existing base theme, create `app/conf/themes/<filename>.local.yaml` next to it; the loader merges the overlay after the checked-in base file.
+- Unknown keys are ignored — only keys present in `_THEME_DEFAULTS` (`app/config.py`) are accepted.
+- Values may be any valid CSS color, length, gradient, or shadow string, depending on the key.
+- To derive one value from another, use CSS custom-property references such as `var(--green)` or `color-mix(in srgb, var(--surface) 88%, #000)`. The loader preserves those strings exactly; the browser resolves them after injection.
+
+For regenerating the `.yaml.example` reference files, see [Keeping example files in sync](#keeping-example-files-in-sync).
+
+### Operational behavior
+
+- If a theme YAML file is malformed, the loader falls back to the built-in defaults instead of crashing. The runtime selector keeps working; fix the file before treating it as usable.
+- Restart the container after changing any loaded theme file under `app/conf/themes/` or after changing `config.yaml`. No rebuild is required.
+
+### Metadata fields
+
+Theme YAMLs may include four optional metadata fields that control how the theme appears in the selector:
+
+| Field | Effect | Fallback when absent |
+|-------|--------|----------------------|
+| `label` | Visible card name in the theme selector | Humanized filename stem |
+| `group` | Section header in the theme modal | `Other` |
+| `sort` | Ordering between cards and sections | Entry sorted after all explicitly sorted themes |
+| `color_scheme` | Set to `dark` or `light` to control which built-in fallback family supplies missing keys (see [Baked-In Fallback Palette](#baked-in-fallback-palette)) | Dark default family |
+
+There is no filename-based or palette-based group inference — `group` must be set explicitly if you want the theme to appear under a specific section.
+
+### CSS variable exposure
+
+- Base palette keys are exposed as plain CSS variables: `--bg`, `--surface`, `--text`, `--green`, `--blue`, and so on.
+- Component chrome keys are exposed as `--theme-*` variables, for example `--theme-panel-bg`, `--theme-tab-active-text`, `--theme-toast-border`.
+
+---
+
+## Practical Notes
+
+- Theme YAML files are explicit and self-contained so operators can tune the shell appearance without touching code.
+- Most values are safe to tweak live as long as they remain valid CSS values.
+- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three surfaces.
+- If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
+
+---
+
+## Keeping example files in sync
+
+`app/conf/theme_dark.yaml.example` and `app/conf/theme_light.yaml.example` are generated files. They must stay in sync with the `_THEME_DEFAULTS` dictionaries in `app/config.py`.
+
+A pytest regression (`TestThemeRegistry.test_theme_example_files_match_generated_defaults`) compares the checked-in files against the output of `scripts/generate_theme_examples.py` on every test run. If the test fails, it means the built-in defaults changed but the example files were not regenerated. Fix it by running:
+
+```bash
+./.venv/bin/python scripts/generate_theme_examples.py
+```
+
+Then commit both updated `.yaml.example` files alongside the `app/config.py` change that triggered the drift.
+
+**When you need to regenerate:**
+
+- You added, removed, or renamed a key in `_THEME_DEFAULTS` in `app/config.py`
+- You changed a default value in `_THEME_DEFAULTS`
+- The test `test_theme_example_files_match_generated_defaults` fails
+
+**When you do not need to regenerate:**
+
+- You created or edited a theme file under `app/conf/themes/` — those are independent of the example files
+- You changed something in `scripts/generate_theme_examples.py` itself (though in that case you should still run it to confirm the output)
+
+---
+
+## Theme Key Reference
+
+The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row includes the dark and light default values for reference — these are the values used when a key is absent from a theme file, not selectable modes. The runtime selector always applies a single fully resolved theme at a time.
 
 ### Base Palette
 
@@ -146,22 +267,22 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 
 | Key | Dark default | Light default | Used for |
 |-----|--------------|---------------|----------|
-| `toolbar_button_bg` | `transparent` | `#c8d4e0` | Header and toolbar button backgrounds |
-| `toolbar_button_border` | `#2e2e2e` | `#8898b0` | Header and toolbar button borders |
-| `toolbar_button_text` | `#7a7a7a` | `#202838` | Header and toolbar button text |
-| `toolbar_button_hover_bg` | `transparent` | `#b8c8d8` | Hover background for header buttons |
-| `toolbar_button_hover_border` | `#1a7a08` | `#6880a0` | Hover border for header buttons |
-| `toolbar_button_hover_text` | `#39ff14` | `#101820` | Hover text for header buttons |
-| `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active header button background |
-| `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active header button border |
-| `toolbar_button_active_text` | `#39ff14` | `#101820` | Active header button text |
+| `toolbar_button_bg` | `transparent` | `#c8d4e0` | Chrome button (rail, HUD, toolbar) backgrounds |
+| `toolbar_button_border` | `#2e2e2e` | `#8898b0` | Chrome button (rail, HUD, toolbar) borders |
+| `toolbar_button_text` | `#7a7a7a` | `#202838` | Chrome button (rail, HUD, toolbar) text |
+| `toolbar_button_hover_bg` | `transparent` | `#b8c8d8` | Hover background for chrome buttons |
+| `toolbar_button_hover_border` | `#1a7a08` | `#6880a0` | Hover border for chrome buttons |
+| `toolbar_button_hover_text` | `#39ff14` | `#101820` | Hover text for chrome buttons |
+| `toolbar_button_active_bg` | `rgba(57,255,20,0.06)` | `#a0b4c8` | Active chrome button background |
+| `toolbar_button_active_border` | `#1a7a08` | `#6880a0` | Active chrome button border |
+| `toolbar_button_active_text` | `#39ff14` | `#101820` | Active chrome button text |
 | `chip_bg` | `transparent` | `#c8d4e0` | History chips and starred chips |
 | `chip_border` | `#2e2e2e` | `#8898b0` | Chip borders |
 | `chip_text` | `#7a7a7a` | `#202838` | Default chip text |
 | `chip_hover_bg` | `rgba(57,255,20,0.12)` | `#b8c8d8` | Chip hover background |
 | `chip_hover_border` | `#1a7a08` | `#6880a0` | Chip hover border |
 | `chip_hover_text` | `#e0e0e0` | `#101820` | Chip hover text |
-| `chip_overflow_text` | `#39ff14` | `#274f17` | “More” / overflow chip text |
+| `chip_overflow_text` | `#39ff14` | `#274f17` | "More" / overflow chip text |
 
 ### Tabs and Tab Controls
 
@@ -210,8 +331,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 |-----|--------------|---------------|----------|
 | `faq_modal_bg` | `#141414` | `#e8eef6` | FAQ modal background |
 | `options_modal_bg` | `#141414` | `#e8eef6` | Options modal background |
-| `kill_modal_bg` | `#141414` | `#d4e0ec` | Kill confirmation modal background |
-| `hist_del_modal_bg` | `#141414` | `#d4e0ec` | History delete confirmation modal background |
+| `confirm_modal_bg` | `#141414` | `#d4e0ec` | Confirmation modal background (shared for all `showConfirm` dialogs) |
 | `dropdown_bg` | `color-mix(in srgb, var(--surface) 96%, transparent)` | `#d4e0ec` | Main autocomplete dropdown background |
 | `dropdown_border` | `color-mix(in srgb, var(--green) 18%, transparent)` | `rgba(26,90,170,0.25)` | Main autocomplete border |
 | `dropdown_shadow` | `rgba(0,0,0,0.35)` | `rgba(0,0,0,0.14)` | Main autocomplete shadow |
@@ -222,7 +342,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 | `overlay_backdrop_bg` | `rgba(0,0,0,0.75)` | `rgba(34,58,88,0.22)` | Shared backdrop behind modals and overlays |
 | `faq_code_bg` | `#141414` | `#dce6f0` | Code-styled FAQ tokens and examples |
 | `allowed_chip_bg` | `#141414` | `#dce6f0` | Allowed-command chips in the FAQ |
-| `options_select_bg` | `#141414` | `#e0e8f4` | Options modal select controls |
+| `form_control_bg` | `#141414` | `#e0e8f4` | Background for themed `<select>` form controls (`.form-select`) |
 
 ### Status and Toasts
 
@@ -249,6 +369,8 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 | `mobile_menu_button_hover_bg` | `var(--green-glow)` | `var(--bg)` | Mobile menu button hover background |
 | `mobile_menu_button_hover_text` | `#39ff14` | `#101820` | Mobile menu button hover text |
 
+Theme authors should also know that not every mobile overlay uses the same geometry. Options / FAQ / workflows / shortcuts now share the generic mobile sheet contract, but the theme selector intentionally keeps its dedicated full-screen mobile treatment so the grouped preview cards have enough space. Theme tokens still flow into both categories through the same surface variables; only the layout contract differs.
+
 ### Welcome and Onboarding
 
 | Key | Dark default | Light default | Used for |
@@ -258,9 +380,13 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. The runt
 | `welcome_ascii_text_shadow` | `0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)` | `0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)` | Welcome ASCII art text shadow |
 | `welcome_ascii_filter` | `saturate(1.12) contrast(1.08) brightness(1.08)` | `saturate(0.9) contrast(0.95) brightness(0.9)` | Welcome ASCII art filter |
 
-## Practical Notes
+---
 
-- The YAML files are intentionally verbose so operators can tune the shell without touching code.
-- Most values are safe to tweak live as long as they remain valid CSS values.
-- The theme layer is shared by the live app, permalink pages, and export HTML, so a change in these files can affect all three surfaces.
-- If you are trying to restyle something and cannot find a key in this appendix, it is probably still hardcoded elsewhere in CSS and should be moved to the theme system next.
+## Related Docs
+
+- [README.md](README.md) — quick summary, quick start, installed tools, and configuration reference
+- [ARCHITECTURE.md](ARCHITECTURE.md) — runtime layers, request flow, persistence schema, and security mechanics
+- [FEATURES.md](FEATURES.md) — full per-feature reference including purpose and use
+- [CONTRIBUTING.md](CONTRIBUTING.md) — local setup, test workflow, linting, and merge request guidance
+- [DECISIONS.md](DECISIONS.md) — architectural rationale, tradeoffs, and implementation-history notes
+- [tests/README.md](tests/README.md) — test suite appendix, smoke-test coverage, and focused test commands

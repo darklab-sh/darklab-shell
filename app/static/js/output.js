@@ -39,9 +39,14 @@ const _OUTPUT_BATCH_SIZE = 80;
 const _pendingOutputBatches = new Map();
 
 function _outputPromptPrefix() {
-  const promptPrefix = document.querySelector('#shell-prompt-wrap .prompt-prefix');
+  const promptPrefix = (typeof shellPromptWrap !== 'undefined' && shellPromptWrap)
+    ? shellPromptWrap.querySelector('.prompt-prefix')
+    : document.querySelector('#shell-prompt-wrap .prompt-prefix');
   const text = promptPrefix ? String(promptPrefix.textContent || '').trim() : '';
-  return text || '$';
+  const configured = typeof APP_CONFIG !== 'undefined' && APP_CONFIG && typeof APP_CONFIG.prompt_prefix === 'string'
+    ? APP_CONFIG.prompt_prefix.trim()
+    : '';
+  return text || configured || '$';
 }
 
 function _formatOutputPrefix(index, tsText, includeTimestamp) {
@@ -108,7 +113,7 @@ function _buildOutputLine(text, cls, tabId, now, runStart) {
     prefixEl.className = 'prompt-prefix';
     prefixEl.textContent = prefix;
     content.appendChild(prefixEl);
-    if (text) content.appendChild(document.createTextNode(' ' + text));
+    if (text) content.appendChild(document.createTextNode(text));
     rawTextForStorage = `${prefix}${text ? ' ' + text : ''}`;
   } else if (cls === 'exit-ok' || cls === 'exit-fail' || cls === 'denied' || cls === 'notice') {
     content.textContent = text;
@@ -140,10 +145,18 @@ function _stickOutputToBottom(out, tab) {
   out.scrollTop = out.scrollHeight;
   if (tab) {
     const token = tab._outputFollowToken;
+    // 16ms follow-up re-sticks the bottom once layout (fonts, images,
+    // prompt mount) has settled. If the user or a caller flipped
+    // followOutput to false during that window (e.g. scrolled up to read
+    // earlier output) we must not yank them back — their scroll intent
+    // wins over our layout-settle retry.
     setTimeout(() => {
-      if (!getTab(tab.id) || tab._outputFollowToken !== token) return;
-      out.scrollTop = out.scrollHeight;
-      tab.suppressOutputScrollTracking = false;
+      const live = getTab(tab.id);
+      if (!live || live._outputFollowToken !== token) return;
+      if (live.followOutput !== false) {
+        out.scrollTop = out.scrollHeight;
+      }
+      live.suppressOutputScrollTracking = false;
     }, 16);
   }
 }
@@ -159,6 +172,69 @@ function _syncTabRawLines(tab, rawLine) {
       tab.currentRunStartIndex = Math.max(0, tab.currentRunStartIndex - removed);
     }
   }
+}
+
+function _appendRestoredOutputSpan(out, rawLine) {
+  const span = document.createElement('span');
+  const cls = rawLine && typeof rawLine.cls === 'string' ? rawLine.cls : '';
+  span.className = 'line' + (cls ? ' ' + cls : '');
+  span.dataset.tsC = String(rawLine && rawLine.tsC || '');
+  if (rawLine && rawLine.tsE) span.dataset.tsE = String(rawLine.tsE);
+
+  const content = document.createElement('span');
+  content.className = 'line-content';
+  const text = String(rawLine && rawLine.text || '');
+
+  if (cls === 'prompt-echo') {
+    const prefix = _outputPromptPrefix();
+    const prefixEl = document.createElement('span');
+    prefixEl.className = 'prompt-prefix';
+    prefixEl.textContent = prefix;
+    content.appendChild(prefixEl);
+
+    let bodyText = text;
+    if (text.startsWith(prefix)) {
+      bodyText = text.slice(prefix.length).replace(/^\s+/, '');
+    } else if (text === '$') {
+      bodyText = '';
+    } else if (text.startsWith('$ ')) {
+      bodyText = text.slice(2);
+    }
+    if (bodyText) content.appendChild(document.createTextNode(bodyText));
+  } else if (cls === 'notice' || cls === 'denied' || cls === 'exit-ok' || cls === 'exit-fail') {
+    content.textContent = text;
+  } else {
+    content.innerHTML = ansi_up.ansi_to_html(text);
+  }
+  span.appendChild(content);
+  _appendOutputSpan(out, span);
+}
+
+function renderRestoredTabOutput(tabId, rawLines) {
+  const out = getOutput(tabId);
+  const tab = getTab(tabId);
+  if (!out || !tab) return;
+  const lines = Array.isArray(rawLines) ? rawLines.map(line => ({
+    text: String(line && line.text || ''),
+    cls: String(line && line.cls || ''),
+    tsC: String(line && line.tsC || ''),
+    tsE: String(line && line.tsE || ''),
+  })) : [];
+  out.innerHTML = '';
+  tab.rawLines = lines;
+  lines.forEach(line => _appendRestoredOutputSpan(out, line));
+  syncOutputPrefixes(out);
+  const mobileMode = !!(
+    typeof document !== 'undefined'
+    && document.body
+    && document.body.classList
+    && document.body.classList.contains('mobile-terminal-mode')
+  );
+  if (mobileMode && lines.length) {
+    tab.followOutput = true;
+    _stickOutputToBottom(out, tab);
+  }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
 }
 
 function _flushPendingOutputBatch(tabId) {
@@ -281,8 +357,6 @@ function _setLnMode(mode) {
     lnBtn.textContent = label;
     lnBtn.classList.toggle('active', mode === 'on');
   }
-  const mobileLn = document.querySelector('#mobile-menu [data-action="ln"]');
-  if (mobileLn) mobileLn.textContent = label;
   syncOutputPrefixes();
   try {
     _refreshFollowingOutputsAfterLayout();

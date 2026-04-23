@@ -1,4 +1,4 @@
-/* darklab shell CSS module: components
+/* darklab_shell CSS module: components
    Reusable shell components: tabs, search, toast, permalink/history surfaces, and menus. */
 
 /* ── Tabs ── */
@@ -6,7 +6,7 @@
   display: flex;
   align-items: flex-end;
   gap: 4px;
-  padding: 0 14px;
+  padding: 6px 8px 0;
   background: var(--theme-terminal-bar-bg);
   overflow-x: scroll;
   overflow-y: hidden;
@@ -15,6 +15,9 @@
   min-width: 0;
 }
 .tabs-bar.tabs-bar-touch-sorting {
+  cursor: grabbing;
+}
+.tabs-bar.tabs-bar-desktop-sorting {
   cursor: grabbing;
 }
 .tabs-bar::-webkit-scrollbar { display: none; width: 0; height: 0; }
@@ -53,18 +56,19 @@
 .tab {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 10px 12px;
+  gap: 7px;
+  padding: 9px 12px;
   font-family: var(--font-mono);
-  font-size: 12px;
-  color: var(--theme-tab-text);
-  border: 1px solid var(--theme-tab-border);
-  border-bottom-color: var(--border);
-  border-radius: 8px 8px 0 0;
-  background: var(--theme-tab-bg);
+  font-size: 11px;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid var(--border-bright);
+  border-bottom: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
   cursor: grab;
   white-space: nowrap;
-  transition: color 0.15s, border-color 0.15s, background 0.15s, opacity 0.15s;
+  transition: color 0.12s ease, border-color 0.12s ease, background 0.12s ease, opacity 0.12s ease, transform 0.12s ease, box-shadow 0.12s ease;
   user-select: none;
   -webkit-user-select: none;
   -webkit-touch-callout: none;
@@ -73,19 +77,54 @@
   margin-bottom: -1px;
 }
 .tab:active { cursor: grabbing; }
-.tab.tab-dragging { opacity: 0.55; }
+.tab.tab-dragging {
+  opacity: 0.32;
+  transform: translateY(-1px);
+}
+.tab.tab-pointer-dragging {
+  opacity: 0.96;
+  color: var(--text);
+  transform: translateY(-3px) scale(1.03);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-tab-drop-shadow) 55%, transparent);
+  z-index: 2;
+}
 .tab.tab-touch-dragging {
   opacity: 0.96;
   color: var(--text);
-  transform: translateY(-2px) scale(1.02);
+  transform: translateY(-3px) scale(1.03);
   text-shadow: var(--theme-tab-touch-drag-text-shadow);
+  box-shadow: 0 10px 24px color-mix(in srgb, var(--theme-tab-drop-shadow) 55%, transparent);
+  z-index: 2;
 }
 .tab.tab-touch-dragging .tab-status {
   box-shadow: 0 0 10px currentColor;
 }
+.tab.tab-touch-dragging.tab-drop-before::before,
+.tab.tab-touch-dragging.tab-drop-after::after {
+  display: none;
+}
 .tab.tab-drop-before,
 .tab.tab-drop-after {
   position: relative;
+}
+.tabs-bar.tabs-bar-desktop-sorting .tab:not(.tab-pointer-dragging),
+.tabs-bar.tabs-bar-touch-sorting .tab:not(.tab-touch-dragging) {
+  transition: transform 0.1s ease, opacity 0.1s ease, border-color 0.1s ease, background 0.1s ease, color 0.1s ease;
+  opacity: 0.42;
+  transform: scale(0.985);
+}
+.tabs-bar.tabs-bar-desktop-sorting .tab.active:not(.tab-pointer-dragging),
+.tabs-bar.tabs-bar-touch-sorting .tab.active:not(.tab-touch-dragging) {
+  opacity: 0.58;
+  transform: scale(0.992);
+}
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-before,
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-after {
+  transform: none;
+}
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-before::before,
+.tabs-bar.tabs-bar-touch-sorting .tab.tab-drop-after::after {
+  display: none;
 }
 .tab.tab-drop-before::before,
 .tab.tab-drop-after::after {
@@ -93,20 +132,24 @@
   position: absolute;
   top: 6px;
   bottom: 6px;
-  width: 2px;
+  width: 3px;
   background: var(--green);
   box-shadow: var(--theme-tab-drop-shadow);
   border-radius: 999px;
 }
-.tab.tab-drop-before::before { left: -3px; }
-.tab.tab-drop-after::after { right: -3px; }
+.tab.tab-drop-before::before { left: -5px; }
+.tab.tab-drop-after::after { right: -5px; }
 .tab:hover { color: var(--theme-tab-hover-text); opacity: 0.96; }
 .tab.active {
-  color: var(--theme-tab-active-text);
-  border-color: var(--theme-tab-active-border);
-  border-bottom-color: var(--border);
-  background: var(--theme-tab-active-bg);
-  box-shadow: var(--theme-tab-active-shadow), inset 0 2px 0 color-mix(in srgb, var(--theme-tab-active-text) 42%, transparent);
+  color: var(--green);
+  background: var(--surface);
+  border: 1px solid var(--border-bright);
+  border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
+  border-bottom-color: var(--surface);
+  box-shadow: none;
+}
+.tab.active:has(.tab-status.running) {
+  border-top-color: color-mix(in srgb, var(--amber) 60%, transparent);
 }
 body .tab:not(.active) { opacity: 0.82; }
 body .hist-chip {
@@ -137,11 +180,6 @@ body .hist-chip {
 }
 
 body .hist-chip-overflow { color: var(--theme-chip-overflow-text); }
-body #faq-btn,
-body #theme-btn,
-body #options-btn,
-body #hist-btn,
-body #diag-btn,
 body #search-toggle-btn,
 body #ts-btn,
 body #ln-btn {
@@ -154,11 +192,6 @@ body #hamburger-btn {
   border-color: transparent;
   color: var(--theme-toolbar-button-text);
 }
-body #faq-btn:hover,
-body #theme-btn:hover,
-body #options-btn:hover,
-body #hist-btn:hover,
-body #diag-btn:hover,
 body #search-toggle-btn:hover,
 body #ts-btn:hover,
 body #ln-btn:hover {
@@ -166,18 +199,20 @@ body #ln-btn:hover {
   border-color: var(--theme-toolbar-button-hover-border);
   color: var(--theme-toolbar-button-hover-text);
 }
-body #hamburger-btn:hover {
+body #hamburger-btn:active {
   background: transparent;
   border-color: transparent;
   color: var(--theme-toolbar-button-hover-text);
 }
+@media (hover: hover) {
+  body #hamburger-btn:hover {
+    background: transparent;
+    border-color: transparent;
+    color: var(--theme-toolbar-button-hover-text);
+  }
+}
 body #ts-btn.active,
 body #ln-btn.active {
-  color: var(--theme-toolbar-button-active-text);
-  border-color: var(--theme-toolbar-button-active-border);
-  background: var(--theme-toolbar-button-active-bg);
-}
-body .search-toggle.active {
   color: var(--theme-toolbar-button-active-text);
   border-color: var(--theme-toolbar-button-active-border);
   background: var(--theme-toolbar-button-active-bg);
@@ -192,18 +227,8 @@ body .history-action-btn:hover {
   border-color: var(--theme-toolbar-button-hover-border);
   color: var(--theme-toolbar-button-hover-text);
 }
-body .star-btn.starred {
-  background: var(--theme-chip-bg);
-  border-color: var(--theme-chip-border);
-  color: var(--theme-chip-text);
-}
-body .star-btn.starred:hover {
-  background: var(--theme-chip-hover-bg);
-  border-color: var(--theme-chip-hover-border);
-  color: var(--theme-chip-hover-text);
-}
 .tab .tab-close {
-  opacity: 0.55;
+  opacity: 0;
   width: 22px;
   height: 22px;
   display: inline-flex;
@@ -227,12 +252,38 @@ body .star-btn.starred:hover {
   box-shadow: none;
   background: var(--theme-tab-close-bg);
   color: inherit;
-  opacity: 0.55;
+  opacity: 0;
 }
-.tab:hover .tab-close { opacity: 0.8; }
+.tab:hover .tab-close { opacity: 1; }
+.tab.active .tab-close { opacity: 1; }
 .tab .tab-close:hover { opacity: 1; background: var(--theme-tab-close-hover-bg); border-color: var(--theme-tab-close-hover-border); color: var(--theme-tab-close-hover-text); }
-.tab .tab-status { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; }
-.tab .tab-status.running { background: var(--amber); animation: pulse 1s infinite; }
+.tab .tab-grip {
+  display: inline-block;
+  width: 2px;
+  height: 2px;
+  margin: 0 4px 0 -2px;
+  border-radius: 1px;
+  background: currentColor;
+  opacity: 0.3;
+  box-shadow:
+    3px 0 0 currentColor,
+    0 3px 0 currentColor,
+    3px 3px 0 currentColor,
+    0 6px 0 currentColor,
+    3px 6px 0 currentColor;
+  flex: 0 0 auto;
+  align-self: center;
+  transform: translateY(-2px);
+  transition: opacity 0.12s ease;
+}
+.tab:hover .tab-grip { opacity: 0.6; }
+.tab.active .tab-grip { opacity: 0.55; }
+.tab .tab-status { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.tab .tab-status.running {
+  background: var(--amber);
+  animation: pulse 1s infinite;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--amber) 55%, transparent);
+}
 .tab .tab-status.ok     { background: var(--theme-tab-status-ok-bg); }
 .tab .tab-status.fail   { background: var(--red); }
 .tab .tab-status.killed { background: var(--red); }
@@ -252,17 +303,12 @@ body .star-btn.starred:hover {
   align-items: center;
   justify-content: center;
   align-self: flex-end;
-  min-height: 34px;
-  min-width: 38px;
-  padding: 0 12px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--text) 2%, transparent),
-    color-mix(in srgb, var(--text) 0.5%, transparent)
-  );
-  border: 1px dashed color-mix(in srgb, var(--theme-tab-border) 82%, transparent);
-  border-bottom-color: var(--border);
-  border-radius: 8px 8px 0 0;
+  min-height: 32px;
+  min-width: 32px;
+  padding: 0 10px;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 6px 6px 0 0;
   color: var(--theme-tab-text);
   font-size: 18px;
   cursor: pointer;
@@ -270,11 +316,12 @@ body .star-btn.starred:hover {
   flex-shrink: 0;
   line-height: 1;
   margin-bottom: -1px;
+  box-shadow: none;
 }
 #new-tab-btn:hover {
   color: var(--theme-tab-hover-text);
-  border-color: color-mix(in srgb, var(--green-dim) 65%, var(--theme-tab-border));
-  background: color-mix(in srgb, var(--theme-tab-active-bg) 60%, transparent);
+  border-color: transparent;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
 }
 #new-tab-btn:active:not(:disabled) {
   transform: translateY(1px);
@@ -350,19 +397,6 @@ body .star-btn.starred:hover {
   border-color: var(--text);
 }
 .search-toggles { display: flex; gap: 4px; }
-.search-toggle {
-  background: transparent;
-  border: 1px solid var(--border-bright);
-  color: var(--muted);
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 3px 7px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: color 0.15s, border-color 0.15s, background 0.15s;
-}
-.search-toggle:hover { color: var(--text); border-color: var(--text); }
-.search-toggle.active { color: var(--green); border-color: var(--green-dim); background: color-mix(in srgb, var(--green) 6%, transparent); }
 mark.search-hl { background: color-mix(in srgb, var(--amber) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transparent); }
 
@@ -380,11 +414,33 @@ mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transp
   font-size: 12px;
   padding: 10px 18px;
   border-radius: 4px;
-  z-index: 300;
+  z-index: 400;
   transition: transform 0.3s ease;
   pointer-events: none;
   opacity: 0;
   visibility: hidden;
+}
+#permalink-toast.toast-has-action {
+  pointer-events: auto;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.toast-action-btn {
+  background: none;
+  border: 1px solid currentColor;
+  color: inherit;
+  font: inherit;
+  font-size: 11px;
+  padding: 2px 8px;
+  border-radius: 3px;
+  cursor: pointer;
+  white-space: nowrap;
+  opacity: 0.85;
+}
+.toast-action-btn:hover,
+.toast-action-btn:active {
+  opacity: 1;
 }
 #permalink-toast.toast-success,
 #copy-toast.toast-success {
@@ -425,6 +481,10 @@ body #copy-toast.toast-error {
 }
 
 /* ── Permalink pages ── */
+/* Shared header/output/line chrome lives in terminal_export.css, which is
+ * linked after styles.css on all permalink/diag pages and inlined into HTML
+ * exports by buildTerminalExportStyles. Only permalink-specific overrides live
+ * here. */
 body.permalink-page {
   display: flex;
   flex-direction: column;
@@ -436,39 +496,6 @@ body.permalink-page {
 body.permalink-page::before {
   display: none;
 }
-body.permalink-page .permalink-header {
-  display: flex;
-  align-items: baseline;
-  gap: 14px;
-  padding: 16px 20px;
-  border-bottom: 1px solid var(--theme-terminal-bar-border);
-  background: var(--theme-terminal-bar-bg);
-  flex-wrap: wrap;
-}
-body.permalink-page .permalink-header-copy {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-}
-body.permalink-page .permalink-title {
-  font-family: var(--font-mono);
-  font-size: 20px;
-  font-weight: 300;
-  letter-spacing: 4px;
-  color: var(--green);
-  text-shadow: 0 0 20px var(--green-glow);
-}
-body.permalink-page .permalink-meta,
-body.permalink-page .permalink-expiry {
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
-body.permalink-page .permalink-expiry {
-  color: var(--amber);
-}
 body.permalink-page .permalink-actions {
   margin-left: auto;
   display: flex;
@@ -476,73 +503,38 @@ body.permalink-page .permalink-actions {
   flex-wrap: wrap;
   align-items: flex-start;
 }
-body.permalink-page .permalink-actions .term-action-btn:hover {
-  border-color: var(--green-dim);
-  color: var(--green);
-}
-body.permalink-page .permalink-output {
-  flex: 1;
-  padding: 16px 20px 20px;
-  line-height: 1.65;
-  white-space: pre-wrap;
-  word-break: break-all;
-  overflow-y: auto;
-  overflow-wrap: anywhere;
-  min-height: 0;
-  background: var(--theme-panel-bg);
+body.permalink-page .permalink-expiry {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--amber);
+  letter-spacing: 1.5px;
+  text-transform: uppercase;
 }
 body.permalink-page .output:empty::before {
   content: none;
 }
-body.permalink-page .perm-prefix {
-  display: inline-block;
-  min-width: var(--perm-prefix-width, 0ch);
-  margin-right: 14px;
-  color: var(--muted);
-  font-size: 10px;
-  user-select: none;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-body.permalink-page .perm-content {
-  display: inline;
-}
-body.permalink-page .permalink-run-meta {
-  display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 10px;
-  margin-top: 3px;
-}
-body.permalink-page .meta-badge {
-  font-size: 10px;
-  font-weight: 700;
-  letter-spacing: 1px;
-  padding: 1px 7px;
-  border-radius: 2px;
-  border: 1px solid;
-}
-body.permalink-page .meta-badge-ok {
-  color: var(--green);
-  border-color: var(--green-dim);
-}
-body.permalink-page .meta-badge-fail {
-  color: var(--red);
-  border-color: var(--red);
-}
-body.permalink-page .meta-item {
-  font-size: 10px;
-  color: var(--muted);
-  letter-spacing: 1.5px;
-  text-transform: uppercase;
-}
 body.permalink-page .permalink-error-heading {
-  color: var(--amber);
+  color: var(--red);
   font-weight: 700;
-  margin-bottom: 12px;
+  font-size: 17px;
+  letter-spacing: 0.2px;
 }
 body.permalink-page .permalink-error-detail {
   color: var(--muted);
+  max-width: 960px;
+  line-height: 1.6;
+  white-space: normal;
+  word-break: normal;
+  overflow-wrap: break-word;
+}
+body.permalink-page .permalink-error-state {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  align-items: flex-start;
+  justify-content: flex-start;
+  padding-top: 8px;
+  white-space: normal;
 }
 
 /* ── Run History panel ── */
@@ -551,9 +543,11 @@ body.permalink-page .permalink-error-detail {
   position: fixed;
   top: 0; right: 0; bottom: 0;
   width: min(380px, 92vw);
+  max-height: none;
   overflow: hidden;
   background: var(--theme-history-panel-bg);
   border-left: 1px solid var(--border-bright);
+  border-radius: 0;
   z-index: 250;
   flex-direction: column;
   box-shadow: -8px 0 32px var(--theme-history-panel-shadow);
@@ -566,6 +560,168 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   padding: 14px 16px;
   border-bottom: 1px solid var(--border);
   gap: 10px;
+}
+.history-panel-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+.history-panel-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 12px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--theme-history-panel-bg) 94%, var(--surface));
+}
+.history-mobile-filters-toggle {
+  display: none;
+}
+.history-advanced-filters {
+  display: contents;
+}
+.history-panel-filters input,
+.history-panel-filters select {
+  min-width: 0;
+  border: 1px solid var(--border-bright);
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  padding: 7px 9px;
+  border-radius: 4px;
+}
+#history-search-input {
+  flex: 1 1 100%;
+}
+.history-root-autocomplete {
+  flex: 1 1 148px;
+  position: relative;
+}
+#history-root-input {
+  width: 100%;
+}
+.history-root-dropdown {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  right: 0;
+  min-width: 0;
+  width: 100%;
+  max-height: 180px;
+  z-index: 4;
+}
+.history-root-dropdown .ac-item {
+  padding: 6px 10px;
+}
+#history-exit-filter,
+#history-date-filter {
+  flex: 1 1 112px;
+}
+.history-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-height: 32px;
+  padding: 0 8px;
+  border: 1px solid var(--border-bright);
+  border-radius: 4px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  background: color-mix(in srgb, var(--surface) 92%, transparent);
+}
+.history-filter-toggle input {
+  margin: 0;
+}
+.history-filter-clear-btn {
+  margin-left: auto;
+}
+.history-active-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--theme-history-panel-bg) 96%, var(--surface));
+}
+.history-active-filters:empty {
+  display: none;
+}
+.history-active-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+  padding: 0 8px 0 10px;
+  border: 1px solid color-mix(in srgb, var(--green-dim) 54%, var(--border-bright));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+  color: color-mix(in srgb, var(--text) 90%, var(--muted));
+  font-family: var(--font-mono);
+  font-size: 10px;
+}
+.history-active-filter-remove {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+}
+.history-active-filter-remove:hover {
+  color: var(--green);
+}
+.history-pagination {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 8px 10px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: color-mix(in srgb, var(--theme-history-panel-bg) 95%, var(--surface));
+  font-family: var(--font-mono);
+}
+.history-pagination-summary {
+  flex: 1 0 100%;
+  color: var(--muted);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.history-pagination-controls {
+  flex: 1 0 100%;
+  display: inline-grid;
+  grid-template-columns: max-content minmax(96px, auto) max-content;
+  align-items: center;
+  max-width: 100%;
+  gap: 6px;
+}
+.history-pagination-controls > .btn {
+  flex: 0 0 auto;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.history-pagination-status {
+  min-width: 96px;
+  text-align: center;
+  color: var(--text);
+  font-size: 11px;
+  white-space: nowrap;
+}
+.history-pagination-controls > .btn.history-pagination-chevron {
+  font-size: 10px;
+  line-height: 1;
+  min-height: 22px;
+  padding-top: 3px;
+  padding-bottom: 3px;
+}
+.history-pagination-controls > .btn:hover:not(:disabled) {
+  color: var(--green);
+  transform: none;
+}
+.history-pagination-controls > .btn:disabled {
+  opacity: 0.45;
+  cursor: default;
 }
 .history-panel-title {
   font-family: var(--font-display);
@@ -585,8 +741,6 @@ body #history-panel { background: var(--theme-history-panel-bg); }
 }
 .history-panel-close:hover { color: var(--text); }
 #history-list {
-  overflow-y: auto;
-  flex: 1;
   padding: 8px 0;
 }
 #history-load-overlay {
@@ -627,11 +781,24 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   color: var(--muted);
   font-size: 12px;
 }
+.history-empty-state-title {
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  margin-bottom: 4px;
+}
+.history-empty-state-detail {
+  color: var(--muted);
+  font-size: 11px;
+}
 .history-entry {
   padding: 10px 16px;
   border-bottom: 1px solid var(--border);
   cursor: pointer;
   transition: background-color 0.15s;
+}
+.history-entry:nth-of-type(even) {
+  background-color: color-mix(in srgb, var(--theme-history-panel-bg) 96%, var(--text) 4%);
 }
 .history-entry:hover,
 .history-entry:focus-visible {
@@ -643,23 +810,90 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   color: var(--green);
   opacity: 0.7;
 }
+.history-entry-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 3px;
+}
+.history-entry-star {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: auto;
+  height: auto;
+  flex: 0 0 auto;
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 26px;
+  line-height: 1;
+  padding: 0 2px 0 0;
+  transform: translateY(-3px);
+  cursor: pointer;
+  transition: color 0.15s, opacity 0.15s, transform 0.15s;
+}
+.history-entry-star:hover {
+  color: var(--green);
+  transform: translateY(-3px) scale(1.05);
+}
+.history-entry-star.starred {
+  color: var(--amber);
+}
+.history-entry-star.starred:hover {
+  color: var(--amber);
+  transform: translateY(-3px) scale(1.05);
+}
 .history-entry-cmd {
+  min-width: 0;
+  flex: 1 1 auto;
   font-family: var(--font-mono);
   font-size: 12px;
   color: var(--text);
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
-  margin-bottom: 3px;
 }
 .history-entry-meta {
   font-size: 10px;
   color: var(--muted);
   display: flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 10px;
+}
+.history-entry-kind {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 16px;
+  padding: 0 6px;
+  border: 1px solid var(--border-bright);
+  border-radius: 999px;
+  font-size: 9px;
+  letter-spacing: 0.06em;
+}
+.history-entry-kind-run {
+  color: var(--green);
+  border-color: var(--green-dim);
+}
+.history-entry-kind-snapshot {
+  color: color-mix(in srgb, var(--text) 72%, var(--muted));
+}
+.history-entry-date {
+  color: color-mix(in srgb, var(--muted) 82%, var(--text));
 }
 .history-entry-meta .exit-ok { color: var(--green); }
 .history-entry-meta .exit-fail { color: var(--red); }
+.history-entry-icon {
+  color: var(--muted);
+  cursor: default;
+  font-size: 18px;
+  transform: none;
+  padding-right: 2px;
+}
 .history-delete-note {
   color: var(--muted);
   font-size: 11px;
@@ -704,38 +938,6 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   border-color: var(--border-bright);
 }
 .history-action-btn:hover { color: var(--green); border-color: var(--green-dim); }
-.star-btn.starred { color: var(--amber); border-color: var(--amber); }
-.star-btn.starred:hover { color: var(--amber); border-color: var(--amber); opacity: 0.75; }
-.tab-kill-btn-danger {
-  color: var(--red);
-  border-color: var(--red);
-}
-
-body #hist-btn,
-body #faq-btn,
-body #theme-btn,
-body #options-btn,
-body #diag-btn {
-  background: color-mix(in srgb, var(--theme-toolbar-button-bg) 58%, color-mix(in srgb, var(--surface) 96%, transparent));
-  border: 1px solid color-mix(in srgb, var(--border-bright) 94%, transparent);
-  color: color-mix(in srgb, var(--muted) 74%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 11px;
-  padding: 5px 11px;
-  border-radius: 3px;
-  cursor: pointer;
-  transition: border-color 0.2s, color 0.2s, background 0.2s, box-shadow 0.2s;
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 2%, transparent);
-}
-body #hist-btn:hover,
-body #faq-btn:hover,
-body #theme-btn:hover,
-body #options-btn:hover,
-body #diag-btn:hover {
-  border-color: color-mix(in srgb, var(--green-dim) 86%, var(--border-bright));
-  color: var(--green);
-  background: color-mix(in srgb, var(--green) 9%, transparent);
-}
 
 #search-toggle-btn, #ts-btn, #ln-btn {
   background: color-mix(in srgb, var(--theme-toolbar-button-bg) 72%, color-mix(in srgb, var(--surface) 92%, transparent));
@@ -823,109 +1025,467 @@ body #diag-btn:hover {
   cursor: pointer;
   transition: color 0.2s, border-color 0.2s;
   margin-left: auto;
+  /* Opt out of the 300ms double-tap-to-zoom gesture on this control. Without
+     it, a double tap on the hamburger (or the empty space immediately around
+     it) triggers the browser's double-tap zoom instead of a second click. */
+  touch-action: manipulation;
 }
-#hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
+/* Press-only glow. Hover-capable pointers (desktop) get the same cue on real
+   hover; touch devices show the glow only while the finger is down so the
+   button does not stay green after release until focus moves elsewhere. */
+#hamburger-btn:active { color: var(--green); border-color: var(--green-dim); }
+@media (hover: hover) {
+  #hamburger-btn:hover { color: var(--green); border-color: var(--green-dim); }
+}
 
-#mobile-menu {
-  display: none;
-  flex-direction: column;
-  background: var(--theme-mobile-menu-bg);
-  border: 1px solid var(--border-bright);
+/* .mobile-sheet-handle was retired in favour of a single .sheet-grab class
+   shared by every mobile bottom-sheet — see mobile-chrome.css and
+   app/static/js/mobile_sheet.js::bindMobileSheet. */
+
+/* ── Selected-card primitive ─────────────────────────────────────────────
+   Shared visual for "this card is the current selection from a set."
+   Apply by toggling .is-selected-card on the surface element (e.g. theme
+   picker cards). The treatment uses the bright --green token, an outer
+   glow ring, and a soft halo to stay visibly distinct from :hover (which
+   uses --green-dim) and :focus-visible (which uses an outline). Surfaces
+   that have a :hover or :focus-visible rule on the same element should
+   add :not(.is-selected-card) to those rules so the selected visual is
+   not overridden when the user hovers or tabs onto the selected card. */
+.is-selected-card {
+  border-color: var(--green);
+  box-shadow:
+    0 0 0 2px var(--green-glow),
+    0 0 14px color-mix(in srgb, var(--green) 22%, transparent),
+    0 12px 26px color-mix(in srgb, var(--theme-panel-shadow) 72%, transparent);
+}
+
+/* ── Chev primitives ─────────────────────────────────────────────────────
+   Two shared glyph classes for the app's navigation vocabulary:
+
+   .disclosure-chev — rotating ▸ glyph for a button that expands an inline
+     section (block disclosure). Rotation activates when any ancestor's
+     aria-expanded="true" matches, turning the right-pointing ▸ visually
+     into ▾.
+
+   .drill-chev — static › glyph for rows that navigate to another surface
+     (sheet, modal, panel). Non-rotating by design.
+
+   Both inherit color via currentColor so each surface keeps its theming.
+   Dropdown carets use a separate 180° rotating ▾ convention and are not
+   part of this primitive set. */
+.disclosure-chev {
+  display: inline-block;
+  font-size: 24px;
+  line-height: 1;
+  transition: transform 160ms ease;
+  opacity: 1;
+  flex: 0 0 auto;
+}
+[aria-expanded="true"] .disclosure-chev {
+  transform: rotate(90deg);
+}
+.drill-chev {
+  display: inline-block;
+  font-size: 22px;
+  line-height: 1;
+  opacity: 0.75;
+  flex: 0 0 auto;
+}
+
+/* ── Button primitives ─────────────────────────────────────────────────────
+   Closed five-primitive set every clickable control in the app must map to.
+   No surface-scoped button classes; one-offs are defects.
+
+   Primitives:
+     .btn        — role × tone × size × state composable CTA
+     .nav-item   — sidebar rail and mobile menu rows (navigation)
+     .close-btn  — icon-only X button
+     .toggle-btn — aria-pressed mode toggle
+     .kb-key     — mobile on-screen keyboard key (see mobile-chrome.css)
+
+   Composition rules for .btn:
+     role  — pick exactly one: btn-primary | btn-secondary | btn-ghost | btn-destructive
+     tone  — pick zero-or-one: btn-warning | btn-danger  (accent is default;
+             btn-destructive defaults its tone to danger)
+     size  — default unless marked btn-compact
+     state — aria-disabled="true" (all roles) or aria-busy="true"
+             (primary + destructive only)
+     icon-only — btn-icon-only permitted on ghost role only (plus close-btn)
+
+   Role chrome:
+     primary     — filled, high-emphasis CTA
+     secondary   — outlined, neutral/mid emphasis
+     ghost       — transparent, low emphasis; only role allowed icon-only on btn
+     destructive — outlined-tint chrome reserved for destructive action weight
+
+   Tone colors flow through the local --_tone custom property so role rules
+   can compose with tone overrides without long :is() selectors. */
+
+.btn {
+  --_tone: var(--green);
+  --_tone-dim: var(--green-dim);
+  --_tone-bg: var(--green);
+  --_tone-fg: var(--theme-on-accent-text);
+
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  box-sizing: border-box;
+  min-height: 28px;
+  padding: 5px 14px;
+  border: 1px solid transparent;
   border-radius: 4px;
-  overflow: hidden;
-  position: absolute;
-  top: 12px;
-  right: 12px;
-  z-index: 300;
-  min-width: 160px;
-  box-shadow: 0 8px 24px var(--theme-mobile-menu-shadow);
-}
-body #mobile-menu {
-  background: var(--theme-mobile-menu-bg);
-  border-color: var(--theme-mobile-menu-border);
-}
-#mobile-menu.open { display: flex; }
-#mobile-menu button {
-  background: transparent;
-  border: none;
-  border-bottom: 1px solid var(--theme-mobile-menu-button-border);
-  color: var(--text);
   font-family: var(--font-mono);
   font-size: 12px;
-  padding: 12px 16px;
-  text-align: left;
+  line-height: 1.2;
+  letter-spacing: 0.3px;
+  text-align: center;
+  text-decoration: none;
+  white-space: normal;
   cursor: pointer;
-  transition: background 0.15s, color 0.15s;
+  transition: background 0.18s, border-color 0.18s, color 0.18s, transform 0.18s;
+  background: transparent;
+  color: var(--text);
+  touch-action: manipulation;
   -webkit-tap-highlight-color: transparent;
 }
-#mobile-menu button:last-child { border-bottom: none; }
-#mobile-menu button:hover { background: var(--theme-mobile-menu-button-hover-bg); color: var(--theme-mobile-menu-button-hover-text); }
 
-#mobile-menu .mobile-menu-wordmark {
-  display: block;
-  padding: 12px 16px;
-  border-top: 1px solid color-mix(in srgb, var(--theme-mobile-menu-button-border) 88%, transparent);
-  color: color-mix(in srgb, var(--muted) 88%, var(--text));
-  font-family: var(--font-mono);
-  font-size: 11px;
-  letter-spacing: 0.2px;
-  text-decoration: none;
-  opacity: 0.86;
+.btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
 }
 
-#mobile-menu .mobile-menu-wordmark:hover {
-  background: color-mix(in srgb, var(--surface) 58%, transparent);
-  color: var(--text);
+/* Inside a confirm modal, always render the focus indicator on :focus — not
+   just :focus-visible. When the user opens a confirm via a mouse click (e.g.
+   the history-row trash icon), the browser's :focus-visible heuristic
+   suppresses the keyboard-cue outline on the programmatically-focused cancel
+   button, leaving keyboard users without a visible focus target. Inside a
+   modal dialog that auto-focuses a button, the focus location matters for
+   keyboard users regardless of how the modal was opened. */
+#confirm-host .btn:focus {
+  outline: 1px solid color-mix(in srgb, var(--green-dim) 82%, var(--text) 18%);
+  outline-offset: 0;
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--green-dim) 18%, transparent),
+    0 0 0 2px color-mix(in srgb, var(--green) 10%, transparent);
 }
 
-body.mobile-terminal-mode #mobile-menu {
-  position: fixed;
-  top: auto;
-  right: 0;
-  bottom: 0;
-  left: 0;
-  border-radius: 14px 14px 0 0;
-  border-left: none;
-  border-right: none;
-  border-bottom: none;
-  min-width: 0;
-  box-shadow: 0 -4px 32px var(--theme-mobile-menu-shadow);
-  padding-bottom: env(safe-area-inset-bottom, 0);
-  z-index: 310;
+.btn[aria-disabled="true"],
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
 }
-body.mobile-terminal-mode #mobile-menu button {
-  font-size: 15px;
-  padding: 16px 20px;
-  min-height: 52px;
-  display: flex;
-  align-items: center;
+
+/* u-hidden escape hatch: the primitive's display:inline-flex is a single-class
+   rule that out-ranks the .u-hidden utility by load order. Re-assert hide
+   when both classes are present. */
+.btn.u-hidden,
+.nav-item.u-hidden,
+.close-btn.u-hidden,
+.toggle-btn.u-hidden {
+  display: none;
 }
-body.mobile-terminal-mode .mobile-sheet-handle {
-  display: block;
-  width: 40px;
-  height: 32px;
-  margin: 4px auto 6px;
+
+.btn[aria-busy="true"] {
+  cursor: progress;
+  color: transparent !important;
   position: relative;
-  flex-shrink: 0;
-  touch-action: none;
 }
-body.mobile-terminal-mode .mobile-sheet-handle::before {
+.btn[aria-busy="true"]::after {
   content: '';
   position: absolute;
-  left: 50%;
-  top: 14px;
-  width: 40px;
-  height: 4px;
-  background: var(--border-bright);
-  border-radius: 2px;
-  transform: translateX(-50%);
+  inset: 0;
+  margin: auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid currentColor;
+  border-top-color: transparent;
+  color: var(--_tone);
+  animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin {
+  to { transform: rotate(360deg); }
 }
 
-body.mobile-terminal-mode #mobile-menu .mobile-menu-wordmark {
-  padding: 14px 20px calc(14px + env(safe-area-inset-bottom, 0));
-  font-size: 12px;
-  min-height: 0;
+/* Tone overrides — applied to any role */
+.btn.btn-warning {
+  --_tone: var(--amber);
+  --_tone-dim: color-mix(in srgb, var(--amber) 58%, transparent);
+  --_tone-bg: color-mix(in srgb, var(--amber) 86%, var(--theme-panel-bg));
+  --_tone-fg: var(--theme-modal-warning-btn-text);
 }
-body.mobile-terminal-mode #mobile-menu::before {
-  display: none;
+.btn.btn-danger,
+.btn.btn-destructive {
+  --_tone: var(--red);
+  --_tone-dim: color-mix(in srgb, var(--red) 54%, transparent);
+  --_tone-bg: var(--red);
+  --_tone-fg: var(--theme-modal-danger-btn-text);
+}
+
+/* Role: primary — filled */
+.btn-primary {
+  background: var(--_tone-bg);
+  border: 1px solid var(--_tone-dim);
+  color: var(--_tone-fg);
+}
+.btn-primary:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone-bg) 92%, var(--text));
+  transform: translateY(-1px);
+}
+
+/* Role: secondary — outlined with neutral default; tone pulls the outline
+   and hover wash toward the tone color while keeping the resting state
+   restrained. */
+.btn-secondary {
+  background: color-mix(in srgb, var(--surface) 66%, transparent);
+  border: 1px solid color-mix(in srgb, var(--border-bright) 88%, transparent);
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+}
+.btn-secondary:hover:not([aria-disabled="true"]):not(:disabled) {
+  border-color: color-mix(in srgb, var(--_tone-dim) 72%, var(--border-bright));
+  color: var(--text);
+  background: color-mix(in srgb, var(--_tone) 7%, transparent);
+  transform: translateY(-1px);
+}
+.btn-secondary.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-secondary.btn-danger:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--_tone);
+  border-color: color-mix(in srgb, var(--_tone) 52%, transparent);
+  background: color-mix(in srgb, var(--_tone) 6%, transparent);
+}
+
+/* Role: ghost — transparent, low emphasis; icon-only permitted */
+.btn-ghost {
+  background: transparent;
+  border: 1px solid transparent;
+  color: color-mix(in srgb, var(--muted) 86%, var(--text));
+}
+.btn-ghost.btn-warning,
+.btn-ghost.btn-danger,
+.btn-ghost.btn-destructive {
+  color: var(--_tone);
+}
+.btn-ghost:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone) 10%, transparent);
+  color: var(--text);
+}
+.btn-ghost.btn-warning:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-ghost.btn-danger:hover:not([aria-disabled="true"]):not(:disabled),
+.btn-ghost.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--_tone);
+  background: color-mix(in srgb, var(--_tone) 12%, transparent);
+}
+
+/* Role: destructive — outlined chrome with tone-tinted background.
+   Default tone is danger (irreversible); btn-warning on destructive renders
+   the reversible-destructive treatment (caution yellow). Accepts labels
+   only — never icon-only, to prevent unlabeled destructive controls. */
+.btn-destructive {
+  background: color-mix(in srgb, var(--_tone) 8%, transparent);
+  border: 1px solid var(--_tone-dim);
+  color: var(--_tone);
+}
+.btn-destructive:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--_tone) 16%, transparent);
+  color: var(--_tone);
+  transform: translateY(-1px);
+}
+
+/* Size — compact */
+.btn-compact {
+  min-height: 22px;
+  padding: 3px 9px;
+  font-size: 10px;
+  gap: 4px;
+}
+
+/* Icon-only — ghost only */
+.btn-icon-only {
+  padding: 4px 6px;
+  min-width: 26px;
+  min-height: 26px;
+  gap: 0;
+}
+.btn-icon-only.btn-compact {
+  padding: 2px 4px;
+  min-width: 22px;
+  min-height: 22px;
+}
+
+/* History pager buttons stay flat on hover so the compact row does not
+   clip the top border against the summary row above it. */
+.history-pagination-controls > .btn:hover:not(:disabled) {
+  transform: none;
+}
+
+/* ── Nav-item primitive ─────────────────────────────────────────────────────
+   Row-shaped navigation / menu control. Covers sidebar rail items, rail
+   section headers, mobile hamburger menu rows, submenu rows, recents-row
+   action chips, FAQ question toggles. Distinct from .btn because these are
+   *rows in a list* — wider, left-aligned, and visually subordinate to the
+   CTAs in their surface. Compose with .disclosure-chev or .drill-chev from
+   the chev primitives to signal behavior. */
+.nav-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  box-sizing: border-box;
+  padding: 7px 10px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  color: var(--text);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.3;
+  letter-spacing: 0.3px;
+  text-align: left;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.nav-item:hover:not([aria-disabled="true"]):not(:disabled) {
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+  color: var(--green);
+}
+.nav-item:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: -2px;
+}
+.nav-item[aria-disabled="true"],
+.nav-item:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+.nav-item.is-active,
+.nav-item[aria-current="page"] {
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 8%, transparent);
+}
+.nav-item.is-muted { color: var(--muted); }
+
+/* ── Close-btn primitive ────────────────────────────────────────────────────
+   The single icon-close control. Composes with faq-close, workflows-close,
+   shortcuts-close, theme-close, options-close, history-panel-close,
+   search-close-btn, sheet-close. Surface classes remain as JS hooks and
+   for surface-local overrides (e.g. sheet-close mobile touch padding).
+
+   Subtle variant (.close-btn-subtle) renders with opacity-only chrome for
+   contexts where the X should recede until hovered.
+
+   Documented exception: .tab .tab-close retains its own surface-specific
+   chrome (circular shape, per-theme bg/border tokens, parent-hover opacity
+   reveal) because the primitive's shape-and-state model doesn't fit. */
+.close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  margin-left: auto;
+  padding: 2px 6px;
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  transition: color 0.15s, background 0.15s, opacity 0.15s;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+.close-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+}
+.close-btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.close-btn[aria-disabled="true"],
+.close-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.close-btn-subtle {
+  opacity: 0.4;
+  margin-left: 0;
+  padding: 1px 4px;
+  font-size: 13px;
+}
+.close-btn-subtle:hover:not([aria-disabled="true"]):not(:disabled) {
+  opacity: 1;
+  background: color-mix(in srgb, var(--red) 12%, transparent);
+  color: var(--red);
+}
+
+/* ── Toggle-btn primitive ───────────────────────────────────────────────────
+   aria-pressed mode toggles: case-sensitive / regex in search, starred
+   filter, mobile recents filter-checks, star icons on history and recents
+   rows. The "is the mode on?" state is always carried by aria-pressed; the
+   CSS only reacts to that attribute. */
+.toggle-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  box-sizing: border-box;
+  min-height: 22px;
+  padding: 3px 8px;
+  background: transparent;
+  border: 1px solid color-mix(in srgb, var(--border-bright) 72%, transparent);
+  border-radius: 3px;
+  color: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 10px;
+  line-height: 1;
+  letter-spacing: 0.3px;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.toggle-btn:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--text);
+  border-color: color-mix(in srgb, var(--text) 40%, transparent);
+}
+.toggle-btn:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 1px;
+}
+.toggle-btn[aria-pressed="true"] {
+  color: var(--green);
+  border-color: var(--green-dim);
+  background: color-mix(in srgb, var(--green) 6%, transparent);
+}
+.toggle-btn[aria-disabled="true"],
+.toggle-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+/* Star toggle — icon-only variant used by history and recents rows. Yellow
+   when pressed is a named exception to the semantic color mapping (starred
+   items use amber regardless). */
+.toggle-btn-star {
+  border: none;
+  padding: 2px 4px;
+  min-height: 20px;
+  font-size: 14px;
+  color: var(--muted);
+}
+.toggle-btn-star:hover:not([aria-disabled="true"]):not(:disabled) {
+  color: var(--amber);
+  border: none;
+  background: transparent;
+}
+.toggle-btn-star[aria-pressed="true"] {
+  color: var(--amber);
+  border: none;
+  background: transparent;
 }

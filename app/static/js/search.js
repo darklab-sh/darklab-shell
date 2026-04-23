@@ -13,13 +13,25 @@ function _collectSearchTextNodes(root) {
   return parts;
 }
 
-function _highlightSearchLine(line, re) {
+function _highlightSearchLine(line, re, startMatchIdx) {
   // Search highlighting operates on a cloned line so the live transcript keeps
   // its original DOM structure until a match has actually been confirmed.
+  // A single logical match that crosses an inline-element boundary (e.g. a
+  // query that spans `.line-host`, ANSI-colour spans, or prompt wrappers)
+  // cannot be wrapped in one `<mark>` — `<mark>` can't cross element
+  // boundaries. Each segment gets its own `<mark>` but all segments of the
+  // same logical match share a `data-search-match` index, so nav walks by
+  // logical match, not DOM element.
   const clone = line.cloneNode(true);
+  // Merge adjacent text nodes before walking — otherwise a prior
+  // clearHighlights() pass leaves the line fragmented (mark replaced with a
+  // sibling textNode, not merged with neighbours), and a fresh search emits
+  // one `<mark>` per fragment instead of one per logical match, producing
+  // visible pill-shape gaps that read as per-character highlighting.
+  clone.normalize();
   const parts = _collectSearchTextNodes(clone);
   const text = parts.map(part => part.text).join('');
-  if (!text) return false;
+  if (!text) return 0;
 
   const matches = [];
   re.lastIndex = 0;
@@ -31,7 +43,7 @@ function _highlightSearchLine(line, re) {
     }
     matches.push({ start: match.index, end: match.index + match[0].length });
   }
-  if (!matches.length) return false;
+  if (!matches.length) return 0;
 
   let matchIdx = 0;
   for (const part of parts) {
@@ -60,6 +72,7 @@ function _highlightSearchLine(line, re) {
       const markEnd = Math.min(partEnd, current.end);
       const mark = document.createElement('mark');
       mark.className = 'search-hl';
+      mark.dataset.searchMatch = String(startMatchIdx + matchIdx);
       mark.textContent = partText.slice(localStart, localStart + (markEnd - cursor));
       frag.appendChild(mark);
       localStart += markEnd - cursor;
@@ -70,7 +83,7 @@ function _highlightSearchLine(line, re) {
   }
 
   line.replaceWith(clone);
-  return true;
+  return matches.length;
 }
 
 function runSearch() {
@@ -91,10 +104,20 @@ function runSearch() {
     searchCount.textContent = 'invalid regex';
     return;
   }
+  let globalMatchIdx = 0;
   lines.forEach(line => {
-    _highlightSearchLine(line, re);
+    globalMatchIdx += _highlightSearchLine(line, re, globalMatchIdx);
   });
-  searchMatches = Array.from(out.querySelectorAll('mark.search-hl'));
+  // Group marks by logical match — a single match that crossed an inline
+  // boundary produces multiple marks with the same data-search-match, and
+  // nav/highlight should treat them as one.
+  const groups = new Map();
+  out.querySelectorAll('mark.search-hl').forEach(mark => {
+    const idx = Number(mark.dataset.searchMatch);
+    if (!groups.has(idx)) groups.set(idx, []);
+    groups.get(idx).push(mark);
+  });
+  searchMatches = Array.from(groups.values());
   searchCount.textContent = searchMatches.length ? `1 / ${searchMatches.length}` : 'no matches';
   if (searchMatches.length) { searchMatchIdx = 0; highlightCurrent(); }
 }
@@ -107,16 +130,25 @@ function navigateSearch(dir) {
 }
 
 function highlightCurrent() {
-  searchMatches.forEach((m, i) => m.classList.toggle('current', i === searchMatchIdx));
-  searchMatches[searchMatchIdx]?.scrollIntoView({ block: 'center' });
+  searchMatches.forEach((group, i) => {
+    group.forEach(m => m.classList.toggle('current', i === searchMatchIdx));
+  });
+  searchMatches[searchMatchIdx]?.[0]?.scrollIntoView({ block: 'center' });
 }
 
 function clearHighlights() {
   const out = getOutput(activeTabId);
   if (!out) return;
+  const touched = new Set();
   out.querySelectorAll('mark.search-hl').forEach(m => {
+    const line = m.closest('.line');
+    if (line) touched.add(line);
     m.replaceWith(document.createTextNode(m.textContent));
   });
+  // Re-merge adjacent text nodes on every touched line so the next search
+  // walks a clean DOM instead of an accumulation of single-character
+  // fragments left behind by prior highlight cycles.
+  touched.forEach(line => line.normalize());
 }
 
 function clearSearch() {

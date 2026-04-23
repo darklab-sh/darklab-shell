@@ -1,4 +1,4 @@
-# darklab shell — Theme Reference Template
+# darklab_shell — Theme Reference Template
 # -------------------------------------------
 # Copy this file to app/conf/themes/<filename>.yaml to create a selectable
 # theme variant. The runtime selector ignores *.yaml.example files and only
@@ -154,8 +154,7 @@ history_load_modal_shadow: "rgba(0,0,0,0.35)"
 # Modals
 faq_modal_bg: "#141414"
 options_modal_bg: "#141414"
-kill_modal_bg: "#141414"
-hist_del_modal_bg: "#141414"
+confirm_modal_bg: "#141414"
 
 # Dropdowns / autocomplete
 dropdown_bg: "color-mix(in srgb, var(--surface) 96%, transparent)"
@@ -170,7 +169,7 @@ overlay_backdrop_bg: "rgba(0,0,0,0.76)"
 # FAQ / options controls
 faq_code_bg: "#141414"
 allowed_chip_bg: "#141414"
-options_select_bg: "#141414"
+form_control_bg: "#141414"
 
 # Status / toasts
 tab_status_ok_bg: "#39ff14"

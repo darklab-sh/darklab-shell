@@ -6,19 +6,29 @@ test.describe('theme selector', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('clicking theme-btn opens the theme selector', async ({ page }) => {
-    await page.locator('#theme-btn').click()
+  test('clicking the theme button opens the theme selector', async ({ page }) => {
+    await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-    await expect(page.locator('#theme-select .theme-card-active')).toBeFocused()
+    await expect(page.locator('#theme-select .theme-card-active')).toBeVisible()
   })
 
   test('selecting a theme applies it from the selector', async ({ page }) => {
-    await page.locator('#theme-btn').click()
-    const optionLabels = await page.locator('#theme-select .theme-card-label').evaluateAll(labels => labels.map(label => label.textContent))
+    await page.locator('.rail-nav [data-action="theme"]').click()
+    const optionLabels = await page
+      .locator('#theme-select .theme-card-label')
+      .evaluateAll((labels) => labels.map((label) => label.textContent))
     expect(optionLabels).toContain('Darklab Obsidian')
     expect(optionLabels).toContain('Charcoal Steel')
-    const groupLabels = await page.locator('#theme-select .theme-picker-group-title').evaluateAll(labels => labels.map(label => label.textContent))
-    expect(groupLabels).toEqual(['Dark Neon', 'Dark Neutral', 'Warm Light', 'Cool Light', 'Neutral Light'])
+    const groupLabels = await page
+      .locator('#theme-select .theme-picker-group-title')
+      .evaluateAll((labels) => labels.map((label) => label.textContent))
+    expect(groupLabels).toEqual([
+      'Dark Neon',
+      'Dark Neutral',
+      'Warm Light',
+      'Cool Light',
+      'Neutral Light',
+    ])
     await page.locator('#theme-select [data-theme-name="charcoal_steel"]').click()
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'charcoal_steel')
 
@@ -26,7 +36,9 @@ test.describe('theme selector', () => {
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'cobalt_obsidian')
   })
 
-  test('falls back to the configured default theme when localStorage references a missing theme', async ({ page }) => {
+  test('falls back to the configured default theme when localStorage references a missing theme', async ({
+    page,
+  }) => {
     await page.evaluate(() => {
       localStorage.setItem('theme', 'theme_missing.yaml')
     })
@@ -40,7 +52,7 @@ test.describe('theme selector', () => {
 
 test.describe('FAQ modal', () => {
   test.beforeEach(async ({ page }) => {
-    await page.route('**/allowed-commands', route => {
+    await page.route('**/allowed-commands', (route) => {
       route.fulfill({
         status: 200,
         contentType: 'application/json',
@@ -62,12 +74,12 @@ test.describe('FAQ modal', () => {
 
   test('FAQ button opens the overlay', async ({ page }) => {
     await expect(page.locator('#faq-overlay')).not.toHaveClass(/open/)
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
   })
 
   test('close button inside the FAQ modal closes it', async ({ page }) => {
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     await page.locator('.faq-close').click()
@@ -75,7 +87,7 @@ test.describe('FAQ modal', () => {
   })
 
   test('clicking the overlay backdrop closes the FAQ modal', async ({ page }) => {
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
     // Click on the overlay element itself (outside the modal content box)
@@ -84,36 +96,116 @@ test.describe('FAQ modal', () => {
   })
 
   test('renders backend-driven FAQ content and allowlist chips', async ({ page }) => {
-    await page.locator('#faq-btn').click()
+    await page.locator('.rail-nav [data-action="faq"]').click()
     await expect(page.locator('#faq-overlay')).toHaveClass(/open/)
 
-    await expect(page.locator('.faq-q')).toContainText(['What is this?', 'What commands are allowed?'])
-    await expect(page.locator('.faq-a a[href*="darklab-shell#darklab-shell"]').first()).toBeVisible()
+    await expect(page.locator('.faq-q')).toContainText([
+      'What is this?',
+      'What commands are allowed?',
+    ])
+    await expect(
+      page.locator('.faq-a a[href*="gitlab.com/darklab.sh/darklab_shell"]').first(),
+    ).toBeVisible()
+
+    // The allowed-commands section is inside a collapsed accordion — expand it first
+    await page.locator('.faq-q').filter({ hasText: 'What commands are allowed?' }).click()
     await expect(page.locator('#faq-allowed-text')).toBeVisible()
   })
 })
 
-test.describe('options modal', () => {
+test.describe('workflows modal', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/')
     await page.locator('#cmd').waitFor()
   })
 
-  test('persists theme, timestamps, and line number preferences across reload', async ({ page }) => {
-    await page.locator('#theme-btn').click()
+  test('each workflow step renders a chip and a per-step run button', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    const firstStep = page.locator('.workflow-card').first().locator('.workflow-step').first()
+    await expect(firstStep.locator('.workflow-step-cmd')).toBeVisible()
+    const runBtn = firstStep.locator('.workflow-step-run')
+    await expect(runBtn).toBeVisible()
+    await expect(runBtn).toHaveText('▶')
+    const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
+    expect(cmd && cmd.length > 0).toBe(true)
+    const ariaLabel = await runBtn.getAttribute('aria-label')
+    expect(ariaLabel).toBe(`Run: ${cmd}`)
+  })
+
+  test('step layout is a two-row grid with chip on row 1 and note on row 2', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    const firstStep = page.locator('.workflow-card').first().locator('.workflow-step').first()
+    const layout = await firstStep.evaluate((el) => ({
+      display: getComputedStyle(el).display,
+      children: Array.from(el.children).map((c) => c.className),
+    }))
+    expect(layout.display).toBe('grid')
+    expect(layout.children[0]).toContain('workflow-step-main')
+    expect(layout.children[1]).toContain('workflow-step-note')
+  })
+
+  test('clicking a step run button closes the modal and submits the command', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    const runBtn = page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-run')
+    const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
+    await runBtn.click()
+    await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('body')).toContainText(cmd)
+  })
+
+  test('clicking a rail workflow opens the scoped modal without collapsing the rail list', async ({ page }) => {
+    const section = page.locator('#rail-section-workflows')
+    if (await section.evaluate((node) => node.classList.contains('closed'))) {
+      await page.locator('#rail-workflows-header').click()
+    }
+    const railItems = page.locator('#rail-workflows-list .rail-item')
+    await expect(railItems.first()).toBeVisible()
+    const beforeCount = await railItems.count()
+    expect(beforeCount).toBeGreaterThan(1)
+
+    await railItems.first().click()
+
+    await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
+    await expect(page.locator('#workflows-modal .workflow-card')).toHaveCount(1)
+    await expect(page.locator('#rail-workflows-list .rail-item')).toHaveCount(beforeCount)
+  })
+})
+
+test.describe('options modal', () => {
+  // The HUD clock "local" mode formats using the browser's local timezone.
+  // CI runners are typically in UTC, which makes `not.toContainText('UTC')`
+  // fail even after switching to local mode (local = UTC on that machine).
+  // Pin a non-UTC zone so the assertion is environment-independent.
+  test.use({ timezoneId: 'America/New_York' })
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+  })
+
+  test('persists theme, timestamps, line number, and HUD clock preferences across reload', async ({
+    page,
+  }) => {
+    await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
     await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
     await page.locator('.theme-close').click()
 
-    await page.locator('#options-btn').click()
+    await page.locator('.rail-nav [data-action="options"]').click()
     await expect(page.locator('#options-overlay')).toHaveClass(/open/)
     await page.locator('#options-ts-select').selectOption('elapsed')
     await page.locator('#options-ln-toggle').check()
+    await page.locator('#options-hud-clock-select').selectOption('local')
     await page.locator('.options-close').click()
 
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+    await expect(page.locator('#hud-clock')).not.toContainText('UTC')
+    await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
 
     await page.reload()
     await page.locator('#cmd').waitFor()
@@ -121,5 +213,7 @@ test.describe('options modal', () => {
     await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
+    await expect(page.locator('#hud-clock')).not.toContainText('UTC')
+    await expect(page.locator('#hud-clock')).toHaveAttribute('title', /local time/i)
   })
 })

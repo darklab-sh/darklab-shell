@@ -1,4 +1,4 @@
-/* darklab shell CSS module: mobile
+/* darklab_shell CSS module: mobile
    Mobile composer, mobile shell layout, bottom sheets, and viewport-specific overrides. */
 
 /* ── Mobile composer (hidden on desktop; shown inside mobile mode/media rules) ── */
@@ -64,6 +64,8 @@
   cursor: pointer;
   flex-shrink: 0;
   min-height: 34px;
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
 }
 
 #mobile-run-btn:active {
@@ -73,6 +75,12 @@
 #mobile-run-btn:disabled {
   opacity: 0.3;
   cursor: not-allowed;
+}
+
+#mobile-run-btn,
+#mobile-kill-btn {
+  -webkit-user-select: none;
+  user-select: none;
 }
 
 /* ── Mobile ── */
@@ -111,9 +119,9 @@
   }
   .history-row::-webkit-scrollbar { display: none; }
   .history-label { flex: 0 0 auto; }
-  .header-btns { display: none; }
   .terminal-bar-btns { display: none; }
   #hamburger-btn { display: block; }
+  #mobile-header-actions { display: none; }
   .hist-chip { max-width: 140px; flex: 0 0 auto; }
   .tabs-bar { padding: 0 8px; }
   .tab { padding: 6px 8px; font-size: 10px; }
@@ -195,24 +203,93 @@
     flex: 1 1 auto;
     min-width: 0;
   }
+  /* ── Mobile tab bar ──
+     Rounded-top pill tabs with drag grip, active-only close, and inset green
+     glow on active. */
+  body.mobile-terminal-mode .tabs-bar {
+    background: var(--theme-panel-alt-bg);
+    border-bottom: 1px solid var(--border-bright);
+    gap: 6px;
+    padding: 6px 10px 0;
+  }
+  /* Shared geometry for every mobile tab. isolation: isolate puts every tab
+     on its own compositor layer to stop iOS Safari from smearing the active
+     tab's bright green border-top across adjacent tabs at 3x DPR. */
   body.mobile-terminal-mode .terminal-bar .tab {
-    min-height: 44px;
-    padding: 0 14px;
-    font-size: 13px;
-    gap: 8px;
-    border-radius: 10px 10px 0 0;
+    min-height: 40px;
+    padding: 9px 12px;
+    gap: 6px;
+    font-size: 11px;
+    border-radius: 8px 8px 0 0;
     margin-bottom: -1px;
+    isolation: isolate;
   }
+  /* Inactive appearance — mirrors active's specificity via :not(.active) so
+     the two rules don't race through the cascade (base components.css
+     .tab.active provides active box-shadow/background that would otherwise
+     bleed in unless explicitly reset here). The 2px transparent border-top
+     keeps inactive and active tabs visually aligned (the active tab carries
+     a 2px green border-top instead of an inset shadow to avoid Safari
+     subpixel halos that bleed onto adjacent tabs at 3x DPR). */
+  body.mobile-terminal-mode .terminal-bar .tab:not(.active) {
+    color: var(--muted);
+    background: transparent;
+    border: 1px solid var(--border-bright);
+    border-top: 2px solid var(--border-bright);
+    border-bottom: 1px solid transparent;
+    box-shadow: none !important;
+  }
+  body.mobile-terminal-mode .terminal-bar .tab.active {
+    color: var(--green);
+    background: var(--surface);
+    border: 1px solid var(--border-bright);
+    border-top: 2px solid color-mix(in srgb, var(--green) 55%, transparent);
+    border-bottom-color: var(--surface);
+    box-shadow: none;
+  }
+  /* Inactive tabs collapse idle/ok/fail/killed to border-bright so only the
+     one active tab carries semantic color. Running stays amber-pulse on every
+     tab so a background run remains visible at a glance. */
+  body.mobile-terminal-mode .tab .tab-status { width: 5px; height: 5px; }
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.idle,
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.ok,
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.fail,
+  body.mobile-terminal-mode .tab:not(.active) .tab-status.killed {
+    background: var(--border-bright);
+  }
+  body.mobile-terminal-mode .tab.active .tab-status.idle,
+  body.mobile-terminal-mode .tab.active .tab-status.ok {
+    background: var(--green);
+  }
+  /* Close renders on every tab for DOM symmetry but only reveals on active. */
+  body.mobile-terminal-mode .tab .tab-close {
+    width: 16px;
+    height: 16px;
+    font-size: 13px;
+    line-height: 14px;
+    border-radius: 3px;
+    border: 1px solid color-mix(in srgb, var(--border-bright) 60%, transparent);
+    opacity: 0;
+    pointer-events: none;
+  }
+  body.mobile-terminal-mode .tab.active .tab-close {
+    opacity: 0.55;
+    pointer-events: auto;
+  }
+  body.mobile-terminal-mode .tab.active .tab-close:hover,
+  body.mobile-terminal-mode .tab.active .tab-close:active {
+    opacity: 1;
+  }
+  /* Flat glyph, not a bordered button. */
   body.mobile-terminal-mode .terminal-bar #new-tab-btn {
-    min-height: 44px;
-    padding: 0 16px;
-    font-size: 16px;
-  }
-  body.mobile-terminal-mode .terminal-bar .tab .tab-close {
-    width: 24px;
-    height: 24px;
-    font-size: 15px;
-    line-height: 24px;
+    min-height: 40px;
+    padding: 0 12px;
+    font-size: 14px;
+    color: var(--muted);
+    background: transparent;
+    border: none;
+    align-self: stretch;
+    margin-bottom: -1px;
   }
   body.mobile-terminal-mode .terminal-bar .status-pill {
     font-size: 9px;
@@ -224,75 +301,91 @@
     justify-content: center;
     align-self: center;
     margin-left: 0;
-    font-size: 12px;
+    font-size: 11px;
     line-height: 1;
-    padding: 4px 11px;
-    min-height: 28px;
-    transform: translateY(2px);
+    padding: 3px 9px;
+    min-height: 26px;
+    letter-spacing: 0.9px;
+    margin-right: 6px;
+    transform: none;
     animation: none;
   }
   body.mobile-terminal-mode header {
     align-items: center;
-    gap: 10px;
+    gap: 8px;
     z-index: 90;
-    padding-left: 12px;
-    padding-right: 12px;
+    padding-left: 10px;
+    padding-right: 10px;
     background: var(--bg);
+  }
+  body.mobile-terminal-mode #mobile-header-actions {
+    display: flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 0;
+    margin-left: auto;
+    flex: 0 0 auto;
+    /* Suppress double-tap-to-zoom on the hamburger wrapper. The button itself
+       also sets this, but the wrapper has non-zero width past the button's
+       negative margin — a double tap landing there would otherwise zoom. */
+    touch-action: manipulation;
   }
   body.mobile-terminal-mode header h1 {
     flex: 1 1 auto;
+    min-width: 0;
     display: flex;
     align-items: center;
     margin-left: 0;
     min-height: 0;
     padding: 0;
-    background: none;
-    border: none;
-    border-radius: 0;
-    box-shadow: none;
-    font-size: 19px;
-    letter-spacing: 1.8px;
+    font-size: 18px;
+    letter-spacing: 1.5px;
   }
   body.mobile-terminal-mode header h1 #header-title {
     display: inline-flex;
     align-items: center;
-    min-height: 34px;
-    padding: 0 12px;
-    background: linear-gradient(180deg, color-mix(in srgb, var(--green) 2%, transparent), color-mix(in srgb, var(--green) 0.6%, transparent));
-    border: 1px solid color-mix(in srgb, var(--green-dim) 22%, var(--border));
-    border-radius: 4px;
+    min-width: 0;
+    max-width: 100%;
+    min-height: 32px;
+    padding: 0 10px;
     color: var(--green);
-    filter: none;
-    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 1.5%, transparent);
-    -webkit-font-smoothing: auto;
-    -moz-osx-font-smoothing: auto;
     font-size: inherit;
     letter-spacing: inherit;
-    text-shadow: 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
+    text-shadow: 0 0 20px var(--green-glow);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
   }
   body.mobile-terminal-mode #run-timer {
     color: var(--muted);
     font-family: var(--font-mono);
-    font-size: 11px !important;
+    font-size: 10px !important;
     line-height: 1;
     align-self: center;
     white-space: nowrap;
     flex-shrink: 0;
-    transform: translateY(4px);
+    min-width: 48px;
+    margin-left: 0;
+    margin-right: 0;
+    transform: none;
+    text-align: center;
   }
   body.mobile-terminal-mode #hamburger-btn {
     display: flex;
     align-items: center;
     justify-content: center;
     align-self: center;
-    min-width: 62px;
+    width: 54px;
+    min-width: 54px;
     min-height: 54px;
-    padding: 0 20px;
+    padding: 0;
     font-size: 34px;
     font-weight: 700;
     line-height: 1;
+    margin-left: 0;
+    margin-right: -12px;
+    margin-top: -6px;
     transform: scaleX(1.08);
-    margin-top: -4px;
   }
   body.mobile-terminal-mode .tabs-bar {
     overflow-x: auto;
@@ -314,18 +407,83 @@
     user-select: none;
     -webkit-touch-callout: none;
   }
-  body.mobile-terminal-mode .tab:hover .tab-close,
-  body.mobile-terminal-mode .tab .tab-close:hover,
-  body.mobile-terminal-mode .tab .tab-close:active,
-  body.mobile-terminal-mode .tab .tab-close:focus,
-  body.mobile-terminal-mode .tab .tab-close:focus-visible {
-    opacity: 0.55;
-    background: var(--theme-tab-close-bg);
-    border-color: var(--theme-tab-close-border);
-    color: inherit;
+
+  /* ── Running-state indicator ──
+     The mobile status pill reflects only the active tab, so a long
+     run on a backgrounded tab is otherwise invisible. Two signals
+     cover this: a trailing chip that shows the count of running
+     non-active tabs (tap cycles through them in tab-row order), plus
+     left/right edge glows that pulse when one of those tabs is
+     currently scrolled off-screen on that side.
+
+     Color tracks --amber so both read as the same "running" signal as
+     the .status-pill.running and .tab-status.running dots.
+
+     Geometry: the chip is a normal flex child appended after .tabs-bar,
+     so the flex layout naturally reserves its space. The edge glows
+     are position:fixed overlays anchored via JS-computed coordinates
+     from .tabs-bar.getBoundingClientRect() — never children of the
+     scroll container or its flex parent, so they can't destabilise
+     iOS Safari momentum scrolling (sticky inside a horizontal flex
+     scroll and absolute children of a position:relative flex parent
+     both regressed scroll in empirical testing on 2026-04-19). */
+  body.mobile-terminal-mode .mobile-running-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex: 0 0 auto;
+    align-self: center;
+    height: 22px;
+    margin: 0 10px 6px 4px;
+    padding: 0 9px 0 8px;
+    border-radius: 11px;
+    background: color-mix(in srgb, var(--amber) 12%, var(--theme-panel-alt-bg));
+    border: 1px solid color-mix(in srgb, var(--amber) 55%, transparent);
+    color: var(--amber);
+    font-family: var(--font-mono);
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
+    box-shadow: 0 1px 6px rgba(0, 0, 0, 0.4);
   }
-  body.mobile-terminal-mode .term-action-btn:focus,
-  body.mobile-terminal-mode .term-action-btn:focus-visible,
+  body.mobile-terminal-mode .mobile-running-chip.u-hidden {
+    display: none;
+  }
+  body.mobile-terminal-mode .mobile-running-dot {
+    font-size: 9px;
+    line-height: 1;
+    color: var(--amber);
+    animation: shell-m-pulse 1.4s ease-in-out infinite;
+  }
+  body.mobile-terminal-mode .mobile-running-count {
+    line-height: 1;
+    font-variant-numeric: tabular-nums;
+  }
+  .tab-edge-glow {
+    position: fixed;
+    width: 22px;
+    pointer-events: none;
+    display: none;
+    z-index: 5;
+  }
+  .tab-edge-glow.is-active {
+    display: block;
+    animation: shell-m-pulse 1.6s ease-in-out infinite;
+  }
+  .tab-edge-glow-left {
+    background: linear-gradient(to right,
+      color-mix(in srgb, var(--amber) 55%, transparent),
+      transparent);
+  }
+  .tab-edge-glow-right {
+    background: linear-gradient(to left,
+      color-mix(in srgb, var(--amber) 55%, transparent),
+      transparent);
+  }
+  body.mobile-terminal-mode .terminal-actions .btn:focus,
+  body.mobile-terminal-mode .terminal-actions .btn:focus-visible,
   body.mobile-terminal-mode .history-action-btn:focus,
   body.mobile-terminal-mode .history-action-btn:focus-visible {
     outline: none;
@@ -334,8 +492,8 @@
     border-color: var(--border-bright);
     background: transparent;
   }
-  body.mobile-terminal-mode .term-action-btn:hover,
-  body.mobile-terminal-mode .term-action-btn:active,
+  body.mobile-terminal-mode .terminal-actions .btn:hover,
+  body.mobile-terminal-mode .terminal-actions .btn:active,
   body.mobile-terminal-mode .history-action-btn:hover,
   body.mobile-terminal-mode .history-action-btn:active {
     color: var(--muted);
@@ -343,36 +501,79 @@
     background: transparent;
   }
   body.mobile-terminal-mode .terminal-actions {
-    padding: 8px 12px;
+    padding: 5px 10px;
+    gap: 4px;
   }
+  body.mobile-terminal-mode .terminal-actions .btn {
+    min-height: 26px;
+    padding: 3px 8px;
+  }
+  body.mobile-terminal-mode .history-entry {
+    padding-top: 12px;
+    padding-bottom: 12px;
+  }
+  body.mobile-terminal-mode .history-entry-header {
+    gap: 10px;
+  }
+  body.mobile-terminal-mode .history-entry-star {
+    width: auto;
+    height: auto;
+    flex-basis: auto;
+    font-size: 30px;
+    padding-right: 2px;
+  }
+  body.mobile-terminal-mode .history-actions {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-top: 8px;
+  }
+  body.mobile-terminal-mode .history-action-btn {
+    min-height: 40px;
+    padding: 8px 10px;
+    font-size: 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    text-align: center;
+  }
+  /* Kill lives in the mobile composer (see #mobile-kill-btn) so the per-tab
+     action-bar duplicate is redundant on mobile. */
+  body.mobile-terminal-mode .terminal-actions .tab-kill-btn { display: none !important; }
+  /* Clear moves into the hamburger menu on mobile (data-menu-action="clear")
+     so the per-tab action row keeps its three high-frequency actions (share
+     snapshot · copy · save ▾) fitting cleanly at narrow widths. Clear is a
+     recovery action rather than an in-flow one; keeping it one extra tap away
+     mirrors the kill-button move above. */
+  body.mobile-terminal-mode .terminal-actions [data-action="clear"] { display: none !important; }
 
-  /* Mobile overlays: bottom sheet layout for FAQ and options */
-  body.mobile-terminal-mode #faq-overlay,
-  body.mobile-terminal-mode #theme-overlay,
-  body.mobile-terminal-mode #options-overlay {
-    align-items: flex-end;
-    justify-content: stretch;
+  /* Mobile sheet contract: overlay wrappers opt into bottom-sheet alignment
+     via .mobile-sheet-overlay instead of per-surface ID selectors. */
+  body.mobile-terminal-mode .mobile-sheet-overlay,
+  body.mobile-terminal-mode .mobile-sheet-overlay.open,
+  body.mobile-terminal-mode #theme-overlay {
+    align-items: flex-end !important;
+    justify-content: stretch !important;
   }
   body.mobile-terminal-mode #theme-overlay {
     align-items: stretch;
     justify-content: stretch;
   }
-  body.mobile-terminal-mode #faq-modal,
-  body.mobile-terminal-mode #theme-modal,
-  body.mobile-terminal-mode #options-modal,
-  body.mobile-terminal-mode #kill-modal,
-  body.mobile-terminal-mode #hist-del-modal {
-    width: 100%;
-    max-width: 100%;
-    border-radius: 14px 14px 0 0;
-    border-left: none;
-    border-right: none;
-    border-bottom: none;
-    max-height: 88svh;
+  body.mobile-terminal-mode .mobile-sheet-surface,
+  body.mobile-terminal-mode .modal-card-compact {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-radius: 14px 14px 0 0 !important;
+    border-left: none !important;
+    border-right: none !important;
+    border-bottom: none !important;
+    max-height: 88svh !important;
     padding-bottom: env(safe-area-inset-bottom, 0);
   }
-  body.mobile-terminal-mode #kill-modal,
-  body.mobile-terminal-mode #hist-del-modal {
+  body.mobile-terminal-mode .mobile-sheet-surface:not(.modal-card-compact) {
+    min-height: 56svh;
+  }
+  body.mobile-terminal-mode .modal-card-compact {
     width: calc(100% - 24px);
     max-width: min(520px, calc(100% - 24px));
     border-left: 1px solid;
@@ -381,6 +582,14 @@
     border-radius: 14px;
     margin: 0 auto 12px;
     padding: 18px 18px calc(18px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .mobile-sheet-surface .close-btn {
+    display: none !important;
+  }
+  body.mobile-terminal-mode .modal-token-input,
+  body.mobile-terminal-mode .options-token-input {
+    font-size: 16px;
+    line-height: 1.35;
   }
   body.mobile-terminal-mode #theme-modal {
     align-self: stretch;
@@ -394,11 +603,20 @@
     box-shadow: none;
     overflow: hidden;
   }
-  body.mobile-terminal-mode #faq-modal::before,
+  /* Modal bodies: flex: 1 + min-height: 0 lets the child shrink below content
+     height so max-height on the modal actually constrains it; -webkit-overflow-
+     scrolling enables inertia scroll on iOS Safari. */
+  body.mobile-terminal-mode .faq-body,
+  body.mobile-terminal-mode .workflows-body {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    -webkit-overflow-scrolling: touch;
+  }
+  body.mobile-terminal-mode .mobile-sheet-surface::before,
   body.mobile-terminal-mode #theme-modal::before,
-  body.mobile-terminal-mode #options-modal::before,
-  body.mobile-terminal-mode #kill-modal::before,
-  body.mobile-terminal-mode #hist-del-modal::before {
+  body.mobile-terminal-mode .modal-card-compact::before {
     display: none;
   }
   body.mobile-terminal-mode #theme-modal::before {
@@ -425,8 +643,93 @@
   body.mobile-terminal-mode .history-panel-header {
     padding: 12px 16px;
   }
+  body.mobile-terminal-mode .history-panel-body {
+    padding-bottom: calc(10px + env(safe-area-inset-bottom, 0));
+  }
+  body.mobile-terminal-mode .history-panel-filters {
+    padding: 10px 14px;
+    gap: 10px;
+    align-items: stretch;
+  }
+  body.mobile-terminal-mode .history-mobile-filters-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    font-size: 14px;
+    flex: 1 1 100%;
+  }
+  body.mobile-terminal-mode .history-advanced-filters {
+    display: none;
+    width: 100%;
+    flex-wrap: wrap;
+    gap: 10px;
+  }
+  body.mobile-terminal-mode #history-panel.mobile-history-filters-open .history-advanced-filters {
+    display: flex;
+  }
+  body.mobile-terminal-mode .history-active-filters {
+    padding: 10px 14px;
+  }
+  body.mobile-terminal-mode .history-pagination {
+    padding: 10px 14px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  body.mobile-terminal-mode .history-pagination-summary {
+    white-space: normal;
+    line-height: 1.35;
+    font-size: 12px;
+  }
+  body.mobile-terminal-mode .history-pagination-controls {
+    grid-template-columns: max-content minmax(96px, auto) max-content;
+  }
+  body.mobile-terminal-mode .history-pagination-controls > .btn {
+    min-height: 26px;
+    font-size: 10px;
+  }
+  body.mobile-terminal-mode .history-pagination-status {
+    font-size: 11px;
+    min-width: 96px;
+  }
+  body.mobile-terminal-mode .history-panel-filters input,
+  body.mobile-terminal-mode .history-panel-filters select,
+  body.mobile-terminal-mode .history-filter-toggle,
+  body.mobile-terminal-mode .history-filter-clear-btn {
+    min-height: 40px;
+    font-size: 16px;
+  }
+  body.mobile-terminal-mode #history-search-input,
+  body.mobile-terminal-mode #history-mobile-filters-toggle,
+  body.mobile-terminal-mode .history-root-autocomplete,
+  body.mobile-terminal-mode #history-root-input,
+  body.mobile-terminal-mode #history-exit-filter,
+  body.mobile-terminal-mode #history-date-filter,
+  body.mobile-terminal-mode .history-filter-toggle,
+  body.mobile-terminal-mode .history-filter-clear-btn {
+    flex: 1 1 100%;
+  }
+  body.mobile-terminal-mode .history-root-dropdown {
+    border-radius: 6px;
+    max-height: 220px;
+    z-index: 6;
+  }
+  body.mobile-terminal-mode .history-root-dropdown .ac-item {
+    min-height: 44px;
+    padding: 10px 14px;
+    font-size: 14px;
+    display: flex;
+    align-items: center;
+  }
+  body.mobile-terminal-mode .history-filter-clear-btn {
+    margin-left: 0;
+  }
+  body.mobile-terminal-mode .history-active-filter-chip {
+    min-height: 34px;
+    font-size: 12px;
+  }
   body.mobile-terminal-mode #history-list {
-    padding: 8px 0 calc(14px + env(safe-area-inset-bottom, 0));
+    padding: 8px 0 0;
   }
   body.mobile-terminal-mode #theme-modal .faq-header {
     position: sticky;
@@ -434,7 +737,7 @@
     z-index: 2;
     background: var(--surface);
   }
-  body.mobile-terminal-mode .options-choice {
+  body.mobile-terminal-mode .form-check {
     min-height: 44px;
     padding: 8px 0;
   }
@@ -452,41 +755,50 @@
     grid-template-columns: repeat(var(--theme-picker-columns-mobile, 1), minmax(0, 1fr));
     gap: 10px;
   }
+  body.mobile-terminal-mode .options-desktop-only {
+    display: none;
+  }
   body.mobile-terminal-mode .theme-card {
     min-height: 176px;
   }
 
-  /* Mobile search bar: larger touch targets and font */
+  /* Mobile search bar: larger touch targets and font. The input takes its own
+     row and the controls (toggles + counter + nav + close) cluster on a second
+     row — `.close-btn` carries `margin-left: auto` from the close primitive so
+     it sits at the right edge of that row, with toggles/counter/nav packed
+     left. Matches the iOS Safari find-on-page layout. */
   body.mobile-terminal-mode .search-bar {
     padding: 8px 12px;
     gap: 10px;
-    flex-wrap: nowrap;
+    flex-wrap: wrap;
   }
   body.mobile-terminal-mode .search-bar input {
     font-size: 16px;
-    padding: 8px 10px;
-    min-height: 40px;
+    padding: 6px 10px;
+    min-height: 32px;
+    flex: 1 1 100%;
   }
   body.mobile-terminal-mode .search-count {
-    display: none;
+    font-size: 13px;
+    flex: 0 0 auto;
   }
   body.mobile-terminal-mode .search-nav button {
-    min-height: 40px;
-    padding: 0 12px;
+    min-height: 28px;
+    padding: 0 10px;
     font-size: 16px;
   }
   body.mobile-terminal-mode .search-close-btn {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 40px;
-    padding: 0 12px;
+    min-height: 28px;
+    padding: 0 10px;
     font-size: 16px;
     flex: 0 0 auto;
   }
   body.mobile-terminal-mode .search-toggles button {
-    min-height: 40px;
-    padding: 0 10px;
+    min-height: 28px;
+    padding: 0 8px;
     font-size: 13px;
   }
 
@@ -507,19 +819,20 @@
 
   #mobile-edit-bar {
     display: none;
-    flex-wrap: nowrap;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 4px;
-    overflow-x: auto;
+    overflow: visible;
     scrollbar-width: none;
   }
 
   body.mobile-keyboard-open #mobile-edit-bar {
-    display: flex;
+    display: grid;
   }
 
   #mobile-edit-bar button {
-    flex: 1 1 0;
+    width: 100%;
     min-width: 0;
+    min-height: 34px;
     appearance: none;
     -webkit-appearance: none;
     background: transparent;
@@ -527,12 +840,13 @@
     color: var(--muted);
     font-family: var(--font-mono);
     font-size: 12px;
-    padding: 4px 2px;
+    padding: 6px 4px;
     border-radius: 3px;
     touch-action: manipulation;
     -webkit-tap-highlight-color: transparent;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   #mobile-edit-bar button:active {
@@ -555,6 +869,11 @@
     line-height: 1;
     padding-top: 2px;
     padding-bottom: 2px;
+  }
+
+  #mobile-edit-bar button[data-mobile-edit="word-left"],
+  #mobile-edit-bar button[data-mobile-edit="word-right"] {
+    font-size: 11px;
   }
 
 

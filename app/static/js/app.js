@@ -1,6 +1,38 @@
 // ── Desktop UI module ──
 // Shared helpers for keyboard shortcuts, overlays, and mobile-layout glue.
 
+const _defaultDesktopPromptLabel = (() => {
+  if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return '';
+  return String(shellPromptWrap.querySelector('.prompt-prefix')?.textContent || '');
+})();
+const _defaultMobilePromptLabel = (() => {
+  if (typeof mobileComposerRow === 'undefined' || !mobileComposerRow) return '$';
+  return String(mobileComposerRow.querySelector('.mobile-prompt-label')?.textContent || '$');
+})();
+let _composerPromptMode = null;
+
+function _applyComposerPromptMode() {
+  const isConfirm = _composerPromptMode === 'confirm';
+  const desktopLabel = isConfirm ? '[yes/no]:' : _defaultDesktopPromptLabel;
+  const mobileLabel = isConfirm ? '[yes/no]:' : _defaultMobilePromptLabel;
+  const promptPrefix = typeof shellPromptWrap !== 'undefined' && shellPromptWrap
+    ? shellPromptWrap.querySelector('.prompt-prefix')
+    : null;
+  if (promptPrefix) promptPrefix.textContent = desktopLabel;
+  if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
+    shellPromptWrap.classList.toggle('shell-prompt-confirm', isConfirm);
+  }
+  const mobilePromptLabel = typeof mobileComposerRow !== 'undefined' && mobileComposerRow
+    ? mobileComposerRow.querySelector('.mobile-prompt-label')
+    : null;
+  if (mobilePromptLabel) mobilePromptLabel.textContent = mobileLabel;
+}
+
+function setComposerPromptMode(mode = null) {
+  _composerPromptMode = mode === 'confirm' ? 'confirm' : null;
+  _applyComposerPromptMode();
+}
+
 function syncShellPrompt() {
   // The visible prompt is rendered from shared composer state instead of from
   // the hidden input directly, so selection/caret state stays correct across
@@ -58,32 +90,12 @@ function syncShellPrompt() {
   if (end < len) shellPromptText.appendChild(document.createTextNode(value.slice(end)));
 }
 
-function refocusTerminalInput() {
-  setTimeout(() => {
-    if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) return;
-    if (typeof focusAnyComposerInput === 'function' && focusAnyComposerInput()) return;
-  }, 0);
-}
-
 function focusCommandInputFromGesture({ preventScroll = true } = {}) {
   if (typeof useMobileTerminalViewportMode === 'function' && useMobileTerminalViewportMode()) {
     const mobileInput = typeof getComposerInputs === 'function' ? getComposerInputs().mobile : null;
     if (mobileInput && typeof focusComposerInput === 'function') {
       if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
       focusComposerInput(mobileInput, { preventScroll });
-      return;
-    }
-    if (mobileInput && typeof mobileInput.focus === 'function') {
-      if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(true);
-      if (preventScroll) {
-        try {
-          mobileInput.focus({ preventScroll: true });
-        } catch (_) {
-          mobileInput.focus();
-        }
-      } else {
-        mobileInput.focus();
-      }
     }
     return;
   }
@@ -110,14 +122,22 @@ const _searchBarHomeParent = typeof searchBar !== 'undefined' && searchBar ? sea
 const _tabPanelsHomeParent = typeof tabPanels !== 'undefined' && tabPanels ? tabPanels.parentElement : null;
 const _historyPanelHomeParent = typeof historyPanel !== 'undefined' && historyPanel ? historyPanel.parentElement : null;
 const _permalinkToastHomeParent = typeof permalinkToast !== 'undefined' && permalinkToast ? permalinkToast.parentElement : null;
-const _killOverlayHomeParent = typeof killOverlay !== 'undefined' && killOverlay ? killOverlay.parentElement : null;
-const _histDelOverlayHomeParent = typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay.parentElement : null;
+const _confirmHostEl = document.getElementById('confirm-host');
+const _confirmHostHomeParent = _confirmHostEl ? _confirmHostEl.parentElement : null;
+const _workflowsOverlayHomeParent = typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay.parentElement : null;
 const _faqOverlayHomeParent = typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay.parentElement : null;
 const _themeOverlayHomeParent = typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay.parentElement : null;
 const _optionsOverlayHomeParent = typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay.parentElement : null;
 const _statusHomeParent = typeof status !== 'undefined' && status ? status.parentElement : null;
 const _runTimerHomeParent = typeof runTimer !== 'undefined' && runTimer ? runTimer.parentElement : null;
 const _headerHomeParent = typeof headerTitle !== 'undefined' && headerTitle ? headerTitle.closest('header') : (typeof document !== 'undefined' ? document.querySelector('header') : null);
+const _mobileHeaderActionsHomeParent = typeof mobileHeaderActions !== 'undefined' && mobileHeaderActions ? mobileHeaderActions : _headerHomeParent;
+const TAB_SESSION_STATE_KEY = `tab_session_state:${typeof SESSION_ID !== 'undefined' ? SESSION_ID : 'session'}`;
+let _tabSessionPersistTimer = null;
+let _tabSessionRestoreInProgress = false;
+const _welcomeIntroModes = ['animated', 'disable_animation', 'remove'];
+const _shareRedactionDefaultModes = ['unset', 'redacted', 'raw'];
+const _hudClockModes = ['utc', 'local'];
 
 function _moveComposerNode(node, target, anchor = null) {
   if (!node || !target || node.parentElement === target) return;
@@ -179,12 +199,11 @@ const _mobileUiLayoutRefs = _getMobileUiLayoutRefs();
 const _uiOverlayRefs = {
   mobileMenu: mobileMenu || null,
   hamburgerBtn: hamburgerBtn || null,
+  workflowsOverlay: typeof workflowsOverlay !== 'undefined' && workflowsOverlay ? workflowsOverlay : null,
   faqOverlay: typeof faqOverlay !== 'undefined' && faqOverlay ? faqOverlay : null,
   themeOverlay: typeof themeOverlay !== 'undefined' && themeOverlay ? themeOverlay : null,
   optionsOverlay: typeof optionsOverlay !== 'undefined' && optionsOverlay ? optionsOverlay : null,
   historyPanel: typeof historyPanel !== 'undefined' && historyPanel ? historyPanel : null,
-  killOverlay: typeof killOverlay !== 'undefined' && killOverlay ? killOverlay : null,
-  histDelOverlay: typeof histDelOverlay !== 'undefined' && histDelOverlay ? histDelOverlay : null,
 };
 
 function _bindMobileComposerInteractions(uiRefs) {
@@ -194,8 +213,10 @@ function _bindMobileComposerInteractions(uiRefs) {
 
 function _bindMobileEditBarInteractions(editBar) {
   if (!editBar || !cmdInput) return;
-  editBar.querySelectorAll('button[data-edit-action]').forEach(btn => {
-    const action = btn.dataset.editAction;
+  editBar.querySelectorAll('button[data-mobile-edit], button[data-edit-action]').forEach(btn => {
+    if (btn.dataset.mobileEditBound === '1') return;
+    btn.dataset.mobileEditBound = '1';
+    const action = btn.dataset.mobileEdit || btn.dataset.editAction;
     const repeating = action === 'left' || action === 'right';
     let handledPointerDown = false;
     let _repeatDelay = null;
@@ -203,7 +224,14 @@ function _bindMobileEditBarInteractions(editBar) {
     const _clearRepeat = () => {
       if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
       if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('pointerup',     stopRepeat);
+        document.removeEventListener('pointercancel', stopRepeat);
+        document.removeEventListener('touchend',      stopRepeat);
+        document.removeEventListener('touchcancel',   stopRepeat);
+      }
     };
+    const stopRepeat = () => _clearRepeat();
     const handler = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -213,9 +241,14 @@ function _bindMobileEditBarInteractions(editBar) {
         _repeatDelay = setTimeout(() => {
           _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
         }, 400);
+        if (typeof document !== 'undefined') {
+          document.addEventListener('pointerup',     stopRepeat);
+          document.addEventListener('pointercancel', stopRepeat);
+          document.addEventListener('touchend',      stopRepeat);
+          document.addEventListener('touchcancel',   stopRepeat);
+        }
       }
     };
-    const stopRepeat = () => _clearRepeat();
     if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
       btn.addEventListener('pointerdown', e => {
         handledPointerDown = true;
@@ -256,12 +289,12 @@ const _mobileShellTranscriptNodes = [
 ];
 const _mobileShellOverlayNodes = [
   { node: historyPanel, homeParent: _historyPanelHomeParent, desktopAnchor: permalinkToast || null },
-  { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: killOverlay || null },
-  { node: killOverlay, homeParent: _killOverlayHomeParent, desktopAnchor: histDelOverlay || null },
-  { node: histDelOverlay, homeParent: _histDelOverlayHomeParent, desktopAnchor: faqOverlay || null },
+  { node: permalinkToast, homeParent: _permalinkToastHomeParent, desktopAnchor: _confirmHostEl || faqOverlay || null },
+  { node: _confirmHostEl, homeParent: _confirmHostHomeParent, desktopAnchor: faqOverlay || null },
   { node: faqOverlay, homeParent: _faqOverlayHomeParent, desktopAnchor: themeOverlay || null },
   { node: themeOverlay, homeParent: _themeOverlayHomeParent, desktopAnchor: optionsOverlay || null },
-  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: null },
+  { node: optionsOverlay, homeParent: _optionsOverlayHomeParent, desktopAnchor: workflowsOverlay || null },
+  { node: workflowsOverlay, homeParent: _workflowsOverlayHomeParent, desktopAnchor: null },
 ];
 
 function syncMobileShellChromeLayout(useMobile, mobileShellChromeMount) {
@@ -298,11 +331,11 @@ function syncMobileShellLayout(mobileMode) {
   syncMobileShellTranscriptLayout(useMobile, mobileShellTranscriptMount, mobileShellChromeMount);
   syncMobileShellOverlayLayout(useMobile, mobileShellOverlaysMount);
   if (status && _headerHomeParent) {
-    if (useMobile) _moveComposerNode(status, _headerHomeParent, hamburgerBtn || null);
+    if (useMobile) _moveComposerNode(status, _mobileHeaderActionsHomeParent, hamburgerBtn || null);
     else _moveComposerNode(status, _statusHomeParent);
   }
   if (runTimer && _headerHomeParent) {
-    if (useMobile) _moveComposerNode(runTimer, _headerHomeParent, hamburgerBtn || null);
+    if (useMobile) _moveComposerNode(runTimer, _mobileHeaderActionsHomeParent, hamburgerBtn || null);
     else _moveComposerNode(runTimer, _runTimerHomeParent);
   }
   if (!useMobile && _shellInputRowHomeParent) _moveComposerNode(shellInputRow, _shellInputRowHomeParent);
@@ -415,6 +448,16 @@ function dismissMobileKeyboardAfterSubmit() {
 }
 
 const PREF_COOKIE_MAX_AGE = 60 * 60 * 24 * 365;
+const _sessionPreferenceKeys = [
+  'pref_theme_name',
+  'pref_timestamps',
+  'pref_line_numbers',
+  'pref_welcome_intro',
+  'pref_share_redaction_default',
+  'pref_run_notify',
+  'pref_hud_clock',
+];
+let _sessionPreferenceOverrides = null;
 
 function getPreferenceCookie(name) {
   const prefix = `${name}=`;
@@ -426,9 +469,214 @@ function setPreferenceCookie(name, value) {
   document.cookie = `${name}=${encodeURIComponent(value)}; path=/; max-age=${PREF_COOKIE_MAX_AGE}; SameSite=Lax`;
 }
 
+function _primePreferenceValue(name, value) {
+  setPreferenceCookie(name, value);
+  if (_sessionPreferenceOverrides && Object.prototype.hasOwnProperty.call(_sessionPreferenceOverrides, name)) {
+    _sessionPreferenceOverrides[name] = value;
+  }
+}
+
 function getPreference(name) {
+  if (_sessionPreferenceOverrides && Object.prototype.hasOwnProperty.call(_sessionPreferenceOverrides, name)) {
+    return _sessionPreferenceOverrides[name];
+  }
   const value = getPreferenceCookie(name);
   return value ? decodeURIComponent(value) : '';
+}
+
+function _defaultSessionPreferences() {
+  const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
+  return {
+    pref_theme_name: defaultTheme,
+    pref_timestamps: 'off',
+    pref_line_numbers: 'off',
+    pref_welcome_intro: 'animated',
+    pref_share_redaction_default: 'unset',
+    pref_run_notify: 'off',
+    pref_hud_clock: 'utc',
+  };
+}
+
+function _normalizeSessionPreferences(raw) {
+  const defaults = _defaultSessionPreferences();
+  const prefs = { ...defaults };
+  const source = (raw && typeof raw === 'object') ? raw : {};
+  if (typeof source.pref_theme_name === 'string' && source.pref_theme_name.trim()) {
+    prefs.pref_theme_name = source.pref_theme_name.trim();
+  }
+  if (_tsModes.includes(source.pref_timestamps)) prefs.pref_timestamps = source.pref_timestamps;
+  if (source.pref_line_numbers === 'on' || source.pref_line_numbers === 'off') {
+    prefs.pref_line_numbers = source.pref_line_numbers;
+  }
+  if (_welcomeIntroModes.includes(source.pref_welcome_intro)) {
+    prefs.pref_welcome_intro = source.pref_welcome_intro;
+  }
+  if (_shareRedactionDefaultModes.includes(source.pref_share_redaction_default)) {
+    prefs.pref_share_redaction_default = source.pref_share_redaction_default;
+  }
+  if (source.pref_run_notify === 'on' || source.pref_run_notify === 'off') {
+    prefs.pref_run_notify = source.pref_run_notify;
+  }
+  if (_hudClockModes.includes(source.pref_hud_clock)) {
+    prefs.pref_hud_clock = source.pref_hud_clock;
+  }
+  return prefs;
+}
+
+function _sessionPreferenceCacheKey(sessionId = SESSION_ID) {
+  return `session_pref_cache:${sessionId || ''}`;
+}
+
+function _readCachedSessionPreferences(sessionId = SESSION_ID) {
+  try {
+    const raw = localStorage.getItem(_sessionPreferenceCacheKey(sessionId));
+    if (!raw) return null;
+    return _normalizeSessionPreferences(JSON.parse(raw));
+  } catch (_) {
+    return null;
+  }
+}
+
+function _cacheSessionPreferences(prefs, sessionId = SESSION_ID) {
+  try {
+    localStorage.setItem(_sessionPreferenceCacheKey(sessionId), JSON.stringify(prefs));
+  } catch (_) {}
+}
+
+function _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage = true } = {}) {
+  _sessionPreferenceKeys.forEach((key) => {
+    if (Object.prototype.hasOwnProperty.call(prefs, key)) {
+      setPreferenceCookie(key, prefs[key]);
+    }
+  });
+  if (writeThemeToLocalStorage && prefs.pref_theme_name) {
+    localStorage.setItem('theme', prefs.pref_theme_name);
+  }
+}
+
+function _buildCurrentSessionPreferenceSnapshot() {
+  const defaultTheme = _defaultThemeEntry?.()?.name || APP_CONFIG.default_theme || 'darklab_obsidian.yaml';
+  const currentThemeName = (document.body && document.body.dataset && document.body.dataset.theme)
+    || _savedThemeName()
+    || defaultTheme;
+  return _normalizeSessionPreferences({
+    pref_theme_name: currentThemeName,
+    pref_timestamps: typeof tsMode === 'string' ? tsMode : 'off',
+    pref_line_numbers: typeof lnMode === 'string' ? lnMode : 'off',
+    pref_welcome_intro: getWelcomeIntroPreference(),
+    pref_share_redaction_default: getShareRedactionDefaultPreference(),
+    pref_run_notify: getRunNotifyPreference(),
+    pref_hud_clock: getHudClockPreference(),
+  });
+}
+
+async function _persistCurrentSessionPreferences() {
+  const prefs = _buildCurrentSessionPreferenceSnapshot();
+  _sessionPreferenceOverrides = prefs;
+  _writePreferenceSnapshotToStorage(prefs, { writeThemeToLocalStorage: false });
+  _cacheSessionPreferences(prefs);
+  const resp = await apiFetch('/session/preferences', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ preferences: prefs }),
+  });
+  if (resp && resp.ok === false) {
+    let detail = '';
+    try {
+      const data = await resp.json();
+      detail = data && data.error ? `: ${data.error}` : '';
+    } catch (_) {}
+    throw new Error(`failed to save session preferences${detail}`);
+  }
+  return prefs;
+}
+
+async function loadSessionPreferences() {
+  const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
+  const defaults = _defaultSessionPreferences();
+  const localFallback = sessionId && !sessionId.startsWith('tok_')
+    ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
+    : null;
+  let prefs = null;
+  try {
+    const resp = await apiFetch('/session/preferences');
+    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+    const data = await resp.json();
+    const remote = _normalizeSessionPreferences(data && data.preferences);
+    if (data && data.preferences && Object.keys(data.preferences).length) {
+      prefs = remote;
+    }
+  } catch (err) {
+    logClientError('failed to load /session/preferences', err);
+  }
+  if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
+  if (!prefs) prefs = localFallback;
+  if (!prefs) prefs = defaults;
+  _sessionPreferenceOverrides = prefs;
+  _writePreferenceSnapshotToStorage(prefs);
+  _cacheSessionPreferences(prefs, sessionId);
+  applyThemePreference(prefs.pref_theme_name, false);
+  applyTimestampPreference(prefs.pref_timestamps, false);
+  applyLineNumberPreference(prefs.pref_line_numbers, false);
+  applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
+  applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
+  applyHudClockPreference(prefs.pref_hud_clock, false);
+  if (typeof applyRunNotifyPreference === 'function') {
+    await applyRunNotifyPreference(prefs.pref_run_notify, false);
+  }
+  syncOptionsControls();
+  return prefs;
+}
+
+function getWelcomeIntroPreference() {
+  const value = getPreference('pref_welcome_intro');
+  return _welcomeIntroModes.includes(value) ? value : 'animated';
+}
+
+function getShareRedactionDefaultPreference() {
+  const value = getPreference('pref_share_redaction_default');
+  return _shareRedactionDefaultModes.includes(value) ? value : 'unset';
+}
+
+function getRunNotifyPreference() {
+  return getPreference('pref_run_notify') === 'on' ? 'on' : 'off';
+}
+
+function getHudClockPreference() {
+  const value = getPreference('pref_hud_clock');
+  return _hudClockModes.includes(value) ? value : 'utc';
+}
+
+async function applyRunNotifyPreference(mode, persist = true) {
+  let nextMode = mode === 'on' ? 'on' : 'off';
+  if (persist && nextMode === 'on') {
+    if (typeof Notification === 'undefined') {
+      nextMode = 'off';
+    } else if (Notification.permission === 'denied') {
+      nextMode = 'off';
+      showToast('Notifications are blocked in your browser settings.');
+    } else if (Notification.permission !== 'granted') {
+      const result = await Notification.requestPermission();
+      if (result !== 'granted') nextMode = 'off';
+    }
+  }
+  if (persist) {
+    _primePreferenceValue('pref_run_notify', nextMode);
+    try { await _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist run notify preference', err); }
+  } else {
+    _primePreferenceValue('pref_run_notify', nextMode);
+  }
+  syncOptionsControls();
+}
+
+function applyHudClockPreference(mode, persist = true) {
+  const nextMode = _hudClockModes.includes(mode) ? mode : 'utc';
+  if (persist) {
+    _primePreferenceValue('pref_hud_clock', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist HUD clock preference', err); }
+  }
+  syncOptionsControls();
+  if (typeof globalThis.renderHudClock === 'function') globalThis.renderHudClock();
 }
 
 function syncOptionsControls() {
@@ -436,6 +684,10 @@ function syncOptionsControls() {
   if (tsSelect) tsSelect.value = typeof tsMode === 'string' ? tsMode : 'off';
   const lnToggle = optionsLnToggle;
   if (lnToggle) lnToggle.checked = typeof lnMode === 'string' && lnMode === 'on';
+  if (optionsWelcomeSelect) optionsWelcomeSelect.value = getWelcomeIntroPreference();
+  if (optionsShareRedactionSelect) optionsShareRedactionSelect.value = getShareRedactionDefaultPreference();
+  if (optionsNotifyToggle) optionsNotifyToggle.checked = getRunNotifyPreference() === 'on';
+  if (optionsHudClockSelect) optionsHudClockSelect.value = getHudClockPreference();
 }
 
 function applyThemePreference(theme, persist = true) {
@@ -445,22 +697,50 @@ function applyThemePreference(theme, persist = true) {
 function applyTimestampPreference(mode, persist = true) {
   const nextMode = _tsModes.includes(mode) ? mode : 'off';
   _setTsMode(nextMode);
-  if (persist) setPreferenceCookie('pref_timestamps', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_timestamps', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist timestamp preference', err); }
+  }
   syncOptionsControls();
 }
 
 function applyLineNumberPreference(mode, persist = true) {
   const nextMode = mode === 'on' ? 'on' : 'off';
   _setLnMode(nextMode);
-  if (persist) setPreferenceCookie('pref_line_numbers', nextMode);
+  if (persist) {
+    _primePreferenceValue('pref_line_numbers', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist line-number preference', err); }
+  }
+  syncOptionsControls();
+}
+
+function applyWelcomeIntroPreference(mode, persist = true) {
+  const nextMode = _welcomeIntroModes.includes(mode) ? mode : 'animated';
+  if (persist) {
+    _primePreferenceValue('pref_welcome_intro', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist welcome-intro preference', err); }
+  }
+  syncOptionsControls();
+}
+
+function applyShareRedactionDefaultPreference(mode, persist = true) {
+  const nextMode = _shareRedactionDefaultModes.includes(mode) ? mode : 'unset';
+  if (persist) {
+    _primePreferenceValue('pref_share_redaction_default', nextMode);
+    try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist share-redaction preference', err); }
+  }
   syncOptionsControls();
 }
 
 function _closeMajorOverlays() {
   if (isHistoryPanelOpen()) hideHistoryPanel();
+  if (isWorkflowsOverlayOpen()) hideWorkflowsOverlay();
   if (isFaqOverlayOpen()) hideFaqOverlay();
   if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
+  if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
+    if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
+  }
 }
 
 function openOptions() {
@@ -469,12 +749,13 @@ function openOptions() {
   _closeMajorOverlays();
   if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
   syncOptionsControls();
+  if (typeof _updateOptionsSessionTokenStatus === 'function') _updateOptionsSessionTokenStatus();
   showOptionsOverlay();
 }
 
 function closeOptions() {
   hideOptionsOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function openThemeSelector() {
@@ -486,27 +767,14 @@ function openThemeSelector() {
   setTimeout(() => {
     const selectedCard = themeSelect && themeSelect.querySelector('.theme-card-active');
     const target = selectedCard || themeSelect?.querySelector('[data-theme-name]');
-    if (target && typeof target.focus === 'function') {
-      try {
-        target.focus({ preventScroll: true });
-      } catch (_) {
-        target.focus();
-      }
-      return;
-    }
-    if (themeSelect && typeof themeSelect.focus === 'function') {
-      try {
-        themeSelect.focus({ preventScroll: true });
-      } catch (_) {
-        themeSelect.focus();
-      }
-    }
+    if (focusElement(target, { preventScroll: true })) return;
+    focusElement(themeSelect, { preventScroll: true });
   }, 0);
 }
 
 function closeThemeSelector() {
   hideThemeOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function isEditableTarget(target) {
@@ -518,7 +786,8 @@ function shouldIgnoreGlobalShortcutTarget(target) {
 }
 
 function createNextTabLabel() {
-  return 'tab ' + (tabs.length + 1);
+  if (typeof createDefaultTabLabel === 'function') return createDefaultTabLabel();
+  return 'shell ' + (tabs.length + 1);
 }
 
 function createShortcutTab() {
@@ -555,19 +824,213 @@ function clearActiveShortcutTab() {
   clearTab(activeTabId, { preserveRunState: !!(activeTab && activeTab.st === 'running') });
 }
 
-function closeKillOverlay() {
-  hideKillOverlay();
-  pendingKillTabId = null;
-  refocusTerminalInput();
+function _buildShareRedactionRememberField() {
+  const field = document.createElement('div');
+  field.className = 'faq-item modal-inline-field';
+  const fieldset = document.createElement('div');
+  fieldset.className = 'faq-a form-fieldset';
+  const choice = document.createElement('label');
+  choice.className = 'form-check';
+  const checkbox = document.createElement('input');
+  checkbox.type = 'checkbox';
+  checkbox.id = 'share-redaction-remember-toggle';
+  const text = document.createElement('span');
+  text.textContent = 'Set this as my default share-snapshot choice';
+  choice.appendChild(checkbox);
+  choice.appendChild(text);
+  fieldset.appendChild(choice);
+  field.appendChild(fieldset);
+  return { field, checkbox };
 }
 
-function confirmPendingKill() {
-  hideKillOverlay();
-  if (pendingKillTabId) {
-    doKill(pendingKillTabId);
-    pendingKillTabId = null;
+async function confirmPermalinkRedactionChoice() {
+  if (APP_CONFIG && APP_CONFIG.share_redaction_enabled === false) return 'raw';
+  const preferred = getShareRedactionDefaultPreference();
+  if (preferred === 'raw' || preferred === 'redacted') return preferred;
+
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+
+  const { field, checkbox } = _buildShareRedactionRememberField();
+  let choice = null;
+  try {
+    choice = await showConfirm({
+      body: {
+        text: 'Create permalink with redaction enabled?',
+        note: 'Redaction can mask common sensitive values such as IP addresses, host names, email addresses, bearer tokens, and any operator-defined share redaction rules before the snapshot is saved.',
+      },
+      content: field,
+      actions: [
+        { id: 'cancel',   label: 'Cancel',         role: 'cancel' },
+        { id: 'raw',      label: 'Share Raw',      role: 'secondary' },
+        { id: 'redacted', label: 'Share Redacted', role: 'primary' },
+      ],
+    });
+  } catch (_) { choice = null; }
+
+  if ((choice === 'raw' || choice === 'redacted') && checkbox.checked) {
+    applyShareRedactionDefaultPreference(choice);
   }
-  refocusTerminalInput();
+  if (choice === 'raw' || choice === 'redacted') return choice;
+  return null;
+}
+
+function _snapshotTabRawLines(rawLines) {
+  if (!Array.isArray(rawLines)) return [];
+  return rawLines.map(line => ({
+    text: String(line && line.text || ''),
+    cls: String(line && line.cls || ''),
+    tsC: String(line && line.tsC || ''),
+    tsE: String(line && line.tsE || ''),
+  }));
+}
+
+function _flushActiveTabDraftForSessionState() {
+  const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+  if (!activeTab || activeTab.st === 'running') return;
+  activeTab.draftInput = typeof getComposerValue === 'function'
+    ? getComposerValue()
+    : (typeof cmdInput !== 'undefined' && cmdInput ? cmdInput.value || '' : '');
+}
+
+function _tabSessionSnapshot() {
+  _flushActiveTabDraftForSessionState();
+  const allTabs = Array.isArray(tabs) ? tabs : [];
+  const persisted = allTabs
+    .filter(tab => tab && tab.st !== 'running' && !tab.closing)
+    .map(tab => ({
+      label: String(tab.label || ''),
+      command: String(tab.command || ''),
+      renamed: !!tab.renamed,
+      draftInput: String(tab.draftInput || ''),
+      st: String(tab.st || 'idle'),
+      exitCode: tab.exitCode == null ? null : Number(tab.exitCode),
+      historyRunId: String(tab.historyRunId || ''),
+      previewTruncated: !!tab.previewTruncated,
+      fullOutputAvailable: !!tab.fullOutputAvailable,
+      fullOutputLoaded: !!tab.fullOutputLoaded,
+      rawLines: _snapshotTabRawLines(tab.rawLines),
+    }));
+  if (!persisted.length) return null;
+  const activeIndex = persisted.findIndex((_, idx) => {
+    const sourceTabs = allTabs.filter(tab => tab && tab.st !== 'running' && !tab.closing);
+    return sourceTabs[idx] && sourceTabs[idx].id === activeTabId;
+  });
+  return {
+    version: 1,
+    activeIndex: activeIndex >= 0 ? activeIndex : 0,
+    tabs: persisted,
+  };
+}
+
+function persistTabSessionStateNow() {
+  if (_tabSessionRestoreInProgress) return;
+  try {
+    const snapshot = _tabSessionSnapshot();
+    if (!snapshot) {
+      sessionStorage.removeItem(TAB_SESSION_STATE_KEY);
+      return;
+    }
+    sessionStorage.setItem(TAB_SESSION_STATE_KEY, JSON.stringify(snapshot));
+  } catch (_) {}
+}
+
+function schedulePersistTabSessionState() {
+  if (_tabSessionRestoreInProgress) return;
+  clearTimeout(_tabSessionPersistTimer);
+  _tabSessionPersistTimer = setTimeout(() => {
+    _tabSessionPersistTimer = null;
+    persistTabSessionStateNow();
+  }, 120);
+}
+
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    persistTabSessionStateNow();
+  });
+  window.addEventListener('beforeunload', () => {
+    persistTabSessionStateNow();
+  });
+}
+
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) {
+      persistTabSessionStateNow();
+    }
+  });
+}
+
+function restoreTabSessionState() {
+  let parsed;
+  try {
+    parsed = JSON.parse(sessionStorage.getItem(TAB_SESSION_STATE_KEY) || 'null');
+  } catch (_) {
+    return false;
+  }
+  if (!parsed || parsed.version !== 1 || !Array.isArray(parsed.tabs) || !parsed.tabs.length) return false;
+
+  _tabSessionRestoreInProgress = true;
+  try {
+    _welcomeBootPending = false;
+    if (typeof unmountShellPrompt === 'function') unmountShellPrompt();
+    if (typeof tabsBar !== 'undefined' && tabsBar) {
+      tabsBar.querySelectorAll('.tab').forEach(node => node.remove());
+    }
+    if (typeof tabPanels !== 'undefined' && tabPanels) tabPanels.innerHTML = '';
+    if (typeof setTabs === 'function') setTabs([]);
+    if (typeof setActiveTabId === 'function') setActiveTabId(null);
+
+    const restoredIds = [];
+    const restoredRecords = [];
+    parsed.tabs.forEach((item, index) => {
+      const label = String(item && item.label || (
+        typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(index + 1) : `shell ${index + 1}`
+      ));
+      const tabId = typeof createTab === 'function' ? createTab(label) : null;
+      if (!tabId) return;
+      const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+      if (!tab) return;
+      tab.command = String(item && item.command || '');
+      tab.renamed = !!(item && item.renamed);
+      tab.draftInput = String(item && item.draftInput || '');
+      tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
+      tab.historyRunId = String(item && item.historyRunId || '');
+      tab.previewTruncated = !!(item && item.previewTruncated);
+      tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
+      tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
+      if (typeof renderRestoredTabOutput === 'function') {
+        renderRestoredTabOutput(tabId, item && item.rawLines);
+      }
+      if (typeof setTabStatus === 'function') {
+        const status = typeof item?.st === 'string' && item.st !== 'running' ? item.st : 'idle';
+        setTabStatus(tabId, status);
+      }
+      if (typeof hideTabKillBtn === 'function') hideTabKillBtn(tabId);
+      restoredIds.push(tabId);
+      restoredRecords.push({ tabId, item });
+    });
+
+    restoredRecords.forEach(({ tabId, item }) => {
+      const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+      if (!tab) return;
+      tab.command = String(item && item.command || '');
+      tab.renamed = !!(item && item.renamed);
+      tab.draftInput = String(item && item.draftInput || '');
+      tab.exitCode = item && item.exitCode == null ? null : Number(item.exitCode);
+      tab.historyRunId = String(item && item.historyRunId || '');
+      tab.previewTruncated = !!(item && item.previewTruncated);
+      tab.fullOutputAvailable = !!(item && item.fullOutputAvailable);
+      tab.fullOutputLoaded = !!(item && item.fullOutputLoaded);
+    });
+
+    if (!restoredIds.length) return false;
+    const activeIndex = Math.max(0, Math.min(Number(parsed.activeIndex) || 0, restoredIds.length - 1));
+    if (typeof activateTab === 'function') activateTab(restoredIds[activeIndex], { focusComposer: false });
+    if (typeof mountShellPrompt === 'function') mountShellPrompt(restoredIds[activeIndex], true);
+    return true;
+  } finally {
+    _tabSessionRestoreInProgress = false;
+  }
 }
 
 function eventMatchesCode(e, code) {
@@ -588,12 +1051,14 @@ function eventMatchesDigit(e, digit) {
 function handleTabShortcut(e) {
   if (!e.altKey || e.ctrlKey || e.metaKey) return false;
   if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
-  if (eventMatchesLetter(e, 't')) {
+  // Letter chords (T, W) require no Shift — Alt+Shift+T is the theme-selector
+  // chrome shortcut and must fall through to handleChromeShortcut.
+  if (!e.shiftKey && eventMatchesLetter(e, 't')) {
     createShortcutTab();
     e.preventDefault();
     return true;
   }
-  if (eventMatchesLetter(e, 'w')) {
+  if (!e.shiftKey && eventMatchesLetter(e, 'w')) {
     closeActiveShortcutTab();
     e.preventDefault();
     return true;
@@ -637,6 +1102,74 @@ function handleActionShortcut(e) {
   }
   if (e.ctrlKey && !e.altKey && !e.metaKey && (e.key === 'l' || e.key === 'L')) {
     clearActiveShortcutTab();
+    e.preventDefault();
+    return true;
+  }
+  return false;
+}
+
+// Desktop chrome shortcuts (rail, search, history, options, theme, workflows).
+// The composer is allowed to pass through so prompt-focused users can still
+// trigger chrome toggles — each branch calls preventDefault so Option-glyphs
+// (`«`, `˙`, `©`, `≤`, `ˇ`, `ß`) never leak into the prompt on macOS. Other
+// editable targets (modal inputs, search field, options textarea) remain
+// gated so typing isn't hijacked.
+//
+// Search is bound to Alt+S (not Alt+F) because the composer owns Alt+F as
+// readline word-forward; binding search to Alt+F would either hijack that
+// or require a context-dependent chord that's a net UX loss. Alt+S has no
+// readline conflict and works identically from everywhere.
+//
+// Each chord toggles its surface directly rather than delegating to the
+// corresponding header button's click handler. The header buttons share a
+// pre-existing quirk where they call _closeMajorOverlays() before toggling,
+// which cancels out the close half of the toggle.
+function handleChromeShortcut(e) {
+  if (!e.altKey || e.ctrlKey || e.metaKey) return false;
+  if (shouldIgnoreGlobalShortcutTarget(e.target)) return false;
+  // Alt+Shift+T → theme; guard first so it doesn't match Alt+Shift letter = T as tab-new.
+  if (e.shiftKey && eventMatchesLetter(e, 't')) {
+    if (typeof isThemeOverlayOpen === 'function' && isThemeOverlayOpen()) closeThemeSelector();
+    else openThemeSelector();
+    e.preventDefault();
+    return true;
+  }
+  // All remaining chrome chords are shift-free.
+  if (e.shiftKey) return false;
+  if (eventMatchesLetter(e, 'h')) {
+    if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) {
+      hideHistoryPanel();
+    } else {
+      if (typeof toggleHistoryPanelSurface === 'function') toggleHistoryPanelSurface(true);
+    }
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 'g')) {
+    if (typeof isWorkflowsOverlayOpen === 'function' && isWorkflowsOverlayOpen()) closeWorkflows();
+    else openWorkflows();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesLetter(e, 's')) {
+    document.getElementById('search-toggle-btn')?.click();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesCode(e, 'Comma') || e.key === ',') {
+    if (typeof isOptionsOverlayOpen === 'function' && isOptionsOverlayOpen()) closeOptions();
+    else openOptions();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesCode(e, 'Backslash') || e.key === '\\') {
+    if (typeof toggleRailCollapsed === 'function') toggleRailCollapsed();
+    e.preventDefault();
+    return true;
+  }
+  if (eventMatchesCode(e, 'Slash') || e.key === '/' || e.key === '÷') {
+    if (typeof isFaqOverlayOpen === 'function' && isFaqOverlayOpen()) closeFaq();
+    else openFaq();
     e.preventDefault();
     return true;
   }
@@ -735,8 +1268,16 @@ function performMobileEditAction(action) {
     const pos = Math.max(0, start - 1);
     nextStart = pos;
     nextEnd = pos;
+  } else if (action === 'word-left') {
+    const pos = findWordBoundaryLeft(value, start);
+    nextStart = pos;
+    nextEnd = pos;
   } else if (action === 'right') {
     const pos = Math.min(value.length, end + 1);
+    nextStart = pos;
+    nextEnd = pos;
+  } else if (action === 'word-right') {
+    const pos = findWordBoundaryRight(value, end);
     nextStart = pos;
     nextEnd = pos;
   } else if (action === 'home') {
@@ -756,9 +1297,20 @@ function performMobileEditAction(action) {
       nextStart = cut;
       nextEnd = cut;
     }
+  } else if (action === 'delete-line') {
+    nextValue = '';
+    nextStart = 0;
+    nextEnd = 0;
   }
 
-  if (action === 'left' || action === 'right' || action === 'home' || action === 'end') {
+  if (
+    action === 'left'
+    || action === 'right'
+    || action === 'word-left'
+    || action === 'word-right'
+    || action === 'home'
+    || action === 'end'
+  ) {
     if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
     else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
   } else {
@@ -894,6 +1446,11 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   // shared composer state stay on the same path.
   mobileInput.addEventListener('input', () => {
     handleComposerInputChange(mobileInput);
+    const activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
+    if (activeTab && activeTab.st !== 'running') {
+      activeTab.draftInput = typeof getComposerValue === 'function' ? getComposerValue() : (mobileInput.value || '');
+      if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+    }
   });
 
   mobileInput.addEventListener('keydown', e => {
@@ -930,72 +1487,6 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
       }
       syncShellPrompt();
     }, 0);
-  });
-}
-
-function bindMobileEditBarListeners(editBar) {
-  if (!editBar) return;
-  editBar.querySelectorAll('button[data-mobile-edit]').forEach(btn => {
-    const action = btn.dataset.mobileEdit;
-    const repeating = action === 'left' || action === 'right';
-    let handledPointerDown = false;
-    let _repeatDelay = null;
-    let _repeatInterval = null;
-    const _clearRepeat = () => {
-      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
-      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('pointerup',     stopRepeat);
-        document.removeEventListener('pointercancel', stopRepeat);
-        document.removeEventListener('touchend',      stopRepeat);
-        document.removeEventListener('touchcancel',   stopRepeat);
-      }
-    };
-    const stopRepeat = () => _clearRepeat();
-    const handler = e => {
-      e.preventDefault();
-      e.stopPropagation();
-      performMobileEditAction(action);
-      if (repeating) {
-        _clearRepeat();
-        _repeatDelay = setTimeout(() => {
-          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
-        }, 400);
-        if (typeof document !== 'undefined') {
-          document.addEventListener('pointerup',     stopRepeat);
-          document.addEventListener('pointercancel', stopRepeat);
-          document.addEventListener('touchend',      stopRepeat);
-          document.addEventListener('touchcancel',   stopRepeat);
-        }
-      }
-    };
-    if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
-      btn.addEventListener('pointerdown', e => {
-        handledPointerDown = true;
-        handler(e);
-      });
-      btn.addEventListener('mousedown', e => {
-        if (handledPointerDown) {
-          handledPointerDown = false;
-          e.preventDefault();
-          return;
-        }
-        handler(e);
-      });
-      if (repeating) {
-        btn.addEventListener('pointerup',     stopRepeat);
-        btn.addEventListener('pointercancel', stopRepeat);
-        btn.addEventListener('pointerleave',  stopRepeat);
-      }
-    } else {
-      btn.addEventListener('mousedown',  handler);
-      btn.addEventListener('touchstart', handler, { passive: false });
-      if (repeating) {
-        btn.addEventListener('mouseup',     stopRepeat);
-        btn.addEventListener('touchend',    stopRepeat);
-        btn.addEventListener('touchcancel', stopRepeat);
-      }
-    }
   });
 }
 
@@ -1110,8 +1601,7 @@ function _applyThemePreviewVars(target, vars) {
 
 function _persistThemeEntry(entry) {
   if (!entry) return;
-  setPreferenceCookie('pref_theme_name', entry.name);
-  localStorage.setItem('theme', entry.name);
+  try { void _persistCurrentSessionPreferences(); } catch (err) { logClientError('failed to persist theme preference', err); }
 }
 
 function _savedThemeName() {
@@ -1244,6 +1734,7 @@ function syncThemeSelectionControls() {
   themeSelect.querySelectorAll('[data-theme-name]').forEach(card => {
     const active = card.dataset.themeName === themeName;
     card.classList.toggle('theme-card-active', active);
+    card.classList.toggle('is-selected-card', active);
     card.setAttribute('aria-pressed', active ? 'true' : 'false');
   });
 }
@@ -1280,10 +1771,518 @@ function _setTsMode(mode) {
   if (mode === 'clock')   document.body.classList.add('ts-clock');
   const label = _tsLabels[mode];
   if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
-  const mobileTs = mobileMenu ? mobileMenu.querySelector('[data-action="ts"]') : null;
-  if (mobileTs) mobileTs.textContent = label;
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
+}
+
+// ── Terminal-native theme/config commands ──
+function _cliAppendLine(text, cls = '', tabId = null) {
+  if (typeof appendLine === 'function') appendLine(text, cls, tabId);
+}
+
+function _cliShouldPreserveOutputTail(tabId = null) {
+  const id = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : null);
+  const tab = typeof getTab === 'function' ? getTab(id) : null;
+  return !!tab && tab.followOutput !== false;
+}
+
+function _cliPreserveOutputTail(tabId = null, shouldPreserve = true) {
+  if (!shouldPreserve) return;
+  const id = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : null);
+  const tab = typeof getTab === 'function' ? getTab(id) : null;
+  const out = typeof getOutput === 'function' ? getOutput(id) : null;
+  if (tab) tab.followOutput = true;
+  if (out && typeof _stickOutputToBottom === 'function') {
+    _stickOutputToBottom(out, tab);
+  } else if (out) {
+    out.scrollTop = out.scrollHeight;
+  }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+}
+
+function _cliSetStatus(statusValue) {
+  if (typeof setStatus === 'function') setStatus(statusValue);
+}
+
+function _cliRecordSuccess(command) {
+  if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(command);
+}
+
+function _cliThemeSlug(entry) {
+  return _normalizeThemeName(entry?.name || entry?.filename || '');
+}
+
+function _cliThemeEntries() {
+  return [..._getThemeThemes()].sort(_compareThemeEntries).filter(entry => _cliThemeSlug(entry));
+}
+
+function _cliThemeColorScheme(entry) {
+  const scheme = String(entry?.color_scheme || '').trim().toLowerCase();
+  if (scheme === 'light' || scheme === 'only light') return 'light';
+  if (scheme === 'dark' || scheme === 'only dark') return 'dark';
+  return 'other';
+}
+
+function _cliThemeColorSchemeLabel(scheme) {
+  if (scheme === 'light') return 'Light themes:';
+  if (scheme === 'dark') return 'Dark themes:';
+  return 'Other themes:';
+}
+
+function _cliThemeEntriesByColorScheme() {
+  const grouped = { dark: [], light: [], other: [] };
+  _cliThemeEntries().forEach((entry) => {
+    grouped[_cliThemeColorScheme(entry)].push(entry);
+  });
+  return grouped;
+}
+
+function _cliCurrentThemeEntry() {
+  return _resolveThemeEntry(document.body?.dataset?.theme || _savedThemeName());
+}
+
+function _cliCurrentThemeSlug() {
+  return _cliThemeSlug(_cliCurrentThemeEntry());
+}
+
+function _formatCliRecord(key, value, width = 18) {
+  return `${key.padEnd(width)}  ${value}`;
+}
+
+function _cliThemeDescription(entry) {
+  const label = String(entry?.label || entry?.name || '').trim();
+  const slug = _cliThemeSlug(entry);
+  const current = slug && slug === _cliCurrentThemeSlug();
+  return `${label || slug}${current ? ' (current)' : ''}`;
+}
+
+async function handleThemeCommand(cmd, tabId = null) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[1] || '').toLowerCase();
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+
+  if (parts.length === 1 || sub === 'list') {
+    const current = _cliCurrentThemeEntry();
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'fake-kv', tabId);
+    _cliAppendLine('', 'fake-spacer', tabId);
+    _cliAppendLine('Available themes:', 'fake-section', tabId);
+    const grouped = _cliThemeEntriesByColorScheme();
+    ['dark', 'light', 'other'].forEach((scheme) => {
+      const entries = grouped[scheme] || [];
+      if (!entries.length) return;
+      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'fake-section', tabId);
+      entries.forEach((entry) => {
+        const slug = _cliThemeSlug(entry);
+        const marker = slug === _cliCurrentThemeSlug() ? '*' : ' ';
+        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'fake-help-row', tabId);
+      });
+    });
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  if (sub === 'current') {
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'fake-kv', tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  const requested = sub === 'set' ? parts.slice(2).join(' ').trim() : '';
+  if (!requested) {
+    _cliAppendLine('usage: theme [list | current | set <theme>]', '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  const entry = _findThemeEntry(requested);
+  if (!entry) {
+    _cliAppendLine(`theme: unknown theme '${requested}'`, 'exit-fail', tabId);
+    _cliAppendLine("run 'theme list' to see available themes", '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  applyThemeSelection(entry.name);
+  _cliAppendLine(`theme set: ${_cliThemeDescription(entry)}`, '', tabId);
+  _cliRecordSuccess(cmd);
+  _cliSetStatus('ok');
+  return true;
+}
+
+const _cliConfigValueLabels = {
+  animated: 'animated',
+  static: 'static',
+  off: 'off',
+  ask: 'ask',
+};
+
+function _cliNormalizeValue(value) {
+  return String(value || '').trim().toLowerCase().replace(/_/g, '-');
+}
+
+function _cliConfigEntries() {
+  return [
+    {
+      key: 'line-numbers',
+      description: 'Show line numbers beside output and the live prompt',
+      values: ['on', 'off'],
+      get: () => (typeof lnMode === 'string' && lnMode === 'on' ? 'on' : 'off'),
+      set: (value) => applyLineNumberPreference(value),
+    },
+    {
+      key: 'timestamps',
+      description: 'Timestamp display mode',
+      values: _tsModes.slice(),
+      get: () => (_tsModes.includes(tsMode) ? tsMode : 'off'),
+      set: (value) => applyTimestampPreference(value),
+    },
+    {
+      key: 'welcome',
+      description: 'Welcome intro behavior',
+      values: ['animated', 'static', 'off'],
+      aliases: { disable_animation: 'static', disable: 'static', remove: 'off', removed: 'off' },
+      toStored: { animated: 'animated', static: 'disable_animation', off: 'remove' },
+      fromStored: { animated: 'animated', disable_animation: 'static', remove: 'off' },
+      get: function getWelcomeCliValue() {
+        return this.fromStored[getWelcomeIntroPreference()] || 'animated';
+      },
+      set: function setWelcomeCliValue(value) {
+        applyWelcomeIntroPreference(this.toStored[value] || value);
+      },
+    },
+    {
+      key: 'share-redaction',
+      description: 'Default redaction behavior for shared snapshots',
+      values: ['ask', 'redacted', 'raw'],
+      aliases: { unset: 'ask', prompt: 'ask', redacted: 'redacted', raw: 'raw' },
+      toStored: { ask: 'unset', redacted: 'redacted', raw: 'raw' },
+      fromStored: { unset: 'ask', redacted: 'redacted', raw: 'raw' },
+      get: function getShareRedactionCliValue() {
+        return this.fromStored[getShareRedactionDefaultPreference()] || 'ask';
+      },
+      set: function setShareRedactionCliValue(value) {
+        applyShareRedactionDefaultPreference(this.toStored[value] || value);
+      },
+    },
+    {
+      key: 'run-notifications',
+      description: 'Desktop notification when a run completes or is killed',
+      values: ['on', 'off'],
+      get: () => getRunNotifyPreference(),
+      set: (value) => applyRunNotifyPreference(value),
+    },
+    {
+      key: 'hud-clock',
+      description: 'HUD clock timezone',
+      values: _hudClockModes.slice(),
+      get: () => getHudClockPreference(),
+      set: (value) => applyHudClockPreference(value),
+    },
+  ];
+}
+
+function _findCliConfigEntry(key) {
+  const normalized = _cliNormalizeValue(key);
+  return _cliConfigEntries().find(entry => entry.key === normalized) || null;
+}
+
+function _normalizeCliConfigEntryValue(entry, value) {
+  const normalized = _cliNormalizeValue(value);
+  const aliased = entry.aliases && Object.prototype.hasOwnProperty.call(entry.aliases, normalized)
+    ? entry.aliases[normalized]
+    : normalized;
+  return entry.values.includes(aliased) ? aliased : null;
+}
+
+function _cliConfigDisplayValue(value) {
+  return _cliConfigValueLabels[value] || value;
+}
+
+function _printCliConfigEntry(entry, tabId) {
+  _cliAppendLine(
+    _formatCliRecord(entry.key, _cliConfigDisplayValue(entry.get()), 19),
+    'fake-kv',
+    tabId,
+  );
+}
+
+function _printCliConfigList(tabId) {
+  _cliAppendLine('Current user config:', 'fake-section', tabId);
+  _cliConfigEntries().forEach(entry => _printCliConfigEntry(entry, tabId));
+}
+
+async function handleConfigCommand(cmd, tabId = null) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[1] || '').toLowerCase();
+  const preserveTail = _cliShouldPreserveOutputTail(tabId);
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+
+  if (parts.length === 1 || sub === 'list') {
+    _printCliConfigList(tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  if (sub === 'get') {
+    const key = parts[2] || '';
+    const entry = _findCliConfigEntry(key);
+    if (!entry) {
+      _cliAppendLine(`config: unknown option '${key}'`, 'exit-fail', tabId);
+      _cliAppendLine("run 'config list' to see available options", '', tabId);
+      _cliSetStatus('fail');
+      return true;
+    }
+    _printCliConfigEntry(entry, tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  const isSet = sub === 'set';
+  const key = isSet ? parts[2] : '';
+  const value = isSet ? parts[3] : '';
+  const entry = _findCliConfigEntry(key);
+
+  if (!entry || !value) {
+    _cliAppendLine('usage: config [list | get <option> | set <option> <value>]', '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  const normalizedValue = _normalizeCliConfigEntryValue(entry, value);
+  if (!normalizedValue) {
+    _cliAppendLine(`config: invalid value '${value}' for ${entry.key}`, 'exit-fail', tabId);
+    _cliAppendLine(`allowed values: ${entry.values.join(', ')}`, '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  await entry.set(normalizedValue);
+  _cliAppendLine(`config set: ${entry.key}=${_cliConfigDisplayValue(entry.get())}`, '', tabId);
+  _cliPreserveOutputTail(tabId, preserveTail);
+  _cliRecordSuccess(cmd);
+  _cliSetStatus('ok');
+  return true;
+}
+
+function _runtimeHint(value, description = '', insertValue = null, label = null) {
+  const item = { value, description };
+  if (insertValue != null) item.insertValue = insertValue;
+  if (label != null) item.label = label;
+  return item;
+}
+
+function _runtimeContextSpec({
+  flags = [],
+  expectsValue = [],
+  argHints = {},
+  sequenceArgHints = {},
+  argumentLimit = null,
+  pipeCommand = false,
+  pipeInsertValue = '',
+  pipeLabel = '',
+  pipeDescription = '',
+  examples = [],
+} = {}) {
+  return {
+    flags,
+    expects_value: expectsValue,
+    arg_hints: argHints,
+    sequence_arg_hints: sequenceArgHints,
+    argument_limit: argumentLimit,
+    pipe_command: pipeCommand,
+    pipe_insert_value: pipeInsertValue,
+    pipe_label: pipeLabel,
+    pipe_description: pipeDescription,
+    examples,
+  };
+}
+
+const _runtimeBuiltinCommandInfo = [
+  ['autocomplete', 'built-in: explain context-aware autocomplete for known commands'],
+  ['banner', 'built-in: print the configured banner art'],
+  ['clear', 'built-in: clear the current terminal tab output'],
+  ['config', 'built-in: show or update user options'],
+  ['date', 'built-in: show the current server time'],
+  ['df', 'built-in: show a compact filesystem summary'],
+  ['env', 'built-in: show core environment values for this shell'],
+  ['faq', 'built-in: show configured FAQ entries'],
+  ['fortune', 'built-in: print a short operator-themed one-liner'],
+  ['free', 'built-in: show a compact memory summary'],
+  ['groups', 'built-in: show the shell group membership'],
+  ['help', 'built-in: list all built-in commands'],
+  ['history', 'built-in: list recent commands from this session'],
+  ['hostname', 'built-in: show the configured shell instance name'],
+  ['id', 'built-in: show the shell identity'],
+  ['ip', 'built-in: show a minimal shell network interface view'],
+  ['jobs', 'built-in: list active jobs for this session'],
+  ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
+  ['limits', 'built-in: show configured runtime, history, and retention limits'],
+  ['ls', 'built-in: show the allowed command catalog'],
+  ['man', 'built-in: show a real or built-in manual page'],
+  ['ps', 'built-in: show the current shell process view'],
+  ['pwd', 'built-in: show the web shell workspace path'],
+  ['retention', 'built-in: show retention and persisted-output settings'],
+  ['route', 'built-in: show the shell routing table summary'],
+  ['session-token', 'built-in: show or manage persistent session tokens'],
+  ['shortcuts', 'built-in: show current keyboard shortcuts'],
+  ['status', 'built-in: show the current session and shell configuration summary'],
+  ['theme', 'built-in: show or apply the active shell theme'],
+  ['tty', 'built-in: show the web terminal device path'],
+  ['type', 'built-in: describe whether a command is built-in, installed, or missing'],
+  ['uname', 'built-in: show the shell platform string'],
+  ['uptime', 'built-in: show app uptime since process start'],
+  ['version', 'built-in: show shell, app, Flask, and Python version details'],
+  ['which', 'built-in: locate a built-in command or allowed runtime command'],
+  ['who', 'built-in: show the current shell user and session'],
+  ['whoami', 'built-in: describe this shell and link to the project README'],
+];
+
+function _runtimeBuiltinDescription(root) {
+  return _runtimeBuiltinCommandInfo.find(([name]) => name === root)?.[1] || 'built-in command';
+}
+
+function _runtimeAllowedCommandRoots() {
+  const roots = new Set();
+  const source = allowedCommandsFaqData && Array.isArray(allowedCommandsFaqData.commands)
+    ? allowedCommandsFaqData.commands
+    : [];
+  source.forEach((command) => {
+    const root = String(command || '').trim().split(/\s+/, 1)[0].toLowerCase();
+    if (root) roots.add(root);
+  });
+  return roots;
+}
+
+function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 'manual page') {
+  const builtinNames = new Set(_runtimeBuiltinCommandInfo.map(([name]) => name));
+  const externalRoots = new Set(Object.keys(baseRegistry || {}));
+  _runtimeAllowedCommandRoots().forEach(root => externalRoots.add(root));
+  builtinNames.forEach(root => externalRoots.delete(root));
+
+  const items = [];
+  [...externalRoots].sort().forEach(root => {
+    items.push(_runtimeHint(root, `${root} ${descriptionForExternal}`));
+  });
+  [...builtinNames].sort().forEach(root => {
+    items.push(_runtimeHint(root, _runtimeBuiltinDescription(root)));
+  });
+  items.push(_runtimeHint('<command>', 'Any built-in or allowed command'));
+  return items;
+}
+
+function _runtimeStaticBuiltinContext() {
+  const emptySpec = _runtimeContextSpec();
+  const context = Object.fromEntries(
+    _runtimeBuiltinCommandInfo.map(([root]) => [root, emptySpec]),
+  );
+
+  context.ps = _runtimeContextSpec({
+    flags: [
+      _runtimeHint('aux', 'All processes with user and memory info'),
+      _runtimeHint('-ef', 'All processes, full format'),
+    ],
+  });
+  context.df = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable disk usage')] });
+  context.free = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable memory usage')] });
+  context.uname = _runtimeContextSpec({ flags: [_runtimeHint('-a', 'All system information')] });
+  context.ip = _runtimeContextSpec({
+    argHints: { __positional__: [_runtimeHint('a', 'Show all network interfaces and addresses')] },
+  });
+  context.ls = _runtimeContextSpec({
+    flags: [
+      _runtimeHint('-la', 'Long listing including hidden files'),
+      _runtimeHint('-lh', 'Long listing with human-readable sizes'),
+      _runtimeHint('-l', 'Long listing format'),
+    ],
+  });
+  context['session-token'] = _runtimeContextSpec({
+    expectsValue: ['set', 'revoke'],
+    argHints: {
+      generate: [],
+      copy: [],
+      clear: [],
+      rotate: [],
+      list: [],
+      set: [_runtimeHint('<token>', 'Paste a tok_... token or UUID from another device')],
+      revoke: [_runtimeHint('<token>', 'tok_ token to permanently invalidate on the server')],
+      __positional__: [
+        _runtimeHint('generate', 'Generate a new session token and save it to this browser'),
+        _runtimeHint('set <token>', 'Activate an existing session token from another device', 'set '),
+        _runtimeHint('copy', 'Copy the active session token to the clipboard'),
+        _runtimeHint('clear', 'Confirm before removing the active session token'),
+        _runtimeHint('rotate', 'Generate a new token and migrate all history to it'),
+        _runtimeHint('list', 'Show the active session token and its creation date'),
+        _runtimeHint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+      ],
+    },
+  });
+  return context;
+}
+
+function _runtimeThemeContext() {
+  const themeHints = _cliThemeEntries().map(entry => _runtimeHint(_cliThemeSlug(entry), _cliThemeDescription(entry)));
+  const argHints = {
+    list: [],
+    current: [],
+    set: themeHints,
+    __positional__: [
+      _runtimeHint('list', 'Show available themes'),
+      _runtimeHint('current', 'Show the active theme'),
+      _runtimeHint('set', 'Apply a theme', 'set '),
+    ],
+  };
+  themeHints.forEach(item => { argHints[item.value] = []; });
+  return _runtimeContextSpec({ expectsValue: ['set'], argHints });
+}
+
+function _runtimeConfigContext() {
+  const entries = _cliConfigEntries();
+  const optionHints = entries.map(entry => _runtimeHint(entry.key, entry.description));
+  const argHints = {
+    list: [],
+    get: optionHints,
+    set: optionHints,
+    __positional__: [
+      _runtimeHint('list', 'Show all current user config'),
+      _runtimeHint('get', 'Show one user config value', 'get '),
+      _runtimeHint('set', 'Set one user config value', 'set '),
+    ],
+  };
+  const sequenceArgHints = {};
+  entries.forEach((entry) => {
+    sequenceArgHints[`set ${entry.key}`] = entry.values.map(value => _runtimeHint(value, entry.description));
+    sequenceArgHints[`get ${entry.key}`] = [];
+    entry.values.forEach(value => { argHints[value] = []; });
+  });
+  return _runtimeContextSpec({ expectsValue: ['get', 'set'], argHints, sequenceArgHints });
+}
+
+function getRuntimeAutocompleteContext(baseRegistry = {}) {
+  const context = _runtimeStaticBuiltinContext();
+  const lookupHints = _runtimeCommandLookupHints(baseRegistry);
+  context.theme = _runtimeThemeContext();
+  context.config = _runtimeConfigContext();
+  context.man = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: lookupHints },
+  });
+  context.which = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command path') },
+  });
+  context.type = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command type') },
+  });
+  return context;
+}
+
+function getRuntimeAutocompleteItems() {
+  return [];
 }
 
 let allowedCommandsFaqData = null;
@@ -1313,7 +2312,7 @@ function _buildFaqLimitsContent(cfg) {
         : '<strong>Unlimited</strong>',
     },
     {
-      label: 'Permalink &amp; history retention',
+      label: 'Permalink & history retention',
       value: retention > 0
         ? `<strong>${retention} day${retention === 1 ? '' : 's'}</strong> — run history and share links are deleted after this period`
         : '<strong>Unlimited</strong> — run history and share links are kept indefinitely',
@@ -1321,31 +2320,30 @@ function _buildFaqLimitsContent(cfg) {
   ];
 
   const frag = document.createDocumentFragment();
-  const table = document.createElement('table');
-  table.className = 'faq-limits-table';
+  const list = document.createElement('div');
+  list.className = 'faq-limits-list';
   rows.forEach(r => {
-    const tr = document.createElement('tr');
-    const labelCell = document.createElement('td');
-    labelCell.className = 'faq-limits-label';
-    labelCell.textContent = r.label;
-    const valueCell = document.createElement('td');
-    valueCell.className = 'faq-limits-value';
-    valueCell.innerHTML = r.value;
-    tr.appendChild(labelCell);
-    tr.appendChild(valueCell);
-    table.appendChild(tr);
-  });
-  frag.appendChild(table);
+    const row = document.createElement('div');
+    row.className = 'faq-limits-row';
 
-  const note = document.createElement('span');
-  note.className = 'faq-limits-note';
-  note.textContent = 'These limits are configured by the operator of this instance.';
-  frag.appendChild(note);
+    const labelEl = document.createElement('div');
+    labelEl.className = 'faq-limits-label';
+    labelEl.textContent = r.label;
+
+    const valueEl = document.createElement('div');
+    valueEl.className = 'faq-limits-value';
+    valueEl.innerHTML = r.value;
+
+    row.appendChild(labelEl);
+    row.appendChild(valueEl);
+    list.appendChild(row);
+  });
+  frag.appendChild(list);
   return frag;
 }
 
 function renderFaqLimits(cfg) {
-  const limitsEl = document.getElementById('faq-limits-text') || faqLimitsText;
+  const limitsEl = document.getElementById('faq-limits-text');
   if (!limitsEl || !cfg) return;
   limitsEl.replaceChildren(_buildFaqLimitsContent(cfg));
 }
@@ -1353,7 +2351,8 @@ function renderFaqLimits(cfg) {
 function activateFaqCommandChip(cmd) {
   if (!cmd) return;
   setComposerValue(cmd + ' ');
-  closeFaq();
+  _closeMajorOverlays();
+  refocusComposerAfterAction({ defer: true });
 }
 
 function wireFaqCommandChips(root = faqBody) {
@@ -1382,7 +2381,7 @@ function makeAllowedCommandChip(cmd) {
 }
 
 function renderAllowedCommandsFaq(data) {
-  const el = document.getElementById('faq-allowed-text') || faqAllowedText;
+  const el = document.getElementById('faq-allowed-text');
   if (!el || !data) return;
   if (!data.restricted) {
     el.textContent = 'No restrictions are configured — all commands are permitted.';
@@ -1426,6 +2425,7 @@ function renderFaqItems(items) {
   // special UI sections are still wired client-side after the HTML is inserted.
   if (!faqBody) return;
   faqBody.innerHTML = '';
+  const faqHandles = [];
   (items || []).forEach(item => {
     const div = document.createElement('div');
     div.className = 'faq-item';
@@ -1448,12 +2448,118 @@ function renderFaqItems(items) {
       a.textContent = item.answer || '';
     }
 
+    q.setAttribute('role', 'button');
+    q.setAttribute('tabindex', '0');
+    // FAQ question is a disclosure trigger. role="button" divs never receive
+    // DOM focus from click, so the pressable's blur is a no-op — the
+    // disclosure helper inherits clearPressStyle to punch through sticky
+    // :hover highlights.
+    faqHandles.push(bindDisclosure(q, {
+      panel: div,
+      openClass: 'faq-open',
+      clearPressStyle: true,
+    }));
+
     div.appendChild(q);
     div.appendChild(a);
     faqBody.appendChild(div);
   });
 
+  if (faqHandles[0]) faqHandles[0].open();
+
   renderAllowedCommandsFaq(allowedCommandsFaqData);
   renderFaqLimits(APP_CONFIG);
   wireFaqCommandChips(faqBody);
+}
+
+function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
+  const body = document.querySelector('.workflows-body');
+  if (!body) return;
+  body.innerHTML = '';
+  const list = Array.isArray(items) ? items : [];
+  list.forEach(item => {
+    const card = document.createElement('div');
+    card.className = 'workflow-card';
+
+    const titleEl = document.createElement('div');
+    titleEl.className = 'workflow-title';
+    titleEl.textContent = item.title || '';
+    card.appendChild(titleEl);
+
+    if (item.description) {
+      const desc = document.createElement('div');
+      desc.className = 'workflow-desc';
+      desc.textContent = item.description;
+      card.appendChild(desc);
+    }
+
+    const steps = item.steps || [];
+    if (steps.length) {
+      const stepsEl = document.createElement('ol');
+      stepsEl.className = 'workflow-steps';
+      steps.forEach(step => {
+        const li = document.createElement('li');
+        li.className = 'workflow-step';
+
+        const main = document.createElement('div');
+        main.className = 'workflow-step-main';
+
+        const chip = document.createElement('span');
+        chip.className = 'allowed-chip faq-chip workflow-step-cmd';
+        chip.textContent = step.cmd || '';
+        chip.title = 'Click to load into prompt';
+        chip.dataset.faqCommand = step.cmd || '';
+        main.appendChild(chip);
+
+        const runBtn = document.createElement('button');
+        runBtn.type = 'button';
+        runBtn.className = 'btn btn-ghost btn-compact btn-icon-only workflow-step-run';
+        runBtn.textContent = '▶';
+        runBtn.title = 'Run this step';
+        runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
+        runBtn.dataset.workflowStepCmd = step.cmd || '';
+        main.appendChild(runBtn);
+
+        li.appendChild(main);
+
+        if (step.note) {
+          const note = document.createElement('span');
+          note.className = 'workflow-step-note';
+          note.textContent = step.note;
+          li.appendChild(note);
+        }
+
+        stepsEl.appendChild(li);
+      });
+      card.appendChild(stepsEl);
+    }
+
+    body.appendChild(card);
+  });
+
+  wireFaqCommandChips(body);
+  wireWorkflowStepRunButtons(body);
+
+  if (emitCatalogEvent && typeof emitUiEvent === 'function') {
+    emitUiEvent('app:workflows-rendered', {
+      items: list.slice(),
+    });
+  }
+}
+
+function activateWorkflowStepRun(cmd) {
+  if (!cmd) return;
+  _closeMajorOverlays();
+  if (typeof submitComposerCommand === 'function') {
+    submitComposerCommand(cmd, { dismissKeyboard: true });
+  }
+}
+
+function wireWorkflowStepRunButtons(root) {
+  if (!root || typeof bindPressable !== 'function') return;
+  root.querySelectorAll('.workflow-step-run[data-workflow-step-cmd]').forEach(btn => {
+    bindPressable(btn, {
+      onActivate: () => activateWorkflowStepRun(btn.dataset.workflowStepCmd || ''),
+    });
+  });
 }

@@ -1,5 +1,5 @@
 """
-Centralized logging configuration for darklab shell.
+Centralized logging configuration for darklab_shell.
 
 Two output formats, controlled by CFG['log_format']:
   text  — human-readable key=value lines (default, good for Docker stdout)
@@ -69,7 +69,7 @@ class GELFFormatter(logging.Formatter):
     parsing the message string.
     """
 
-    def __init__(self, app_name: str = "darklab shell", app_version: str = APP_VERSION) -> None:
+    def __init__(self, app_name: str = "darklab_shell", app_version: str = APP_VERSION) -> None:
         super().__init__()
         self._app_name = app_name
         self._app_version = app_version
@@ -149,7 +149,7 @@ def configure_logging(cfg: dict) -> None:
     level_name = str(cfg.get("log_level", "INFO")).upper()
     level      = getattr(logging, level_name, logging.INFO)
     fmt_name   = str(cfg.get("log_format", "text")).lower()
-    app_name   = str(cfg.get("app_name", "darklab shell"))
+    app_name   = str(cfg.get("app_name", "darklab_shell"))
 
     formatter: logging.Formatter = (
         GELFFormatter(app_name, APP_VERSION) if fmt_name == "gelf" else _TextFormatter()

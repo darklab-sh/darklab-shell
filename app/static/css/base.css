@@ -1,4 +1,4 @@
-/* darklab shell CSS module: base
+/* darklab_shell CSS module: base
    Theme tokens, reset, base layout, header, input, and dropdown foundations. */
 
 /* ── CSS variables & theme tokens ── */
@@ -79,8 +79,7 @@
   --theme-history-load-modal-shadow: rgba(0,0,0,0.35);
   --theme-faq-modal-bg: #141414;
   --theme-options-modal-bg: #141414;
-  --theme-kill-modal-bg: #141414;
-  --theme-hist-del-modal-bg: #141414;
+  --theme-confirm-modal-bg: #141414;
   --theme-dropdown-bg: color-mix(in srgb, var(--surface) 96%, transparent);
   --theme-dropdown-border: color-mix(in srgb, var(--green) 18%, transparent);
   --theme-dropdown-shadow: rgba(0,0,0,0.35);
@@ -91,7 +90,7 @@
   --theme-overlay-backdrop-bg: rgba(0,0,0,0.75);
   --theme-faq-code-bg: #141414;
   --theme-allowed-chip-bg: #141414;
-  --theme-options-select-bg: #141414;
+  --theme-form-control-bg: #141414;
   --theme-tab-status-ok-bg: #39ff14;
   --theme-toast-bg: #141414;
   --theme-toast-text: #39ff14;
@@ -148,28 +147,17 @@ header {
   border-bottom: 1px solid var(--border);
 }
 
-.header-btns {
-  margin-left: auto;
-  display: flex;
-  gap: 8px;
-  align-items: center;
-}
-
 header h1 {
   font-family: var(--font-mono);
   display: inline-flex;
   align-items: center;
   min-height: 34px;
   padding: 0 12px;
-  background: linear-gradient(180deg, color-mix(in srgb, var(--green) 2%, transparent), color-mix(in srgb, var(--green) 0.6%, transparent));
-  border: 1px solid color-mix(in srgb, var(--green-dim) 22%, var(--border));
-  border-radius: 4px;
   font-size: 22px;
   font-weight: 500;
   color: var(--green);
   letter-spacing: 1.5px;
-  text-shadow: 0 0 6px color-mix(in srgb, var(--green) 8%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--green) 1.5%, transparent);
+  text-shadow: 0 0 20px var(--green-glow);
 }
 
 header .version {
@@ -222,6 +210,16 @@ header .version {
   display: none;
 }
 
+.line-clamp-2 {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  word-break: break-word;
+}
+
 .shell-prompt-wrap {
   display: flex;
   align-items: flex-start;
@@ -261,6 +259,7 @@ header .version {
 }
 
 .shell-prompt-caret {
+  display: inline-block;
   width: 8px;
   height: 1.15em;
   margin-left: 2px;
@@ -269,6 +268,10 @@ header .version {
   box-shadow: 0 0 8px var(--green-glow);
   opacity: 1;
   flex-shrink: 0;
+  align-self: flex-start;
+  transform: translateY(2px);
+  font-size: inherit;
+  line-height: inherit;
   animation: caret-blink 1s steps(1, end) infinite;
 }
 
@@ -295,7 +298,8 @@ header .version {
   border-radius: 1px;
   background: var(--green);
   box-shadow: 0 0 8px var(--green-glow);
-  vertical-align: text-bottom;
+  vertical-align: baseline;
+  transform: translateY(2px);
   font-size: inherit;
   line-height: inherit;
 }
@@ -379,13 +383,21 @@ header .version {
   font-size: 14px;
   min-height: 44px;
   display: flex;
-  align-items: center;
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 2px;
   -webkit-tap-highlight-color: transparent;
   touch-action: manipulation;
 }
 
 .ac-dropdown.ac-mobile .ac-item::before {
   display: none;
+}
+
+.ac-dropdown.ac-mobile .ac-item-desc {
+  margin-left: 0;
+  font-size: 11px;
+  white-space: normal;
 }
 
 .ac-dropdown.ac-up {
@@ -416,6 +428,24 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
   transition: color 0.1s;
 }
 
+.ac-item-main,
+.ac-item-desc {
+  display: inline-block;
+  vertical-align: top;
+}
+
+.ac-item-main {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.ac-item-desc {
+  margin-left: 10px;
+  color: var(--muted);
+  opacity: 0.9;
+}
+
 .ac-item::before {
   content: '  ';
   white-space: pre;
@@ -423,6 +453,10 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 
 .ac-item:hover, .ac-item.ac-active {
   color: var(--green);
+}
+
+.ac-item.ac-active {
+  background: var(--theme-dropdown-hover-bg, var(--bg3));
 }
 
 .ac-item.ac-active::before {
@@ -433,6 +467,15 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 .ac-item .ac-match {
   color: var(--green);
   font-weight: 700;
+}
+
+.ac-item:hover .ac-item-desc,
+.ac-item.ac-active .ac-item-desc {
+  color: var(--text);
+}
+
+.ac-item.ac-example .ac-item-desc::before {
+  content: '# ';
 }
 
 /* ── Ctrl+R history search dropdown ── */
@@ -481,9 +524,11 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 }
 
 .hist-search-match {
-  background: transparent;
+  background: color-mix(in srgb, var(--green) 18%, transparent);
   color: var(--green);
   font-weight: 700;
+  border-radius: 2px;
+  padding: 0 2px;
 }
 
 .hist-search-empty {

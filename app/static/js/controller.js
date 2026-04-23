@@ -10,17 +10,25 @@ else syncThemeSelectionControls();
 
 tsBtn.addEventListener('click', () => {
   applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 });
 
 lnBtn.addEventListener('click', () => {
   applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 });
 
-themeBtn.addEventListener('click', () => {
-  openThemeSelector();
-});
+function openWorkflows() {
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  showWorkflowsOverlay();
+}
+
+function closeWorkflows() {
+  hideWorkflowsOverlay();
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:workflows-closed', {});
+  refocusComposerAfterAction({ defer: true });
+}
 
 function openFaq() {
   _closeMajorOverlays();
@@ -30,106 +38,153 @@ function openFaq() {
 
 function closeFaq() {
   hideFaqOverlay();
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }
 
-function ensureMobileSheetHandle(sheet) {
-  if (!sheet) return null;
-  let handle = sheet.querySelector(':scope > .mobile-sheet-handle');
-  if (handle) return handle;
-  handle = document.createElement('div');
-  handle.className = 'mobile-sheet-handle';
-  handle.setAttribute('aria-hidden', 'true');
-  sheet.insertBefore(handle, sheet.firstChild || null);
-  return handle;
+function openShortcuts() {
+  _closeMajorOverlays();
+  if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+  if (typeof showShortcutsOverlay === 'function') showShortcutsOverlay();
 }
 
-function bindMobileSheetDragClose(sheet, onClose, { threshold = 72 } = {}) {
-  // Bottom sheets should only drag from the visible handle area; otherwise
-  // normal scrolling and button interaction inside the sheet would feel broken.
-  if (!sheet || typeof onClose !== 'function' || sheet.dataset.mobileSheetDragBound === '1') return;
-  sheet.dataset.mobileSheetDragBound = '1';
-  const handle = ensureMobileSheetHandle(sheet);
-  if (!handle) return;
+function closeShortcuts() {
+  if (typeof hideShortcutsOverlay === 'function') hideShortcutsOverlay();
+  refocusComposerAfterAction({ defer: true });
+}
 
-  let drag = null;
+function toggleHistoryPanelSurface(force = null) {
+  _closeMajorOverlays();
+  const isOpen = togglePanelOverlay(historyPanel, force);
+  if (isOpen) {
+    if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
+    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+    refreshHistoryPanel();
+  } else {
+    refocusComposerAfterAction({ defer: true });
+  }
+  return isOpen;
+}
 
-  const clearSheetDragStyles = () => {
-    sheet.style.removeProperty('transform');
-    sheet.style.removeProperty('transition');
-    sheet.style.removeProperty('will-change');
-    sheet.style.removeProperty('opacity');
-  };
+window.toggleHistoryPanelSurface = toggleHistoryPanelSurface;
+window.openHistoryPanelSurface = () => toggleHistoryPanelSurface(true);
+window.closeHistoryPanelSurface = () => toggleHistoryPanelSurface(false);
 
-  const finishDrag = (pointerId, shouldClose) => {
-    if (!drag || drag.pointerId !== pointerId) return;
-    const dy = drag.dy;
-    drag = null;
-    try {
-      sheet.releasePointerCapture(pointerId);
-    } catch (_) {}
-
-    if (!shouldClose) {
-      sheet.style.transition = 'transform 160ms ease';
-      sheet.style.transform = 'translateY(0)';
-      setTimeout(clearSheetDragStyles, 180);
-      return;
+function renderShortcuts(data) {
+  const listEl = document.getElementById('shortcuts-list');
+  if (!listEl) return;
+  listEl.textContent = '';
+  const sections = Array.isArray(data && data.sections) ? data.sections : [];
+  for (const section of sections) {
+    const items = Array.isArray(section && section.items) ? section.items : [];
+    if (!items.length) continue;
+    const sectionEl = document.createElement('div');
+    sectionEl.className = 'shortcuts-section';
+    const headingEl = document.createElement('div');
+    headingEl.className = 'shortcut-section-title';
+    headingEl.textContent = section.title || '';
+    sectionEl.appendChild(headingEl);
+    const pairsEl = document.createElement('div');
+    pairsEl.className = 'shortcuts-pairs';
+    for (const item of items) {
+      const keyEl = document.createElement('div');
+      keyEl.className = 'shortcut-key';
+      keyEl.textContent = item.key || '';
+      const descEl = document.createElement('div');
+      descEl.className = 'shortcut-desc';
+      descEl.textContent = item.description || '';
+      pairsEl.appendChild(keyEl);
+      pairsEl.appendChild(descEl);
     }
-
-    sheet.style.transition = 'transform 180ms ease, opacity 180ms ease';
-    sheet.style.transform = `translateY(${Math.max(sheet.getBoundingClientRect().height, dy)}px)`;
-    sheet.style.opacity = '0.98';
-    setTimeout(() => {
-      clearSheetDragStyles();
-      onClose();
-    }, 180);
-  };
-
-  handle.addEventListener('pointerdown', e => {
-    if (typeof useMobileTerminalViewportMode === 'function' && !useMobileTerminalViewportMode()) return;
-    if (typeof e.button === 'number' && e.button !== 0) return;
-    drag = { pointerId: e.pointerId, startY: e.clientY, dy: 0 };
-    sheet.style.willChange = 'transform';
-    sheet.style.transition = 'none';
-    try {
-      sheet.setPointerCapture(e.pointerId);
-    } catch (_) {}
-  });
-
-  sheet.addEventListener('pointermove', e => {
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    const dy = Math.max(0, e.clientY - drag.startY);
-    drag.dy = dy;
-    if (dy <= 0) return;
-    e.preventDefault();
-    sheet.style.transform = `translateY(${dy}px)`;
-  });
-
-  sheet.addEventListener('pointerup', e => {
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    finishDrag(e.pointerId, drag.dy >= threshold);
-  });
-
-  sheet.addEventListener('pointercancel', e => {
-    if (!drag || drag.pointerId !== e.pointerId) return;
-    finishDrag(e.pointerId, false);
-  });
+    sectionEl.appendChild(pairsEl);
+    listEl.appendChild(sectionEl);
+  }
 }
 
 function setupMobileSheetDragClose() {
+  // All sheet drag/tap/keyboard close behavior lives in mobile_sheet.js so the
+  // wiring per sheet stays a one-liner and behavior cannot drift between them.
+  if (typeof bindMobileSheet !== 'function') return;
   const faqModal = document.getElementById('faq-modal');
   const optionsModal = document.getElementById('options-modal');
-  const killModal = document.getElementById('kill-modal');
-  const histDelModal = document.getElementById('hist-del-modal');
+  const workflowsModal = document.getElementById('workflows-modal');
 
-  bindMobileSheetDragClose(mobileMenu, () => hideMobileMenu());
-  bindMobileSheetDragClose(historyPanel, () => hideHistoryPanel());
-  bindMobileSheetDragClose(faqModal, () => closeFaq());
-  bindMobileSheetDragClose(optionsModal, () => closeOptions());
-  bindMobileSheetDragClose(killModal, () => closeKillOverlay());
-  bindMobileSheetDragClose(histDelModal, () => {
-    hideHistoryDeleteOverlay();
-    pendingHistAction = null;
+  bindMobileSheet(mobileMenu,         { onClose: () => hideMobileMenu() });
+  bindMobileSheet(historyPanel,       { onClose: () => hideHistoryPanel() });
+  bindMobileSheet(workflowsModal,     { onClose: () => closeWorkflows() });
+  bindMobileSheet(faqModal,           { onClose: () => closeFaq() });
+  bindMobileSheet(optionsModal,       { onClose: () => closeOptions() });
+}
+
+function setupDismissibleOverlays() {
+  // Each overlay/modal surface is registered with bindDismissible so
+  // backdrop click + explicit close button + Escape are owned by one
+  // helper (app/static/js/ui_dismissible.js). The Escape cascade
+  // dispatcher (closeTopmostDismissible) enforces modal > sheet > panel
+  // priority declaratively instead of the hand-rolled if-chain this
+  // setup replaces.
+  if (typeof bindDismissible !== 'function') return;
+  const shortcutsOverlayEl = document.getElementById('shortcuts-overlay');
+  const shortcutsCloseBtn = shortcutsOverlayEl?.querySelector('.shortcuts-close');
+
+  bindDismissible(_uiOverlayRefs.workflowsOverlay, {
+    level: 'panel',
+    isOpen: isWorkflowsOverlayOpen,
+    onClose: closeWorkflows,
+    closeButtons: workflowsCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.faqOverlay, {
+    level: 'panel',
+    isOpen: isFaqOverlayOpen,
+    onClose: closeFaq,
+    closeButtons: faqCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.themeOverlay, {
+    level: 'panel',
+    isOpen: isThemeOverlayOpen,
+    onClose: closeThemeSelector,
+    closeButtons: themeCloseBtn,
+  });
+  bindDismissible(_uiOverlayRefs.optionsOverlay, {
+    level: 'panel',
+    isOpen: isOptionsOverlayOpen,
+    onClose: closeOptions,
+    closeButtons: optionsCloseBtn,
+  });
+  bindDismissible(shortcutsOverlayEl, {
+    level: 'panel',
+    isOpen: isShortcutsOverlayOpen,
+    onClose: closeShortcuts,
+    closeButtons: shortcutsCloseBtn,
+  });
+  bindDismissible(historyPanel, {
+    level: 'panel',
+    isOpen: isHistoryPanelOpen,
+    onClose: () => {
+      if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
+      hideHistoryPanel();
+    },
+    closeButtons: historyCloseBtn,
+    // historyPanel is an aside, not a modal backdrop — outside click
+    // dismissal is handled by the ambient-click listener in the global
+    // click handler below, not by backdrop-click here.
+    closeOnBackdrop: false,
+  });
+}
+
+function setupModalFocusTraps() {
+  // Keep Tab / Shift+Tab cycling inside each modal card while its overlay is
+  // open — otherwise focus falls through to the rail / tabs / HUD behind the
+  // backdrop. #confirm-host wires its own focus trap per-open through
+  // showConfirm() because the card's focusables change between shows; the
+  // four app-level modals have persistent DOM, so a one-shot idempotent bind
+  // at startup is equivalent. bindFocusTrap is a no-op when the card is
+  // hidden (display: none on the overlay wrapper), so the listener is only
+  // reachable while the modal is open.
+  if (typeof bindFocusTrap !== 'function') return;
+  const ids = ['options-modal', 'theme-modal', 'faq-modal', 'workflows-modal'];
+  ids.forEach((id) => {
+    const card = document.getElementById(id);
+    if (card) bindFocusTrap(card);
   });
 }
 
@@ -140,12 +195,11 @@ function setupMobileComposer() {
   const mobileInput = composerInputs.mobile || null;
   if (!mobileInput || !mobileRunBtn) return;
   bindMobileComposerSubmitAndInputListeners(mobileInput);
-  bindMobileEditBarListeners(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer ? _mobileUiLayoutRefs.composer.editBar : null);
   bindMobileComposerKeyboardListeners(mobileInput);
   if (mobileShellTranscript) {
     const closeKeyboardFromTranscript = e => {
       const interactiveTarget = e && e.target && e.target.closest
-        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .term-action-btn, .hist-chip');
+        && e.target.closest('button, a, input, textarea, select, [contenteditable="true"], .hist-chip');
       if (interactiveTarget) return;
       if (isMobileKeyboardOpen() && typeof blurVisibleComposerInputIfMobile === 'function') {
         if (typeof setMobileKeyboardOpenState === 'function') setMobileKeyboardOpenState(false, { delay: 120 });
@@ -159,16 +213,17 @@ function setupMobileComposer() {
 // ── Load config from server ──
 apiFetch('/config').then(r => r.json()).then(cfg => {
   APP_CONFIG = cfg;
+  if (typeof window !== 'undefined') window.APP_CONFIG = APP_CONFIG;
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
-  const wmText = `${cfg.app_name || 'darklab shell'}${wmVersion}`;
+  const wmText = `${cfg.app_name || 'darklab_shell'}${wmVersion}`;
   document.querySelectorAll('.terminal-wordmark').forEach(el => {
     el.textContent = wmText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
-  document.querySelectorAll('.mobile-menu-wordmark').forEach(el => {
-    el.textContent = `GitLab: ${wmText}`;
+  document.querySelectorAll('.menu-footer').forEach(el => {
+    el.textContent = wmText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
   syncThemeSelectionControls();
@@ -176,7 +231,9 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   renderFaqLimits(cfg);
   if (cfg.diag_enabled) {
     if (diagBtn) diagBtn.classList.remove('u-hidden');
-    const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-action="diag"]');
+    const railDiagBtn = document.getElementById('rail-diag-btn');
+    if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
+    const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-menu-action="diag"]');
     if (mobileDiagBtn) mobileDiagBtn.classList.remove('u-hidden');
   }
 }).catch(err => {
@@ -190,64 +247,484 @@ _uiOverlayRefs.hamburgerBtn.addEventListener('click', e => {
   else showMobileMenu();
 });
 
-_uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-action]').forEach(btn => {
+// Mobile menu action dispatch. Exposed globally so the mobile-shell sheet
+// (mobile_chrome.js) can route its own data-menu-action button clicks here
+// without re-implementing the action body, and so a few flows (e.g. routing
+// 'history' to the recents pull-up sheet on mobile) can override one branch.
+function dispatchMobileMenuAction(action, btn = null) {
+  if (action === 'search') {
+    const visible = isSearchBarOpen();
+    if (visible) {
+      hideSearchBar();
+      clearSearch();
+    } else {
+      showSearchBar();
+      focusElement(searchInput);
+      runSearch();
+    }
+  }
+  if (action === 'history') {
+    _closeMajorOverlays();
+    const isOpen = togglePanelOverlay(historyPanel);
+    if (isOpen) {
+      if (typeof resetHistoryMobileFilters === 'function') resetHistoryMobileFilters();
+      if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
+      refreshHistoryPanel();
+    }
+  }
+  if (action === 'ts-toggle') {
+    // The ts-toggle button is wired as a disclosure in mobile_chrome.js —
+    // bindDisclosure owns the aria-expanded / submenu visibility toggle via
+    // the pressable's own click handler. The dispatcher here returns early
+    // so the menu is not closed as a side effect (ts-toggle is the only
+    // menu action that keeps the sheet open).
+    return;
+  }
+  if (action === 'ts-set') {
+    applyTimestampPreference(btn?.dataset.tsMode || 'off');
+    refocusComposerAfterAction({ defer: true });
+  }
+  if (action === 'ln') {
+    applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
+    refocusComposerAfterAction({ defer: true });
+  }
+  if (action === 'clear') {
+    // On desktop the clear button lives in `.terminal-actions` per-tab. On
+    // mobile that row is compressed, so clear moves into the hamburger menu
+    // (mobile.css hides the per-tab clear under `body.mobile-terminal-mode`).
+    // Behaviour matches the HUD / per-tab clear: cancel welcome settle if it's
+    // still running on this tab, then clear the output while preserving run
+    // state so a mid-run clear doesn't abandon the SSE stream.
+    if (activeTabId) {
+      if (typeof cancelWelcome === 'function') cancelWelcome(activeTabId);
+      if (typeof clearTab === 'function') clearTab(activeTabId, { preserveRunState: true });
+    }
+    refocusComposerAfterAction({ defer: true });
+  }
+  if (action === 'options') openOptions();
+  if (action === 'theme') openThemeSelector();
+  if (action === 'workflows') openWorkflows();
+  if (action === 'faq') openFaq();
+  if (action === 'diag') window.location.href = '/diag';
+}
+window.dispatchMobileMenuAction = dispatchMobileMenuAction;
+
+_uiOverlayRefs.mobileMenu?.querySelectorAll('button[data-menu-action]').forEach(btn => {
   btn.addEventListener('click', () => {
-    hideMobileMenu();
-    const action = btn.dataset.action;
-    if (action === 'search') {
-      const visible = isSearchBarOpen();
-      if (visible) {
-        hideSearchBar();
-        clearSearch();
-      } else {
-        showSearchBar();
-        searchInput.focus();
-        runSearch();
-      }
-    }
-    if (action === 'history') {
-      _closeMajorOverlays();
-      const isOpen = togglePanelOverlay(historyPanel);
-      if (isOpen) {
-        if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-        refreshHistoryPanel();
-      }
-    }
-    if (action === 'ts') {
-      applyTimestampPreference(_tsModes[(_tsModes.indexOf(tsMode) + 1) % _tsModes.length]);
-      refocusTerminalInput();
-    }
-    if (action === 'ln') {
-      applyLineNumberPreference(typeof lnMode !== 'undefined' ? (lnMode === 'on' ? 'off' : 'on') : 'on');
-      refocusTerminalInput();
-    }
-    if (action === 'options') openOptions();
-    if (action === 'theme') openThemeSelector();
-    if (action === 'faq') openFaq();
-    if (action === 'diag') window.location.href = '/diag';
+    const action = btn.dataset.menuAction;
+    // ts-toggle keeps the sheet open; its whole purpose is to expand an inline
+    // sub-menu beneath the timestamps row. Every other action closes the sheet
+    // as it transitions to another surface.
+    if (action !== 'ts-toggle') hideMobileMenu();
+    dispatchMobileMenuAction(action, btn);
   });
 });
 
-// ── FAQ ──
-faqBtn.addEventListener('click', openFaq);
-_uiOverlayRefs.faqOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.faqOverlay) closeFaq();
-});
-faqCloseBtn.addEventListener('click', closeFaq);
-_uiOverlayRefs.themeOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.themeOverlay) closeThemeSelector();
-});
-themeCloseBtn?.addEventListener('click', closeThemeSelector);
-optionsBtn?.addEventListener('click', openOptions);
-_uiOverlayRefs.optionsOverlay?.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.optionsOverlay) closeOptions();
-});
-optionsCloseBtn?.addEventListener('click', closeOptions);
+// ── Keyboard shortcuts overlay (`?` trigger) ──
+
+// Global `?` handler. Opens the shortcuts overlay from anywhere on the page,
+// including text-input-like surfaces (the composer, search boxes, modal
+// inputs), but only when the field is empty. Once any text is present, `?`
+// types normally so args like `curl "https://example.com/api?foo=bar"` are
+// not interfered with. Skipped while the welcome animation is active; the
+// welcome flow consumes every printable key to settle its own intro state.
+// Registered in capture phase so we can inspect the input value BEFORE the
+// browser inserts the character, and call stopImmediatePropagation() to
+// prevent the `#cmd` keydown handler's press-and-hold manual-insertion
+// path (which preventDefault's the native insert and re-inserts the key
+// itself) from re-adding the `?` after we've routed it to the overlay.
+document.addEventListener('keydown', e => {
+  if (e.key !== '?') return;
+  if (e.ctrlKey || e.metaKey || e.altKey) return;
+  if (typeof _welcomeActive !== 'undefined' && _welcomeActive) return;
+  const ae = document.activeElement;
+  if (ae) {
+    const tag = (ae.tagName || '').toLowerCase();
+    const isEditable = ae.isContentEditable;
+    const isTextInput =
+      tag === 'textarea' ||
+      (tag === 'input' && !/^(checkbox|radio|button|submit|reset|range|color|file)$/i.test(ae.type || '')) ||
+      isEditable;
+    if (tag === 'select') return;
+    if (isTextInput) {
+      const raw = isEditable ? (ae.textContent || '') : (ae.value || '');
+      if (raw.length > 0) return;
+    }
+  }
+  e.preventDefault();
+  e.stopImmediatePropagation();
+  if (typeof isShortcutsOverlayOpen === 'function' && isShortcutsOverlayOpen()) {
+    closeShortcuts();
+  } else {
+    openShortcuts();
+  }
+}, true);
+// Theme + Options: backdrop + close button dismissal is registered via
+// bindDismissible in setupDismissibleOverlays(); only the open triggers
+// live here.
 optionsTsSelect?.addEventListener('change', e => {
   applyTimestampPreference(e.target.value);
 });
 optionsLnToggle?.addEventListener('change', e => {
   applyLineNumberPreference(e.target.checked ? 'on' : 'off');
+});
+optionsWelcomeSelect?.addEventListener('change', e => {
+  applyWelcomeIntroPreference(e.target.value);
+});
+optionsShareRedactionSelect?.addEventListener('change', e => {
+  applyShareRedactionDefaultPreference(e.target.value);
+});
+optionsNotifyToggle?.addEventListener('change', e => {
+  applyRunNotifyPreference(e.target.checked ? 'on' : 'off');
+});
+optionsHudClockSelect?.addEventListener('change', e => {
+  applyHudClockPreference(e.target.value);
+});
+
+// Session token options panel — UI-native controls
+
+function _updateOptionsSessionTokenStatus() {
+  const el = document.getElementById('options-session-token-status');
+  if (!el) return;
+  const token = localStorage.getItem('session_token');
+  const hasToken = Boolean(token);
+  el.textContent = hasToken ? maskSessionToken(token) : 'No session token — anonymous session';
+  el.classList.toggle('is-active', hasToken);
+  // Generate only when no token; Rotate, Clear, Copy only when one is active.
+  const generateBtn = document.getElementById('options-session-token-generate-btn');
+  const rotateBtn   = document.getElementById('options-session-token-rotate-btn');
+  const clearBtn    = document.getElementById('options-session-token-clear-btn');
+  const copyBtn     = document.getElementById('options-session-token-copy-btn');
+  if (generateBtn) generateBtn.style.display = hasToken ? 'none' : '';
+  if (rotateBtn)   rotateBtn.style.display   = hasToken ? '' : 'none';
+  if (clearBtn)    clearBtn.style.display    = hasToken ? '' : 'none';
+  if (copyBtn)     copyBtn.style.display     = hasToken ? '' : 'none';
+  _optionsTokenShowMsg('');
+}
+
+function _optionsTokenSetBusy(busy) {
+  ['options-session-token-generate-btn', 'options-session-token-set-btn',
+   'options-session-token-rotate-btn',   'options-session-token-clear-btn'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.disabled = busy;
+  });
+}
+
+function _optionsTokenShowMsg(msg, isError = false) {
+  const el = document.getElementById('options-session-token-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = msg ? '' : 'none';
+  el.classList.toggle('is-error', isError);
+}
+
+async function _waitForMigrateChoice(msg) {
+  if (typeof showConfirm !== 'function') return false;
+  return await showConfirm({
+    body: msg,
+    actions: [
+      { id: 'cancel', label: 'Cancel',       role: 'cancel' },
+      { id: 'skip',   label: 'Skip',         role: 'secondary' },
+      { id: 'yes',    label: 'Yes, migrate', role: 'primary' },
+    ],
+  });
+}
+
+async function _clearActiveSessionToken() {
+  localStorage.removeItem('session_token');
+  const uuid = localStorage.getItem('session_id') || SESSION_ID;
+  updateSessionId(uuid);
+  if (typeof hydrateCmdHistory === 'function') hydrateCmdHistory([]);
+  if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+  _updateOptionsSessionTokenStatus();
+  return uuid;
+}
+
+async function confirmClearSessionToken() {
+  const token = localStorage.getItem('session_token');
+  if (!token) return { cleared: false, anonymousSessionId: null };
+  if (typeof showConfirm !== 'function') {
+    const uuid = await _clearActiveSessionToken();
+    return { cleared: true, anonymousSessionId: uuid };
+  }
+
+  const choice = await showConfirm({
+    body: {
+      text: 'Clear the current session token from this browser?',
+      note: 'If you have not saved it elsewhere, you will not be able to recover it from the app, and history tied to it will no longer be accessible from this browser.',
+    },
+    tone: 'danger',
+    actions: [
+      {
+        id: 'copy',
+        label: 'Copy token',
+        role: 'secondary',
+        onActivate: async () => {
+          try {
+            await copyTextToClipboard(token);
+            showToast('Token copied to clipboard');
+          } catch (_) {
+            showToast('Failed to copy token', 'error');
+          }
+          return false;
+        },
+      },
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      { id: 'clear', label: 'Clear token', role: 'primary', tone: 'danger' },
+    ],
+  });
+
+  if (choice !== 'clear') return { cleared: false, anonymousSessionId: null };
+  const uuid = await _clearActiveSessionToken();
+  return { cleared: true, anonymousSessionId: uuid };
+}
+
+document.getElementById('options-session-token-copy-btn')?.addEventListener('click', () => {
+  const token = localStorage.getItem('session_token');
+  if (!token) return;
+  copyTextToClipboard(token)
+    .then(() => showToast('Token copied to clipboard'))
+    .catch(() => showToast('Failed to copy token', 'error'));
+});
+
+document.getElementById('options-session-token-generate-btn')?.addEventListener('click', async () => {
+  const oldSessionId = SESSION_ID;
+  _optionsTokenSetBusy(true);
+  _optionsTokenShowMsg('');
+  try {
+    const resp = await apiFetch('/session/token/generate');
+    if (!resp.ok) {
+      const d = await resp.json().catch(() => ({}));
+      _optionsTokenShowMsg(`Failed to generate token — ${d.error || resp.status}`, true);
+      return;
+    }
+    const { session_token: newToken } = await resp.json();
+
+    // Count runs on OLD session before switching identity.
+    let runCount = 0;
+    try {
+      const countResp = await apiFetch('/session/run-count');
+      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+    } catch (_) {}
+
+    // Migrate BEFORE switching identity so a failed /session/migrate does not
+    // leave the user on the new token with their runs still on the old session.
+    if (runCount > 0) {
+      const migrateChoice = await _waitForMigrateChoice(
+        `You have ${runCount} run(s) in your previous session. Migrate history to the new token?`
+      );
+      if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
+      if (migrateChoice === 'yes') {
+        const migrateResp = await fetch('/session/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
+          body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: newToken }),
+        }).catch(() => null);
+        if (!migrateResp?.ok) {
+          const d = await migrateResp?.json().catch(() => ({})) ?? {};
+          _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
+          return;
+        }
+      }
+    }
+
+    localStorage.setItem('session_token', newToken);
+    updateSessionId(newToken);
+    if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
+    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    _updateOptionsSessionTokenStatus();
+    copyTextToClipboard(newToken)
+      .then(() => showToast('New token copied to clipboard'))
+      .catch(() => {});
+  } catch (err) {
+    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+  } finally {
+    _optionsTokenSetBusy(false);
+  }
+});
+
+// Set token modal — showConfirm with input + inline error content slot.
+// Apply is gated by onActivate (format check + /session/token/verify),
+// so validation errors keep the modal open instead of firing the real flow.
+document.getElementById('options-session-token-set-btn')?.addEventListener('click', async () => {
+  _optionsTokenShowMsg('');
+  if (typeof showConfirm !== 'function') return;
+
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.id = 'session-token-set-input';
+  input.className = 'options-token-input modal-token-input';
+  input.placeholder = 'tok_... or UUID';
+  if (typeof applyMobileTextInputDefaults === 'function') {
+    applyMobileTextInputDefaults(input);
+  } else {
+    input.autocomplete = 'off';
+    input.autocapitalize = 'none';
+    input.autocorrect = 'off';
+    input.spellcheck = false;
+    input.inputMode = 'text';
+  }
+
+  const errEl = document.createElement('div');
+  errEl.id = 'session-token-set-error';
+  errEl.className = 'options-session-token-msg is-error';
+  errEl.style.display = 'none';
+
+  // Enter in the input triggers Apply. Preventing default stops the enter from
+  // bubbling into a synthetic click on the first button (Cancel).
+  input.addEventListener('keydown', (e) => {
+    if (e.key !== 'Enter') return;
+    e.preventDefault();
+    document.querySelector('#confirm-host [data-confirm-action-id="apply"]')?.click();
+  });
+
+  let value = '';
+  const choice = await showConfirm({
+    body: {
+      text: 'Enter a session token to switch to.',
+      note: 'Accepts tok_... format or a UUID from another session.',
+    },
+    content: [input, errEl],
+    defaultFocus: input,
+    actions: [
+      { id: 'cancel', label: 'Cancel', role: 'cancel' },
+      {
+        id: 'apply',
+        label: 'Apply',
+        role: 'primary',
+        onActivate: async () => {
+          value = (input.value || '').trim();
+          const isTok  = value.startsWith('tok_');
+          const isUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+          if (!value || (!isTok && !isUuid)) {
+            errEl.textContent = 'Invalid token — expected tok_... or a UUID';
+            errEl.style.display = '';
+            return false;
+          }
+          // For tok_ tokens, verify server-side existence before switching.
+          // A typo would otherwise silently create a brand-new empty session.
+          // Fail closed: any failure (network error, non-OK response, missing
+          // exists flag) blocks the switch rather than allowing an unverified
+          // token through.
+          if (isTok) {
+            let verifyErr = null;
+            try {
+              const vResp = await apiFetch('/session/token/verify', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ token: value }),
+              });
+              const vData = await vResp.json().catch(() => ({}));
+              if (!vResp.ok) {
+                verifyErr = 'Token verification failed — server returned an error';
+              } else if (vData.exists === false) {
+                verifyErr = 'Token not found — this token was not issued by this server';
+              }
+            } catch (_) {
+              verifyErr = 'Token verification failed — server is unreachable';
+            }
+            if (verifyErr !== null) {
+              errEl.textContent = verifyErr;
+              errEl.style.display = '';
+              return false;
+            }
+          }
+          errEl.style.display = 'none';
+          return true;
+        },
+      },
+    ],
+  });
+
+  if (choice !== 'apply') return;
+
+  const oldSessionId = SESSION_ID;
+  _optionsTokenSetBusy(true);
+  _optionsTokenShowMsg('');
+  try {
+    let runCount = 0;
+    try {
+      const countResp = await apiFetch('/session/run-count');
+      if (countResp.ok) runCount = (await countResp.json()).count || 0;
+    } catch (_) {}
+
+    // Migrate BEFORE switching identity so a failed /session/migrate does not
+    // leave the user on the new token with their runs still on the old session.
+    if (runCount > 0) {
+      const migrateChoice = await _waitForMigrateChoice(
+        `You have ${runCount} run(s) in your current session. Migrate history to this token?`
+      );
+      if (migrateChoice !== 'skip' && migrateChoice !== 'yes') return;
+      if (migrateChoice === 'yes') {
+        const migrateResp = await fetch('/session/migrate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
+          body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: value }),
+        }).catch(() => null);
+        if (!migrateResp?.ok) {
+          const d = await migrateResp?.json().catch(() => ({})) ?? {};
+          _optionsTokenShowMsg(`Migration failed — ${d.error || 'network error'}. Token not activated.`, true);
+          return;
+        }
+      }
+    }
+
+    localStorage.setItem('session_token', value);
+    updateSessionId(value);
+    if (typeof _seedLocalStorageStarsToServer === 'function') await _seedLocalStorageStarsToServer();
+    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+    _updateOptionsSessionTokenStatus();
+    showToast('Session token applied');
+  } catch (err) {
+    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+  } finally {
+    _optionsTokenSetBusy(false);
+  }
+});
+
+document.getElementById('options-session-token-rotate-btn')?.addEventListener('click', async () => {
+  const oldSessionId = SESSION_ID;
+  _optionsTokenSetBusy(true);
+  _optionsTokenShowMsg('');
+  try {
+    const genResp = await apiFetch('/session/token/generate');
+    if (!genResp.ok) {
+      const d = await genResp.json().catch(() => ({}));
+      _optionsTokenShowMsg(`Failed to generate token — ${d.error || genResp.status}`, true);
+      return;
+    }
+    const { session_token: newToken } = await genResp.json();
+
+    // Migrate BEFORE updating SESSION_ID so the old identity is sent in the header.
+    const migrateResp = await fetch('/session/migrate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'X-Session-ID': oldSessionId },
+      body: JSON.stringify({ from_session_id: oldSessionId, to_session_id: newToken }),
+    });
+    const migrateData = await migrateResp.json().catch(() => ({}));
+    if (!migrateResp.ok || !migrateData.ok) {
+      _optionsTokenShowMsg(`Migration failed — token not rotated: ${migrateData.error || migrateResp.status}`, true);
+      return;
+    }
+
+    localStorage.setItem('session_token', newToken);
+    updateSessionId(newToken);
+    if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
+
+    _updateOptionsSessionTokenStatus();
+    copyTextToClipboard(newToken)
+      .then(() => showToast('New token copied to clipboard'))
+      .catch(() => showToast('Token rotated'));
+  } catch (err) {
+    _optionsTokenShowMsg(`Error: ${err.message || 'network error'}`, true);
+  } finally {
+    _optionsTokenSetBusy(false);
+  }
+});
+
+document.getElementById('options-session-token-clear-btn')?.addEventListener('click', async () => {
+  const result = await confirmClearSessionToken();
+  if (result.cleared) showToast('Session token cleared');
 });
 
 apiFetch('/allowed-commands').then(r => r.json()).then(data => {
@@ -263,35 +740,80 @@ apiFetch('/faq').then(r => r.json()).then(data => {
   logClientError('failed to load /faq', err);
 });
 
-apiFetch('/history').then(r => r.json()).then(data => {
-  hydrateCmdHistory(data.runs || []);
+apiFetch('/shortcuts').then(r => r.json()).then(data => {
+  renderShortcuts(data || {});
 }).catch(err => {
-  logClientError('failed to load /history', err);
+  logClientError('failed to load /shortcuts', err);
 });
+
+apiFetch('/workflows').then(r => r.json()).then(data => {
+  const items = data.items || [];
+  renderWorkflowItems(items);
+}).catch(err => {
+  logClientError('failed to load /workflows', err);
+});
+
+loadStarredFromServer().catch(err => {
+  logClientError('failed to load /session/starred', err);
+});
+
+// Migrate any legacy stars from localStorage to the server, and clean up the
+// stale key for users who never trigger a session change.
+if (typeof _seedLocalStorageStarsToServer === 'function') {
+  _seedLocalStorageStarsToServer().catch(err => {
+    logClientError('failed to seed localStorage stars', err);
+  });
+}
 
 // ── Tabs ──
 setupTabScrollControls();
 applyTimestampPreference(getPreference('pref_timestamps') || 'off', false);
 applyLineNumberPreference(getPreference('pref_line_numbers') || 'off', false);
-createTab('tab 1');
-runWelcome();
+applyWelcomeIntroPreference(getWelcomeIntroPreference(), false);
+applyShareRedactionDefaultPreference(getShareRedactionDefaultPreference(), false);
+applyHudClockPreference(getHudClockPreference(), false);
+syncOptionsControls();
+if (typeof loadSessionPreferences === 'function') {
+  loadSessionPreferences().catch(err => {
+    logClientError('failed to apply session preferences', err);
+  });
+}
+
+const commandHistoryLimit = encodeURIComponent(String(APP_CONFIG.recent_commands_limit || 50));
+Promise.all([
+  apiFetch(`/history/commands?limit=${commandHistoryLimit}`).then(r => r.json()).catch(err => {
+    logClientError('failed to load /history/commands', err);
+    return { runs: [] };
+  }),
+  apiFetch('/history/active').then(r => r.json()).catch(err => {
+    logClientError('failed to load /history/active', err);
+    return { runs: [] };
+  }),
+]).then(([historyData, activeData]) => {
+  hydrateCmdHistory(historyData.runs || []);
+  const restoredTabs = typeof restoreTabSessionState === 'function'
+    && restoreTabSessionState();
+  const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
+    && restoreActiveRunsAfterReload(activeData.runs || []);
+  if (!restoredTabs && !restoredActiveRuns) {
+    createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
+    runWelcome();
+    return;
+  }
+  _welcomeBootPending = false;
+});
+
 setTimeout(() => {
   if (!cmdInput) return;
   if (useMobileTerminalViewportMode()) {
-    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-    if (typeof window !== 'undefined' && typeof window.scrollTo === 'function') {
-      try {
-        window.scrollTo({ top: 0, behavior: 'auto' });
-      } catch (_) {
-        // jsdom does not implement scrollTo; browsers do.
-      }
-    }
     return;
   }
-  refocusTerminalInput();
+  refocusComposerAfterAction({ defer: true });
 }, 0);
 syncMobileViewportState();
 setupMobileSheetDragClose();
+setupDismissibleOverlays();
+setupModalFocusTraps();
 
 newTabBtn.addEventListener('click', () => {
   createShortcutTab();
@@ -305,7 +827,7 @@ searchToggleBtn.addEventListener('click', () => {
     clearSearch();
   } else {
     showSearchBar();
-    searchInput.focus();
+    focusElement(searchInput);
     runSearch();
   }
 });
@@ -322,67 +844,34 @@ searchInput.addEventListener('keydown', e => {
   if (e.key === 'Escape') {
     hideSearchBar();
     clearSearch();
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
   }
 });
 
 searchCaseBtn.addEventListener('click', () => {
   searchCaseSensitive = !searchCaseSensitive;
-  searchCaseBtn.classList.toggle('active', searchCaseSensitive);
+  searchCaseBtn.setAttribute('aria-pressed', searchCaseSensitive ? 'true' : 'false');
   runSearch();
 });
 
 searchRegexBtn.addEventListener('click', () => {
   searchRegexMode = !searchRegexMode;
-  searchRegexBtn.classList.toggle('active', searchRegexMode);
+  searchRegexBtn.setAttribute('aria-pressed', searchRegexMode ? 'true' : 'false');
   runSearch();
 });
 
 // ── Run history panel ──
-histBtn.addEventListener('click', () => {
-  _closeMajorOverlays();
-  const isOpen = togglePanelOverlay(historyPanel);
-  if (isOpen) {
-    if (typeof blurVisibleComposerInputIfMobile === 'function') blurVisibleComposerInputIfMobile();
-    refreshHistoryPanel();
-  } else {
-    refocusTerminalInput();
-  }
-});
-historyCloseBtn.addEventListener('click', () => {
-  hideHistoryPanel();
-});
+// history panel close button + outside-area dismissal are registered via
+// bindDismissible in setupDismissibleOverlays().
 
 // ── History delete modal ──
+// The modal itself lives in ui_confirm.js — confirmHistAction() builds
+// the action list and resolves the choice. Only the entry-point button
+// for the bulk clear path lives here.
 histClearAllBtn.addEventListener('click', () => {
   confirmHistAction('clear');
 });
-histDelCancelBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  pendingHistAction = null;
-});
-histDelNonfavBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  executeHistAction('clear-nonfav');
-});
-histDelConfirmBtn.addEventListener('click', () => {
-  hideHistoryDeleteOverlay();
-  executeHistAction();
-});
-histDelOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.histDelOverlay) { hideHistoryDeleteOverlay(); pendingHistAction = null; }
-});
 
-// ── Kill modal ──
-killCancelBtn.addEventListener('click', () => {
-  closeKillOverlay();
-});
-killConfirmBtn.addEventListener('click', () => {
-  confirmPendingKill();
-});
-_uiOverlayRefs.killOverlay.addEventListener('click', e => {
-  if (e.target === _uiOverlayRefs.killOverlay) closeKillOverlay();
-});
 
 // ── Global keyboard shortcuts ──
 // Current bindings intentionally stay narrow:
@@ -395,31 +884,27 @@ _uiOverlayRefs.killOverlay.addEventListener('click', e => {
 // - Alt+Tab / Alt+Shift+Tab for tab cycling (forward/backward)
 // - Alt+ArrowLeft / Alt+ArrowRight for tab cycling (same as Tab)
 // - Alt+P for permalink, Alt+Shift+C for copy
-// - Enter / Escape for kill-confirm accept / cancel
+// Confirmation dialogs (kill, history-delete, share-redaction, ...) use
+// default-focus-on-cancel so Enter resolves to the safe action via the
+// browser's native button activation. Escape is routed through the
+// dismissible dispatcher below.
 // Browser-native combos like Ctrl/Cmd+T or Ctrl/Cmd+W remain environment-dependent.
 document.addEventListener('keydown', e => {
-  if (isKillOverlayOpen()) {
-    if (e.key === 'Enter') {
-      confirmPendingKill();
-      e.preventDefault();
-      return;
-    }
-    if (e.key === 'Escape') {
-      closeKillOverlay();
-      e.preventDefault();
-      return;
-    }
+  // Unified Escape dispatch: closes the topmost open dismissible
+  // (modal > sheet > panel) via the registry populated by
+  // setupDismissibleOverlays(). Replaces the per-overlay if-chain that
+  // used to live here.
+  if (e.key === 'Escape' && typeof closeTopmostDismissible === 'function' && closeTopmostDismissible()) {
+    e.preventDefault();
+    return;
   }
-  if (isHistoryDeleteOverlayOpen()) {
-    if (e.key === 'Escape') {
-      hideHistoryDeleteOverlay();
-      pendingHistAction = null;
-      e.preventDefault();
-      return;
-    }
-  }
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
-    if (e.key !== 'Escape') return;
+  // When a major panel is open, swallow non-chrome keys so shortcuts
+  // don't dispatch behind the overlay. Chrome shortcuts (Alt+H, Alt+G,
+  // Alt+, etc.) still fire so the opening chord can also close the
+  // surface.
+  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen() || isWorkflowsOverlayOpen() || isHistoryPanelOpen()) {
+    if (handleChromeShortcut(e)) return;
+    return;
   }
   if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
     const isCtrlC = e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C');
@@ -428,19 +913,19 @@ document.addEventListener('keydown', e => {
     if (isCtrlC) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (e.key === 'Escape' || e.key === 'Enter' || isSpace) {
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     if (isPrintable) {
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
       e.preventDefault();
       return;
@@ -448,6 +933,7 @@ document.addEventListener('keydown', e => {
   }
   if (handleTabShortcut(e)) return;
   if (handleActionShortcut(e)) return;
+  if (handleChromeShortcut(e)) return;
   if (e.ctrlKey && !e.metaKey && !e.altKey && (e.key === 'c' || e.key === 'C')) {
     if (e.target === cmdInput) return;
     const editable = isEditableTarget(e.target);
@@ -455,13 +941,15 @@ document.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
       return;
     }
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
+    } else if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+      cancelPendingTerminalConfirm(activeTabId);
     } else {
       interruptPromptLine(activeTabId);
     }
@@ -476,7 +964,7 @@ document.addEventListener('keydown', e => {
     && e.key.length === 1
   ) {
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     setComposerValue((typeof getComposerValue === 'function' ? getComposerValue() : '') + e.key);
     e.preventDefault();
     return;
@@ -484,23 +972,22 @@ document.addEventListener('keydown', e => {
   if (e.key === 'Enter' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
     if ((typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) return;
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
   if (e.key === 'Escape' && _welcomeActive && welcomeOwnsTab(activeTabId)) {
     requestWelcomeSettle(activeTabId);
-    refocusTerminalInput();
+    refocusComposerAfterAction({ defer: true });
     e.preventDefault();
     return;
   }
   if (e.key === 'Escape') {
-    closeFaq();
-    closeOptions();
-    closeThemeSelector();
+    // Dismissibles are closed by the unified Escape dispatch at the top
+    // of this handler; only the search-bar and search-term clears
+    // remain, since those are not registered surfaces.
     hideSearchBar();
     clearSearch();
-    if (isHistoryPanelOpen()) hideHistoryPanel();
   }
 
   if (_replayPromptShortcutAfterSelection(e)) return;
@@ -513,11 +1000,11 @@ document.addEventListener('keydown', e => {
     && !isEditableTarget(e.target)
     && !(e.target && e.target.closest && e.target.closest('button, a, select'))
     && cmdInput
-    && !isFaqOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
-    && !isKillOverlayOpen()
+    && !isFaqOverlayOpen() && !isWorkflowsOverlayOpen() && !isOptionsOverlayOpen() && !isThemeOverlayOpen()
+    && !(typeof isConfirmOpen === 'function' && isConfirmOpen())
   ) {
     e.preventDefault();
-    if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+    refocusComposerAfterAction({ preventScroll: true });
     const value = typeof getComposerValue === 'function' ? getComposerValue() : (cmdInput.value || '');
     const { start, end } = getCmdSelection(value);
     replaceCmdRange(value, start, end, e.key);
@@ -539,7 +1026,7 @@ function _replayPromptShortcutAfterSelection(e) {
   if (!selectedText) return false;
 
   e.preventDefault();
-  if (typeof focusAnyComposerInput === 'function') focusAnyComposerInput({ preventScroll: true });
+  refocusComposerAfterAction({ preventScroll: true });
   if (isCtrlR) {
     if (typeof enterHistSearch === 'function') enterHistSearch();
     return true;
@@ -578,20 +1065,31 @@ function _replayPromptShortcutAfterSelection(e) {
   return true;
 }
 
-// ── Global click: dismiss mobile menu and autocomplete ──
-document.addEventListener('click', e => {
-  if (_uiOverlayRefs.mobileMenu && !_uiOverlayRefs.mobileMenu.contains(e.target) && e.target !== _uiOverlayRefs.hamburgerBtn) {
-    hideMobileMenu();
-  }
-  if (historyPanel && isHistoryPanelOpen() && e.target !== histBtn && !historyPanel.contains(e.target)) {
-    if (e.target.closest?.('.hist-chip-overflow') || e.target.closest?.('[data-action="history"]')) {
-      return;
-    }
-    hideHistoryPanel();
-  }
-  if (!(e.target && e.target.closest &&
-        (e.target.closest('.prompt-wrap') || e.target.closest('.ac-dropdown') || e.target.closest('#mobile-composer')))) acHide();
-});
+// ── Global click: dismiss history panel, autocomplete ──
+// bindOutsideClickClose owns ambient click dismissal for the two surfaces
+// that have no scrim of their own (the history side panel and the
+// autocomplete dropdown). The mobile menu sheet's dismissal is owned by
+// its bindDismissible registration in mobile_chrome.js — the scrim covers
+// the viewport so every outside click hits it.
+if (historyPanel && typeof bindOutsideClickClose === 'function') {
+  bindOutsideClickClose(historyPanel, {
+    triggers: null,
+    isOpen: isHistoryPanelOpen,
+    onClose: hideHistoryPanel,
+    exemptSelectors: ['.hist-chip-overflow', '[data-action="history"]'],
+  });
+}
+if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'undefined' && shellPromptWrap) {
+  // Autocomplete dismissal: the dropdown itself is a transient element, so we
+  // anchor the helper on the prompt wrap (always present) and exempt the
+  // dropdown + mobile composer via selectors. Any click outside all three
+  // zones hides the dropdown, matching the prior global-click behavior.
+  bindOutsideClickClose(shellPromptWrap, {
+    isOpen: () => typeof isAcDropdownOpen === 'function' && isAcDropdownOpen(),
+    onClose: () => { if (typeof acHide === 'function') acHide(); },
+    exemptSelectors: ['.ac-dropdown', '#mobile-composer'],
+  });
+}
 
 if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('pointerdown', e => {
@@ -672,6 +1170,8 @@ if (typeof document !== 'undefined') {
 // ── Autocomplete ──
 apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
+  acContextRegistry = data.context || {};
+  acSpecialCommands = data.special_commands || [];
 }).catch(err => {
   logClientError('failed to load /autocomplete', err);
 });
@@ -680,8 +1180,10 @@ cmdInput.addEventListener('input', () => {
   if (isHistoryPanelOpen()) hideHistoryPanel();
   if (typeof isHistSearchMode === 'function' && isHistSearchMode()) {
     if (typeof handleHistSearchInput === 'function') {
-      const value = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
-      handleHistSearchInput(value);
+      // Read the DOM value directly — the hist-search path intentionally
+      // short-circuits handleComposerInputChange, so the shared composer
+      // state is one keystroke stale (reads showed the pre-backspace query).
+      handleHistSearchInput(cmdInput.value);
     }
     const _hsTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
     if (_hsTab) _hsTab.followOutput = true;
@@ -694,14 +1196,15 @@ cmdInput.addEventListener('input', () => {
   const _activeTab = typeof getActiveTab === 'function' ? getActiveTab() : null;
   if (_activeTab && _activeTab.st !== 'running') {
     _activeTab.draftInput = (typeof getComposerValue === 'function') ? getComposerValue() : cmdInput.value;
+    if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   }
 });
 
 cmdInput.addEventListener('keydown', e => {
-  if (isFaqOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
+  if (isFaqOverlayOpen() || isWorkflowsOverlayOpen() || isOptionsOverlayOpen() || isThemeOverlayOpen()) {
     if (e.key === 'Escape') {
-      closeFaq(); closeOptions(); closeThemeSelector();
-      refocusTerminalInput();
+      closeFaq(); closeWorkflows(); closeOptions(); closeThemeSelector();
+      refocusComposerAfterAction({ defer: true });
       e.preventDefault();
     }
     return;
@@ -721,12 +1224,16 @@ cmdInput.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId)) {
       _welcomePromptAfterSettle = true;
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       return;
     }
     const activeTab = getActiveTab();
     if (activeTab && activeTab.st === 'running') {
       confirmKill(activeTabId);
+      return;
+    }
+    if (typeof hasPendingTerminalConfirm === 'function' && hasPendingTerminalConfirm()) {
+      cancelPendingTerminalConfirm(activeTabId);
       return;
     }
     interruptPromptLine(activeTabId);
@@ -820,7 +1327,7 @@ cmdInput.addEventListener('keydown', e => {
     if (_welcomeActive && welcomeOwnsTab(activeTabId) && !(typeof getComposerValue === 'function' ? getComposerValue() : '').trim()) {
       e.preventDefault();
       requestWelcomeSettle(activeTabId);
-      refocusTerminalInput();
+      refocusComposerAfterAction({ defer: true });
       return;
     }
     if (acIndex >= 0 && acFiltered[acIndex]) {
@@ -840,8 +1347,18 @@ cmdInput.addEventListener('keydown', e => {
   if (e.key === 'Tab' && !e.altKey && !e.ctrlKey && !e.metaKey) {
     e.preventDefault();
     if (acFiltered.length === 1) { acAccept(acFiltered[0]); }
-    else if (acIndex >= 0 && acFiltered[acIndex]) { acAccept(acFiltered[acIndex]); }
-    else if (acFiltered.length > 0) { acIndex = 0; acShow(acFiltered); }
+    else if (acFiltered.length > 0) {
+      const _allExamples = acFiltered.every(item => item && item.isExample);
+      if (!_allExamples && typeof acExpandSharedPrefix === 'function' && acExpandSharedPrefix(acFiltered)) return;
+      if (acIndex < 0 || !isAcDropdownOpen()) {
+        acIndex = 0;
+      } else if (e.shiftKey) {
+        acIndex = acIndex <= 0 ? acFiltered.length - 1 : acIndex - 1;
+      } else {
+        acIndex = (acIndex + 1) % acFiltered.length;
+      }
+      acShow(acFiltered);
+    }
     return;
   }
   if (e.key === 'ArrowDown') {

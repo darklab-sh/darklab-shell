@@ -1,0 +1,662 @@
+/* darklab_shell CSS module: shell-chrome
+   Desktop shell: left rail, tabbar, and bottom HUD.
+   Mobile uses the stacked layout in mobile.css. */
+
+/* ============================================================
+   Shared helpers
+   ============================================================ */
+
+.tab-scroll::-webkit-scrollbar,
+.tabbar-scroll::-webkit-scrollbar { height: 4px; }
+.tab-scroll::-webkit-scrollbar-track,
+.tabbar-scroll::-webkit-scrollbar-track { background: transparent; }
+.tab-scroll::-webkit-scrollbar-thumb,
+.tabbar-scroll::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 2px;
+  transition: background 120ms;
+}
+.tab-scroll:hover::-webkit-scrollbar-thumb,
+.tabbar-scroll:hover::-webkit-scrollbar-thumb { background: var(--border-bright); }
+
+/* Chrome buttons (search / ln / ts) — inline text w/ hover */
+.chrome-btn {
+  cursor: pointer;
+  padding: 5px 10px;
+  border-radius: 3px;
+  color: var(--theme-toolbar-button-text, var(--muted));
+  background: transparent;
+  border: none;
+  font-family: inherit;
+  transition: background 120ms, color 120ms;
+  user-select: none;
+}
+.chrome-btn:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+  color: var(--theme-toolbar-button-hover-text, var(--text));
+}
+.chrome-btn:active {
+  background: color-mix(in srgb, var(--text) 10%, transparent);
+}
+
+/* Chrome buttons with border (share / copy / save / clear) */
+.chrome-btn-border {
+  transition: background 120ms, color 120ms, border-color 120ms;
+}
+.chrome-btn-border:hover {
+  background: color-mix(in srgb, var(--text) 6%, transparent) !important;
+  color: var(--theme-toolbar-button-hover-text, var(--text)) !important;
+  border-color: var(--theme-toolbar-button-hover-border, var(--border-bright)) !important;
+}
+.chrome-btn-border:active {
+  background: color-mix(in srgb, var(--text) 10%, transparent) !important;
+}
+
+/* ============================================================
+   Desktop layout.  All rules scoped behind min-width: 601px so the
+   mobile path in mobile.css is untouched.
+   ============================================================ */
+
+@media (min-width: 601px) {
+
+  /* Body reset: the shell owns the full viewport. */
+  body:not(.mobile-terminal-mode) {
+    padding: 0;
+    gap: 0;
+    min-height: 100vh;
+    height: 100vh;
+    overflow: hidden;
+  }
+
+  /* The top header and recent-command chip row are owned by the rail on
+     desktop. Scope to the main shell so the permalink and diag pages keep
+     their own <header>. */
+  body:not(.mobile-terminal-mode):not(.permalink-page):not(.diag-page) > header { display: none; }
+  body:not(.mobile-terminal-mode):not(.permalink-page):not(.diag-page) > #history-row { display: none !important; }
+
+  /* The per-tab footer is owned by the HUD on desktop. The footer stays in
+     the DOM for the mobile path, which re-parents the tab panels into the
+     mobile shell. */
+  body:not(.mobile-terminal-mode) .terminal-actions { display: none !important; }
+
+  /* Shell root — flex row with a 10px top gutter above the tabbar. */
+  .shell-root {
+    display: flex;
+    flex: 1 1 auto;
+    min-height: 0;
+    height: 100vh;
+    padding-top: 10px;
+    background: var(--bg);
+  }
+
+  /* ------------------------------------------------------------
+     Left rail
+     ------------------------------------------------------------ */
+
+  .rail {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    flex: 0 0 auto;
+    width: var(--rail-w, 214px);
+    min-height: 0;
+    background: var(--theme-panel-alt-bg);
+    border-right: 1px solid var(--border);
+    transition: width 160ms ease;
+    font-family: var(--font-mono);
+  }
+  .rail.rail-dragging { transition: none; }
+  .rail.rail-collapsed { width: 44px; }
+
+  .rail-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 14px 16px;
+    border-bottom: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+  .rail.rail-collapsed .rail-header {
+    padding: 14px 0;
+    justify-content: center;
+  }
+
+  .rail-wordmark { flex: 1; min-width: 0; }
+  .rail.rail-collapsed .rail-wordmark { display: none; }
+
+  .rail-wordmark-title {
+    color: var(--green);
+    font-size: 16px;
+    font-weight: 500;
+    letter-spacing: 0.5px;
+    white-space: nowrap;
+    text-shadow: 0 0 8px color-mix(in srgb, var(--green) 18%, transparent);
+  }
+  .rail-wordmark-sub {
+    color: var(--muted);
+    font-size: 9.5px;
+    letter-spacing: 2px;
+    text-transform: uppercase;
+    margin-top: 4px;
+  }
+
+  .rail-collapse-btn {
+    background: transparent;
+    border: none;
+    color: var(--text);
+    font-family: inherit;
+    font-size: 14px;
+    width: 24px;
+    height: 24px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    border-radius: 4px;
+  }
+  .rail-collapse-btn:hover { color: var(--green); }
+
+  /* Split area: Recent on top, optional splitter, optional spacer, Workflows on bottom. */
+  .rail-split-area {
+    display: flex;
+    flex-direction: column;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .rail.rail-collapsed .rail-split-area { display: none; }
+
+  .rail-section {
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
+  }
+
+  /* Recent defaults to filling the area. */
+  .rail-section-recent { flex: 1 1 auto; }
+
+  /* When both sections are open, Recent is a user-sized fixed height
+     (set via --recent-h on .rail-split-area by the JS controller). */
+  .rail-split-area.both-open .rail-section-recent {
+    flex: 0 0 auto;
+    height: var(--recent-h, 50%);
+  }
+
+  /* When the user collapses the section header, the body collapses. */
+  .rail-section.closed { flex: 0 0 auto; }
+  .rail-section.closed .rail-section-body { display: none; }
+
+  .rail-splitter {
+    height: 6px;
+    cursor: ns-resize;
+    background: var(--border);
+    border-top: 1px solid var(--theme-panel-alt-bg);
+    border-bottom: 1px solid var(--theme-panel-alt-bg);
+    position: relative;
+    flex: 0 0 auto;
+  }
+  .rail-splitter[hidden] { display: none; }
+  .rail-splitter::after {
+    content: '';
+    position: absolute;
+    left: 50%; top: 50%;
+    transform: translate(-50%, -50%);
+    width: 24px; height: 1px;
+    background: var(--border-bright);
+  }
+
+  .rail-section-workflows { flex: 0 0 auto; }
+  .rail-split-area.workflows-closed .rail-section-workflows {
+    border-top: 1px solid var(--border);
+  }
+  .rail-split-area:not(.workflows-closed):not(.recent-fixed) .rail-section-workflows {
+    flex: 1 1 auto;
+  }
+  .rail-split-area.recent-fixed .rail-section-workflows {
+    flex: 1 1 auto;
+  }
+
+  /* Section header */
+  .rail-section-header {
+    padding: 10px 16px 4px;
+    color: var(--muted);
+    font-size: 11.5px;
+    letter-spacing: 1.5px;
+    text-transform: uppercase;
+    opacity: 0.85;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    cursor: pointer;
+    user-select: none;
+    flex: 0 0 auto;
+    background: transparent;
+    border: none;
+    font-family: inherit;
+    width: 100%;
+    text-align: left;
+  }
+  .rail-section-header-left {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+  /* Rail section headers reuse the shared .disclosure-chev primitive with a
+     tighter size so the rail's information density stays intact. Rotation
+     is driven by the primitive's [aria-expanded="true"] selector, which
+     bindDisclosure writes on the header button. A small translateY pulls
+     the glyph onto the visual centerline of the uppercase label (the ▸
+     codepoint renders in the upper half of its em-box); the expanded-state
+     rule composes the nudge with the primitive's 90° rotation so both
+     states share the same vertical offset. */
+  .rail-section-header .disclosure-chev {
+    font-size: 18px;
+    width: 14px;
+    opacity: 0.9;
+    transform: translateY(2px);
+  }
+  .rail-section-header[aria-expanded="true"] .disclosure-chev {
+    transform: translateY(2px) rotate(90deg);
+  }
+  .rail-section-count { font-size: 10.5px; opacity: 0.6; }
+
+  .rail-section-body {
+    flex: 1;
+    overflow-y: auto;
+    padding-bottom: 6px;
+    min-height: 0;
+  }
+
+  .rail-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 5px 18px 5px 16px;
+    font-size: 12.5px;
+    color: var(--text);
+    cursor: pointer;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    border: none;
+    border-left: 2px solid transparent;
+    background: transparent;
+    font-family: inherit;
+    width: 100%;
+    text-align: left;
+  }
+  .rail-item.starred { border-left-color: var(--amber); }
+  .rail-item-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    min-width: 0;
+  }
+  .rail-section-workflows .rail-item {
+    align-items: flex-start;
+    white-space: normal;
+  }
+  /* The drill-chev primitive is 22px (its own line-box) against 12.5px row
+     text; with align-items:flex-start (kept so the glyph pins to the first
+     line when a long workflow title wraps via .line-clamp-2), the › codepoint
+     renders in the lower half of its em-box, leaving it visually below the
+     first-line centerline. A small translateY pulls the glyph up onto the
+     first-line visual midline without disturbing the wrap behavior. */
+  .rail-section-workflows .rail-item .drill-chev {
+    transform: translateY(-4px);
+  }
+  .rail-section-empty {
+    padding: 5px 18px;
+    font-size: 12px;
+    color: var(--muted);
+    font-style: italic;
+    opacity: 0.7;
+  }
+
+  /* Nav menu — always pinned at the bottom. */
+  .rail-nav {
+    border-top: 1px solid var(--border);
+    padding: 10px 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    flex: 0 0 auto;
+    background: var(--theme-panel-alt-bg);
+  }
+  .rail.rail-collapsed .rail-nav { padding: 8px 0; }
+
+  .rail-nav-item {
+    padding: 6px 6px;
+    color: var(--muted);
+    font-size: 13px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 3px;
+    background: transparent;
+    border: none;
+    font-family: inherit;
+    text-decoration: none;
+    text-align: left;
+  }
+  .rail.rail-collapsed .rail-nav-item {
+    padding: 9px 0;
+    justify-content: center;
+  }
+  .rail-nav-glyph {
+    color: var(--border-bright);
+    width: 14px;
+    text-align: center;
+    flex: 0 0 auto;
+  }
+  .rail.rail-collapsed .rail-nav-item { color: var(--text); }
+  .rail.rail-collapsed .rail-nav-item:hover .rail-nav-glyph { color: var(--green); }
+  .rail.rail-collapsed .rail-nav-glyph {
+    width: 22px;
+    font-size: 20px;
+    line-height: 1;
+    color: var(--text);
+  }
+  .rail.rail-collapsed .rail-nav-label { display: none; }
+
+  .rail-nav-version {
+    margin-top: 6px;
+    padding-top: 8px;
+    padding-left: 6px;
+    border-top: 1px dashed var(--border);
+    color: var(--muted);
+    font-size: 10.5px;
+    letter-spacing: 0.3px;
+    text-decoration: none;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    opacity: 0.85;
+  }
+  .rail.rail-collapsed .rail-nav-version { display: none; }
+
+  .rail-resize-handle {
+    position: absolute;
+    top: 0;
+    right: -3px;
+    bottom: 0;
+    width: 6px;
+    cursor: ew-resize;
+    z-index: 2;
+  }
+  .rail.rail-collapsed .rail-resize-handle { display: none; }
+
+  /* ------------------------------------------------------------
+     Main column
+     ------------------------------------------------------------ */
+
+  .main-col {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
+    min-height: 0;
+  }
+
+  /* ---- Tab bar (reskinned .terminal-bar) ---- */
+  .terminal-bar.tabbar {
+    display: flex;
+    align-items: stretch;
+    gap: 0;
+    padding: 0;
+    background: var(--theme-panel-alt-bg);
+    border-bottom: 1px solid var(--border);
+    min-width: 0;
+    flex: 0 0 auto;
+  }
+
+  .tabbar-scroll {
+    display: flex;
+    align-items: stretch;
+    flex: 1 1 0;
+    min-width: 0;
+    padding-left: 8px;
+    overflow-x: auto;
+    overflow-y: hidden;
+  }
+
+  .terminal-bar.tabbar .tabs-bar {
+    padding: 5px 0 0;
+    flex: 1 1 auto;
+    background: transparent;
+  }
+
+  .terminal-bar.tabbar #tabs-scroll-left,
+  .terminal-bar.tabbar #tabs-scroll-right {
+    align-self: center;
+  }
+
+  .tabbar-chrome {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    padding: 0 10px;
+    font-size: 10.5px;
+    color: var(--muted);
+    white-space: nowrap;
+    flex: 0 0 auto;
+    border-left: 1px solid var(--border);
+  }
+
+  .tabbar-chrome .chrome-btn {
+    font-size: 11px;
+  }
+
+  /* ---- Terminal body container — strip the outer frame ---- */
+  .main-col > .terminal-wrap {
+    background: var(--bg);
+    border: none;
+    border-radius: 0;
+    box-shadow: none;
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow: hidden;
+  }
+  .main-col > .terminal-wrap::before,
+  .main-col > .terminal-wrap::after { display: none; }
+
+  /* ------------------------------------------------------------
+     HUD
+     ------------------------------------------------------------ */
+
+  .hud {
+    display: flex;
+    align-items: stretch;
+    border-top: 1px solid var(--border-bright);
+    background: linear-gradient(180deg, var(--bg) 0%, var(--theme-panel-alt-bg) 100%);
+    flex: 0 0 auto;
+    min-width: 0;
+    font-family: var(--font-mono);
+  }
+
+  .hud-pills {
+    display: flex;
+    align-items: stretch;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .hud-pills::-webkit-scrollbar { display: none; }
+
+  .hud-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    padding: 10px 16px;
+    border-right: 1px solid var(--border);
+    flex: 0 0 auto;
+    white-space: nowrap;
+  }
+  .hud-cell.hud-status { cursor: pointer; }
+
+  .hud-label {
+    color: var(--muted);
+    font-size: 9px;
+    letter-spacing: 1.8px;
+    text-transform: uppercase;
+    opacity: 0.7;
+  }
+
+  .hud-value {
+    font-size: 11.5px;
+    letter-spacing: 0.5px;
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+  }
+
+  .hud-value-green {
+    color: var(--green);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--green) 22%, transparent);
+  }
+  .hud-value-amber {
+    color: var(--amber);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--amber) 22%, transparent);
+  }
+  .hud-value-red {
+    color: var(--red);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--red) 22%, transparent);
+  }
+  .hud-muted {
+    color: var(--muted);
+    opacity: 0.85;
+  }
+  .hud-value-dot::before {
+    content: '';
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 999px;
+    background: currentColor;
+    box-shadow: 0 0 6px currentColor;
+    flex: 0 0 6px;
+  }
+  .hud-muted.hud-value-dot::before { box-shadow: none; }
+
+  /* Status pill living inside a HUD cell sheds its pill chrome. */
+  .hud-cell .status-pill {
+    background: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    margin: 0;
+    border-radius: 0;
+    font-size: 11.5px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    box-shadow: none !important;
+    animation: none;
+  }
+  /* STATUS is a binary running-or-not pill in the HUD; any non-running class
+     (idle/ok/fail/killed) renders identically as muted text so the outcome
+     colour lives on the adjacent LAST EXIT pill, not here. */
+  .hud-cell .status-pill.idle,
+  .hud-cell .status-pill.ok,
+  .hud-cell .status-pill.fail,
+  .hud-cell .status-pill.killed {
+    color: var(--muted);
+    text-shadow: none;
+    animation: none;
+  }
+  .hud-cell .status-pill.running {
+    color: var(--amber);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--amber) 22%, transparent);
+    animation: hud-status-pulse 1s ease-in-out infinite;
+  }
+  @keyframes hud-status-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+  }
+
+  /* Runtime counter rides alongside STATUS inside the same HUD cell: the
+     wrapper keeps them on one line and the ::before injects " - " only when
+     the timer has text (running state). */
+  .hud-status-value-row {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 0;
+  }
+  .hud-cell .run-timer {
+    font-size: 11.5px;
+    letter-spacing: 0.5px;
+    color: var(--amber);
+    text-shadow: 0 0 8px color-mix(in srgb, var(--amber) 22%, transparent);
+    background: transparent;
+    border: none;
+    padding: 0;
+  }
+  .hud-cell .run-timer:not(:empty)::before {
+    content: " - ";
+    white-space: pre;
+    color: var(--amber);
+  }
+
+  .hud-spacer { flex: 1 1 auto; }
+
+  .hud-actions {
+    display: flex;
+    padding: 10px 14px;
+    border-left: 1px solid var(--border);
+    gap: 6px;
+    align-items: center;
+    white-space: nowrap;
+    flex: 0 0 auto;
+    position: relative;
+  }
+
+  /* HUD save menu — drops UP above the bottom bar. */
+  .hud-save-wrap { position: relative; }
+  .hud-save-wrap .save-menu {
+    position: absolute;
+    bottom: calc(100% - 1px);
+    right: 0;
+    display: none;
+    flex-direction: column;
+    background: var(--theme-panel-alt-bg);
+    border: 1px solid var(--border-bright);
+    border-radius: 3px 3px 0 0;
+    padding: 4px;
+    min-width: 160px;
+    z-index: 20;
+    box-shadow: 0 6px 18px color-mix(in srgb, var(--bg) 60%, transparent);
+  }
+  .hud-save-wrap.open .save-menu { display: flex; }
+  .hud-save-wrap .save-menu button {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    font-family: inherit;
+    font-size: 10px;
+    padding: 5px 10px;
+    text-align: left;
+    cursor: pointer;
+    border-radius: 2px;
+  }
+  .hud-save-wrap .save-menu button:hover {
+    color: var(--text);
+    background: color-mix(in srgb, var(--text) 6%, transparent);
+  }
+}
+
+/* ============================================================
+   Mobile: hide the desktop chrome and let the stacked layout
+   (mobile.css + mobile-terminal-mode re-parenting) take over.
+   ============================================================ */
+
+@media (max-width: 600px) {
+  .shell-root, .main-col, .tabbar-scroll { display: contents; }
+  .rail, .hud, .tabbar-chrome { display: none !important; }
+}
+
+body.mobile-terminal-mode .rail,
+body.mobile-terminal-mode .hud,
+body.mobile-terminal-mode .tabbar-chrome { display: none !important; }
+
+body.mobile-terminal-mode .shell-root,
+body.mobile-terminal-mode .main-col,
+body.mobile-terminal-mode .tabbar-scroll { display: contents; }

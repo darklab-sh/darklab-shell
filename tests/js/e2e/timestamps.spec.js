@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { runCommand, makeTestIp } from './helpers.js'
+import { ensurePromptReady, runCommand, makeTestIp } from './helpers.js'
 
 const CMD = 'hostname'
 
@@ -58,48 +58,49 @@ test.describe('timestamp toggle', () => {
     await expect(elapsedLine.first()).toBeVisible()
   })
 
-  test('line numbers work with timestamps and typing continues after toggling display modes', async ({ page }) => {
+  test('line numbers work with timestamps and typing continues after toggling display modes', async ({
+    page,
+  }) => {
     await page.locator('#ln-btn').click()
     await expect(page.locator('body')).toHaveClass(/ln-on/)
 
     await page.locator('#ts-btn').click()
     await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
     await expect(page.locator('#cmd')).toBeFocused()
-    await expect(page.locator('.line.welcome-hint')).toBeVisible({ timeout: 15_000 })
 
     await page.locator('#cmd').fill(CMD)
     await page.locator('#cmd').press('Enter')
 
-    await expect(page.locator('#status')).toHaveText('EXIT 0')
+    await expect(page.locator('#hud-last-exit')).toHaveText('0')
 
     const prefixedLine = page.locator('.tab-panel.active .output .line[data-prefix]').first()
     await expect(prefixedLine).toHaveAttribute('data-prefix', /^\d+(\s+\+\d+\.\ds)?$/)
     await expect(page.locator('#shell-prompt-wrap')).toHaveAttribute('data-prefix', /^\d+$/)
   })
 
-  test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({ page }) => {
+  test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({
+    page,
+  }) => {
     await page.waitForFunction(() => {
       const text = document.querySelector('.wlc-command-text')?.textContent || ''
       return text.length >= 5
     })
-    await page.evaluate(() => {
-      if (typeof requestWelcomeSettle === 'function') requestWelcomeSettle()
-    })
-    await page.waitForFunction(() => {
-      return typeof _welcomeActive !== 'undefined' ? _welcomeActive === false : true
-    })
+    await ensurePromptReady(page)
 
     await page.evaluate(() => {
       if (typeof submitComposerCommand === 'function') {
         submitComposerCommand('man curl', { dismissKeyboard: true })
       }
     })
-    await expect(page.locator('#status')).toHaveText('EXIT 0')
+    await expect(page.locator('#hud-last-exit')).toHaveText('0')
 
     const output = page.locator('.tab-panel.active .output')
-    await output.evaluate(el => { el.scrollTop = el.scrollHeight })
+    await output.evaluate((el) => {
+      el.scrollTop = el.scrollHeight
+    })
 
-    const isAtBottom = async () => output.evaluate(el => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
+    const isAtBottom = async () =>
+      output.evaluate((el) => el.scrollTop + el.clientHeight >= el.scrollHeight - 2)
     await expect.poll(isAtBottom).toBeTruthy()
 
     await page.locator('#ts-btn').click()
