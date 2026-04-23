@@ -51,11 +51,11 @@ window.addEventListener('storage', (e) => {
 });
 
 // Return a display-safe masked version of a session token or UUID.
-// tok_a1b2c3d4... → tok_a1b2••••••••
+// tok_a1b2c3d4... → tok_a1b2••••
 // uuid...         → 8-char-prefix••••••••
 function maskSessionToken(token) {
   if (typeof token !== 'string' || !token) return '(none)';
-  if (token.startsWith('tok_')) return 'tok_' + token.slice(4, 8) + '••••••••';
+  if (token.startsWith('tok_')) return 'tok_' + token.slice(4, 8) + '••••';
   return token.slice(0, 8) + '••••••••';
 }
 

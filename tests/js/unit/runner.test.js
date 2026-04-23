@@ -414,7 +414,7 @@ function loadRunnerFns({
       SESSION_ID: sessionId,
       maskSessionToken: (token) => {
         if (typeof token !== 'string' || !token) return '(none)'
-        if (token.startsWith('tok_')) return `tok_${token.slice(4, 8)}••••••••`
+        if (token.startsWith('tok_')) return `tok_${token.slice(4, 8)}••••`
         return `${token.slice(0, 8)}••••••••`
       },
       copyTextToClipboard: copyTextToClipboardOverride,
@@ -1793,7 +1793,7 @@ describe('session-token copy', () => {
     expect(copyTextToClipboard).toHaveBeenCalledWith('tok_abcd1234efgh5678ijkl9012mnop3456')
     await vi.waitFor(() =>
       expect(appendLine).toHaveBeenCalledWith(
-        'session token copied to clipboard: tok_abcd••••••••',
+        'session token copied to clipboard: tok_abcd••••',
         '',
         'tab-1',
       ),
@@ -1916,7 +1916,7 @@ describe('session-token set pending prompt', () => {
       'tab-1',
     )
     expect(addToHistory).toHaveBeenCalledTimes(1)
-    expect(addToHistory).toHaveBeenCalledWith('session-token set tok_abcd••••••••')
+    expect(addToHistory).toHaveBeenCalledWith('session-token set tok_abcd••••')
     expect(setComposerPromptMode).toHaveBeenCalledWith('confirm')
 
     await submitCommand('no')
@@ -1924,16 +1924,16 @@ describe('session-token set pending prompt', () => {
       expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456'),
     )
     await vi.waitFor(() =>
-      expect(appendLine).toHaveBeenCalledWith('session token set: tok_abcd••••••••', '', 'tab-1'),
+      expect(appendLine).toHaveBeenCalledWith('session token set: tok_abcd••••', '', 'tab-1'),
     )
 
     expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
     expect(updateSessionId).toHaveBeenCalledWith('tok_abcd1234efgh5678ijkl9012mnop3456')
     expect(reloadSessionHistory).toHaveBeenCalled()
     expect(addToHistory).toHaveBeenCalledTimes(1)
-    expect(addToRecentPreview).toHaveBeenCalledWith('session-token set tok_abcd••••••••')
+    expect(addToRecentPreview).toHaveBeenCalledWith('session-token set tok_abcd••••')
     expect(appendLine).toHaveBeenCalledWith('no', 'prompt-echo', 'tab-1')
-    expect(appendLine).toHaveBeenCalledWith('session token set: tok_abcd••••••••', '', 'tab-1')
+    expect(appendLine).toHaveBeenCalledWith('session token set: tok_abcd••••', '', 'tab-1')
     expect(appendLine).toHaveBeenCalledWith(
       'reload other tabs to apply the new session token',
       '',

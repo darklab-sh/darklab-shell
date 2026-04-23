@@ -402,7 +402,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 | **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
 | **LATENCY** | Round-trip time to `/status` in ms | Green `<250ms`, amber `<500ms`, red `>=500ms` |
 | **MODE** | Current shell mode indicator | Shows the active shell mode |
-| **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
+| **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
 | **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
 | **CLOCK** | Wall clock in `UTC` or browser-local time | Ticks every second in the browser; local mode prefers the browser's short timezone label and falls back to a GMT offset |
 | **DB** | SQLite connection state | `ONLINE` green, `OFFLINE` red |

@@ -181,7 +181,7 @@ describe('session.js', () => {
   it('maskSessionToken masks a tok_ token showing only the first 4 hex chars', () => {
     const { maskSessionToken } = loadSession()
 
-    expect(maskSessionToken('tok_abcd1234efgh5678ijkl9012mnop3456')).toBe('tok_abcd••••••••')
+    expect(maskSessionToken('tok_abcd1234efgh5678ijkl9012mnop3456')).toBe('tok_abcd••••')
   })
 
   it('maskSessionToken masks a UUID session showing the first 8 chars', () => {

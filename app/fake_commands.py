@@ -430,7 +430,7 @@ def _run_fake_help() -> list[dict[str, str]]:
 def _mask_session_token(token: str) -> str:
     """Return a display-safe masked version of a session token or session UUID."""
     if token.startswith("tok_"):
-        return "tok_" + token[4:8] + "••••••••"
+        return "tok_" + token[4:8] + "••••"
     return token[:8] + "••••••••"
 
 

@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 886
+- `pytest`: 887
 - `vitest`: 753
 - `playwright`: 200
-- total: 1,839
+- total: 1,840
 
 This document is organized in two parts:
 
@@ -353,6 +353,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_empty_yaml_returns_empty` | Checks that empty YAML returns empty. |
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
 | `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
+| `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
 | `TestPathBlockingEdgeCases.test_tmp_at_end_of_command` | Checks that /tmp at end of command. |
 | `TestPathBlockingEdgeCases.test_tmp_with_subdirectory` | Checks /tmp with subdirectory handling. |
 | `TestPathBlockingEdgeCases.test_tmp_in_url_path_allowed` | Checks that /tmp in URL path allowed. |
@@ -1652,7 +1653,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `falls back to session_id UUID when session_token is absent` | Verifies that `SESSION_ID` falls back to the UUID stored under `session_id` when no session token is set. |
 | `updateSessionId switches SESSION_ID at runtime` | Verifies that calling `updateSessionId` with a new value changes `SESSION_ID` without a page reload. |
 | `apiFetch sends updated session token after updateSessionId` | Verifies that `apiFetch` uses the new `SESSION_ID` set by `updateSessionId` in subsequent requests. |
-| `maskSessionToken masks a tok_ token showing only the first 4 hex chars` | Verifies that a `tok_`-prefixed token is masked as `tok_XXXX••••••••`. |
+| `maskSessionToken masks a tok_ token showing only the first 4 hex chars` | Verifies that a `tok_`-prefixed token is masked as `tok_XXXX••••`. |
 | `maskSessionToken masks a UUID session showing the first 8 chars` | Verifies that a UUID session ID is masked to its first 8 characters followed by bullets. |
 | `maskSessionToken returns (none) for empty input` | Verifies that `maskSessionToken` returns `(none)` for an empty string or null. |
 | `storage event from another tab updates SESSION_ID to the new token` | Verifies that a `storage` event setting `session_token` in another tab updates `SESSION_ID` in the current tab. |

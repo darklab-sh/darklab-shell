@@ -555,6 +555,21 @@ class TestThemeRegistry:
         assert "https://example.invalid/README.md" in result[0]["answer"]
         assert "https://example.invalid/README.md" in result[0]["answer_html"]
 
+    def test_load_all_faq_uses_config_project_readme_by_default(self):
+        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
+            f.write("")
+            path = f.name
+        try:
+            with mock.patch("commands.FAQ_FILE", path), mock.patch(
+                "config.PROJECT_README",
+                "https://example.invalid/config-readme",
+            ):
+                result = load_all_faq("darklab_shell")
+        finally:
+            os.unlink(path)
+        assert "https://example.invalid/config-readme" in result[0]["answer"]
+        assert "https://example.invalid/config-readme" in result[0]["answer_html"]
+
     def test_load_all_faq_clarifies_snapshot_vs_run_permalink(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
             f.write("")

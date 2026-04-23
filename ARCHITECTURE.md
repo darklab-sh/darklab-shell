@@ -621,7 +621,7 @@ Session identity is a two-tier model managed in `app/static/js/session.js`:
 
 **Server-side token validation:** `get_session_id()` in `helpers.py` validates `tok_`-prefixed header values against the `session_tokens` table on every request. A revoked or never-issued `tok_` token is treated as anonymous (returns `""`) so the caller loses access to session-scoped data immediately, without requiring a client-side logout. UUID-format session IDs pass through without a DB lookup.
 
-`maskSessionToken(token)` in `session.js` produces display-safe representations: `tok_XXXX••••••••` for named tokens and `uuid8ch••••••••` for UUIDs.
+`maskSessionToken(token)` in `session.js` produces display-safe representations: `tok_XXXX••••` for named tokens and `uuid8ch••••••••` for UUIDs.
 
 History migration between identities goes through `POST /session/migrate` — see `### Session Token Security` in [DECISIONS.md](DECISIONS.md) for the constraints on that endpoint.
 
@@ -816,10 +816,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 886
+- `pytest`: 887
 - `vitest`: 753
 - `playwright`: 200
-- total: 1,839
+- total: 1,840
 
 ### Testing Architecture
 

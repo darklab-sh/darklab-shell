@@ -229,7 +229,7 @@ async function loadAppFns({
               app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -725,7 +725,7 @@ describe('app helpers', () => {
               app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -2464,7 +2464,7 @@ describe('app helpers', () => {
 
     expect(wordmark.textContent).toBe('darklab_shell v9.9')
     expect(wordmark.getAttribute('href')).toBe(
-      'https://gitlab.com/darklab.sh/darklab-shell',
+      'https://gitlab.com/darklab.sh/darklab_shell',
     )
   })
 
@@ -3633,7 +3633,7 @@ describe('app helpers', () => {
               app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3709,7 +3709,7 @@ describe('app helpers', () => {
               app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3802,7 +3802,7 @@ describe('app helpers', () => {
               app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],
@@ -3932,7 +3932,7 @@ describe('app helpers', () => {
               app_name: 'darklab_shell',
               prompt_prefix: 'anon@darklab:~$',
               version: '9.9',
-              project_readme: 'https://gitlab.com/darklab.sh/darklab-shell',
+              project_readme: 'https://gitlab.com/darklab.sh/darklab_shell',
               default_theme: 'darklab_obsidian.yaml',
               share_redaction_enabled: true,
               share_redaction_rules: [],

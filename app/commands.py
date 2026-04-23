@@ -1,8 +1,8 @@
 """
 Command loading, validation, and rewriting.
 
-This module has no dependency on Flask or other app modules — it contains
-pure functions that can be imported and tested in isolation.
+This module has no dependency on Flask — it contains pure helpers that can be
+imported and tested in isolation.
 """
 
 from copy import deepcopy
@@ -12,6 +12,8 @@ import re
 import shlex
 import shutil
 import yaml
+
+import config as app_config
 
 _HERE = os.path.dirname(__file__)
 _CONF = os.path.join(_HERE, "conf")
@@ -25,7 +27,13 @@ ASCII_MOBILE_FILE     = os.path.join(_CONF, "ascii_mobile.txt")
 APP_HINTS_FILE        = os.path.join(_CONF, "app_hints.txt")
 APP_HINTS_MOBILE_FILE = os.path.join(_CONF, "app_hints_mobile.txt")
 
-def _builtin_faq(app_name="darklab_shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell"):
+
+def _project_readme_url(project_readme=None):
+    return project_readme or app_config.PROJECT_README
+
+
+def _builtin_faq(app_name="darklab_shell", project_readme=None):
+    readme_url = _project_readme_url(project_readme)
     return [
         {
             "question": "What is this?",
@@ -33,7 +41,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme="https://gitlab.com/da
                 f"{app_name} is a lightweight web interface for running network diagnostic "
                 "and vulnerability scanning commands against remote endpoints, with output streamed "
                 "in real time. It's designed for testing and troubleshooting remote hosts. "
-                f"See the project README: {project_readme}"
+                f"See the project README: {readme_url}"
             ),
             "answer_html": (
                 f"{app_name} is a lightweight web interface for running network diagnostic "
@@ -41,7 +49,7 @@ def _builtin_faq(app_name="darklab_shell", project_readme="https://gitlab.com/da
                 "in real time. It's designed for testing and troubleshooting remote hosts — things "
                 "like DNS lookups, port scans, traceroutes, HTTP checks, and web app vulnerability "
                 "scans — without needing SSH access to a server. For more detailed information, see "
-                f"the project <a href=\"{html.escape(project_readme, quote=True)}\" target=\"_blank\" "
+                f"the project <a href=\"{html.escape(readme_url, quote=True)}\" target=\"_blank\" "
                 "rel=\"noopener\" class=\"faq-link\">README</a>."
             ),
         },
@@ -648,7 +656,7 @@ def load_faq():
     return result
 
 
-def load_all_faq(app_name="darklab_shell", project_readme="https://gitlab.com/darklab.sh/darklab-shell"):
+def load_all_faq(app_name="darklab_shell", project_readme=None):
     """Return the built-in FAQ entries followed by any custom faq.yaml entries."""
     return [*(deepcopy(_builtin_faq(app_name, project_readme))), *load_faq()]
 
