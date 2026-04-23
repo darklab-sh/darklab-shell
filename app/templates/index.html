@@ -148,7 +148,7 @@
         <div id="mobile-recents-pagination-summary" class="history-pagination-summary"></div>
         <div id="mobile-recents-pagination-controls" class="history-pagination-controls"></div>
       </div>
-      <div class="sheet-list" id="mobile-recents-list" aria-live="polite"></div>
+      <div class="sheet-list nice-scroll" id="mobile-recents-list" aria-live="polite"></div>
     </div>
     <div id="mobile-menu-sheet-scrim" class="menu-sheet-scrim u-hidden" aria-hidden="true"></div>
     <div id="mobile-menu-sheet" class="menu-sheet u-hidden" role="dialog" aria-label="Menu" aria-modal="true">
@@ -332,7 +332,7 @@
           <span class="shell-prompt-caret" id="shell-prompt-caret"></span>
         </div>
       </div>
-      <div id="ac-dropdown" class="ac-dropdown u-hidden"></div>
+      <div id="ac-dropdown" class="ac-dropdown nice-scroll u-hidden"></div>
       <div id="hist-search-dropdown" class="hist-search-dropdown u-hidden"></div>
       <div id="shell-input-row" class="shell-input-row" aria-hidden="true">
         <input id="cmd" type="text" placeholder="" autocomplete="new-password" spellcheck="false" inputmode="none" aria-label="Command">
@@ -405,7 +405,7 @@
     <button id="hist-clear-all-btn" class="history-action-btn history-panel-clear-all" type="button">delete all</button>
     <button class="close-btn history-panel-close" id="history-close" type="button" aria-label="Close history panel">✕</button>
   </div>
-  <div class="history-panel-body">
+  <div class="history-panel-body nice-scroll">
     <div class="history-panel-filters">
       <input id="history-search-input" type="text" placeholder="search history" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search history">
       <button id="history-mobile-filters-toggle" class="history-action-btn history-mobile-filters-toggle" type="button" aria-expanded="false">filters</button>
@@ -417,7 +417,7 @@
         </select>
         <div class="history-root-autocomplete">
           <input id="history-root-input" type="text" placeholder="command name" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Filter by command name">
-          <div id="history-root-dropdown" class="ac-dropdown history-root-dropdown u-hidden"></div>
+          <div id="history-root-dropdown" class="ac-dropdown history-root-dropdown nice-scroll u-hidden"></div>
         </div>
         <select id="history-exit-filter" aria-label="Filter by exit code">
           <option value="all">exit: all</option>
@@ -483,7 +483,7 @@
       <span class="faq-title">WORKFLOWS</span>
       <button type="button" class="close-btn workflows-close" aria-label="Close workflows">✕</button>
     </div>
-    <div class="workflows-body"></div>
+    <div class="workflows-body nice-scroll"></div>
   </div>
 </div>
 
@@ -494,7 +494,7 @@
       <span class="faq-title">FAQ</span>
       <button type="button" class="close-btn faq-close" aria-label="Close FAQ">✕</button>
     </div>
-    <div class="faq-body"></div>
+    <div class="faq-body nice-scroll"></div>
   </div>
 </div>
 
@@ -505,7 +505,7 @@
       <span class="faq-title" id="shortcuts-title">KEYBOARD SHORTCUTS</span>
       <button type="button" class="close-btn shortcuts-close" aria-label="Close keyboard shortcuts">✕</button>
     </div>
-    <div class="faq-body shortcuts-body">
+    <div class="faq-body shortcuts-body nice-scroll">
       <div id="shortcuts-list" class="shortcuts-list" aria-live="polite"></div>
     </div>
   </div>
@@ -518,7 +518,7 @@
       <span class="faq-title">THEME</span>
       <button type="button" class="close-btn theme-close" aria-label="Close theme selector">✕</button>
     </div>
-    <div class="faq-body theme-body">
+    <div class="faq-body theme-body nice-scroll">
       <div id="theme-select" class="theme-picker-grid" aria-label="Theme selector" tabindex="-1"></div>
     </div>
   </div>
@@ -531,7 +531,7 @@
       <span class="faq-title">OPTIONS</span>
       <button type="button" class="close-btn options-close" aria-label="Close options">✕</button>
     </div>
-    <div class="faq-body options-body">
+    <div class="faq-body options-body nice-scroll">
       <div class="faq-item">
         <div class="faq-q">Timestamps</div>
         <div class="faq-a">
@@ -613,6 +613,7 @@
 <script src="/static/js/session.js"></script>
 <script src="/static/js/state.js"></script>
 <script src="/static/js/utils.js"></script>
+<script id="app-config-json" type="application/json">{{ frontend_config|tojson }}</script>
 <script src="/static/js/config.js"></script>
 <script src="/static/js/dom.js"></script>
 <script src="/static/js/ui_helpers.js"></script>

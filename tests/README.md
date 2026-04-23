@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 867
-- `vitest`: 728
-- `playwright`: 199
-- total: 1,794
+- `pytest`: 886
+- `vitest`: 753
+- `playwright`: 200
+- total: 1,839
 
 This document is organized in two parts:
 
@@ -547,6 +547,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestCmdRewriteEvent.test_nmap_rewrite_extra_has_privileged_flag` | Checks that nmap rewrite extra has privileged flag. |
 | `TestCmdRewriteEvent.test_unrewritten_command_does_not_emit_cmd_rewrite` | Checks that unrewritten command does not emit command rewrite. |
 | `TestRunLifecycleEvents.test_run_start_emits_info` | Checks that run start emits info. |
+| `TestRunLifecycleEvents.test_run_start_masks_token_session_id` | Checks that run lifecycle logs mask token-backed session identifiers. |
 | `TestRunLifecycleEvents.test_run_end_emits_info_with_exit_code` | Checks that run end emits info with exit code. |
 | `TestRunLifecycleEvents.test_run_kill_emits_info` | Checks that run kill emits info. |
 | `TestRunLifecycleEvents.test_kill_miss_emits_debug` | Checks that kill miss emits debug. |
@@ -590,9 +591,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestHistoryClearedEvent.test_history_cleared_count_is_zero_for_empty_session` | Checks that history cleared count is zero for empty session. |
 | `TestHistoryViewedEvent.test_history_viewed_emits_info` | Checks that history viewed emits info. |
 | `TestHistoryViewedEvent.test_history_viewed_extra_has_count` | Checks that history viewed extra has count. |
+| `TestHistoryCommandsViewedEvent.test_history_commands_masks_token_session_id` | Checks that command-recall hydration logs mask token-backed session identifiers. |
 | `TestPageLoadEvent.test_page_load_emits_info` | Checks that page load emits info. |
 | `TestPageLoadEvent.test_page_load_extra_has_ip` | Checks that page load extra has IP. |
 | `TestPageLoadEvent.test_page_load_extra_has_session_when_present` | Checks that page load extra has session when present. |
+| `TestPageLoadEvent.test_page_load_masks_token_session_id` | Checks that page-load logs mask token-backed session identifiers. |
 | `TestPageLoadEvent.test_page_load_extra_has_theme` | Checks that page load extra has theme. |
 | `TestThemeSelectedDebugEvent.test_theme_selected_emits_debug` | Checks that theme selected emits debug. |
 | `TestThemeSelectedDebugEvent.test_theme_selected_extra_has_theme_and_source` | Checks that theme selected extra has theme and source. |
@@ -607,6 +610,14 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestNotFoundEvents.test_share_not_found_emits_warning` | Checks that share not found emits warning. |
 | `TestNotFoundEvents.test_share_not_found_extra_has_share_id` | Checks that share not found extra has share id. |
 | `TestNotFoundEvents.test_share_not_found_not_emitted_when_share_exists` | Checks that share not found not emitted when share exists. |
+| `TestSessionStateEvents.test_session_token_generate_emits_info_without_token_field` | Checks that token generation emits structured info without a raw token field. |
+| `TestSessionStateEvents.test_session_token_revoke_not_found_emits_warning_without_token_field` | Checks that rejected token revocation logs the reason without a raw token field. |
+| `TestSessionStateEvents.test_session_token_revoke_masks_token_session_id` | Checks that revoking the current token session masks the token-backed session identifier in structured logs. |
+| `TestSessionStateEvents.test_session_migrate_emits_counts_and_session_kinds` | Checks that session migration logs moved-row counts and anonymous/token session kinds without raw source or destination IDs. |
+| `TestSessionStateEvents.test_session_preferences_save_emits_key_count` | Checks that saving session preferences logs the normalized preference key count. |
+| `TestSessionStateEvents.test_session_preferences_invalid_json_emits_warning` | Checks that invalid stored session preferences emit a warning and still return safely. |
+| `TestSessionStateEvents.test_starred_command_add_logs_command_root_not_full_command` | Checks that starring a command logs only the command root, not the full command string. |
+| `TestSessionStateEvents.test_starred_commands_clear_logs_count` | Checks that clearing starred commands logs the affected row count. |
 | `TestRunSpawnErrorEvent.test_spawn_error_returns_500` | Checks that spawn error returns 500. |
 | `TestRunSpawnErrorEvent.test_spawn_error_emits_error_log` | Checks that spawn error emits error log. |
 | `TestRunSpawnErrorEvent.test_spawn_error_extra_has_ip` | Checks that spawn error extra has IP. |
@@ -648,6 +659,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestIndexRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestIndexRoute.test_returns_html` | Checks returns HTML handling. |
 | `TestIndexRoute.test_desktop_diag_link_opens_in_new_tab_while_mobile_action_stays_button` | Checks that desktop diagnostics link opens in new tab while mobile action stays button. |
+| `TestIndexRoute.test_bootstrapped_app_config_matches_config_route` | Verifies that the server-rendered APP_CONFIG bootstrap JSON matches the `/config` payload. |
 | `TestHealthRoute.test_returns_200_when_db_ok` | Returns 200 when database ok. |
 | `TestHealthRoute.test_response_is_json` | Checks response is JSON handling. |
 | `TestHealthRoute.test_db_true_when_sqlite_available` | Checks that database true when SQLite available. |
@@ -721,6 +733,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestFaqRoute.test_returns_200` | Checks returns 200 handling. |
 | `TestFaqRoute.test_items_key_present` | Checks items key present handling. |
 | `TestFaqRoute.test_includes_builtin_faq_entries` | Includes builtin FAQ entries. |
+| `TestWorkflowsRoute.test_returns_200` | Checks `/workflows` returns 200. |
+| `TestWorkflowsRoute.test_includes_v15_recon_playbooks` | Verifies that the v1.5 recon workflow playbooks are present in the workflow payload. |
+| `TestWorkflowsRoute.test_payload_steps_are_prompt_fillable` | Verifies that every workflow step exposes a prompt-fill command and note text. |
 | `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
 | `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
@@ -744,12 +759,15 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunRoute.test_shell_operator_returns_403` | Checks that shell operator returns 403. |
 | `TestRunRoute.test_missing_allowlisted_command_returns_synthetic_run` | Checks that missing allowlisted command returns synthetic run. |
 | `TestRunRoute.test_non_json_body_handled` | Checks that non JSON body handled. |
+| `TestRunRoute.test_client_side_run_persists_terminal_native_builtin` | Verifies that browser-owned built-in output is persisted as a server-backed history run. |
+| `TestRunRoute.test_client_side_run_rejects_non_client_builtin_root` | Verifies that `/run/client` only accepts allowlisted browser-owned built-in roots. |
 | `TestHistoryRoute.test_get_returns_200` | Checks get returns 200 handling. |
 | `TestHistoryRoute.test_get_returns_runs_list` | Checks that get returns runs list. |
 | `TestHistoryRoute.test_delete_all_returns_ok` | Checks that delete all returns ok. |
 | `TestHistoryRoute.test_delete_specific_nonexistent_run_returns_ok` | Checks that delete specific nonexistent run returns ok. |
 | `TestHistoryRoute.test_get_run_nonexistent_returns_404` | Checks that get run nonexistent returns 404. |
 | `TestHistoryRoute.test_history_respects_panel_limit_and_sorts_newest_first` | Checks that history respects panel limit and sorts newest first. |
+| `TestHistoryRoute.test_history_commands_returns_distinct_recent_commands_without_exit_filter` | Verifies that `/history/commands` returns the newest distinct commands without excluding non-zero exit codes. |
 | `TestHistoryRoute.test_history_reports_totals_and_keeps_roots_complete_across_pages` | Checks that paginated history responses report totals and keep command-root suggestions across pages. |
 | `TestHistoryRoute.test_history_applies_starred_only_server_side` | Checks that starred-only history filtering is applied server-side and reflected in totals. |
 | `TestHistoryRoute.test_history_can_return_snapshot_items` | Checks that `/history?type=snapshots` returns snapshot items through the mixed history payload while leaving the run subset empty. |
@@ -875,6 +893,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_man_for_built_in_topic_returns_shell_help` | Checks that `man history` and similar built-in topics return shell built-in help output. |
 | `TestRunStreaming.test_fake_man_for_shortcuts_topic_returns_web_shell_help` | Checks that fake man for shortcuts topic returns web shell help. |
 | `TestRunStreaming.test_fake_history_lists_recent_session_commands` | Checks that fake history lists recent session commands. |
+| `TestRunStreaming.test_fake_history_honors_recent_commands_limit` | Verifies that the built-in `history` command uses the configured recent-command limit instead of a separate hard cap. |
 | `TestRunStreaming.test_fake_pwd_returns_synthetic_path` | Checks that fake pwd returns synthetic path. |
 | `TestRunStreaming.test_fake_uname_a_returns_web_shell_environment` | Checks that fake uname a returns web shell environment. |
 | `TestRunStreaming.test_fake_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
@@ -1120,6 +1139,15 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `clear cancels welcome, clears the active tab preserving run state, and closes the sheet` | Verifies that the mobile menu `clear` entry routes through `cancelWelcome(activeTabId)` + `clearTab(activeTabId, { preserveRunState: true })` and closes the menu sheet. |
 | `opens the theme selector from the theme button` | Verifies that opens the theme selector from the theme button. |
 | `populates the theme select from the registry and applies the selected theme` | Verifies that populates the theme select from the registry and applies the selected theme. |
+| `applies a theme from the terminal theme command` | Verifies that the terminal-native `theme` command applies a selected theme through the same runtime path as the theme selector. |
+| `groups terminal theme list output by color scheme` | Verifies that `theme list` separates dark, light, and fallback theme entries using the registry `color_scheme` value. |
+| `requires explicit set before applying a theme from the terminal theme command` | Verifies that `theme <theme>` is rejected and only `theme set <theme>` applies a terminal-native theme change. |
+| `updates user options from the terminal config command` | Verifies that the terminal-native `config` command updates user options through the same preference path as the options modal. |
+| `requires explicit set before updating user options from the terminal config command` | Verifies that `config <option> <value>` is rejected and only `config set <option> <value>` applies terminal-native option changes. |
+| `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
+| `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
+| `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
+| `keeps code-owned built-ins out of autocomplete.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing autocomplete YAML. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
 | `falls back to the current/default theme when localStorage references a missing theme` | Verifies that falls back to the current/default theme when localStorage references a missing theme. |
 | `falls back to the baked-in dark palette when the configured default theme is missing` | Verifies that falls back to the baked-in dark palette when the configured default theme is missing. |
@@ -1255,6 +1283,9 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `expands through the shared trailing space when suggestions only diverge after the command root` | Verifies that expands through the shared trailing space when suggestions only diverge after the command root. |
 | `expands the shared prefix for contextual token suggestions in place` | Verifies that contextual token suggestions can expand to a shared in-token prefix without disturbing the rest of the command. |
 | `returns root-aware contextual matches and suppresses already-used flags` | Verifies that contextual autocomplete stays root-aware and does not resuggest flags already present in the command. |
+| `prefers runtime autocomplete suggestions for client-side commands` | Verifies that client-side commands can provide dynamic autocomplete suggestions before falling back to the static autocomplete registry. |
+| `merges runtime autocomplete context with the YAML-loaded context registry` | Verifies that runtime built-in context and YAML-loaded tool context feed the same autocomplete matching engine. |
+| `uses sequence-specific runtime value hints without leaking them to sibling subcommands` | Verifies that runtime context can offer values for sequences such as `config set line-numbers` without also suggesting those values after `config get line-numbers`. |
 | `keeps an exact single flag match visible so its description is still shown` | Verifies that typing a full flag token such as `curl -w` keeps the single matching flag row visible long enough to expose its description instead of collapsing the dropdown immediately. |
 | `still collapses an exact single non-flag match` | Verifies that the exact-match dropdown auto-hide rule still applies to normal non-flag suggestions such as a flat `ping` root match. |
 | `shows positional hints alongside flag hints at command-root whitespace` | Verifies that positional guidance like `<target>` appears alongside root-level flag hints after a known command plus trailing space, and that `<placeholder>` entries are flagged `hintOnly` with an empty `insertValue`. |
@@ -1325,8 +1356,9 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 
 | Test | Description |
 | --- | --- |
-| `includes the welcome timing keys exposed by /config` | Verifies that includes the welcome timing keys exposed by /config. |
-| `keeps the built-in share redaction baseline in bootstrap defaults` | Verifies that the frontend bootstrap defaults preserve the built-in share redaction baseline. |
+| `reads APP_CONFIG from the server-rendered bootstrap JSON` | Verifies that `config.js` initializes `APP_CONFIG` from the inline JSON emitted by the Flask index route. |
+| `falls back to an existing window APP_CONFIG object for non-template harnesses` | Verifies that non-template test harnesses can still pre-seed `window.APP_CONFIG`. |
+| `does not hard-code server config defaults in config.js` | Verifies that frontend bootstrap code does not duplicate server-owned defaults or built-in redaction rules. |
 
 #### `history.test.js`
 
@@ -1352,6 +1384,7 @@ Runtime contract coverage for JS-rendered button surfaces that the static templa
 | `does not throw when the fetch rejects` | Verifies that loadStarredFromServer swallows network errors silently. |
 | `after load, _getStarred returns server data and localStorage is ignored` | Verifies that loadStarredFromServer populates the cache and that any leftover localStorage value is not surfaced. |
 | `hydrates unique recent commands from server history and enables navigation` | Verifies that hydrates unique recent commands from server history and enables navigation. |
+| `reloads command history from the distinct-command endpoint` | Verifies that session reloads hydrate prompt history and recents from `/history/commands` rather than a raw history page. |
 | `restores the typed draft after navigating through hydrated history` | Verifies that restores the typed draft after navigating through hydrated history. |
 | `emits a history-rendered event when hydrated history becomes empty` | Verifies that clearing the hydrated history still emits the rail-refresh event so empty-state recents surfaces repaint instead of keeping stale commands. |
 | `resetCmdHistoryNav clears navigation state after the user types` | Verifies that resetCmdHistoryNav clears navigation state after the user types. |
@@ -1512,6 +1545,12 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `accepts uniq with no flags` | Verifies that accepts uniq with no flags. |
 | `accepts uniq -c` | Verifies that accepts uniq -c. |
 | `rejects unsupported uniq flags` | Verifies that rejects unsupported uniq flags. |
+| `parses the base command and grep stage for client-side built-ins` | Verifies that client-side built-ins can split a piped command into a runnable base command and synthetic helper stage. |
+| `applies chained synthetic helpers to captured client-side output` | Verifies that captured client-side command output can pass through chained synthetic helpers before rendering. |
+| `filters terminal-native theme output through the same pipe helpers as older built-ins` | Verifies that terminal-native `theme` output supports the same pipe helpers as server-side fake built-ins. |
+| `filters terminal-native config output through chained pipe helpers` | Verifies that terminal-native `config` output supports chained pipe helpers before rendering. |
+| `persists terminal-native built-ins to server-backed history` | Verifies that terminal-native built-ins post their rendered output to `/run/client` so recents and history survive reload. |
+| `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
@@ -1575,6 +1614,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `treats Ctrl+C as no and cancels the clear confirmation` | Verifies that `Ctrl+C` cancels the terminal clear-confirm prompt and leaves the token untouched. |
 | `copies the active token to the clipboard from the terminal` | Verifies that `session-token copy` copies the active token and reports success without exposing the raw value. |
 | `shows an error when clipboard copy fails` | Verifies that `session-token copy` surfaces a terminal error when the clipboard write fails. |
+| `filters client-side session-token output through the built-in pipe helpers` | Verifies that terminal-native `session-token` output supports built-in pipe helpers before rendering. |
 | `prints success only after a skipped migration answer and does not store yes/no in command history` | Verifies that explicitly skipping migration still applies the token, delays the success copy until that answer, and keeps the yes/no response out of command history. |
 | `keeps the pending prompt open on invalid answers` | Verifies that invalid terminal-confirm answers re-prompt on a new line instead of silently defaulting to yes or no. |
 | `treats Ctrl+C as cancel and aborts the session-token set flow` | Verifies that `Ctrl+C` during the `session-token set` migration prompt cancels the whole flow instead of applying the token with migration skipped. |
@@ -1661,6 +1701,10 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `renderRestoredTabOutput rebuilds prompt-echo lines with the prompt prefix span` | Verifies that renderRestoredTabOutput rebuilds prompt-echo lines with the prompt prefix span. |
 | `keeps currentRunStartIndex aligned when old raw lines are pruned from the front` | Verifies that keeps currentRunStartIndex aligned when old raw lines are pruned from the front. |
 | `setTabLabel truncates the rendered label but preserves the full label in state` | Verifies that setTabLabel truncates the rendered label but preserves the full label in state. |
+| `uses shell-number defaults for new tabs` | Verifies that new tabs default to shell-number labels. |
+| `shows commands temporarily while preserving the stable default label` | Verifies that running commands appear as temporary display labels without overwriting the stable default tab label. |
+| `does not flash the command label when a run finishes before the delay` | Verifies that fast commands finish without briefly replacing the stable tab label. |
+| `shows the running command temporarily without overwriting a user rename` | Verifies that user-renamed tabs show the active command only while it is running. |
 | `permalinkTab shows a toast when there is no output to share` | Verifies that permalinkTab shows a toast when there is no output to share. |
 | `permalinkTab shows a failure toast when the share request rejects` | Verifies that permalinkTab shows a failure toast when the share request rejects. |
 | `permalinkTab falls back to execCommand when clipboard writeText rejects` | Verifies that permalinkTab falls back to execCommand when clipboard writeText rejects. |
@@ -2189,6 +2233,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `double-clicking a tab label lets the user rename it` | Verifies that double-clicking a tab label lets the user rename it. |
 | `pressing Escape cancels the rename and restores the original label` | Verifies that pressing Escape cancels the rename and restores the original label. |
 | `renamed labels stay in place after running another command` | Verifies that renamed labels stay in place after running another command. |
+| `default labels restore after a command finishes running` | Verifies that a default tab label shows the active command only while it runs, then returns to its stable shell label. |
 | `input is empty on the initial tab` | Verifies that input is empty on the initial tab. |
 | `switching to a tab does not restore prior commands into input` | Verifies that switching to a tab does not restore prior commands into input. |
 | `running a command in one tab does not block another tab from running` | Verifies that running a command in one tab does not block another tab from running. |

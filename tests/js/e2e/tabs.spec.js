@@ -77,6 +77,15 @@ test.describe('tab renaming', () => {
 
     await expect(label).toHaveText('ops-tab')
   })
+
+  test('default labels restore after a command finishes running', async ({ page }) => {
+    const label = page.locator('.tab').first().locator('.tab-label')
+
+    await expect(label).toHaveText('shell 1')
+    await runCommand(page, CMD)
+
+    await expect(label).toHaveText('shell 1')
+  })
 })
 
 test.describe('tab command recall', () => {
@@ -356,7 +365,7 @@ test.describe('tab closing', () => {
     await page.locator('.tab').first().locator('.tab-close').click()
 
     await expect(page.locator('.tab')).toHaveCount(1)
-    await expect(page.locator('.tab .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('.tab .tab-label')).toHaveText('shell 1')
     await expect(page.locator('.tab-panel .output .line')).toHaveCount(0)
     await expect(page.locator('.tab-panel .output .shell-prompt-wrap')).toBeVisible()
     await expect(page.locator('#cmd')).toHaveValue('')
@@ -461,7 +470,7 @@ test.describe('tab strip interactions', () => {
     )
 
     await expect(page.locator('#tabs-bar')).not.toHaveClass(/tabs-bar-touch-sorting/)
-    await expect(page.locator('.tab').first()).toContainText('tab 3')
+    await expect(page.locator('.tab').first()).toContainText('shell 3')
     await expect(page.locator('.tab-drop-before, .tab-drop-after')).toHaveCount(0)
     await expect(page.locator('#cmd')).toBeFocused()
   })

@@ -40,7 +40,8 @@ async function loadStarredFromServer() {
 async function reloadSessionHistory() {
   await loadStarredFromServer();
   try {
-    const resp = await apiFetch('/history?type=runs');
+    const limit = Math.max(1, Number(APP_CONFIG.recent_commands_limit) || 50);
+    const resp = await apiFetch(`/history/commands?limit=${encodeURIComponent(String(limit))}`);
     if (resp.ok) {
       const data = await resp.json();
       hydrateCmdHistory(data.runs || []);
@@ -501,7 +502,6 @@ function hydrateCmdHistory(runs) {
     .slice(0, APP_CONFIG.recent_commands_limit);
   const previewSeen = new Set();
   recentPreviewHistory = items
-    .filter(run => run && run.exit_code === 0)
     .map(run => run && typeof run.command === 'string' ? run.command : '')
     .filter(cmd => {
       if (!cmd || previewSeen.has(cmd)) return false;

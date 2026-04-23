@@ -630,6 +630,26 @@ class TestRunLifecycleEvents:
         calls = [c for c in mock_info.call_args_list if c[0][0] == "RUN_START"]
         assert len(calls) == 1
 
+    def test_run_start_masks_token_session_id(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        fake_proc = _FakeProc(lines=["hello\n", ""])
+
+        with mock.patch.object(shell_app.log, "info") as mock_info, \
+             mock.patch("blueprints.run.is_command_allowed", return_value=(True, "")), \
+             mock.patch("blueprints.run.subprocess.Popen", return_value=fake_proc), \
+             mock.patch("blueprints.run.pid_register"), \
+             mock.patch("blueprints.run.pid_pop"), \
+             mock.patch("blueprints.run._stdout_ready", side_effect=[True, True]):
+            resp = client.post("/run", json={"command": "echo hello"}, headers={"X-Session-ID": token})
+            _ = resp.get_data(as_text=True)
+
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "RUN_START")
+        extra = call.kwargs["extra"]
+        assert extra["session"] != token
+        assert extra["session"].startswith(token[:8])
+        assert token not in extra.values()
+
     def test_run_end_emits_info_with_exit_code(self):
         client = get_client()
         fake_proc = _FakeProc(lines=["hello\n", ""], returncode=7)
@@ -1209,6 +1229,38 @@ class TestHistoryViewedEvent:
                 conn.commit()
 
 
+# ── HISTORY_COMMANDS_VIEWED ───────────────────────────────────────────────────
+
+class TestHistoryCommandsViewedEvent:
+    """HISTORY_COMMANDS_VIEWED is emitted at DEBUG when command recall hydrates."""
+
+    def test_history_commands_masks_token_session_id(self):
+        client = get_client()
+        generate_resp = client.get("/session/token/generate")
+        token = json.loads(generate_resp.data)["session_token"]
+        run_id = "hcv-test-run-" + uuid.uuid4().hex[:8]
+        with db_connect() as conn:
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (run_id, token, "dig darklab.sh", "2026-01-01T00:00:00", "2026-01-01T00:00:01", 0, "[]"),
+            )
+            conn.commit()
+        try:
+            with mock.patch.object(shell_app.log, "debug") as mock_debug:
+                resp = client.get("/history/commands", headers={"X-Session-ID": token})
+            assert resp.status_code == 200
+            call = next(c for c in mock_debug.call_args_list if c[0][0] == "HISTORY_COMMANDS_VIEWED")
+            extra = call.kwargs["extra"]
+            assert extra["session"] != token
+            assert extra["session"].startswith(token[:8])
+            assert token not in extra.values()
+        finally:
+            with db_connect() as conn:
+                conn.execute("DELETE FROM runs WHERE id = ?", (run_id,))
+                conn.commit()
+
+
 # ── PAGE_LOAD ─────────────────────────────────────────────────────────────────
 
 class TestPageLoadEvent:
@@ -1231,6 +1283,17 @@ class TestPageLoadEvent:
             get_client().get("/", headers={"X-Session-ID": "page-session"})
         call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
         assert call.kwargs["extra"]["session"] == "page-session"
+
+    def test_page_load_masks_token_session_id(self):
+        client = get_client()
+        token = json.loads(client.get("/session/token/generate").data)["session_token"]
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            client.get("/", headers={"X-Session-ID": token})
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "PAGE_LOAD")
+        extra = call.kwargs["extra"]
+        assert extra["session"] != token
+        assert extra["session"].startswith(token[:8])
+        assert token not in extra.values()
 
     def test_page_load_extra_has_theme(self):
         with mock.patch.object(shell_app.log, "info") as mock_info:
@@ -1384,6 +1447,123 @@ class TestNotFoundEvents:
             client.get(f"/share/{share_id}")
         calls = [c for c in mock_warn.call_args_list if c[0][0] == "SHARE_NOT_FOUND"]
         assert len(calls) == 0
+
+
+# ── Session state events ─────────────────────────────────────────────────────
+
+class TestSessionStateEvents:
+    """Session-token, preference, and starred-command state changes emit logs."""
+
+    def test_session_token_generate_emits_info_without_token_field(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            resp = get_client().get("/session/token/generate")
+        assert resp.status_code == 200
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_TOKEN_GENERATED")
+        assert "session_kind" in call.kwargs["extra"]
+        assert "token" not in call.kwargs["extra"]
+
+    def test_session_token_revoke_not_found_emits_warning_without_token_field(self):
+        with mock.patch.object(shell_app.log, "warning") as mock_warn:
+            resp = get_client().post("/session/token/revoke", json={"token": "tok_" + "a" * 32})
+        assert resp.status_code == 404
+        call = next(c for c in mock_warn.call_args_list if c[0][0] == "SESSION_TOKEN_REVOKE_DENIED")
+        assert call.kwargs["extra"]["reason"] == "not_found"
+        assert "token" not in call.kwargs["extra"]
+
+    def test_session_token_revoke_masks_token_session_id(self):
+        client = get_client()
+        generate_resp = client.get("/session/token/generate")
+        token = json.loads(generate_resp.data)["session_token"]
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            resp = client.post(
+                "/session/token/revoke",
+                json={"token": token},
+                headers={"X-Session-ID": token},
+            )
+        assert resp.status_code == 200
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_TOKEN_REVOKED")
+        extra = call.kwargs["extra"]
+        assert extra["session"] != token
+        assert extra["session"].startswith(token[:8])
+        assert token not in extra.values()
+
+    def test_session_migrate_emits_counts_and_session_kinds(self):
+        client = get_client()
+        from_id = "log-migrate-from-" + uuid.uuid4().hex[:8]
+        to_id = str(uuid.uuid4())
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            resp = client.post(
+                "/session/migrate",
+                json={"from_session_id": from_id, "to_session_id": to_id},
+                headers={"X-Session-ID": from_id},
+            )
+        assert resp.status_code == 200
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_MIGRATED")
+        extra = call.kwargs["extra"]
+        assert extra["from_session_kind"] == "anonymous"
+        assert extra["to_session_kind"] == "anonymous"
+        assert "migrated_preferences" in extra
+        assert "from_session_id" not in extra
+        assert "to_session_id" not in extra
+
+    def test_session_preferences_save_emits_key_count(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            resp = get_client().post(
+                "/session/preferences",
+                json={"preferences": {"pref_theme_name": "darklab_obsidian.yaml", "ignored": "x"}},
+                headers={"X-Session-ID": "prefs-log-session"},
+            )
+        assert resp.status_code == 200
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "SESSION_PREFERENCES_SAVED")
+        assert call.kwargs["extra"]["key_count"] == 1
+
+    def test_session_preferences_invalid_json_emits_warning(self):
+        session_id = "prefs-invalid-" + uuid.uuid4().hex[:8]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR REPLACE INTO session_preferences (session_id, preferences, updated) "
+                "VALUES (?, ?, datetime('now'))",
+                (session_id, "{not-json"),
+            )
+            conn.commit()
+        try:
+            with mock.patch.object(shell_app.log, "warning") as mock_warn:
+                resp = get_client().get("/session/preferences", headers={"X-Session-ID": session_id})
+            assert resp.status_code == 200
+            calls = [c for c in mock_warn.call_args_list if c[0][0] == "SESSION_PREFERENCES_INVALID"]
+            assert len(calls) == 1
+        finally:
+            with sqlite3.connect(DB_PATH) as conn:
+                conn.execute("DELETE FROM session_preferences WHERE session_id = ?", (session_id,))
+                conn.commit()
+
+    def test_starred_command_add_logs_command_root_not_full_command(self):
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            resp = get_client().post(
+                "/session/starred",
+                json={"command": "curl -H Authorization:secret https://darklab.sh"},
+                headers={"X-Session-ID": "star-log-session"},
+            )
+        assert resp.status_code == 200
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "STARRED_COMMAND_ADDED")
+        extra = call.kwargs["extra"]
+        assert extra["command_root"] == "curl"
+        assert "command" not in extra
+
+    def test_starred_commands_clear_logs_count(self):
+        client = get_client()
+        session_id = "star-clear-log-" + uuid.uuid4().hex[:8]
+        with sqlite3.connect(DB_PATH) as conn:
+            conn.execute(
+                "INSERT OR IGNORE INTO starred_commands (session_id, command) VALUES (?, ?)",
+                (session_id, "dig darklab.sh"),
+            )
+            conn.commit()
+        with mock.patch.object(shell_app.log, "info") as mock_info:
+            resp = client.delete("/session/starred", headers={"X-Session-ID": session_id})
+        assert resp.status_code == 200
+        call = next(c for c in mock_info.call_args_list if c[0][0] == "STARRED_COMMANDS_CLEARED")
+        assert call.kwargs["extra"]["count"] >= 1
 
 
 # ── RUN_SPAWN_ERROR ────────────────────────────────────────────────────────────

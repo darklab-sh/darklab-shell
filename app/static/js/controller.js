@@ -195,7 +195,6 @@ function setupMobileComposer() {
   const mobileInput = composerInputs.mobile || null;
   if (!mobileInput || !mobileRunBtn) return;
   bindMobileComposerSubmitAndInputListeners(mobileInput);
-  bindMobileEditBarListeners(_mobileUiLayoutRefs && _mobileUiLayoutRefs.composer ? _mobileUiLayoutRefs.composer.editBar : null);
   bindMobileComposerKeyboardListeners(mobileInput);
   if (mobileShellTranscript) {
     const closeKeyboardFromTranscript = e => {
@@ -214,6 +213,7 @@ function setupMobileComposer() {
 // ── Load config from server ──
 apiFetch('/config').then(r => r.json()).then(cfg => {
   APP_CONFIG = cfg;
+  if (typeof window !== 'undefined') window.APP_CONFIG = APP_CONFIG;
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
@@ -779,9 +779,10 @@ if (typeof loadSessionPreferences === 'function') {
   });
 }
 
+const commandHistoryLimit = encodeURIComponent(String(APP_CONFIG.recent_commands_limit || 50));
 Promise.all([
-  apiFetch('/history').then(r => r.json()).catch(err => {
-    logClientError('failed to load /history', err);
+  apiFetch(`/history/commands?limit=${commandHistoryLimit}`).then(r => r.json()).catch(err => {
+    logClientError('failed to load /history/commands', err);
     return { runs: [] };
   }),
   apiFetch('/history/active').then(r => r.json()).catch(err => {
@@ -795,7 +796,7 @@ Promise.all([
   const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
     && restoreActiveRunsAfterReload(activeData.runs || []);
   if (!restoredTabs && !restoredActiveRuns) {
-    createTab('tab 1');
+    createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
     runWelcome();
     return;
   }

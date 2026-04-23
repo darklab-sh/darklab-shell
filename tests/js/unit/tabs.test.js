@@ -123,6 +123,8 @@ function loadTabsFns({
     clearTab,
     setTabStatus,
     setTabLabel,
+    setTabRunningCommand,
+    createDefaultTabLabel,
     copyTab,
     saveTab,
     exportTabHtml,
@@ -249,6 +251,7 @@ describe('tabs helpers', () => {
   })
 
   afterEach(() => {
+    vi.useRealTimers()
     vi.restoreAllMocks()
   })
 
@@ -377,7 +380,7 @@ describe('tabs helpers', () => {
     expect(_getTabs()[0].exitCode).toBeNull()
     expect(_getTabs()[0].killed).toBe(false)
     expect(_getTabs()[0].pendingKill).toBe(false)
-    expect(document.querySelector('.tab-label').textContent).toBe('tab 1')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
     expect(closeBtn.blur).toHaveBeenCalled()
     activeElementSpy.mockRestore()
   })
@@ -675,6 +678,89 @@ describe('tabs helpers', () => {
 
     expect(document.querySelector('.tab-label').textContent).toBe('abcdefghijklmnopqrstuvwxyz…')
     expect(_getTabs()[0].label).toBe(label)
+  })
+
+  it('uses shell-number defaults for new tabs', () => {
+    const { createTab, createDefaultTabLabel, _getTabs } = loadTabsFns()
+
+    const id = createTab()
+    const secondId = createTab()
+
+    expect(id).toBeTruthy()
+    expect(secondId).toBeTruthy()
+    expect(createDefaultTabLabel(2)).toBe('shell 2')
+    expect([...document.querySelectorAll('.tab-label')].map(el => el.textContent)).toEqual([
+      'shell 1',
+      'shell 2',
+    ])
+    expect(_getTabs()[0].label).toBe('shell 1')
+    expect(_getTabs()[1].label).toBe('shell 2')
+  })
+
+  it('shows commands temporarily while preserving the stable default label', () => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+    const { createTab, setTabRunningCommand, setTabStatus, _getTabs } = loadTabsFns()
+    const id = createTab('shell 1')
+
+    setTabRunningCommand(id, 'ping darklab.sh')
+    setTabStatus(id, 'running')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    vi.advanceTimersByTime(499)
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    vi.advanceTimersByTime(1)
+    expect(document.querySelector('.tab-label').textContent).toBe('ping darklab.sh')
+    expect(_getTabs()[0].label).toBe('shell 1')
+
+    setTabStatus(id, 'ok')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    expect(_getTabs()[0].runningLabel).toBe('')
+
+    setTabRunningCommand(id, 'dig darklab.sh')
+    setTabStatus(id, 'running')
+    vi.advanceTimersByTime(500)
+    expect(document.querySelector('.tab-label').textContent).toBe('dig darklab.sh')
+    expect(_getTabs()[0].label).toBe('shell 1')
+
+    setTabStatus(id, 'ok')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+  })
+
+  it('does not flash the command label when a run finishes before the delay', () => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+    const { createTab, setTabRunningCommand, setTabStatus, _getTabs } = loadTabsFns()
+    const id = createTab('shell 1')
+
+    setTabRunningCommand(id, 'hostname')
+    setTabStatus(id, 'running')
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+
+    setTabStatus(id, 'ok')
+    vi.advanceTimersByTime(500)
+
+    expect(document.querySelector('.tab-label').textContent).toBe('shell 1')
+    expect(_getTabs()[0].runningLabel).toBe('')
+  })
+
+  it('shows the running command temporarily without overwriting a user rename', () => {
+    vi.restoreAllMocks()
+    vi.useFakeTimers()
+    const { createTab, setTabLabel, setTabRunningCommand, setTabStatus, _getTabs } = loadTabsFns()
+    const id = createTab('shell 1')
+    const tab = _getTabs()[0]
+    setTabLabel(id, 'ops')
+    tab.renamed = true
+
+    setTabRunningCommand(id, 'nmap example.com')
+    setTabStatus(id, 'running')
+    expect(document.querySelector('.tab-label').textContent).toBe('ops')
+    vi.advanceTimersByTime(500)
+    expect(document.querySelector('.tab-label').textContent).toBe('nmap example.com')
+    expect(tab.label).toBe('ops')
+
+    setTabStatus(id, 'ok')
+    expect(document.querySelector('.tab-label').textContent).toBe('ops')
   })
 
   it('permalinkTab shows a toast when there is no output to share', () => {

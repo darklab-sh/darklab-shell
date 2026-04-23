@@ -9,12 +9,14 @@ Long output is trimmed so the terminal stays responsive.
 Arrow Up/Down cycles command history when autocomplete is not active.
 The welcome banner uses sampled examples from the allowlist.
 Use the search bar to scan output with case-sensitive or regex matching.
-Built-in pipe support lets commands use | grep, | head, | tail, and | wc -l.
+Built-in pipe support lets commands chain | grep, | head, | tail, | wc -l, | sort, and | uniq.
 Double-click a tab label to rename it without losing later command output.
 The timestamps toggle cycles between off, elapsed, and clock time.
 The line number toggle makes long output easier to reference and share.
 Save HTML preserves ANSI colors; save txt exports a plain text snapshot.
+Save PDF creates a themed document from the active tab without leaving the browser.
 Use share snapshot when you want the current tab view, not just one saved run.
+Snapshots appear in history alongside runs; use the type filter to switch between them.
 Run permalink in the history panel copies the canonical link for a single saved command.
 The kill button sends SIGTERM to the whole process group for that tab.
 If you scroll away from a live run, use jump to live to snap back to the tail.
@@ -27,11 +29,17 @@ After `nmap ` or `curl -`, autocomplete can switch to command-specific flags and
 Context-aware autocomplete shows positional hints too, so `nmap ` can suggest both flags and `<target>`.
 Reload keeps idle tabs, restored output, and draft text in the current browser session.
 If a run is still active after reload, the tab reconnects and swaps in the saved result when it finishes.
-History filters can narrow runs by search text, command root, exit code, date, and starred state.
+History filters can narrow runs by search text, command name, exit code, date, and starred state.
 Active history filters show up as removable chips so you can clear one without resetting the rest.
+History pagination keeps large sessions navigable without losing search or filter state.
 Older history entries show their date alongside the time so searches are easier to scan.
 Copy, save txt, and save html all work from the active tab without leaving the shell.
 Theme changes apply to the shell, history overlays, and shared snapshot pages.
+Run 'theme list' to inspect installed themes or 'theme set <name>' to apply one from the prompt.
+Run 'config list' to inspect user options or 'config set <option> <value>' to change them.
+Run 'session-token generate' to carry history, starred commands, snapshots, and user options across devices.
+Run 'status' for a compact summary of session type, runs, snapshots, stars, saved options, and active jobs.
+Use the Workflows rail menu to load multi-step diagnostic playbooks into the prompt.
 Press any key to end the welcome animation early and jump to the prompt.
 Run the command 'help' to view the shell's built-in commands.
 Run the command 'ls' to view all available commands.

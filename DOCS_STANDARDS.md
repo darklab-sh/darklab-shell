@@ -65,28 +65,28 @@ Each template lists a set of **Invariants** — the contract the shape is meant 
 
 ### T1. Release-entry umbrella shape
 
-Use for multi-phase or multi-subsystem refactors in `CHANGELOG.md`.
+Use for broad multi-subsystem refactors in `CHANGELOG.md`.
 
 Shape:
 
 ```md
 - **{Refactor name} — {one-sentence framing of scope + motivation}** so that {outcome}.
-  - **Phase 1 — {what changed, one line}.**
+  - **{Subsystem or surface} — {what changed, one line}.**
     - Contract: {what callers/readers get}
     - Migrated: {files or surfaces touched}
     - Removed: {what was retired}
     - Test coverage: {new tests or coverage additions}
     - Net delta: {suite counts or measurable impact if relevant}
-  - **Phase 2 — ...**
+  - **{Next subsystem or surface} — ...**
 ```
 
 Invariants:
 
-- Umbrella lead is self-contained — a reader gets the full scope without reading any phase.
-- Every phase is itself bold-led and skimmable.
-- Phases share consistent axes (Contract / Migrated / Removed / Test coverage).
+- Umbrella lead is self-contained — a reader gets the full scope without reading every child bullet.
+- Every child bullet is itself bold-led and skimmable.
+- Child bullets share consistent axes (Contract / Migrated / Removed / Test coverage).
 
-Use this when the reader benefits from seeing repeated structure across phases. Do not use it for simple one-shot changes — reach for T2 instead.
+Use this when the reader benefits from repeated structure across related subsystems. Do not use it for simple one-shot changes — reach for T2 instead.
 
 ### T2. Release-entry single-shot shape
 
@@ -136,10 +136,10 @@ Invariants:
 
 Both shapes use indented sub-bullets, so the choice is easy to get wrong.
 
-- **T1** — one *umbrella* change split across multiple *phases*. Each sub-bullet is its own phase with Contract / Migrated / Removed / Tests axes.
+- **T1** — one *umbrella* change split across multiple related subsystems or surfaces. Each sub-bullet has Contract / Migrated / Removed / Tests axes.
 - **T2 long** — one *atomic* change decomposed into the three semantic axes for its changelog section (Root cause / Fix / Tests, etc.). Child bullets are fine when they keep those axes readable; phases are not.
 
-If the work shipped as one commit or one coordinated change, use T2 long. If it shipped across multiple deliberate stages the reader needs to walk through, use T1.
+If the work shipped as one commit or one coordinated change, use T2 long. If it spans multiple reader-relevant subsystems, use T1.
 
 ### T3. Merge-request doc shape
 
@@ -331,7 +331,7 @@ Invariants:
 - Separate user-visible outcomes from internal implementation notes when possible.
 - Use T2 short for one-scope entries (≤4 sentences).
 - Use T2 long when the entry is ≥5 sentences or has distinct root-cause / implementation / tests concepts.
-- Use T1 only for multi-phase umbrellas — not as a substitute for T2 long.
+- Use T1 only for broad subsystem umbrellas — not as a substitute for T2 long.
 - If a `Before` / `After` / `Fix` / `What` / `Tests` bullet still contains several distinct points, split it into one additional child-bullet level instead of leaving a paragraph-sized block.
 
 ### `THEME.md`

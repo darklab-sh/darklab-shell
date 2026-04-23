@@ -181,7 +181,7 @@ describe('loadStarredFromServer', () => {
 })
 
 describe('command history hydration', () => {
-  function loadHistoryHelpers({ emitUiEvent = vi.fn() } = {}) {
+  function loadHistoryHelpers({ emitUiEvent = vi.fn(), apiFetch = null } = {}) {
     document.body.innerHTML = `
       <div id="history-row"><span class="history-label">Recent:</span></div>
       <input id="cmd" />
@@ -198,7 +198,7 @@ describe('command history hydration', () => {
         document,
         localStorage: new MemoryStorage(),
         APP_CONFIG: { recent_commands_limit: 3 },
-        apiFetch: () => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) }),
+        apiFetch: apiFetch || (() => Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })),
         histRow,
         cmdInput,
         historyPanel,
@@ -220,6 +220,7 @@ describe('command history hydration', () => {
         },
       },
       `{
+      reloadSessionHistory,
       hydrateCmdHistory,
       navigateCmdHistory,
       resetCmdHistoryNav,
@@ -249,6 +250,7 @@ describe('command history hydration', () => {
     ])
     expect(getRecentPreviewHistory()).toEqual([
       'dig darklab.sh A',
+      'curl -I https://darklab.sh',
       'ping -c 4 darklab.sh',
     ])
 
@@ -256,6 +258,30 @@ describe('command history hydration', () => {
     expect(cmdInput.value).toBe('dig darklab.sh A')
     expect(navigateCmdHistory(-1)).toBe(true)
     expect(cmdInput.value).toBe('')
+  })
+
+  it('reloads command history from the distinct-command endpoint', async () => {
+    const apiFetch = vi.fn((url) => {
+      if (url === '/session/starred') {
+        return Promise.resolve({ ok: true, json: () => Promise.resolve({ commands: [] }) })
+      }
+      return Promise.resolve({
+        ok: true,
+        json: () => Promise.resolve({
+          runs: [
+            { command: 'dig darklab.sh A' },
+            { command: 'curl -I https://darklab.sh' },
+          ],
+        }),
+      })
+    })
+    const { reloadSessionHistory, getCmdHistory, getRecentPreviewHistory } = loadHistoryHelpers({ apiFetch })
+
+    await reloadSessionHistory()
+
+    expect(apiFetch).toHaveBeenCalledWith('/history/commands?limit=3')
+    expect(getCmdHistory()).toEqual(['dig darklab.sh A', 'curl -I https://darklab.sh'])
+    expect(getRecentPreviewHistory()).toEqual(['dig darklab.sh A', 'curl -I https://darklab.sh'])
   })
 
   it('restores the typed draft after navigating through hydrated history', () => {
@@ -326,7 +352,7 @@ describe('command history hydration', () => {
       {
         document,
         localStorage: new MemoryStorage(),
-        APP_CONFIG: { recent_commands_limit: 8, history_panel_limit: 8 },
+        APP_CONFIG: { recent_commands_limit: 50, history_panel_limit: 8 },
         histRow: document.getElementById('history-row'),
         cmdInput: document.getElementById('cmd'),
         historyPanel: document.getElementById('history-panel'),
@@ -365,7 +391,7 @@ describe('command history hydration', () => {
       {
         document,
         localStorage: new MemoryStorage(),
-        APP_CONFIG: { recent_commands_limit: 8 },
+        APP_CONFIG: { recent_commands_limit: 50 },
         histRow: document.getElementById('history-row'),
         cmdInput: document.getElementById('cmd'),
         historyPanel: document.getElementById('history-panel'),
@@ -535,7 +561,7 @@ describe('history panel actions', () => {
         {
           document,
           localStorage: new MemoryStorage(),
-          APP_CONFIG: { recent_commands_limit: 8, history_panel_limit: 8 },
+          APP_CONFIG: { recent_commands_limit: 50, history_panel_limit: 8 },
           apiFetch,
           navigator: { clipboard },
           location,

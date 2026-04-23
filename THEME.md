@@ -23,7 +23,7 @@ This document is the full reference for the shell theme system. It explains how 
 
 ## Overview
 
-The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, exported HTML, and PDF export all read from the same resolved semantic tokens rather than each maintaining a separate palette. Themes are selectable at runtime through a preview modal without requiring code changes or a container rebuild.
+The theme system externalizes all visual palette values into named YAML files that the runtime loads, resolves against built-in fallback defaults, and injects into every presentation surface. The live shell, permalink pages, the runtime theme selector, exported HTML, and PDF export all read from the same resolved semantic tokens rather than each maintaining a separate palette. Themes are selectable at runtime through the preview modal or the `theme` terminal command without requiring code changes or a container rebuild.
 
 ---
 
@@ -111,7 +111,7 @@ The checked-in files `app/conf/theme_dark.yaml.example` and `app/conf/theme_ligh
 
 ### 4. Expose the values to JS
 
-`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder and the runtime theme selector, can then read the exact runtime theme without duplicating a hardcoded palette.
+`theme_vars_script.html` serializes the current resolved values into `window.ThemeCssVars` and the full registry into `window.ThemeRegistry`. Browser-side helpers, especially the HTML export builder, runtime theme selector, and `theme` terminal command, can then read the exact runtime theme without duplicating a hardcoded palette.
 
 ### 5. Consume from CSS and export helpers
 

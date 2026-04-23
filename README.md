@@ -37,19 +37,19 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 
 ## Features
 
-- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, bash-like `Tab` completion with context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei, `Ctrl+R` reverse-history search, built-in pipe support for chained helper stages like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, and client-side stall detection with an inline notice when the connection silently dies
+- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, bash-like `Tab` completion with context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei plus runtime suggestions for app-owned commands, `Ctrl+R` reverse-history search, built-in pipe support for chained helper stages like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, and client-side stall detection with an inline notice when the connection silently dies
 - **Mobile shell** — dedicated mobile composer, keyboard helper row with character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior that keeps the latest lines visible when the keyboard opens, and a mobile history sheet with the same type / command name / exit / date / starred filtering model as desktop
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), a jump-to-live / jump-to-bottom helper when you scroll away from the tail, and export output that keeps the live header/title/meta treatment aligned across permalink pages, saved HTML, and PDF as closely as the PDF renderer allows
 - **History and sharing** — recent command chips, a persistent history surface on desktop and mobile with full-text search across command text and stored output text (SQLite FTS5), filtering by type / command name / exit code / date range / starred status, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot rows with open/copy/delete actions, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
 - **Session tokens** — generate a persistent `tok_` session token to carry your run history, shell identity, and saved user options across browsers and devices; `session-token generate/set/copy/clear/rotate/list/revoke` manage the full token lifecycle with optional history migration, atomic rotate with rollback on failure, terminal-native yes/no confirmations for the interactive CLI flows, automatic cross-tab identity sync with session-scoped UI refresh, server-side revocation, masked token arguments in local history, and a destructive clear-confirm in Options that can copy the token before the browser forgets it; the Options modal exposes the common inline actions (`Generate`, `Set`, `Copy`, `Rotate`, `Clear`) without entering commands
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
-- **Themes and presentation** — named theme variants, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
-- **Built-in commands** — native shell commands like `help`, `history`, `last`, `limits`, `status`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `status` now summarizes session type, runs, snapshots, starred commands, saved options, and active jobs alongside the instance limits
-- **Guided workflows** — built-in diagnostic sequences (DNS troubleshooting, TLS/HTTPS check, HTTP triage, quick reachability, email server check) that load individual steps directly into the active prompt; extendable with site-specific sequences via `conf/workflows.yaml`
+- **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
+- **Built-in commands** — native shell commands like `help`, `history`, `last`, `limits`, `status`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `status` now summarizes session type, runs, snapshots, starred commands, saved options, and active jobs alongside the instance limits
+- **Guided workflows** — built-in diagnostic sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive domain recon, subdomain validation, directory discovery, CDN/edge checks, API recon, network path analysis, and fast port/service triage that load individual steps directly into the active prompt; extendable with site-specific sequences via `conf/workflows.yaml`
 - **Security and operations** — allowlist-based execution with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, feroxbuster, wfuzz, katana, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`
-- **Operator customization** — context-aware autocomplete hints configurable via `conf/autocomplete.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
+- **Operator customization** — context-aware external-tool autocomplete hints configurable via `conf/autocomplete.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
 - **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, and configurable retention pruning via `permalink_retention_days`
 
 See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
@@ -171,8 +171,8 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 | `share_redaction_rules` | `[]` | Optional operator-defined regex rules appended after the built-in snapshot-share redaction baseline. Each rule supports `label`, `pattern`, `replacement`, and `flags` (`i`, `m`). This does not change stored run history or the history drawer permalink path; it affects only snapshot sharing |
 | `trusted_proxy_cidrs` | `["127.0.0.1/32", "::1/128"]` | IPs / CIDRs allowed to supply `X-Forwarded-For`. Requests outside these ranges ignore forwarded headers and use the direct connection IP |
 | `diagnostics_allowed_cidrs` | `[]` | IPs / CIDRs that may access the `/diag` operator diagnostics page. Checked against the resolved client IP using the same trusted-proxy rules as the rest of the app, so `X-Forwarded-For` is honored only when the direct peer is inside `trusted_proxy_cidrs`. Empty list (default) disables the page entirely (returns 404). When enabled, a `⊕ diag` button appears in the desktop rail and the mobile menu for matching visitors. The page shows app version, operational config, DB/Redis status, vendor asset source, tool availability, run activity by period, exit-code outcomes, and top commands by frequency and duration |
-| `history_panel_limit` | `50` | Number of runs shown in the history drawer per session |
-| `recent_commands_limit` | `8` | Number of recent commands surfaced in the Recent row (desktop rail chips; mobile peek row and pull-up recents sheet) |
+| `history_panel_limit` | `50` | Number of history rows shown per page in the desktop history drawer and mobile recents sheet |
+| `recent_commands_limit` | `50` | Number of distinct recent commands hydrated into prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `permalink_retention_days` | `365` | Delete runs and snapshots older than this many days on startup. `0` = unlimited |
 | `rate_limit_per_minute` | `30` | Max `/run` requests per minute per IP |
 | `rate_limit_per_second` | `5` | Max `/run` requests per second per IP |
@@ -446,7 +446,7 @@ To prevent commands from writing to either path directly, the app blocks any com
 
 - [ARCHITECTURE.md](ARCHITECTURE.md) - Runtime layers, request flow, persistence, security mechanics, and deployment notes
 - [CONTRIBUTING.md](CONTRIBUTING.md) - Local setup, test workflow, linting, branch workflow, and merge request guidance
-- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - Documentation structure, canonical templates, and review rules for future doc updates
+- [DOCS_STANDARDS.md](DOCS_STANDARDS.md) - Documentation structure, canonical templates, and review rules for ongoing doc updates
 - [DECISIONS.md](DECISIONS.md) - Architectural rationale, tradeoffs, and implementation-history notes
 - [tests/README.md](tests/README.md) - Detailed suite appendix, smoke-test coverage, and focused test commands
 - [THEME.md](THEME.md) - Theme registry, selector metadata, and override behavior
@@ -473,12 +473,12 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 ├── CONTRIBUTING.md            # Contributor setup, local workflow, and merge request guidance
 ├── CONTRIBUTORS.md            # Project contributors
 ├── DECISIONS.md               # Architectural rationale, tradeoffs, and implementation-history notes
-├── DOCS_STANDARDS.md          # Documentation structure, canonical templates, and review rules for future doc updates
+├── DOCS_STANDARDS.md          # Documentation structure, canonical templates, and review rules for ongoing doc updates
 ├── Dockerfile
 ├── FEATURES.md                # User-facing feature catalog with screenshots and highlights
 ├── README.md                  # This file — top-level overview and project structure map
 ├── THEME.md                   # Theme authoring/reference guide and runtime token behavior
-├── TODO.md                    # Internal task list and follow-ups not yet scheduled into a release
+├── TODO.md                    # Internal task list, known issues, and product ideas
 ├── docker-compose.yml
 ├── entrypoint.sh               # Container startup script — fixes /data ownership, drops to appuser
 ├── package.json                # JS dev dependencies and test scripts
@@ -487,6 +487,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │                               #   tests that import app.py get correct static analysis in VS Code
 ├── config/
 │   ├── eslint.config.js        # ESLint config — indentation, quotes, and semicolon rules for JS config/test files
+│   ├── stylelint.config.mjs    # stylelint config — CSS syntax and safety lint rules
 │   ├── hadolint.yaml           # hadolint config — ignores intentional Dockerfile patterns
 │   ├── yamllint.yml            # yamllint config — relaxed line length, no document-start requirement
 │   ├── vitest.config.js        # Vitest unit test config (jsdom environment)
@@ -552,7 +553,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │       │   ├── button_primitives_runtime.test.js # runtime contract — mounts JS-rendered history/mobile pagination controls and verifies they still use shared button primitives
 │       │   ├── mobile_running_indicator.test.js # mobile running-indicator chip + edge-glow contract — mount, ?ri=off/?ri=0 kill switch, chip count, active-tab exclusion, cycle-tap dispatch
 │       │   ├── session.test.js     # session ID persistence, apiFetch() header injection, and session-switch preference reloads
-│       │   ├── config.test.js      # frontend fallback config coverage for /config-mirrored keys
+│       │   ├── config.test.js      # frontend APP_CONFIG bootstrap coverage
 │       │   ├── export_pdf.test.js  # PDF export rendering — header layout, ANSI escape handling, theme color resolution
 │       │   ├── permalink.test.js   # Permalink page controller — render paths, toggles, save action delegation
 │       │   ├── ui_confirm.test.js   # showConfirm primitive coverage — guards, promise resolution, body rendering, tone, button classes, default-focus (role:cancel / id / Node), stacking breakpoint, content slot rendering/cleanup, onActivate gating (sync/async truthy/falsy/throw/reject)
@@ -629,7 +630,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     │   ├── config.yaml             # Application configuration (see Configuration section)
     │   ├── config.local.yaml       # Optional untracked deployment overrides loaded after config.yaml; sibling *.local.* overlays are also supported
     │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
-    │   ├── autocomplete.yaml         # Structured autocomplete hints for context-aware flag and value suggestions
+    │   ├── autocomplete.yaml         # Structured external-tool autocomplete hints for context-aware flag and value suggestions
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
     │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
     │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)
@@ -666,7 +667,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
         └── js/
             ├── session.js      # Session UUID + apiFetch wrapper (loads first)
             ├── utils.js        # escapeHtml, escapeRegex, renderMotd, showToast
-            ├── config.js       # APP_CONFIG defaults
+            ├── config.js       # APP_CONFIG bootstrap reader
             ├── dom.js          # Shared DOM element references
             ├── state.js        # Shared app-state store/accessors
             ├── ui_helpers.js   # DOM-facing helpers and visibility setters

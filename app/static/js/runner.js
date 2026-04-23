@@ -137,14 +137,18 @@ function restoreActiveRunsAfterReload(runs) {
       && !bootstrapTab.draftInput
       && Array.isArray(bootstrapTab.rawLines)
       && bootstrapTab.rawLines.length === 0);
-    const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab(run.command);
+    const tabId = canReuseBootstrapTab ? bootstrapTab.id : createTab();
     if (!tabId) return;
     if (!firstRestoredTabId) firstRestoredTabId = tabId;
     clearTab(tabId);
     const t = getTab(tabId);
     if (!t) return;
-    if (!t.renamed) setTabLabel(tabId, run.command);
-    t.command = run.command;
+    if (typeof setTabRunningCommand === 'function') {
+      setTabRunningCommand(tabId, run.command);
+    } else {
+      if (!t.renamed) setTabLabel(tabId, run.command);
+      t.command = run.command;
+    }
     t.runId = run.run_id;
     t.historyRunId = run.run_id;
     t.reconnectedRun = true;
@@ -403,47 +407,69 @@ function _parseSyntheticPostFilterCommand(cmd) {
     .filter(index => index !== -1);
   if (!pipeIndexes.length || pipeIndexes[0] <= 0) return null;
 
+  function unquoteToken(token) {
+    const value = String(token || '');
+    if (value.length >= 2) {
+      const first = value[0];
+      if ((first === '"' || first === "'") && value[value.length - 1] === first) {
+        return value.slice(1, -1);
+      }
+    }
+    return value;
+  }
+
   function parseStage(stageTokens) {
     if (!stageTokens.length) return null;
-    const helper = String(stageTokens[0]).toLowerCase();
+    const normalizedStageTokens = stageTokens.map(unquoteToken);
+    const helper = String(normalizedStageTokens[0]).toLowerCase();
 
     if (helper === 'grep') {
-      let patternSeen = false;
-      for (const token of stageTokens.slice(1)) {
-        if (!patternSeen && /^-[^-]/.test(token)) {
+      let pattern = null;
+      const options = { ignoreCase: false, invertMatch: false, extended: false };
+      for (const token of normalizedStageTokens.slice(1)) {
+        if (pattern === null && /^-[^-]/.test(token)) {
           for (const flag of token.slice(1)) {
             if (!['i', 'v', 'E'].includes(flag)) return null;
+            if (flag === 'i') options.ignoreCase = true;
+            if (flag === 'v') options.invertMatch = true;
+            if (flag === 'E') options.extended = true;
           }
           continue;
         }
-        if (patternSeen) return null;
-        patternSeen = true;
+        if (pattern !== null) return null;
+        pattern = token;
       }
-      return patternSeen ? { kind: 'grep' } : null;
+      return pattern !== null ? { kind: 'grep', pattern, ...options } : null;
     }
 
     if (helper === 'head' || helper === 'tail') {
-      if (stageTokens.length === 1) return { kind: helper };
-      if (stageTokens.length === 2 && /^-\d+$/.test(stageTokens[1])) {
-        return { kind: helper, count: Number(stageTokens[1].slice(1)) };
+      if (normalizedStageTokens.length === 1) return { kind: helper, count: 10 };
+      if (normalizedStageTokens.length === 2 && /^-\d+$/.test(normalizedStageTokens[1])) {
+        return { kind: helper, count: Number(normalizedStageTokens[1].slice(1)) };
       }
-      if (stageTokens.length !== 3 || stageTokens[1] !== '-n' || !/^\d+$/.test(stageTokens[2])) {
+      if (
+        normalizedStageTokens.length !== 3
+        || normalizedStageTokens[1] !== '-n'
+        || !/^\d+$/.test(normalizedStageTokens[2])
+      ) {
         return null;
       }
-      return { kind: helper, count: Number(stageTokens[2]) };
+      return { kind: helper, count: Number(normalizedStageTokens[2]) };
     }
 
     if (helper === 'wc') {
-      if (stageTokens.length === 2 && stageTokens[1] === '-l') {
+      if (normalizedStageTokens.length === 2 && normalizedStageTokens[1] === '-l') {
         return { kind: 'wc_l' };
       }
       return null;
     }
 
     if (helper === 'sort') {
-      if (stageTokens.length === 1) return { kind: 'sort' };
-      if (stageTokens.length === 2) {
-        const flag = stageTokens[1];
+      if (normalizedStageTokens.length === 1) {
+        return { kind: 'sort', reverse: false, numeric: false, unique: false };
+      }
+      if (normalizedStageTokens.length === 2) {
+        const flag = normalizedStageTokens[1];
         if (/^-[rnu]+$/.test(flag) && new Set(flag.slice(1)).size === flag.length - 1) {
           const chars = new Set(flag.slice(1));
           if ([...chars].every(c => 'rnu'.includes(c))) {
@@ -455,8 +481,10 @@ function _parseSyntheticPostFilterCommand(cmd) {
     }
 
     if (helper === 'uniq') {
-      if (stageTokens.length === 1) return { kind: 'uniq' };
-      if (stageTokens.length === 2 && stageTokens[1] === '-c') return { kind: 'uniq', count: true };
+      if (normalizedStageTokens.length === 1) return { kind: 'uniq', count: false };
+      if (normalizedStageTokens.length === 2 && normalizedStageTokens[1] === '-c') {
+        return { kind: 'uniq', count: true };
+      }
       return null;
     }
 
@@ -475,8 +503,102 @@ function _parseSyntheticPostFilterCommand(cmd) {
 
   return {
     kind: stages[0] ? stages[0].kind : null,
+    baseCommand: tokens.slice(0, pipeIndexes[0]).map(unquoteToken).join(' '),
     stages,
   };
+}
+
+function _applySyntheticPostFilterLines(lineItems, spec) {
+  const stages = spec && Array.isArray(spec.stages) ? spec.stages : [];
+  let items = Array.isArray(lineItems) ? lineItems.slice() : [];
+
+  function textOf(item) {
+    return String(item && item.text !== undefined ? item.text : item || '');
+  }
+
+  function plainItem(text) {
+    return { text: String(text), cls: '' };
+  }
+
+  for (const stage of stages) {
+    const kind = stage && stage.kind;
+    if (kind === 'grep') {
+      let matches;
+      if (stage.extended) {
+        let regex;
+        try {
+          regex = new RegExp(String(stage.pattern || ''), stage.ignoreCase ? 'i' : '');
+        } catch (err) {
+          return [{ text: `[error] Invalid synthetic grep regex: ${err.message}`, cls: 'exit-fail' }];
+        }
+        matches = (line) => regex.test(line);
+      } else {
+        const needle = String(stage.pattern || '');
+        const normalizedNeedle = stage.ignoreCase ? needle.toLowerCase() : needle;
+        matches = (line) => {
+          const haystack = stage.ignoreCase ? line.toLowerCase() : line;
+          return haystack.includes(normalizedNeedle);
+        };
+      }
+      items = items.filter((item) => {
+        const matched = matches(textOf(item));
+        return stage.invertMatch ? !matched : matched;
+      });
+    } else if (kind === 'head') {
+      items = items.slice(0, Math.max(0, Number(stage.count || 0)));
+    } else if (kind === 'tail') {
+      const count = Math.max(0, Number(stage.count || 0));
+      items = count > 0 ? items.slice(-count) : [];
+    } else if (kind === 'wc_l') {
+      items = [plainItem(String(items.length))];
+    } else if (kind === 'sort') {
+      const numeric = !!stage.numeric;
+      const sorted = items.slice().sort((a, b) => {
+        const aText = textOf(a).trimStart();
+        const bText = textOf(b).trimStart();
+        if (numeric) {
+          const aMatch = aText.match(/^[-+]?\d+\.?\d*/);
+          const bMatch = bText.match(/^[-+]?\d+\.?\d*/);
+          const aNum = aMatch ? Number(aMatch[0]) : Number.NEGATIVE_INFINITY;
+          const bNum = bMatch ? Number(bMatch[0]) : Number.NEGATIVE_INFINITY;
+          return aNum - bNum;
+        }
+        return aText.toLowerCase().localeCompare(bText.toLowerCase());
+      });
+      if (stage.reverse) sorted.reverse();
+      items = sorted;
+      if (stage.unique) {
+        const seen = new Set();
+        items = items.filter((item) => {
+          const key = textOf(item);
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+      }
+    } else if (kind === 'uniq') {
+      const result = [];
+      let previous = null;
+      let count = 0;
+      const flush = () => {
+        if (previous === null) return;
+        result.push(stage.count ? plainItem(`${String(count).padStart(7)} ${previous}`) : plainItem(previous));
+      };
+      items.forEach((item) => {
+        const text = textOf(item);
+        if (text === previous) {
+          count += 1;
+          return;
+        }
+        flush();
+        previous = text;
+        count = 1;
+      });
+      flush();
+      items = result;
+    }
+  }
+  return items;
 }
 
 function _isSyntheticPostFilterCommand(cmd) {
@@ -531,6 +653,11 @@ function _isSessionTokenSubcommand(cmd) {
   return lower.startsWith('session-token ');
 }
 
+function _isClientSideUiCommand(cmd) {
+  const root = String(cmd || '').trim().split(/\s+/, 1)[0].toLowerCase();
+  return root === 'theme' || root === 'config';
+}
+
 function _historySafeCommand(cmd) {
   const value = String(cmd || '').trim();
   if (!value) return '';
@@ -544,6 +671,52 @@ function _recordSuccessfulLocalCommand(cmd) {
   if (typeof addToRecentPreview !== 'function') return;
   const value = _historySafeCommand(cmd);
   if (value) addToRecentPreview(value);
+}
+
+function _clientSideRunExitCodeFromStatus(statusValue) {
+  return statusValue === 'fail' ? 1 : 0;
+}
+
+function _finalizeClientSideCommandStatus(tabId, statusValue) {
+  const failed = statusValue === 'fail';
+  const exitCode = failed ? 1 : 0;
+  const finalStatus = failed ? 'fail' : 'ok';
+  const tab = typeof getTab === 'function' ? getTab(tabId) : null;
+  if (tab) {
+    tab.exitCode = exitCode;
+    tab.runId = null;
+    tab.reconnectedRun = false;
+  }
+  if (tabId === activeTabId) setStatus(finalStatus);
+  setTabStatus(tabId, finalStatus);
+  if (typeof emitUiEvent === 'function') emitUiEvent('app:last-exit-changed', { value: exitCode });
+}
+
+function _persistClientSideRun(command, lineItems, statusValue) {
+  const safeCommand = _historySafeCommand(command);
+  if (!safeCommand || typeof apiFetch !== 'function') return;
+  const lines = (Array.isArray(lineItems) ? lineItems : []).map((line) => ({
+    text: String(line && line.text !== undefined ? line.text : line || ''),
+    cls: String(line && line.cls || ''),
+  }));
+  apiFetch('/run/client', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      command: safeCommand,
+      exit_code: _clientSideRunExitCodeFromStatus(statusValue),
+      lines,
+    }),
+  }).then((resp) => {
+    if (!resp || !resp.ok) throw new Error(String(resp && resp.status || 'unknown'));
+    if (typeof isHistoryPanelOpen === 'function' && isHistoryPanelOpen()) refreshHistoryPanel();
+  }).catch((err) => {
+    if (typeof logClientError === 'function') logClientError('client-side run persistence failed', err);
+  });
+}
+
+function _persistSessionTokenRun(command, lineItems, statusValue = 'ok') {
+  _persistClientSideRun(command, lineItems, statusValue);
 }
 
 async function _doSessionMigration(fromId, toId, tabId) {
@@ -622,6 +795,21 @@ function hasPendingTerminalConfirm() {
   return !!_pendingTerminalConfirm;
 }
 
+async function _runPendingTerminalConfirmHandler(promptTabId, handler) {
+  const originalSetStatus = setStatus;
+  let finalStatus = 'idle';
+  try {
+    setStatus = (statusValue) => {
+      finalStatus = statusValue;
+      originalSetStatus(statusValue);
+    };
+    await Promise.resolve(typeof handler === 'function' ? handler() : undefined);
+  } finally {
+    setStatus = originalSetStatus;
+  }
+  _finalizeClientSideCommandStatus(promptTabId, finalStatus);
+}
+
 function cancelPendingTerminalConfirm(tabId = activeTabId) {
   if (!_pendingTerminalConfirm) return false;
   const pending = _pendingTerminalConfirm;
@@ -630,9 +818,10 @@ function cancelPendingTerminalConfirm(tabId = activeTabId) {
   const cancelHandler = typeof pending.onCancel === 'function'
     ? pending.onCancel
     : (typeof pending.onNo === 'function' ? pending.onNo : null);
-  Promise.resolve(cancelHandler ? cancelHandler() : undefined).catch((err) => {
+  _runPendingTerminalConfirmHandler(promptTabId, cancelHandler).catch((err) => {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
     setStatus('fail');
+    _finalizeClientSideCommandStatus(promptTabId, 'fail');
   });
   refocusComposerAfterAction();
   return true;
@@ -694,6 +883,10 @@ async function _sessionTokenGenerate(tabId) {
             await _seedLocalStorageStarsToServer();
             if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
             _recordSuccessfulLocalCommand('session-token generate');
+            _persistSessionTokenRun('session-token generate', [
+              { text: `session token generated:  ${maskSessionToken(newToken)}` },
+              { text: 'history migrated to the new session token' },
+            ]);
           }
           setStatus('idle');
         },
@@ -704,6 +897,10 @@ async function _sessionTokenGenerate(tabId) {
           if (typeof reloadSessionHistory === 'function') await reloadSessionHistory().catch(() => {});
           _recordSuccessfulLocalCommand('session-token generate');
           appendLine('History migration skipped.', '', tabId);
+          _persistSessionTokenRun('session-token generate', [
+            { text: `session token generated:  ${maskSessionToken(newToken)}` },
+            { text: 'History migration skipped.' },
+          ]);
           setStatus('idle');
         },
       });
@@ -714,6 +911,10 @@ async function _sessionTokenGenerate(tabId) {
       await _seedLocalStorageStarsToServer();
       if (typeof reloadSessionHistory === 'function') reloadSessionHistory().catch(() => {});
       _recordSuccessfulLocalCommand('session-token generate');
+      _persistSessionTokenRun('session-token generate', [
+        { text: `session token generated:  ${maskSessionToken(newToken)}` },
+        { text: 'stored in localStorage as session_token' },
+      ]);
       setStatus('ok');
     }
   } catch (err) {
@@ -787,6 +988,10 @@ async function _sessionTokenSet(value, tabId) {
           await _activateSessionTokenIdentity(value);
           _appendSessionTokenSetLines(value, tabId);
           _recordSuccessfulLocalCommand(`session-token set ${value}`);
+          _persistSessionTokenRun(`session-token set ${value}`, [
+            { text: `session token set: ${maskSessionToken(value)}` },
+            { text: 'reload other tabs to apply the new session token' },
+          ]);
         }
         setStatus('idle');
       },
@@ -795,6 +1000,11 @@ async function _sessionTokenSet(value, tabId) {
         _appendSessionTokenSetLines(value, tabId);
         _recordSuccessfulLocalCommand(`session-token set ${value}`);
         appendLine('History migration skipped.', '', tabId);
+        _persistSessionTokenRun(`session-token set ${value}`, [
+          { text: `session token set: ${maskSessionToken(value)}` },
+          { text: 'reload other tabs to apply the new session token' },
+          { text: 'History migration skipped.' },
+        ]);
         setStatus('idle');
       },
       onCancel: async () => {
@@ -807,6 +1017,10 @@ async function _sessionTokenSet(value, tabId) {
     await _activateSessionTokenIdentity(value);
     _appendSessionTokenSetLines(value, tabId);
     _recordSuccessfulLocalCommand(`session-token set ${value}`);
+    _persistSessionTokenRun(`session-token set ${value}`, [
+      { text: `session token set: ${maskSessionToken(value)}` },
+      { text: 'reload other tabs to apply the new session token' },
+    ]);
     setStatus('ok');
   }
 }
@@ -822,6 +1036,9 @@ async function _sessionTokenCopy(tabId) {
     await copyTextToClipboard(token);
     appendLine(`session token copied to clipboard: ${maskSessionToken(token)}`, '', tabId);
     _recordSuccessfulLocalCommand('session-token copy');
+    _persistSessionTokenRun('session-token copy', [
+      { text: `session token copied to clipboard: ${maskSessionToken(token)}` },
+    ]);
     setStatus('ok');
   } catch (err) {
     appendLine('[error] failed to copy the session token to clipboard', 'exit-fail', tabId);
@@ -850,6 +1067,10 @@ async function _sessionTokenClear(tabId) {
       appendLine(`session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})`, '', tabId);
       appendLine('your session token data remains in the server database', '', tabId);
       _recordSuccessfulLocalCommand('session-token clear');
+      _persistSessionTokenRun('session-token clear', [
+        { text: `session token cleared — reverted to anonymous session (${maskSessionToken(uuid)})` },
+        { text: 'your session token data remains in the server database' },
+      ]);
       setStatus('ok');
     },
     onNo: async () => {
@@ -902,6 +1123,14 @@ async function _sessionTokenRotate(tabId) {
     );
     appendLine('old session token is now inactive — reload other tabs to use the new token', '', tabId);
     _recordSuccessfulLocalCommand('session-token rotate');
+    _persistSessionTokenRun('session-token rotate', [
+      { text: `session token rotated: ${maskSessionToken(newToken)}` },
+      {
+        text: `migrated — ${migrateData.migrated_runs} run(s), ${migrateData.migrated_snapshots} snapshot(s), `
+          + `${migrateData.migrated_stars ?? 0} starred command(s), and saved user options when the destination had none`,
+      },
+      { text: 'old session token is now inactive — reload other tabs to use the new token' },
+    ]);
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -932,6 +1161,10 @@ async function _sessionTokenList(tabId) {
       appendLine(kv('tip', "run 'session-token generate' to create a persistent token"), 'fake-kv', tabId);
     }
     _recordSuccessfulLocalCommand('session-token list');
+    _persistSessionTokenRun('session-token list', [
+      { text: data.token ? `session token  ${maskSessionToken(data.token)}` : `session  ${maskSessionToken(SESSION_ID)}`, cls: 'fake-kv' },
+      { text: data.token ? 'status          active' : 'status          anonymous (no session token set)', cls: 'fake-kv' },
+    ]);
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -976,6 +1209,9 @@ async function _sessionTokenRevoke(token, tabId) {
       appendLine('token removed from server — any device using it is now on an empty anonymous session', '', tabId);
     }
     _recordSuccessfulLocalCommand(`session-token revoke ${token}`);
+    _persistSessionTokenRun(`session-token revoke ${token}`, [
+      { text: `session token revoked: ${maskSessionToken(token)}` },
+    ]);
     setStatus('ok');
   } catch (err) {
     appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', tabId);
@@ -1011,6 +1247,50 @@ async function _handleSessionTokenCommand(cmd, tabId) {
   }
 }
 
+async function _runClientSideCommandWithOptionalPipe(cmd, tabId, runBaseCommand) {
+  const spec = _parseSyntheticPostFilterCommand(cmd);
+  const baseCommand = spec ? (spec.baseCommand || cmd) : cmd;
+  const capturedLines = [];
+  const originalAppendLine = appendLine;
+  const originalAppendCommandEcho = appendCommandEcho;
+  const originalRecordSuccessfulLocalCommand = _recordSuccessfulLocalCommand;
+  const originalPersistSessionTokenRun = _persistSessionTokenRun;
+  const originalSetStatus = setStatus;
+  let finalStatus = 'idle';
+
+  appendCommandEcho(cmd, tabId);
+  try {
+    appendCommandEcho = () => {};
+    _recordSuccessfulLocalCommand = () => {};
+    _persistSessionTokenRun = () => {};
+    setStatus = (statusValue) => {
+      finalStatus = statusValue;
+      originalSetStatus(statusValue);
+    };
+    appendLine = (text, cls = '', lineTabId = tabId) => {
+      capturedLines.push({ text: String(text ?? ''), cls: String(cls || ''), tabId: lineTabId });
+    };
+    const result = runBaseCommand(baseCommand);
+    if (!_pendingTerminalConfirm) await result;
+  } finally {
+    appendLine = originalAppendLine;
+    appendCommandEcho = originalAppendCommandEcho;
+    _recordSuccessfulLocalCommand = originalRecordSuccessfulLocalCommand;
+    _persistSessionTokenRun = originalPersistSessionTokenRun;
+    setStatus = originalSetStatus;
+  }
+
+  const outputLines = spec ? _applySyntheticPostFilterLines(capturedLines, spec) : capturedLines;
+  outputLines.forEach((line) => {
+    originalAppendLine(line.text, line.cls || '', tabId);
+  });
+  if (!_pendingTerminalConfirm) {
+    _finalizeClientSideCommandStatus(tabId, finalStatus);
+    if (finalStatus !== 'fail') _recordSuccessfulLocalCommand(cmd);
+    _persistClientSideRun(cmd, outputLines, finalStatus);
+  }
+}
+
 // ── End session token handlers ───────────────────────────────────────────────
 
 function submitCommand(rawCmd) {
@@ -1041,14 +1321,16 @@ function submitCommand(rawCmd) {
     }
     _setPendingTerminalConfirm(null);
     if (answer === 'yes' || answer === 'y') {
-      Promise.resolve(typeof pending.onYes === 'function' ? pending.onYes() : undefined).catch((err) => {
+      _runPendingTerminalConfirmHandler(promptTabId, pending.onYes).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
+        _finalizeClientSideCommandStatus(promptTabId, 'fail');
       });
     } else {
-      Promise.resolve(typeof pending.onNo === 'function' ? pending.onNo() : undefined).catch((err) => {
+      _runPendingTerminalConfirmHandler(promptTabId, pending.onNo).catch((err) => {
         appendLine(`[error] ${err.message || 'network error'}`, 'exit-fail', promptTabId);
         setStatus('fail');
+        _finalizeClientSideCommandStatus(promptTabId, 'fail');
       });
     }
     return true;
@@ -1067,7 +1349,9 @@ function submitCommand(rawCmd) {
 
   const activeTab = getActiveTab();
   if (activeTab && activeTab.st === 'running') {
-    const newId = createTab('tab ' + (tabs.length + 1));
+    const newId = createTab(typeof createDefaultTabLabel === 'function'
+      ? createDefaultTabLabel()
+      : 'shell ' + (tabs.length + 1));
     if (!newId) return false; // tab limit reached — createTab already showed a toast
     // createTab calls activateTab internally, so activeTabId now points to the new tab
   }
@@ -1093,15 +1377,41 @@ function submitCommand(rawCmd) {
   // Session-token subcommands (generate / set / clear / rotate) run entirely
   // client-side.  The bare 'session-token' status command goes to the server.
   if (_isSessionTokenSubcommand(cmd)) {
-    _handleSessionTokenCommand(cmd, activeTabId);
+    void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+      _handleSessionTokenCommand(baseCommand, activeTabId)
+    ));
+    return true;
+  }
+
+  if (_isClientSideUiCommand(cmd)) {
+    const root = cmd.trim().split(/\s+/, 1)[0].toLowerCase();
+    if (root === 'theme' && typeof handleThemeCommand === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+        handleThemeCommand(baseCommand, activeTabId)
+      ));
+      return true;
+    }
+    if (root === 'config' && typeof handleConfigCommand === 'function') {
+      void _runClientSideCommandWithOptionalPipe(cmd, activeTabId, (baseCommand) => (
+        handleConfigCommand(baseCommand, activeTabId)
+      ));
+      return true;
+    }
+    appendCommandEcho(cmd);
+    appendLine(`[error] ${root} command is not ready — reload the page and try again`, 'exit-fail', activeTabId);
+    setStatus('fail');
     return true;
   }
 
   // Re-lookup the active tab after the potential createTab() call above, which
   // may have changed activeTabId to point at the newly created tab.
   const _runTab = getActiveTab();
-  if (!_runTab || !_runTab.renamed) setTabLabel(activeTabId, cmd);
-  if (_runTab) _runTab.command = cmd;
+  if (typeof setTabRunningCommand === 'function') {
+    setTabRunningCommand(activeTabId, cmd);
+  } else {
+    if (!_runTab || !_runTab.renamed) setTabLabel(activeTabId, cmd);
+    if (_runTab) _runTab.command = cmd;
+  }
   appendCommandEcho(cmd);
   // Set runStart after the prompt line so it doesn't receive an elapsed stamp
   if (_runTab) {

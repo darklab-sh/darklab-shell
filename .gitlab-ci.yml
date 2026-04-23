@@ -115,6 +115,7 @@ lint-js:
       - node_modules/
   script:
     - npm run lint:js
+    - npm run lint:css
     - npm run lint:shell
     - npm run lint:docker
     - npm run lint:md

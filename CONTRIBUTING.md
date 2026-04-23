@@ -27,6 +27,7 @@ For system structure, use [ARCHITECTURE.md](ARCHITECTURE.md). For the test-suite
    - Node.js `22` (the repo pins this in [`.nvmrc`](.nvmrc))
    - `npm`
    - `shellcheck`, `hadolint`, `yamllint` (via Homebrew on macOS: `brew install shellcheck hadolint yamllint`)
+   - CSS linting uses the npm-managed `stylelint` dependency; no separate system package is needed
 
 2. Create and activate a local virtual environment from the repo root:
 
@@ -133,7 +134,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **867 pytest + 728 Vitest + 199 Playwright = 1,794 tests**.
+Current totals: **886 pytest + 753 Vitest + 200 Playwright = 1,839 tests**.
 
 Playwright notes:
 
@@ -168,15 +169,16 @@ The checks and their scope:
 | JS unit tests | `vitest` | `tests/js/unit/` | `npm run test:unit` |
 | JS style | `eslint` | `tests/js/`, `config/`, `scripts/` | `npm run lint:js` |
 | JS dep CVEs | `npm audit` | `package.json` (high/critical only) | `npm run audit:js` |
+| CSS style | `stylelint` | `app/static/css/**/*.css` | `npm run lint:css` |
 | Shell scripts | `shellcheck` | all tracked `.sh` files with a bash/sh shebang | `npm run lint:shell` |
 | Dockerfile | `hadolint` | `Dockerfile` | `npm run lint:docker` |
 | YAML | `yamllint` | all tracked `.yml`/`.yaml` files | `npm run lint:yaml` |
 | Markdown | `markdownlint-cli2` | all tracked `.md` files | `npm run lint:md` |
 | Vendor JS | `build_vendor.mjs` + `git diff` | `app/static/js/vendor/` | `npm run vendor:check` |
 
-Run all linters at once (Python + JS/shell/Docker/YAML/Markdown + vendor): `npm run lint`
+Run all linters at once (Python + JS/CSS/shell/Docker/YAML/Markdown + vendor): `npm run lint`
 
-Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
+Tool configurations: [`.flake8`](.flake8), [`config/eslint.config.js`](config/eslint.config.js), [`config/stylelint.config.mjs`](config/stylelint.config.mjs), [`.shellcheckrc`](.shellcheckrc), [`config/hadolint.yaml`](config/hadolint.yaml), [`config/yamllint.yml`](config/yamllint.yml), [`.markdownlint-cli2.jsonc`](.markdownlint-cli2.jsonc).
 
 These checks also run in GitLab CI through the `test`, `lint`, `audit`, and `build` stages defined in [`.gitlab-ci.yml`](.gitlab-ci.yml).
 
@@ -295,7 +297,7 @@ A good merge request should make it easy to answer:
 - why it changed
 - what risks or tradeoffs remain
 - how it was validated
-- whether any follow-up work is intentionally deferred
+- what scope boundaries or residual risks reviewers should know
 
 Use the repository template in [`.gitlab/merge_request_templates/Default.md`](.gitlab/merge_request_templates/Default.md).
 
@@ -313,7 +315,7 @@ GitLab will use the checked-in default template, but this is the expected shape:
 - `npm run test:e2e`
 
 ## Risks
-- Any known tradeoffs, compatibility notes, or follow-up work
+- Known tradeoffs, compatibility notes, or residual risks
 
 ## Docs
 - README / ARCHITECTURE / tests docs / release notes updated as needed

@@ -134,6 +134,19 @@ def get_session_id():
     return session_id if row else ""
 
 
+def get_log_session_id(session_id=None):
+    """Return a log-safe session identifier.
+
+    Anonymous UUID-style sessions are correlation IDs and can be logged as-is.
+    ``tok_`` sessions are bearer credentials, so logs keep only the visible
+    prefix needed for correlation and mask the secret suffix.
+    """
+    value = get_session_id() if session_id is None else str(session_id or "")
+    if value.startswith("tok_"):
+        return f"{value[:8]}********"
+    return value
+
+
 # ── Font manifest ──────────────────────────────────────────────────────────────
 # Single source of truth for vendored font files.  assets.py derives its route
 # allowlist from this list; permalinks.py uses it to generate @font-face CSS.

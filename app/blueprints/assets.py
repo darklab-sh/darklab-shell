@@ -14,7 +14,7 @@ from flask import Blueprint, abort, jsonify, render_template, request, send_file
 from commands import command_root, load_allowed_commands
 from config import APP_VERSION, CFG, get_theme_entry
 from database import db_connect
-from helpers import FONT_FILES, current_theme_name, get_client_ip, get_session_id, ip_is_in_cidrs
+from helpers import FONT_FILES, current_theme_name, get_client_ip, get_log_session_id, ip_is_in_cidrs
 from process import redis_client
 
 log = logging.getLogger("shell")
@@ -49,7 +49,7 @@ def client_log():
     message = str(data.get("message") or "")[:500]
     log.warning("CLIENT_ERROR", extra={
         "ip": get_client_ip(),
-        "session": get_session_id(),
+        "session": get_log_session_id(),
         "context": context,
         "client_message": message,
     })

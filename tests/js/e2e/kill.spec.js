@@ -139,7 +139,7 @@ test.describe('kill running command', () => {
     await page.locator('.tab .tab-close').click()
 
     await expect(page.locator('.status-pill')).toHaveText('IDLE', { timeout: 10_000 })
-    await expect(page.locator('.tab .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('.tab .tab-label')).toHaveText('shell 1')
     await expect(page.locator('.tab-panel .output .line')).toHaveCount(0)
     await expect(page.locator('#hud-actions [data-action="kill"]')).toBeHidden()
   })

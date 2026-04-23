@@ -709,6 +709,117 @@ def _builtin_workflows():
                 {"cmd": "nc -zv darklab.sh 587",   "note": "Is the submission port 587 open?"},
             ],
         },
+        {
+            "title": "Domain OSINT / Passive Recon",
+            "description": "Gather ownership, delegation, and passive subdomain context before active probing.",
+            "steps": [
+                {"cmd": "whois darklab.sh", "note": "Review registration, registrar, and allocation context."},
+                {"cmd": "dig darklab.sh NS", "note": "Identify authoritative nameservers for the domain."},
+                {"cmd": "subfinder -d darklab.sh -silent", "note": "Find passively observed subdomains."},
+                {"cmd": "dnsrecon -d darklab.sh", "note": "Enumerate common DNS records and transfer hints."},
+            ],
+        },
+        {
+            "title": "Subdomain Enumeration & Validation",
+            "description": "Discover candidate subdomains, resolve them, and probe likely web services.",
+            "steps": [
+                {"cmd": "subfinder -d darklab.sh -silent", "note": "Collect passive subdomain candidates."},
+                {
+                    "cmd": (
+                        "dnsx -d darklab.sh "
+                        "-w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp"
+                    ),
+                    "note": "Resolve common subdomains and keep the DNS response context.",
+                },
+                {
+                    "cmd": "pd-httpx -u https://darklab.sh -title -status-code -tech-detect",
+                    "note": "Probe HTTPS and collect status, title, and technology hints.",
+                },
+            ],
+        },
+        {
+            "title": "Web Directory Discovery",
+            "description": "Look for common web paths and follow up on interesting responses.",
+            "steps": [
+                {
+                    "cmd": (
+                        "ffuf -u https://darklab.sh/FUZZ "
+                        "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+                    ),
+                    "note": "Fuzz common paths and watch for non-baseline status codes or sizes.",
+                },
+                {
+                    "cmd": (
+                        "gobuster dir -u https://darklab.sh "
+                        "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+                    ),
+                    "note": "Run a second directory check with a different scanner.",
+                },
+                {"cmd": "curl -sIL https://darklab.sh/admin", "note": "Inspect redirects and headers for a candidate path."},
+            ],
+        },
+        {
+            "title": "SSL / TLS Deep Dive",
+            "description": "Inspect certificates, protocol support, cipher exposure, and known TLS weaknesses.",
+            "steps": [
+                {"cmd": "sslscan darklab.sh", "note": "Enumerate protocols, ciphers, and certificate metadata."},
+                {"cmd": "sslyze --certinfo darklab.sh", "note": "Validate certificate chain details."},
+                {
+                    "cmd": "openssl s_client -connect darklab.sh:443 -servername darklab.sh",
+                    "note": "Inspect the raw handshake and served certificate chain.",
+                },
+                {"cmd": "testssl darklab.sh", "note": "Run the broader TLS configuration audit."},
+            ],
+        },
+        {
+            "title": "CDN / Edge Behavior Check",
+            "description": "Compare DNS, ownership, redirects, headers, and WAF/CDN edge signals.",
+            "steps": [
+                {"cmd": "dig darklab.sh A", "note": "Check the current address records."},
+                {"cmd": "whois darklab.sh", "note": "Review ownership and provider hints."},
+                {"cmd": "curl -sIL https://darklab.sh", "note": "Inspect redirects, cache headers, and edge headers."},
+                {"cmd": "wafw00f https://darklab.sh", "note": "Look for WAF or CDN fingerprints."},
+            ],
+        },
+        {
+            "title": "API Recon",
+            "description": "Triage API-style endpoints with headers, methods, JSON negotiation, and path fuzzing.",
+            "steps": [
+                {"cmd": "curl -sI https://darklab.sh/api", "note": "Check whether the API path responds and how."},
+                {"cmd": "curl -sX OPTIONS -I https://darklab.sh/api", "note": "Inspect allowed methods and CORS-style headers."},
+                {
+                    "cmd": "curl -sH Accept:application/json https://darklab.sh/api",
+                    "note": "Ask for JSON explicitly and inspect the response shape.",
+                },
+                {
+                    "cmd": (
+                        "ffuf -u https://darklab.sh/FUZZ "
+                        "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+                    ),
+                    "note": "Fuzz common API-adjacent paths and versions.",
+                },
+            ],
+        },
+        {
+            "title": "Network Path Analysis",
+            "description": "Diagnose reachability, route shape, latency, and packet-loss symptoms.",
+            "steps": [
+                {"cmd": "ping -c 10 darklab.sh", "note": "Measure basic reachability, latency, and packet loss."},
+                {"cmd": "mtr darklab.sh", "note": "Summarize path loss and latency in report mode."},
+                {"cmd": "traceroute darklab.sh", "note": "Capture a static routed path to the target."},
+                {"cmd": "tcptraceroute darklab.sh 443", "note": "Trace the TCP path toward HTTPS specifically."},
+            ],
+        },
+        {
+            "title": "Fast Port Discovery to Service Fingerprint",
+            "description": "Sweep for exposed ports quickly, then fingerprint and validate important services.",
+            "steps": [
+                {"cmd": "rustscan -a darklab.sh --range 1-1000", "note": "Quickly sweep the first thousand ports."},
+                {"cmd": "naabu -host darklab.sh -silent", "note": "Run a second fast TCP discovery pass."},
+                {"cmd": "nmap -sV darklab.sh", "note": "Fingerprint services once you know exposure is present."},
+                {"cmd": "nc -zv darklab.sh 80", "note": "Validate a specific expected port manually."},
+            ],
+        },
     ]
 
 

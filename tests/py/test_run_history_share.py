@@ -555,7 +555,7 @@ class TestRunStreaming:
         assert "faq" in body and "Show configured FAQ entries inside the terminal with question and answer formatting." in body
         assert "fortune" in body and "Print a short operator-themed one-liner." in body
         assert "groups" in body and "Show the shell group membership." in body
-        assert "autocomplete" in body and "Explain context-aware autocomplete for known command roots." in body
+        assert "autocomplete" in body and "Explain context-aware autocomplete for known commands." in body
         assert "help" in body and "List the built-in commands available in this shell." in body
         assert "history" in body and "List recent commands from this session." in body
         assert "hostname" in body and "Show the configured shell instance name." in body
@@ -1065,6 +1065,41 @@ class TestRunStreaming:
         assert "2  dig darklab.sh A\\n" in body
         assert '"type": "exit"' in body
 
+    def test_fake_history_honors_recent_commands_limit(self):
+        client = get_client()
+        with db_connect() as conn:
+            for index in range(1, 6):
+                conn.execute(
+                    "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (
+                        f"run-limit-{index}",
+                        "sess-history-limit",
+                        f"cmd {index}",
+                        f"2026-01-01T00:00:0{index}+00:00",
+                        f"2026-01-01T00:00:1{index}+00:00",
+                        0,
+                        "[]",
+                    ),
+                )
+            conn.commit()
+
+        with mock.patch.dict("fake_commands.CFG", {"recent_commands_limit": 3}):
+            resp = client.post(
+                "/run",
+                json={"command": "history"},
+                headers={"X-Session-ID": "sess-history-limit"},
+            )
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "1  cmd 3\\n" in body
+        assert "2  cmd 4\\n" in body
+        assert "3  cmd 5\\n" in body
+        assert "cmd 1\\n" not in body
+        assert "cmd 2\\n" not in body
+        assert '"type": "exit"' in body
+
     def test_fake_pwd_returns_synthetic_path(self):
         client = get_client()
 
@@ -1122,7 +1157,7 @@ class TestRunStreaming:
 
         assert resp.status_code == 200
         assert "Autocomplete:\\n" in body
-        assert "Known command roots can suggest flags, values, and positional hints.\\n" in body
+        assert "Known commands can suggest flags, values, and positional hints.\\n" in body
         assert "Built-in pipe support can also suggest grep, head, tail, wc -l, sort, and uniq after `command |`.\\n" in body
         assert '"type": "exit"' in body
 

@@ -275,6 +275,163 @@ describe('autocomplete helpers', () => {
     expect(items[0].value).toBe('-sV')
   })
 
+  it('prefers runtime autocomplete suggestions for client-side commands', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'theme ',
+        acSuggestions: [],
+        acContextRegistry: {
+          theme: {},
+        },
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+        getRuntimeAutocompleteItems: (ctx, buildItem) => {
+          if (ctx.commandRoot !== 'theme') return []
+          return [
+            buildItem({
+              value: 'blue_paper',
+              description: 'Blue Paper (current)',
+              replaceStart: ctx.tokenStart,
+              replaceEnd: ctx.tokenEnd,
+            }),
+          ]
+        },
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    const items = getAutocompleteMatches('theme ', 6)
+
+    expect(items).toEqual([
+      expect.objectContaining({
+        value: 'blue_paper',
+        description: 'Blue Paper (current)',
+      }),
+    ])
+  })
+
+  it('merges runtime autocomplete context with the YAML-loaded context registry', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'man ',
+        acSuggestions: [],
+        acContextRegistry: {
+          curl: {
+            arg_hints: {
+              __positional__: [{ value: '<url>', description: 'Target URL' }],
+            },
+          },
+        },
+        getRuntimeAutocompleteContext: (baseRegistry) => ({
+          status: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {},
+            argument_limit: null,
+            pipe_command: false,
+            pipe_insert_value: '',
+            pipe_label: '',
+            pipe_description: '',
+            examples: [],
+          },
+          man: {
+            flags: [],
+            expects_value: [],
+            arg_hints: {
+              __positional__: [
+                { value: 'status', description: 'built-in: show status' },
+                { value: Object.keys(baseRegistry)[0], description: 'curl manual page' },
+              ],
+            },
+            argument_limit: 1,
+            pipe_command: false,
+            pipe_insert_value: '',
+            pipe_label: '',
+            pipe_description: '',
+            examples: [],
+          },
+        }),
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('sta', 3).map(item => item.value)).toContain('status')
+    expect(getAutocompleteMatches('curl ', 5)[0].value).toBe('<url>')
+    expect(getAutocompleteMatches('man ', 4).map(item => item.value)).toEqual(['status', 'curl'])
+  })
+
+  it('uses sequence-specific runtime value hints without leaking them to sibling subcommands', () => {
+    const { getAutocompleteMatches } = fromDomScripts(
+      ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],
+      {
+        document,
+        cmdInput: document.getElementById('cmd'),
+        acDropdown: document.getElementById('ac'),
+        mobileComposerHost: document.getElementById('mobile-composer-host'),
+        mobileCmdInput: document.getElementById('mobile-cmd'),
+        getComposerValue: () => 'config set line-numbers ',
+        acSuggestions: [],
+        acContextRegistry: {},
+        getRuntimeAutocompleteContext: () => ({
+          config: {
+            flags: [],
+            expects_value: ['get', 'set'],
+            arg_hints: {
+              get: [{ value: 'line-numbers', description: 'Line number mode' }],
+              set: [{ value: 'line-numbers', description: 'Line number mode' }],
+              __positional__: [
+                { value: 'get', insertValue: 'get ', description: 'Show one value' },
+                { value: 'set', insertValue: 'set ', description: 'Set one value' },
+              ],
+            },
+            sequence_arg_hints: {
+              'get line-numbers': [],
+              'set line-numbers': [
+                { value: 'on', description: 'Line number mode' },
+                { value: 'off', description: 'Line number mode' },
+              ],
+            },
+            argument_limit: null,
+            pipe_command: false,
+            pipe_insert_value: '',
+            pipe_label: '',
+            pipe_description: '',
+            examples: [],
+          },
+        }),
+        acFiltered: [],
+        acIndex: -1,
+        acSuppressInputOnce: false,
+      },
+      `{
+      getAutocompleteMatches,
+    }`,
+    )
+
+    expect(getAutocompleteMatches('config set line-numbers ', 24).map(item => item.value)).toEqual(['on', 'off'])
+    expect(getAutocompleteMatches('config get line-numbers ', 24)).toEqual([])
+  })
+
   it('keeps an exact single flag match visible so its description is still shown', () => {
     const { getAutocompleteMatches } = fromDomScripts(
       ['app/static/js/utils.js', 'app/static/js/autocomplete.js'],

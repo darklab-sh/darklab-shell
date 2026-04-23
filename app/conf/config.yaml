@@ -41,8 +41,8 @@
 
 # Number of recent commands surfaced in the Recent row
 # (desktop rail chips; mobile peek row and pull-up recents sheet)
-# Server default if unset: 8
-# recent_commands_limit: 8
+# Server default if unset: 50
+# recent_commands_limit: 50
 
 # Enable the built-in basic redaction model for snapshot permalinks and local
 # export actions (`save txt` / `save html`). When enabled, the app applies a

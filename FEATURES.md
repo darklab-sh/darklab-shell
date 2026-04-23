@@ -65,13 +65,14 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 **Behavior:**
 
 - Desktop rail's `Recent` section renders clickable chips that load a command into the prompt when tapped.
-- Mobile surfaces a persistent `Recent` peek row between the transcript and the composer showing a count plus a one-line preview; tapping opens a full pull-up recents sheet.
-- The mobile recents sheet lists recent runs as tappable rows: tapping a row injects the command into the composer (matching the terminal up-arrow convention); per-row **restore** / **permalink** / **delete** action buttons, search, filter chips (root / exit / date / starred), and a clear-all control round out the sheet.
+- Mobile surfaces a persistent `Recent` peek row between the transcript and the composer showing a count plus a one-line preview.
+- Prompt Up/Down history, desktop rail recents, and the mobile recent peek hydrate from the same newest-distinct command list and include known commands regardless of exit code.
+- Tapping the mobile recent peek opens a full recents sheet backed by persisted history rows: tapping a row injects the command into the composer (matching the terminal up-arrow convention); per-row **restore** / **permalink** / **delete** action buttons, search, filter chips (root / exit / date / starred), and a clear-all control round out the sheet.
 - Both surfaces update live as commands are run.
 
-**Limits:** the most recent distinct commands only; hidden entirely until there is at least one command in history; entry count capped at `recent_commands_limit`.
+**Limits:** compact recents and Up/Down history use the most recent distinct commands only; hidden entirely until there is at least one command in history; entry count capped at `recent_commands_limit`. The full desktop drawer and mobile recents sheet are paginated persisted-history views controlled by `history_panel_limit`.
 
-**Configuration:** `recent_commands_limit` in `config.yaml` (default 8).
+**Configuration:** `recent_commands_limit` in `config.yaml` (default 50).
 
 **Related files:** `app/static/js/shell_chrome.js` (desktop rail), `app/static/js/mobile_chrome.js` (mobile peek + sheet), `app/conf/config.yaml`.
 
@@ -83,17 +84,18 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Behavior:**
 
-- Suggestions load from `conf/autocomplete.yaml` at page load and match what the user types; the matched portion is highlighted in green.
+- Tool suggestions load from `conf/autocomplete.yaml` at page load and match what the user types; the matched portion is highlighted in green.
+- App-owned built-in commands complete from a runtime context that uses the same matching engine as YAML-backed tools.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
 - After a known command root, the dropdown switches to contextual flag/value hints for that tool; after `|`, it switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
-**Limits:** completions come only from the static YAML file(s); there is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
+**Limits:** external-tool completions come from the static YAML file(s), while app-owned built-ins come from the browser runtime. There is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
 
-**Configuration:** `conf/autocomplete.yaml` (plus optional `conf/autocomplete.local.yaml`). Reloaded by the browser at page load — no server restart needed.
+**Configuration:** external-tool suggestions use `conf/autocomplete.yaml` (plus optional `conf/autocomplete.local.yaml`). App-owned built-ins are defined in application code. YAML changes reload on the next page load — no server restart needed.
 
-**Related files:** `app/static/js/autocomplete.js`, `app/conf/autocomplete.yaml`.
+**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/conf/autocomplete.yaml`.
 
 **Keyboard controls:**
 
@@ -399,7 +401,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 | **TABS** | Total tab count, with active-run annotation (`N · M active`) when any tab is running | Amber while any tab is running, muted when no tabs are active |
 | **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
 | **LATENCY** | Round-trip time to `/status` in ms | Green `<250ms`, amber `<500ms`, red `>=500ms` |
-| **MODE** | Current shell mode indicator | Reserved for future sandbox/lockdown modes |
+| **MODE** | Current shell mode indicator | Shows the active shell mode |
 | **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••••••` (green) for named tokens — see [Session Tokens](#session-tokens) |
 | **UPTIME** | Server process uptime | Returned by `/status` and ticked client-side between polls so the pill never looks frozen |
 | **CLOCK** | Wall clock in `UTC` or browser-local time | Ticks every second in the browser; local mode prefers the browser's short timezone label and falls back to a GMT offset |
@@ -501,7 +503,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 **Behavior:**
 
-- Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and label themselves from the last command run. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
+- Each command runs in the active tab; the **+** button opens additional tabs for side-by-side sessions. Tabs show a status dot (amber running, green success, red failed/killed) and start with labels such as `shell 1`, `shell 2`, and `shell 3`. Commands that keep running past the brief visual grace period show temporarily in the tab label, then the tab returns to its stable label when the command finishes. Double-click to rename, drag to reorder, tab-scroll arrows when more tabs are open than fit the window width. Draft input is preserved per tab.
 - The **⧖ history** button opens a slide-out drawer listing persisted session history with a `type` filter for **all**, **runs**, and **snapshots**. Run rows keep the current model: clicking a row injects that command into the composer for re-run (matching the terminal up-arrow convention) and closes the drawer; each row also has a toggleable **star** plus **restore** / **permalink** / **delete** actions. Snapshot rows show the snapshot label and created time plus **open** / **copy link** / **delete** actions. The **restore** action loads the run's output into a tab with the command shown as a styled prompt line (activating an existing matching tab when one exists). Starred runs list before unstarred ones regardless of age. Star state persists server-side per session and follows named session tokens.
 - When full-output persistence is enabled, the history drawer's permalink points at the complete saved artifact; loading into a tab still uses the capped preview and shows a notice linking to the permalink if truncated. The active tab's **share snapshot** action creates a separate `/share/<id>` snapshot and can optionally redact before saving.
 - The **delete all** button (history drawer + mobile recents sheet) prompts **Delete all** / **Delete Non-Favorites** / **Cancel** to separate destructive deletion from starred-only cleanup.
@@ -521,14 +523,14 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 ## Guided Workflows
 
-**Purpose:** curated multi-step diagnostic sequences (DNS, TLS, HTTP, reachability, email) that load one command at a time into the prompt so the operator can run and inspect each step in turn.
+**Purpose:** curated multi-step diagnostic sequences that load one command at a time into the prompt so the operator can run and inspect each step in turn.
 
 **Behavior:**
 
 - Workflows are listed in the **Workflows** panel on desktop and behind the mobile ☰ menu; opening one reveals its individual command steps.
 - Clicking a step pre-fills the prompt with its `cmd` — nothing runs automatically, so the operator inspects and edits each step before pressing Run.
 - Each step can show a short `note` explaining what the command checks.
-- Built-in workflows cover DNS (`dig` A/NS/MX, public resolver comparison, delegation trace), TLS/HTTPS (`curl`, `openssl s_client`, `testssl`), HTTP triage (redirect-following curl, verbose curl, wget spider), quick reachability (`ping`, `nc`, fast `nmap`), and email server checks (MX/TXT record checks, SMTP port probes).
+- Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, and fast port/service triage.
 - Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
 
 **Limits:** step commands still run through the allowlist — a workflow step is only usable if its `cmd` is permitted by `allowed_commands.txt`.
@@ -626,8 +628,9 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Utility commands**
 
-- `help`, `history`, `last`, `limits`, `retention`, `status`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session.
+- `help`, `history`, `last`, `limits`, `retention`, `status`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session.
 - `status` prints a compact session summary: active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, and the current instance-level save/retention limits.
+- `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
 **Shell identity commands**
@@ -647,7 +650,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Configuration:** none. The built-in command surface is defined in application code, not in operator config.
 
-**Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch + man routing), `app/conf/autocomplete.yaml` (built-in autocomplete coverage), `app/static/js/controller.js` (client-side interception for app-owned command flows like `session-token`).
+**Related files:** `app/fake_commands.py` (built-in command registry + output rendering), `app/commands.py` (dispatch + man routing), `app/static/js/app.js` (built-in autocomplete context, client-side command flows, and Options/theme command handling), `app/static/js/runner.js` (client-side command interception).
 
 ---
 
@@ -826,6 +829,7 @@ wget -q -O /dev/null --server-response https://example.com
 **Behavior:**
 
 - Click **◑ theme** in the desktop rail (or the **☰** menu on mobile) to open the theme selector modal.
+- Run `theme`, `theme list`, `theme current`, or `theme set <theme>` in the terminal to inspect or apply the same theme variants without opening the modal. Theme names are suggested after `theme set`.
 - Picking a variant applies it immediately and saves the choice into the current session's preference snapshot, while also caching it locally so reloads stay fast.
 - The selected theme applies to the live shell, permalink pages, and HTML exports — so shared links render in the author's theme context when opened fresh.
 
@@ -833,7 +837,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** theme variants live under `app/conf/themes/`; see [THEME.md](THEME.md) for authoring details (variable names, fallbacks, and how a new variant is registered).
 
-**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/theme.js` (selector modal + `localStorage` persistence), `app/static/css/theme-core.css` (variable surface), `THEME.md` (authoring guide).
+**Related files:** `app/conf/themes/` (theme variant files), `app/static/js/app.js` (selector modal, terminal command, and preference persistence), `app/static/css/theme-core.css` (variable surface), `THEME.md` (authoring guide).
 
 ---
 
@@ -844,6 +848,7 @@ wget -q -O /dev/null --server-response https://example.com
 **Behavior:**
 
 - Click **≡ options** in the desktop rail (or the **☰** menu on mobile) to open the modal.
+- Run `config`, `config list`, `config get <option>`, or `config set <option> <value>` in the terminal to inspect or update the same user options without opening the modal. Option names are suggested after `config get` or `config set`, and option values are suggested after a selected option.
 - Timestamp and line-number settings mirror the tabbar quick toggles — changing either surface updates the other immediately.
 - The HUD clock setting chooses whether the desktop `CLOCK` pill renders in `UTC` or browser-local time. This control is intentionally hidden from the mobile Options sheet because the HUD itself is desktop-only.
 - The welcome-intro setting controls whether the welcome animation plays on first tab: full animated sequence, instant settle, or no welcome tab at all.
@@ -864,7 +869,9 @@ wget -q -O /dev/null --server-response https://example.com
 | **Share Snapshot Redaction** | Prompt Until Set / Default To Redacted / Default To Raw | Default redaction choice for snapshot sharing |
 | **Run Notifications** | on / off | Browser desktop notification on run exit or kill; title is command root, body is exit code + elapsed time; shown on desktop, hidden from the mobile Options sheet |
 
-**Related files:** `app/static/js/shell_chrome.js` (Options modal rendering + tabbar sync), `app/static/js/mobile_chrome.js` (mobile menu wiring), `app/static/js/notifications.js` (permission + notification dispatch).
+**Terminal option keys:** `line-numbers`, `timestamps`, `welcome`, `share-redaction`, `run-notifications`, `hud-clock`.
+
+**Related files:** `app/static/js/app.js` (Options modal state, terminal command, and session preference persistence), `app/static/js/shell_chrome.js` (desktop options navigation), `app/static/js/mobile_chrome.js` (mobile menu wiring), `app/static/js/notifications.js` (permission + notification dispatch).
 
 ---
 
@@ -911,7 +918,7 @@ sqlite3 data/history.db "DELETE FROM snapshots;"
 - The active token is stored in `localStorage` under `session_token`; the original UUID is always preserved under `session_id` so `session-token clear` has a stable fallback.
 - The browser sends the active identity as `X-Session-ID` on every request; possession of the token string is the only authorization check (matching the existing anonymous session model).
 - Changing the token in one tab propagates to all open tabs via the `storage` event — recent chips, starred state, history drawer, session-scoped preferences, and the options-panel masked display all refresh without a reload.
-- All `session-token` subcommands are intercepted client-side and never reach the server, so token values are not written to the server command log. Token-bearing variants that are kept in the local command history are masked before they are stored or shown in recent-command surfaces.
+- `session-token` subcommands are rendered client-side so token values are not sent through the normal `/run` execution path. Successful commands are saved through the allowlisted `/run/client` history path with token-bearing arguments masked before they are stored or shown in recent-command surfaces.
 
 **Terminal commands:**
 
@@ -977,13 +984,13 @@ If a session has run history, the terminal flows (`generate`, `set`, `clear`) us
 - The backend emits structured log events at four levels: `DEBUG`, `INFO`, `WARNING`, `ERROR`.
 - Two output formats are supported: `text` (human-readable `key=value` pairs for local development) and `gelf` (JSON compatible with log aggregators).
 - Each event carries structured context fields — session ID, command root, run ID, status — rather than interpolated strings, so log lines are machine-parseable without regex.
-- Event names are stable (e.g. `RUN_START`, `RUN_END`, `KILL`, `DIAG_VIEWED`, `UNTRUSTED_PROXY`), letting aggregators filter by name without string matching.
+- Event names are stable (e.g. `RUN_START`, `RUN_END`, `RUN_KILL`, `DIAG_VIEWED`, `UNTRUSTED_PROXY`), letting aggregators filter by name without string matching.
 
 **Limits:** field names and level semantics are stable, but specific numeric codes and free-form `message` strings are not part of the contract. Downstream consumers should key off event names and structured fields, not prose.
 
 **Configuration:** `log_format` and `log_level` in `config.yaml` (`text` / `gelf`, default `text`; `DEBUG` / `INFO` / `WARNING` / `ERROR`, default `INFO`).
 
-**Related files:** `app/logging_config.py` (format + level wiring, event emission helpers), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (snapshot + diag events).
+**Related files:** `app/logging_setup.py` (format + level wiring), `app/blueprints/run.py` (run lifecycle events), `app/blueprints/history.py` (history/share events), `app/blueprints/session.py` (token, preference, and starred-command events), `app/blueprints/assets.py` (diagnostics events).
 
 ---
 

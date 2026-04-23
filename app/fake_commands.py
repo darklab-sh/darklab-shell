@@ -146,10 +146,11 @@ _SPECIAL_FAKE_COMMANDS = {
 }
 _BACKSPACE_RE = re.compile(r".\x08")
 _DOCUMENTED_FAKE_COMMANDS = [
-    {"name": "autocomplete", "description": "Explain context-aware autocomplete for known command roots.",
+    {"name": "autocomplete", "description": "Explain context-aware autocomplete for known commands.",
      "root": "autocomplete"},
     {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
     {"name": "clear", "description": "Clear the current terminal tab output.", "root": "clear"},
+    {"name": "config", "description": "Show or update user options from the terminal.", "root": "config"},
     {"name": "date", "description": "Show the current server time.", "root": "date"},
     {"name": "df -h", "description": "Show a compact filesystem summary.", "root": "df"},
     {"name": "env", "description": "Show core environment values for this shell.", "root": "env"},
@@ -175,6 +176,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
     {"name": "status", "description": "Show the current session and shell configuration summary.", "root": "status"},
+    {"name": "theme", "description": "Show or apply the active shell theme from the terminal.", "root": "theme"},
     {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},
     {"name": "type <cmd>", "description": "Describe whether a command is built in, installed, or missing.", "root": "type"},
     {"name": "uname [-a]", "description": "Show the shell platform string.", "root": "uname"},
@@ -232,6 +234,7 @@ _FAKE_COMMAND_DISPATCH = {
     "autocomplete": lambda cmd, sid: _run_fake_autocomplete(),
     "banner":    lambda cmd, sid: _run_fake_banner(),
     "clear":     lambda cmd, sid: _run_fake_clear(),
+    "config":    lambda cmd, sid: _run_fake_client_side_command("config"),
     "date":      lambda cmd, sid: _run_fake_date(),
     "env":       lambda cmd, sid: _run_fake_env(sid),
     "faq":       lambda cmd, sid: _run_fake_faq(),
@@ -259,6 +262,7 @@ _FAKE_COMMAND_DISPATCH = {
     "status":    lambda cmd, sid: _run_fake_status(sid),
     "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_fake_su(cmd),
+    "theme":     lambda cmd, sid: _run_fake_client_side_command("theme"),
     "tty":       lambda cmd, sid: _run_fake_tty(),
     "type":      lambda cmd, sid: _run_fake_type(cmd),
     "uname":     lambda cmd, sid: _run_fake_uname(cmd),
@@ -285,14 +289,15 @@ def execute_fake_command(command: str, session_id: str) -> tuple[list[dict[str, 
     return handler(command, session_id), 0
 
 
-def _recent_runs(session_id: str, limit: int = 8):
+def _recent_runs(session_id: str, limit: int | None = None):
     # Synthetic status/history helpers stay session-scoped to match the rest of
     # the shell rather than exposing global activity.
+    effective_limit = int(limit if limit is not None else CFG["recent_commands_limit"])
     with db_connect() as conn:
         return conn.execute(
             "SELECT id, command, started, finished, exit_code FROM runs "
             "WHERE session_id = ? ORDER BY started DESC LIMIT ?",
-            (session_id, limit),
+            (session_id, effective_limit),
         ).fetchall()
 
 
@@ -433,7 +438,7 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     parts = _split_command(cmd)
     subcommand = parts[1].lower() if len(parts) > 1 else ""
 
-    if subcommand in ("generate", "set", "clear", "rotate", "list", "revoke"):
+    if subcommand in ("generate", "set", "copy", "clear", "rotate", "list", "revoke"):
         # These subcommands are intercepted and executed client-side; they
         # should never reach the server.  Return a safe fallback message.
         return [_output_line("session-token: subcommands run client-side — reload the page and try again.")]
@@ -441,7 +446,7 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
     if subcommand:
         return [
             _output_line(f"session-token: unknown subcommand '{subcommand}'"),
-            _output_line("Usage: session-token [generate | set <value> | clear | rotate | list | revoke <token>]"),
+            _output_line("Usage: session-token [generate | copy | set <value> | clear | rotate | list | revoke <token>]"),
         ]
 
     # Bare session-token — show status from the server-side session_id
@@ -458,6 +463,10 @@ def _run_fake_session_token(cmd: str, session_id: str) -> list[dict[str, str]]:
         _output_line(_format_native_record("status", "anonymous (no session token set)", width), "fake-kv"),
         _output_line(_format_native_record("tip", "run 'session-token generate' to create a persistent token", width), "fake-kv"),
     ]
+
+
+def _run_fake_client_side_command(name: str) -> list[dict[str, str]]:
+    return [_output_line(f"{name}: command runs client-side — reload the page and try again.")]
 
 
 def _is_mac_user_agent(user_agent: str | None) -> bool:
@@ -767,7 +776,7 @@ def _run_fake_autocomplete() -> list[dict[str, str]]:
     return [
         _output_line("Autocomplete:", "fake-section"),
         _output_line("Tab expands shared prefixes before it cycles suggestions.", "fake-plain"),
-        _output_line("Known command roots can suggest flags, values, and positional hints.", "fake-plain"),
+        _output_line("Known commands can suggest flags, values, and positional hints.", "fake-plain"),
         _output_line(
             "Built-in pipe support can also suggest grep, head, tail, wc -l, sort, and uniq after `command |`.",
             "fake-plain",
@@ -776,7 +785,7 @@ def _run_fake_autocomplete() -> list[dict[str, str]]:
 
 
 def _run_fake_history(session_id: str) -> list[dict[str, str]]:
-    rows = list(reversed(_recent_runs(session_id, limit=15)))
+    rows = list(reversed(_recent_runs(session_id)))
     if not rows:
         return [{"type": "output", "text": "No history for this session yet."}]
 
@@ -822,7 +831,7 @@ def _run_fake_jobs(session_id: str) -> list[dict[str, str]]:
 
 
 def _run_fake_last(session_id: str) -> list[dict[str, str]]:
-    rows = _recent_runs(session_id, limit=10)
+    rows = _recent_runs(session_id)
     if not rows:
         return [{"type": "output", "text": "No completed runs for this session yet."}]
 

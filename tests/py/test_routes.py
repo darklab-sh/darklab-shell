@@ -7,6 +7,7 @@ Run with: pytest tests/ (from the repo root)
 import json
 import logging
 import os
+import re
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
@@ -53,6 +54,20 @@ class TestIndexRoute:
         assert 'target="_blank"' in body
         assert 'rel="noopener noreferrer"' in body
         assert 'data-menu-action="diag"' in body
+
+    def test_bootstrapped_app_config_matches_config_route(self):
+        client = get_client(use_forwarded_for=False)
+        with mock.patch.dict("config.CFG", {"diagnostics_allowed_cidrs": ["127.0.0.1/32"]}):
+            body = client.get("/").get_data(as_text=True)
+            config_payload = json.loads(client.get("/config").data)
+        match = re.search(
+            r'<script id="app-config-json" type="application/json">(.*?)</script>',
+            body,
+            re.S,
+        )
+        assert match
+        boot_payload = json.loads(match.group(1))
+        assert boot_payload == config_payload
 
 # ── /health ───────────────────────────────────────────────────────────────────
 
@@ -717,6 +732,43 @@ class TestFaqRoute:
         assert "What commands are allowed?" in questions
 
 
+# ── /workflows ────────────────────────────────────────────────────────────────
+
+class TestWorkflowsRoute:
+    def test_returns_200(self):
+        client = get_client()
+        resp = client.get("/workflows")
+        assert resp.status_code == 200
+
+    def test_includes_v15_recon_playbooks(self):
+        client = get_client()
+        data = json.loads(client.get("/workflows").data)
+        titles = {item.get("title") for item in data["items"]}
+        expected = {
+            "Domain OSINT / Passive Recon",
+            "Subdomain Enumeration & Validation",
+            "Web Directory Discovery",
+            "SSL / TLS Deep Dive",
+            "CDN / Edge Behavior Check",
+            "API Recon",
+            "Network Path Analysis",
+            "Fast Port Discovery to Service Fingerprint",
+        }
+        assert expected.issubset(titles)
+
+    def test_payload_steps_are_prompt_fillable(self):
+        client = get_client()
+        data = json.loads(client.get("/workflows").data)
+        assert data["items"], "workflow payload should not be empty"
+        for item in data["items"]:
+            assert isinstance(item.get("title"), str) and item["title"]
+            assert isinstance(item.get("description"), str)
+            assert isinstance(item.get("steps"), list) and item["steps"]
+            for step in item["steps"]:
+                assert isinstance(step.get("cmd"), str) and step["cmd"].strip()
+                assert isinstance(step.get("note"), str)
+
+
 # ── /shortcuts ────────────────────────────────────────────────────────────────
 
 class TestShortcutsRoute:
@@ -897,6 +949,58 @@ class TestRunRoute:
         # Should not crash — Flask returns 400 or 415 for bad content type
         assert resp.status_code in (400, 415, 500)
 
+    def test_client_side_run_persists_terminal_native_builtin(self):
+        client = get_client()
+        session = "client-run-" + uuid.uuid4().hex[:8]
+        try:
+            resp = client.post(
+                "/run/client",
+                headers={"X-Session-ID": session},
+                json={
+                    "command": "theme list",
+                    "exit_code": 0,
+                    "lines": [
+                        {"text": "Available themes:", "cls": "fake-section"},
+                        {"text": "Dark themes:", "cls": "fake-section"},
+                    ],
+                },
+            )
+            data = json.loads(resp.data)
+            assert resp.status_code == 200
+            assert data["ok"] is True
+            assert data["output_line_count"] == 2
+
+            history = json.loads(
+                client.get(
+                    "/history?type=runs&include_total=1",
+                    headers={"X-Session-ID": session},
+                ).data
+            )
+            assert history["runs"][0]["command"] == "theme list"
+            assert history["total_count"] == 1
+
+            run_id = history["runs"][0]["id"]
+            detail = json.loads(client.get(f"/history/{run_id}?json&preview=1").data)
+            assert detail["command"] == "theme list"
+            assert detail["output"] == ["Available themes:", "Dark themes:"]
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
+            conn.commit()
+            conn.close()
+
+    def test_client_side_run_rejects_non_client_builtin_root(self):
+        client = get_client()
+        resp = client.post(
+            "/run/client",
+            json={
+                "command": "ping darklab.sh",
+                "exit_code": 0,
+                "lines": [],
+            },
+        )
+        assert resp.status_code == 403
+
 
 # ── /history ──────────────────────────────────────────────────────────────────
 
@@ -972,6 +1076,47 @@ class TestHistoryRoute:
         finally:
             conn = sqlite3.connect(DB_PATH)
             conn.executemany("DELETE FROM runs WHERE id = ?", [(run_id,) for run_id in run_ids])
+            conn.commit()
+            conn.close()
+
+    def test_history_commands_returns_distinct_recent_commands_without_exit_filter(self):
+        client = get_client()
+        session = "commands-distinct-" + uuid.uuid4().hex[:8]
+        run_ids = [f"{session}-{i}" for i in range(5)]
+        rows = [
+            (run_ids[0], session, "dig darklab.sh A", "2026-01-01T00:00:01", 0),
+            (run_ids[1], session, "curl -I https://darklab.sh", "2026-01-01T00:00:02", 7),
+            (run_ids[2], session, "dig darklab.sh A", "2026-01-01T00:00:03", 1),
+            (run_ids[3], session, "ping darklab.sh", "2026-01-01T00:00:04", 0),
+            (run_ids[4], session, "nmap -sV darklab.sh", "2026-01-01T00:00:05", 2),
+        ]
+        try:
+            conn = sqlite3.connect(DB_PATH)
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code, output) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [(run_id, sid, cmd, started, started, code, "[]") for run_id, sid, cmd, started, code in rows],
+            )
+            conn.commit()
+            conn.close()
+
+            resp = client.get(
+                "/history/commands?limit=3",
+                headers={"X-Session-ID": session},
+            )
+            data = json.loads(resp.data)
+
+            assert resp.status_code == 200
+            assert data["commands"] == [
+                "nmap -sV darklab.sh",
+                "ping darklab.sh",
+                "dig darklab.sh A",
+            ]
+            assert data["limit"] == 3
+            assert len(data["runs"]) == 3
+        finally:
+            conn = sqlite3.connect(DB_PATH)
+            conn.execute("DELETE FROM runs WHERE session_id = ?", (session,))
             conn.commit()
             conn.close()
 

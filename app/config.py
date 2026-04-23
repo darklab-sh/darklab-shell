@@ -66,7 +66,7 @@ def load_config(conf_dir=None):
         "motd":                       "",
         "default_theme":              "darklab_obsidian.yaml",
         "history_panel_limit":        50,
-        "recent_commands_limit":      8,
+        "recent_commands_limit":      50,
         "permalink_retention_days":   365,
         "log_level":                  "INFO",
         "log_format":                 "text",

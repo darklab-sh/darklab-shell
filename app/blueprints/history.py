@@ -15,7 +15,7 @@ from flask import Blueprint, jsonify, request
 
 import config as _config
 from database import db_connect, delete_run_artifacts
-from helpers import get_client_ip, get_session_id
+from helpers import get_client_ip, get_log_session_id, get_session_id
 from permalinks import _format_duration, _permalink_error_page, _permalink_page
 from process import active_runs_for_session
 from redaction import redact_line_entries
@@ -339,7 +339,7 @@ def get_history():
         except sqlite3.OperationalError as exc:
             if query and _build_fts_query(query):
                 log.warning("FTS_SEARCH_FALLBACK", extra={
-                    "session": session_id, "q": query, "error": str(exc),
+                    "session": get_log_session_id(session_id), "q": query, "error": str(exc),
                 })
                 items, runs, roots_rows, total_count, page_count, current_page, fts_q = _query_history(
                     conn,
@@ -352,7 +352,7 @@ def get_history():
     roots = [str(row["root"]) for row in roots_rows if row["root"]]
     log.info("HISTORY_VIEWED", extra={
         "ip": get_client_ip(),
-        "session": session_id,
+        "session": get_log_session_id(session_id),
         "count": len(items),
         "q": query or None,
         "output_search": bool(fts_q),
@@ -379,12 +379,51 @@ def get_history():
     return jsonify(payload)
 
 
+@history_bp.route("/history/commands")
+def get_history_commands():
+    """Return recent distinct run commands for prompt history and recents."""
+    session_id = get_session_id()
+    limit = _parse_history_int(
+        request.args.get("limit"),
+        CFG["recent_commands_limit"],
+        maximum=200,
+    )
+    with db_connect() as conn:
+        rows = conn.execute(
+            "SELECT command, MAX(started) AS latest_started "
+            "FROM runs "
+            "WHERE session_id = ? "
+            "GROUP BY command "
+            "ORDER BY latest_started DESC "
+            "LIMIT ?",
+            (session_id, limit),
+        ).fetchall()
+    runs = [
+        {"command": str(row["command"]), "started": row["latest_started"]}
+        for row in rows
+        if row["command"]
+    ]
+    log.debug("HISTORY_COMMANDS_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "count": len(runs),
+        "limit": limit,
+    })
+    return jsonify({
+        "commands": [run["command"] for run in runs],
+        "runs": runs,
+        "limit": limit,
+    })
+
+
 @history_bp.route("/history/active")
 def get_active_history_runs():
     """Return currently running commands for this session."""
     session_id = get_session_id()
     runs = active_runs_for_session(session_id)
-    log.debug("ACTIVE_RUNS_VIEWED", extra={"ip": get_client_ip(), "session": session_id, "count": len(runs)})
+    log.debug("ACTIVE_RUNS_VIEWED", extra={
+        "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": len(runs),
+    })
     return jsonify({"runs": runs})
 
 
@@ -489,11 +528,11 @@ def delete_run(run_id):
         conn.commit()
     if cur.rowcount:
         log.info("HISTORY_DELETED", extra={
-            "ip": get_client_ip(), "run_id": run_id, "session": session_id,
+            "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
         })
     else:
         log.debug("HISTORY_DELETE_MISS", extra={
-            "ip": get_client_ip(), "run_id": run_id, "session": session_id,
+            "ip": get_client_ip(), "run_id": run_id, "session": get_log_session_id(session_id),
         })
     return jsonify({"ok": True})
 
@@ -513,7 +552,7 @@ def clear_history():
         cur = conn.execute("DELETE FROM runs WHERE session_id = ?", (session_id,))
         conn.commit()
     log.info("HISTORY_CLEARED", extra={
-        "ip": get_client_ip(), "session": session_id, "count": cur.rowcount,
+        "ip": get_client_ip(), "session": get_log_session_id(session_id), "count": cur.rowcount,
     })
     return jsonify({"ok": True})
 
@@ -557,7 +596,7 @@ def save_share():
         )
         conn.commit()
     log.info("SHARE_CREATED", extra={
-        "ip": get_client_ip(), "session": session_id, "share_id": share_id,
+        "ip": get_client_ip(), "session": get_log_session_id(session_id), "share_id": share_id,
         "label": label, "redacted": apply_redaction,
     })
     return jsonify({"id": share_id, "url": f"/share/{share_id}"})
@@ -574,7 +613,7 @@ def get_share(share_id):
     snap = dict(row)
     content_lines = json.loads(snap["content"]) if snap["content"] else []
     log.info("SHARE_VIEWED", extra={
-        "ip": get_client_ip(), "session": get_session_id(), "share_id": share_id,
+        "ip": get_client_ip(), "session": get_log_session_id(), "share_id": share_id,
         "label": snap["label"],
     })
 
@@ -611,7 +650,7 @@ def delete_share(share_id):
         conn.commit()
     log.info("SHARE_DELETED", extra={
         "ip": get_client_ip(),
-        "session": session_id,
+        "session": get_log_session_id(session_id),
         "share_id": share_id,
         "deleted": cur.rowcount > 0,
     })

@@ -47,7 +47,8 @@
 # - Use `argument_limit` when a command should stop suggesting additional
 #   positional arguments after a fixed number of slots are filled, while still
 #   allowing flags and other non-positional hints.
-# - Use `subcommands` for command trees such as `session-token set`.
+# - Use `subcommands` for external-tool command trees. darklab_shell-owned
+#   built-ins are completed by the runtime context in app/static/js/app.js.
 # - Use `placeholder: "<...>"` for display-only guidance. The frontend shows
 #   these as hints and does not insert the literal placeholder text on Tab.
 # - Use `closes: true` for flags or subcommands that should suppress further
@@ -57,8 +58,7 @@
 # Diverse examples:
 # - `ping` shows a simple flag + argument command.
 # - `curl` shows starter values plus a persistent `<url>` placeholder.
-# - `session-token` shows a subcommand tree with `closes: true` and
-#   `value_hint`.
+# - `openssl` shows a subcommand-style positional argument plus value hints.
 # - `grep` and `wc` show pipe-stage entries.
 #
 # The container smoke test runs every example command defined here. Add or
@@ -1307,215 +1307,38 @@ context:
     arguments:
       - placeholder: <target>
         description: Usually provided through -a
-  man:
-    argument_limit: 1
-    arguments:
-      - value: nmap
-        description: nmap manual page
-      - value: curl
-        description: curl manual page
-      - value: wget
-        description: wget manual page
-      - value: dig
-        description: dig manual page
-      - value: ping
-        description: ping manual page
-      - value: traceroute
-        description: traceroute manual page
-      - value: mtr
-        description: mtr manual page
-      - value: nc
-        description: nc manual page
-      - value: nslookup
-        description: nslookup manual page
-      - value: host
-        description: host manual page
-      - value: whois
-        description: whois manual page
-      - value: fping
-        description: fping manual page
-      - value: tcptraceroute
-        description: tcptraceroute manual page
-      - value: testssl
-        description: testssl manual page
-      - value: dnsrecon
-        description: dnsrecon manual page
-      - value: dnsenum
-        description: dnsenum manual page
-      - value: fierce
-        description: fierce manual page
-      - value: ps
-        description: ps manual page
-      - value: ls
-        description: ls manual page
-      - value: man
-        description: man manual page
-      - value: autocomplete
-        description: 'built-in: explain context-aware autocomplete for known command roots'
-      - value: banner
-        description: 'built-in: print the configured banner art'
-      - value: clear
-        description: 'built-in: clear the current terminal tab output'
-      - value: date
-        description: 'built-in: show the current server time'
-      - value: df
-        description: 'built-in: show a compact filesystem summary'
-      - value: env
-        description: 'built-in: show core environment values for this shell'
-      - value: faq
-        description: 'built-in: show configured FAQ entries'
-      - value: fortune
-        description: 'built-in: print a short operator-themed one-liner'
-      - value: free
-        description: 'built-in: show a compact memory summary'
-      - value: groups
-        description: 'built-in: show the shell group membership'
-      - value: help
-        description: 'built-in: list all built-in commands'
-      - value: history
-        description: 'built-in: list recent commands from this session'
-      - value: hostname
-        description: 'built-in: show the configured shell instance name'
-      - value: id
-        description: 'built-in: show the shell identity'
-      - value: ip
-        description: 'built-in: show a minimal shell network interface view'
-      - value: jobs
-        description: 'built-in: list active jobs for this session'
-      - value: last
-        description: 'built-in: show recent completed runs with timestamps and exit codes'
-      - value: limits
-        description: 'built-in: show configured runtime, history, and retention limits'
-      - value: pwd
-        description: 'built-in: show the web shell workspace path'
-      - value: retention
-        description: 'built-in: show retention and persisted-output settings'
-      - value: route
-        description: 'built-in: show the shell routing table summary'
-      - value: session-token
-        description: 'built-in: show session token status'
-      - value: shortcuts
-        description: 'built-in: show current keyboard shortcuts'
-      - value: status
-        description: 'built-in: show the current session and shell configuration summary'
-      - value: tty
-        description: 'built-in: show the web terminal device path'
-      - value: type
-        description: 'built-in: describe whether a command is built-in, installed, or missing'
-      - value: uname
-        description: 'built-in: show the shell platform string'
-      - value: uptime
-        description: 'built-in: show app uptime since process start'
-      - value: version
-        description: 'built-in: show shell, app, Flask, and Python version details'
-      - value: which
-        description: 'built-in: locate a built-in command or allowed runtime command'
-      - value: who
-        description: 'built-in: show the current shell user and session'
-      - value: whoami
-        description: 'built-in: describe this shell and link to the project README'
-      - placeholder: <command>
-        description: Manual page for any allowed command
-  ps:
+  whois:
+    examples:
+      - value: whois --help
+        description: Show help and usage
+      - value: whois darklab.sh
+        description: Domain registration lookup
+      - value: whois 104.21.4.35
+        description: IP allocation lookup
+      - value: whois -h whois.iana.org darklab.sh
+        description: Query a specific WHOIS server
     flags:
-      - value: aux
-        description: All processes with user and memory info
-      - value: -ef
-        description: All processes, full format
-  df:
-    flags:
+      - value: --help
+        description: Show help and usage
+        closes: true
       - value: -h
-        description: Human-readable disk usage
-  free:
-    flags:
-      - value: -h
-        description: Human-readable memory usage
-  uname:
-    flags:
-      - value: -a
-        description: All system information
-  ip:
-    arguments:
-      - value: a
-        description: Show all network interfaces and addresses
-  ls:
-    flags:
-      - value: -la
-        description: Long listing including hidden files
-      - value: -lh
-        description: Long listing with human-readable sizes
-      - value: -l
-        description: Long listing format
-  which:
-    argument_limit: 1
-    arguments:
-      - value: curl
-        description: Path to curl
-      - placeholder: <command>
-        description: Locate an installed command
-  type:
-    argument_limit: 1
-    arguments:
-      - value: curl
-        description: Type of curl
-      - value: history
-        description: Type of history
-      - placeholder: <command>
-        description: Describe a command's type
-  autocomplete: {}
-  banner: {}
-  clear: {}
-  date: {}
-  env: {}
-  faq: {}
-  fortune: {}
-  groups: {}
-  help: {}
-  history: {}
-  hostname: {}
-  id: {}
-  jobs: {}
-  last: {}
-  limits: {}
-  pwd: {}
-  retention: {}
-  route: {}
-  session-token:
-    subcommands:
-      - value: generate
-        description: Generate a new session token and save it to this browser
-        closes: true
-      - value: set
-        description: Activate an existing session token from another device with a terminal migration confirm when needed
+        description: WHOIS server to query
         takes_value: true
-        value_hint:
-          placeholder: <token>
-          description: Paste a tok_... token or UUID from another device
-        insert: 'set '
-      - value: copy
-        description: Copy the active session token to the clipboard
-        closes: true
-      - value: clear
-        description: Confirm before removing the active session token and reverting to an anonymous session
-        closes: true
-      - value: rotate
-        description: Generate a new token and migrate all history to it
-        closes: true
-      - value: list
-        description: Show the active session token and its creation date
-        closes: true
-      - value: revoke
-        description: Permanently invalidate a tok_ token on this server
+        suggest:
+          - value: whois.iana.org
+            description: IANA WHOIS server
+          - value: whois.verisign-grs.com
+            description: Verisign .com/.net WHOIS server
+          - value: whois.arin.net
+            description: ARIN WHOIS server for IP allocations
+      - value: -p
+        description: WHOIS server port
         takes_value: true
-        value_hint:
-          placeholder: <token>
-          description: tok_ token to permanently invalidate on the server
-        insert: 'revoke '
-  shortcuts: {}
-  status: {}
-  tty: {}
-  uptime: {}
-  version: {}
-  who: {}
-  whoami: {}
-  whois: {}
+        suggest:
+          - value: '43'
+            description: Standard WHOIS port
+      - value: -H
+        description: Hide legal disclaimers when supported
+    arguments:
+      - placeholder: <domain-or-ip>
+        description: Domain name, IP address, or ASN to query

@@ -8,6 +8,7 @@ let _tabSeq = 0;
 const _TOUCH_TAB_DRAG_THRESHOLD = 14;
 const _TOUCH_TAB_DRAG_HOLD_MS = 180;
 const _POINTER_TAB_DRAG_THRESHOLD = 6;
+const _RUNNING_LABEL_DELAY_MS = 500;
 
 function _syncTabDraggable(tab) {
   if (!tab) return;
@@ -28,6 +29,35 @@ function _getTabStatusEl(id) {
 
 function _getTabLabelEl(id) {
   return _getTabEl(id)?.querySelector('.tab-label') || null;
+}
+
+function createDefaultTabLabel(index = null) {
+  const explicitIndex = index !== null && index !== undefined && index !== '';
+  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : tabs.length + 1;
+  return `shell ${Math.max(1, next)}`;
+}
+
+function _truncateTabLabel(label) {
+  const text = String(label || '');
+  return text.length > 28 ? text.slice(0, 26) + '…' : text;
+}
+
+function _tabDisplayLabel(tab) {
+  if (!tab) return '';
+  if (tab.st === 'running' && tab.runningLabel) return tab.runningLabel;
+  return tab.label || '';
+}
+
+function _renderTabLabel(id) {
+  const tab = getTab(id);
+  const lbl = _getTabLabelEl(id);
+  if (lbl && tab) lbl.textContent = _truncateTabLabel(_tabDisplayLabel(tab));
+}
+
+function _clearTabRunningLabelTimer(tab) {
+  if (!tab || !tab.runningLabelTimer) return;
+  clearTimeout(tab.runningLabelTimer);
+  tab.runningLabelTimer = null;
 }
 
 function _getTabOutputEl(id) {
@@ -484,7 +514,7 @@ function _createTabPanel(id) {
   terminalBody.className = 'terminal-body';
 
   const output = document.createElement('div');
-  output.className = 'output';
+  output.className = 'output nice-scroll';
   output.id = `output-${id}`;
   terminalBody.appendChild(output);
 
@@ -557,8 +587,9 @@ function createTab(label) {
     return null;
   }
   const id = 'tab-' + (++_tabSeq);
+  const stableLabel = String(label || createDefaultTabLabel());
 
-  const { tab, labelEl } = _createTabHeader(id, label);
+  const { tab, labelEl } = _createTabHeader(id, stableLabel);
   tab.addEventListener('click', e => {
     if (Date.now() < _tabDragSuppressClickUntil) return;
     if (e.target.classList.contains('tab-close')) {
@@ -642,7 +673,9 @@ function createTab(label) {
 
   tabs.push({
     id,
-    label,
+    label: stableLabel,
+    runningLabel: '',
+    runningLabelTimer: null,
     command: '',
     runId: null,
     historyRunId: null,
@@ -670,7 +703,7 @@ function createTab(label) {
   updateTabScrollButtons();
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   if (typeof emitUiEvent === 'function') {
-    emitUiEvent('app:tab-created', { id, label, activeTabId });
+    emitUiEvent('app:tab-created', { id, label: stableLabel, activeTabId });
   }
   return id;
 }
@@ -751,11 +784,15 @@ function closeTab(id) {
   if (tabs.length === 1) {
     // Last tab: reset to blank instead of closing
     clearTab(id);
-    setTabLabel(id, 'tab 1');
+    setTabLabel(id, createDefaultTabLabel(1));
     const t = tabs[0];
     t.runId = null;
     t.runStart = null;
     t.exitCode = null;
+    t.command = '';
+    _clearTabRunningLabelTimer(t);
+    t.runningLabel = '';
+    t.renamed = false;
     t.killed = false;
     t.pendingKill = false;
     if (typeof useMobileTerminalViewportMode === 'function'
@@ -803,7 +840,14 @@ function setTabStatus(id, st) {
   const dot = _getTabStatusEl(id);
   if (dot) dot.className = `tab-status ${st}`;
   const t = getTab(id);
-  if (t) t.st = st;
+  if (t) {
+    t.st = st;
+    if (st !== 'running') {
+      _clearTabRunningLabelTimer(t);
+      t.runningLabel = '';
+    }
+  }
+  _renderTabLabel(id);
   if (id === activeTabId) {
     if (st === 'running') unmountShellPrompt();
     else mountShellPrompt(id);
@@ -817,10 +861,31 @@ function setTabStatus(id, st) {
 }
 
 function setTabLabel(id, label) {
-  const lbl = _getTabLabelEl(id);
-  if (lbl) lbl.textContent = label.length > 28 ? label.slice(0, 26) + '…' : label;
   const t = getTab(id);
-  if (t) t.label = label;
+  if (t) {
+    t.label = String(label || '');
+    _renderTabLabel(id);
+  }
+  if (id === activeTabId) ensureActiveTabVisible(id);
+  if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
+}
+
+function setTabRunningCommand(id, command) {
+  const t = getTab(id);
+  if (!t) return;
+  const next = String(command || '').trim();
+  if (!next) return;
+  _clearTabRunningLabelTimer(t);
+  t.command = next;
+  t.runningLabel = '';
+  t.runningLabelTimer = setTimeout(() => {
+    t.runningLabelTimer = null;
+    if (t.st !== 'running' || t.command !== next) return;
+    t.runningLabel = next;
+    _renderTabLabel(id);
+    if (id === activeTabId) ensureActiveTabVisible(id);
+  }, _RUNNING_LABEL_DELAY_MS);
+  _renderTabLabel(id);
   if (id === activeTabId) ensureActiveTabVisible(id);
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
 }
@@ -852,6 +917,8 @@ function clearTab(id, { preserveRunState = false } = {}) {
       t.fullOutputLoaded = false;
       t.historyRunId = null;
       t.reconnectedRun = false;
+      _clearTabRunningLabelTimer(t);
+      t.runningLabel = '';
     }
   }
   if (id === activeTabId && (!preserveRunState || !wasRunning)) {
@@ -890,7 +957,11 @@ function finalizeClosingTab(id) {
   if (tabs.length === 1) {
     tab.closing = false;
     clearTab(id);
-    setTabLabel(id, 'tab 1');
+    setTabLabel(id, createDefaultTabLabel(1));
+    tab.command = '';
+    _clearTabRunningLabelTimer(tab);
+    tab.runningLabel = '';
+    tab.renamed = false;
     if (typeof document !== 'undefined'
       && document.body
       && document.body.classList
@@ -1219,6 +1290,14 @@ function _extractLatestFullRunShareContent(tab, fullRun) {
   ];
 }
 
+function _shareSnapshotLabel(tab) {
+  if (!tab) return 'snapshot';
+  const customLabel = String(tab.label || '').trim();
+  const latestCommand = String(tab.command || '').trim();
+  if (tab.renamed && customLabel) return customLabel;
+  return latestCommand || customLabel || 'snapshot';
+}
+
 async function permalinkTab(id) {
   const t = getTab(id);
   if (!t || !t.rawLines.length) {
@@ -1247,7 +1326,7 @@ async function permalinkTab(id) {
   apiFetch('/share', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ label: t.label, content: shareContent, apply_redaction: applyRedaction })
+    body: JSON.stringify({ label: _shareSnapshotLabel(t), content: shareContent, apply_redaction: applyRedaction })
   }).then(r => r.json()).then(data => {
     const url = `${location.origin}${data.url}`;
     shareUrl(url).catch(() => showToast('Failed to copy link', 'error'));

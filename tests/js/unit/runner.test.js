@@ -14,6 +14,11 @@ const { _isSyntheticPostFilterCommand } = fromScript(
   'app/static/js/runner.js',
   '_isSyntheticPostFilterCommand',
 )
+const { _parseSyntheticPostFilterCommand, _applySyntheticPostFilterLines } = fromScript(
+  'app/static/js/runner.js',
+  '_parseSyntheticPostFilterCommand',
+  '_applySyntheticPostFilterLines',
+)
 
 // ── _formatElapsed ────────────────────────────────────────────────────────────
 
@@ -136,6 +141,143 @@ describe('sort and uniq synthetic post-filters', () => {
   })
 })
 
+describe('client-side synthetic post-filters', () => {
+  it('parses the base command and grep stage for client-side built-ins', () => {
+    const parsed = _parseSyntheticPostFilterCommand('theme list | grep -i blue')
+
+    expect(parsed.baseCommand).toBe('theme list')
+    expect(parsed.stages).toEqual([
+      { kind: 'grep', pattern: 'blue', ignoreCase: true, invertMatch: false, extended: false },
+    ])
+  })
+
+  it('applies chained synthetic helpers to captured client-side output', () => {
+    const parsed = _parseSyntheticPostFilterCommand('theme list | grep light | sort -r | head -n 2')
+    const lines = _applySyntheticPostFilterLines([
+      { text: 'theme_dark_amber', cls: 'fake-help-row' },
+      { text: 'theme_light_blue', cls: 'fake-help-row' },
+      { text: 'theme_light_olive', cls: 'fake-help-row' },
+      { text: 'theme_dark_green', cls: 'fake-help-row' },
+    ], parsed)
+
+    expect(lines.map(line => line.text)).toEqual([
+      'theme_light_olive',
+      'theme_light_blue',
+    ])
+  })
+})
+
+describe('client-side UI command pipe helpers', () => {
+  it('filters terminal-native theme output through the same pipe helpers as older built-ins', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      runnerInitCode: `
+        async function handleThemeCommand(cmd, tabId) {
+          appendCommandEcho(cmd, tabId);
+          appendLine('theme_dark_amber', 'fake-help-row', tabId);
+          appendLine('theme_light_blue', 'fake-help-row', tabId);
+          appendLine('theme_light_olive', 'fake-help-row', tabId);
+        }
+      `,
+    })
+
+    await submitCommand('theme list | grep light | wc -l')
+    await vi.waitFor(() => expect(appendLine).toHaveBeenCalledWith('2', '', 'tab-1'))
+
+    expect(appendLine).toHaveBeenCalledWith('theme list | grep light | wc -l', 'prompt-echo', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('theme_light_blue', 'fake-help-row', 'tab-1')
+  })
+
+  it('filters terminal-native config output through chained pipe helpers', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      runnerInitCode: `
+        async function handleConfigCommand(cmd, tabId) {
+          appendCommandEcho(cmd, tabId);
+          appendLine('line-numbers        off', 'fake-kv', tabId);
+          appendLine('timestamps          off', 'fake-kv', tabId);
+          appendLine('welcome             static', 'fake-kv', tabId);
+        }
+      `,
+    })
+
+    await submitCommand('config list | tail -n 2 | head -n 1')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('timestamps          off', 'fake-kv', 'tab-1'),
+    )
+
+    expect(appendLine).toHaveBeenCalledWith('config list | tail -n 2 | head -n 1', 'prompt-echo', 'tab-1')
+    expect(appendLine).not.toHaveBeenCalledWith('line-numbers        off', 'fake-kv', 'tab-1')
+  })
+
+  it('persists terminal-native built-ins to server-backed history', async () => {
+    const appendLine = vi.fn()
+    const addToRecentPreview = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ ok: true, run_id: 'client-run-1' }),
+    }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      addToRecentPreview,
+      apiFetch,
+      runnerInitCode: `
+        async function handleThemeCommand(cmd, tabId) {
+          appendCommandEcho(cmd, tabId);
+          appendLine('Available themes:', 'fake-section', tabId);
+          appendLine('Dark themes:', 'fake-section', tabId);
+        }
+      `,
+    })
+
+    await submitCommand('theme list')
+    await vi.waitFor(() => expect(apiFetch).toHaveBeenCalledWith(
+      '/run/client',
+      expect.objectContaining({ method: 'POST' }),
+    ))
+    const payload = JSON.parse(apiFetch.mock.calls[0][1].body)
+
+    expect(addToRecentPreview).toHaveBeenCalledWith('theme list')
+    expect(payload).toEqual({
+      command: 'theme list',
+      exit_code: 0,
+      lines: [
+        { text: 'Available themes:', cls: 'fake-section' },
+        { text: 'Dark themes:', cls: 'fake-section' },
+      ],
+    })
+  })
+
+  it('clears stale failed tab and HUD state after a successful client-side built-in', async () => {
+    const appendLine = vi.fn()
+    const { submitCommand, tabs, status } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'fail', exitCode: 2, runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      runnerInitCode: `
+        async function handleThemeCommand(cmd, tabId) {
+          appendCommandEcho(cmd, tabId);
+          appendLine('current theme      Darklab Obsidian', 'fake-kv', tabId);
+          setStatus('ok');
+        }
+      `,
+    })
+    status.className = 'status-pill fail'
+    status.textContent = 'IDLE'
+
+    await submitCommand('theme current')
+    await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
+
+    expect(tabs[0].exitCode).toBe(0)
+    expect(status.className).toBe('status-pill ok')
+    expect(status.textContent).toBe('IDLE')
+  })
+})
+
 function loadRunnerFns({
   tabs = [{ id: 'tab-1', st: 'running', runId: null, killed: false, pendingKill: false }],
   activeTabId = 'tab-1',
@@ -166,6 +308,9 @@ function loadRunnerFns({
   restoreHistoryRunIntoTab = vi.fn(() => Promise.resolve('tab-1')),
   getRunNotifyPreference: getRunNotifyPreferenceOverride = () => 'off',
   Notification: NotificationOverride = undefined,
+  handleThemeCommand: handleThemeCommandOverride = undefined,
+  handleConfigCommand: handleConfigCommandOverride = undefined,
+  runnerInitCode = '',
 } = {}) {
   const normalizedTabs = tabs.map((tab) => ({
     rawLines: [],
@@ -308,6 +453,8 @@ function loadRunnerFns({
       setTimeout,
       Event,
       getRunNotifyPreference: getRunNotifyPreferenceOverride,
+      ...(handleThemeCommandOverride ? { handleThemeCommand: handleThemeCommandOverride } : {}),
+      ...(handleConfigCommandOverride ? { handleConfigCommand: handleConfigCommandOverride } : {}),
       ...(NotificationOverride !== undefined ? { Notification: NotificationOverride } : {}),
     },
     `{
@@ -325,8 +472,8 @@ function loadRunnerFns({
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
     _getPendingKillTabId: () => pendingKillTabId,
-  }`,
-    'setTabs(tabs); setActiveTabId(activeTabId);',
+    }`,
+    `${runnerInitCode}\nsetTabs(tabs); setActiveTabId(activeTabId);`,
   )
 
   return {
@@ -451,7 +598,7 @@ describe('runner helpers', () => {
       { run_id: 'run-1', command: 'ping darklab.sh', started: '2026-01-01T00:00:00Z' },
     ])
 
-    expect(createTab).toHaveBeenCalledWith('ping darklab.sh')
+    expect(createTab).toHaveBeenCalledWith()
     expect(tabs[0].historyRunId).toBe('run-old')
   })
 
@@ -1512,7 +1659,7 @@ describe('session-token clear', () => {
 
     await submitCommand('session-token clear')
 
-    expect(appendLine).toHaveBeenNthCalledWith(1, 'session-token clear', 'prompt-echo', undefined)
+    expect(appendLine).toHaveBeenNthCalledWith(1, 'session-token clear', 'prompt-echo', 'tab-1')
     expect(appendLine).toHaveBeenNthCalledWith(
       2,
       'warning: clearing the active session token removes it from this browser',
@@ -1541,8 +1688,8 @@ describe('session-token clear', () => {
     const updateSessionId = vi.fn()
     const reloadSessionHistory = vi.fn(() => Promise.resolve())
     const hydrateCmdHistory = vi.fn()
-    const { submitCommand, status, storage } = loadRunnerFns({
-      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+    const { submitCommand, status, storage, tabs } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'fail', exitCode: 2, runId: null, killed: false, pendingKill: false }],
       appendLine,
       setComposerPromptMode,
       updateSessionId,
@@ -1574,7 +1721,9 @@ describe('session-token clear', () => {
       'tab-1',
     )
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
+    await vi.waitFor(() => expect(tabs[0].st).toBe('ok'))
     expect(status.className).toBe('status-pill ok')
+    expect(tabs[0].exitCode).toBe(0)
   })
 
   it('leaves the session token untouched when the user answers no', async () => {
@@ -1598,7 +1747,7 @@ describe('session-token clear', () => {
     expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
     expect(updateSessionId).not.toHaveBeenCalled()
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
-    expect(status.className).toBe('status-pill idle')
+    expect(status.className).toBe('status-pill ok')
   })
 
   it('treats Ctrl+C as no and cancels the clear confirmation', async () => {
@@ -1622,7 +1771,7 @@ describe('session-token clear', () => {
     expect(storage.getItem('session_token')).toBe('tok_abcd1234efgh5678ijkl9012mnop3456')
     expect(updateSessionId).not.toHaveBeenCalled()
     expect(setComposerPromptMode).toHaveBeenLastCalledWith(null)
-    expect(status.className).toBe('status-pill idle')
+    expect(status.className).toBe('status-pill ok')
   })
 })
 
@@ -1642,10 +1791,12 @@ describe('session-token copy', () => {
     await submitCommand('session-token copy')
 
     expect(copyTextToClipboard).toHaveBeenCalledWith('tok_abcd1234efgh5678ijkl9012mnop3456')
-    expect(appendLine).toHaveBeenCalledWith(
-      'session token copied to clipboard: tok_abcd••••••••',
-      '',
-      'tab-1',
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith(
+        'session token copied to clipboard: tok_abcd••••••••',
+        '',
+        'tab-1',
+      ),
     )
     expect(addToRecentPreview).toHaveBeenCalledWith('session-token copy')
     expect(status.className).toBe('status-pill ok')
@@ -1671,6 +1822,41 @@ describe('session-token copy', () => {
     )
 
     expect(status.className).toBe('status-pill fail')
+  })
+})
+
+describe('session-token pipe helpers', () => {
+  it('filters client-side session-token output through the built-in pipe helpers', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({
+        token: 'tok_abcd1234efgh5678ijkl9012mnop3456',
+        created: '2026-04-22T12:00:00',
+      }),
+    }))
+    const { submitCommand } = loadRunnerFns({
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      appendLine,
+      apiFetch,
+      localStorageEntries: { session_token: 'tok_abcd1234efgh5678ijkl9012mnop3456' },
+    })
+
+    await submitCommand('session-token list | grep status')
+    await vi.waitFor(() =>
+      expect(appendLine).toHaveBeenCalledWith('status          active', 'fake-kv', 'tab-1'),
+    )
+
+    expect(appendLine).toHaveBeenCalledWith(
+      'session-token list | grep status',
+      'prompt-echo',
+      'tab-1',
+    )
+    expect(appendLine).not.toHaveBeenCalledWith(
+      expect.stringContaining('session token'),
+      expect.anything(),
+      expect.anything(),
+    )
   })
 })
 
@@ -1716,7 +1902,7 @@ describe('session-token set pending prompt', () => {
       1,
       'session-token set tok_abcd1234efgh5678ijkl9012mnop3456',
       'prompt-echo',
-      undefined,
+      'tab-1',
     )
     expect(appendLine).toHaveBeenNthCalledWith(
       2,

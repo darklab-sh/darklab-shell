@@ -34,7 +34,7 @@ from fake_commands import (
     resolve_fake_command,
     resolves_exact_special_fake_command,
 )
-from helpers import get_client_ip, get_session_id
+from helpers import get_client_ip, get_log_session_id, get_session_id
 from process import active_run_register, active_run_remove, pid_pop, pid_register
 from run_output_store import RunOutputCapture, load_full_output_entries
 
@@ -45,6 +45,8 @@ run_bp = Blueprint("run", __name__)
 SHELL_BIN = shutil.which("sh") or "/bin/sh"
 SUDO_BIN  = shutil.which("sudo") or "/usr/bin/sudo"
 KILL_BIN  = shutil.which("kill") or "/bin/kill"
+
+CLIENT_SIDE_RUN_ROOTS = {"theme", "config", "session-token"}
 
 
 # ── Run output helpers ────────────────────────────────────────────────────────
@@ -126,7 +128,7 @@ def _save_completed_run(run_id, session_id, command, run_started, finished_iso, 
             conn.commit()
     except Exception:
         log.error("RUN_SAVED_ERROR", exc_info=True, extra={
-            "run_id": run_id, "session": session_id, "cmd": command,
+            "run_id": run_id, "session": get_log_session_id(session_id), "cmd": command,
         })
 
 
@@ -134,7 +136,7 @@ def _finalize_completed_run(run_id, session_id, client_ip, original_command, run
     finished = datetime.now(timezone.utc)
     elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
     log.info("RUN_END", extra={
-        "run_id": run_id, "session": session_id, "ip": client_ip,
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
         "cmd_type": cmd_type,
     })
@@ -188,7 +190,7 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
     capture = _run_output_capture(run_id)
 
     log.info("RUN_START", extra={
-        "run_id": run_id, "session": session_id, "ip": client_ip,
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": 0, "cmd": original_command, "cmd_type": cmd_type,
     })
 
@@ -213,7 +215,7 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
             finished = datetime.now(timezone.utc)
             elapsed = round((finished - datetime.fromisoformat(run_started)).total_seconds(), 1)
             log.info("RUN_END", extra={
-                "run_id": run_id, "session": session_id, "ip": client_ip,
+                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
                 "exit_code": exit_code, "elapsed": elapsed, "cmd": original_command,
                 "cmd_type": cmd_type,
             })
@@ -231,7 +233,8 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
             )
         except Exception as e:
             log.error("RUN_STREAM_ERROR", exc_info=True, extra={
-                "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
+                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+                "cmd": original_command,
             })
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
 
@@ -242,6 +245,100 @@ def _synthetic_run_response(original_command, session_id, client_ip, events, exi
 def _fake_run_response(original_command, session_id, client_ip):
     events, exit_code = execute_fake_command(original_command, session_id)
     return _synthetic_run_response(original_command, session_id, client_ip, events, exit_code)
+
+
+def _client_side_run_command_allowed(command: str) -> bool:
+    root = command.strip().split(maxsplit=1)[0].lower() if command.strip() else ""
+    return root in CLIENT_SIDE_RUN_ROOTS
+
+
+def _normalize_client_side_run_lines(lines):
+    if not isinstance(lines, list):
+        return []
+    max_lines = int(CFG.get("max_output_lines", 0) or 0)
+    source_lines = lines if max_lines <= 0 else lines[:max_lines]
+    normalized = []
+    for item in source_lines:
+        if isinstance(item, dict):
+            text = str(item.get("text", ""))
+            cls = str(item.get("cls", ""))
+        else:
+            text = str(item)
+            cls = ""
+        normalized.append({"text": text, "cls": cls, "tsC": "", "tsE": ""})
+    return normalized
+
+
+@run_bp.route("/run/client", methods=["POST"])
+def save_client_side_run():
+    """Persist browser-owned built-in command output as a normal history run."""
+    data = request.get_json() or {}
+    if not isinstance(data, dict):
+        return jsonify({"error": "Request body must be a JSON object"}), 400
+
+    command = data.get("command", "")
+    if not isinstance(command, str):
+        return jsonify({"error": "Command must be a string"}), 400
+    command = command.strip()
+    if not command:
+        return jsonify({"error": "No command provided"}), 400
+    if not _client_side_run_command_allowed(command):
+        return jsonify({"error": "Client-side run persistence is limited to browser-owned built-ins"}), 403
+
+    try:
+        exit_code = int(data.get("exit_code", 0))
+    except (TypeError, ValueError):
+        return jsonify({"error": "exit_code must be an integer"}), 400
+
+    raw_lines = data.get("lines", [])
+    raw_line_count = len(raw_lines) if isinstance(raw_lines, list) else 0
+    lines = _normalize_client_side_run_lines(raw_lines)
+    preview_truncated = int(raw_line_count > len(lines))
+    session_id = get_session_id()
+    client_ip = get_client_ip()
+    run_id = str(uuid.uuid4())
+    started = datetime.now(timezone.utc)
+    finished = datetime.now(timezone.utc)
+    output_search_text = _extract_output_search_text(lines)
+
+    log.info("RUN_START", extra={
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+        "pid": 0, "cmd": command, "cmd_type": "client-builtin",
+    })
+
+    with db_connect() as conn:
+        conn.execute(
+            "INSERT INTO runs "
+            "("
+            "id, session_id, command, started, finished, exit_code, output, output_preview, "
+            "preview_truncated, output_line_count, full_output_available, full_output_truncated, "
+            "output_search_text"
+            ") VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                run_id,
+                session_id,
+                command,
+                started.isoformat(),
+                finished.isoformat(),
+                exit_code,
+                None,
+                json.dumps(lines),
+                preview_truncated,
+                raw_line_count,
+                0,
+                0,
+                output_search_text,
+            ),
+        )
+        conn.commit()
+
+    elapsed = round((finished - started).total_seconds(), 1)
+    log.info("RUN_END", extra={
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+        "exit_code": exit_code, "elapsed": elapsed, "cmd": command,
+        "cmd_type": "client-builtin",
+    })
+    return jsonify({"ok": True, "run_id": run_id, "output_line_count": raw_line_count})
 
 
 class _SyntheticPostFilterStageProcessor:
@@ -420,7 +517,7 @@ def run_command():
     postfilter_spec, postfilter_error = parse_synthetic_postfilter(original_command)
     if postfilter_error:
         log.warning("CMD_DENIED", extra={
-            "ip": client_ip, "session": session_id,
+            "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "reason": postfilter_error,
         })
         return jsonify({"error": postfilter_error}), 403
@@ -428,7 +525,7 @@ def run_command():
     if postfilter_spec:
         stage_kinds = [stage.get("kind") for stage in postfilter_spec.get("stages", []) if stage.get("kind")]
         log.debug("CMD_PIPE", extra={
-            "ip": client_ip, "session": session_id,
+            "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command,
             "kind": " -> ".join(stage_kinds) if stage_kinds else postfilter_spec.get("kind"),
         })
@@ -456,7 +553,7 @@ def run_command():
     allowed, reason = is_command_allowed(original_command)
     if not allowed:
         log.warning("CMD_DENIED", extra={
-            "ip": client_ip, "session": session_id,
+            "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "reason": reason,
         })
         return jsonify({"error": reason}), 403
@@ -470,7 +567,7 @@ def run_command():
     missing_runtime = runtime_missing_command_name(command)
     if missing_runtime:
         log.warning("CMD_MISSING", extra={
-            "ip": client_ip, "session": session_id,
+            "ip": client_ip, "session": get_log_session_id(session_id),
             "cmd": original_command, "missing": missing_runtime,
         })
         return _synthetic_run_response(
@@ -502,14 +599,14 @@ def run_command():
         )  # nosec B603
     except Exception as e:
         log.error("RUN_SPAWN_ERROR", exc_info=True, extra={
-            "ip": client_ip, "session": session_id, "cmd": original_command,
+            "ip": client_ip, "session": get_log_session_id(session_id), "cmd": original_command,
         })
         return jsonify({"error": str(e)}), 500
 
     pid_register(run_id, proc.pid)
     active_run_register(run_id, proc.pid, session_id, original_command, run_started)
     log.info("RUN_START", extra={
-        "run_id": run_id, "session": session_id, "ip": client_ip,
+        "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
         "pid": proc.pid, "cmd": original_command, "cmd_type": "real",
     })
 
@@ -547,7 +644,7 @@ def run_command():
                             ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                         )
                         log.warning("CMD_TIMEOUT", extra={
-                            "run_id": run_id, "session": session_id, "ip": client_ip,
+                            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
                             "timeout": COMMAND_TIMEOUT, "cmd": original_command,
                         })
                         break
@@ -581,7 +678,8 @@ def run_command():
             )
         except Exception:
             log.error("RUN_STREAM_ERROR", exc_info=True, extra={
-                "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
+                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+                "cmd": original_command,
             })
         finally:
             _cleanup_proc_stream(proc)
@@ -627,7 +725,7 @@ def run_command():
                             pass
                         timeout_msg = _timeout_notice(COMMAND_TIMEOUT)
                         log.warning("CMD_TIMEOUT", extra={
-                            "run_id": run_id, "session": session_id, "ip": client_ip,
+                            "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
                             "timeout": COMMAND_TIMEOUT, "cmd": original_command,
                         })
                         yield f"data: {json.dumps({'type': 'notice', 'text': timeout_msg})}\n\n"
@@ -685,7 +783,8 @@ def run_command():
             raise
         except Exception as e:
             log.error("RUN_STREAM_ERROR", exc_info=True, extra={
-                "run_id": run_id, "session": session_id, "ip": client_ip, "cmd": original_command,
+                "run_id": run_id, "session": get_log_session_id(session_id), "ip": client_ip,
+                "cmd": original_command,
             })
             yield f"data: {json.dumps({'type': 'error', 'text': str(e)})}\n\n"
         finally:

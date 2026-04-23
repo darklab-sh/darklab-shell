@@ -299,7 +299,7 @@ ${styles}
 </head>
 <body>
 ${buildTerminalExportHeaderHtml(headerModel)}
-<main class="export-output">
+<main class="export-output nice-scroll">
 ${linesHtml}
 </main>
 </body>

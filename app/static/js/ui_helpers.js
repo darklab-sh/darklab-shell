@@ -391,6 +391,7 @@
     // refocusing would re-pop the software keyboard, which users don't want
     // after every chrome action.
     if (isMobileMode) return false;
+    if (typeof global.isConfirmOpen === 'function' && global.isConfirmOpen()) return false;
     const target = typeof getVisibleComposerInput === 'function' ? getVisibleComposerInput() : null;
     if (target && typeof focusComposerInput === 'function' && focusComposerInput(target, { preventScroll })) {
       return true;

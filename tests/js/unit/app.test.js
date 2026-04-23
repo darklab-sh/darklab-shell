@@ -255,6 +255,10 @@ async function loadAppFns({
   const clearSearch = vi.fn()
   const navigateSearch = vi.fn()
   const logClientError = vi.fn()
+  const appendLine = vi.fn()
+  const appendCommandEcho = vi.fn()
+  const setStatus = vi.fn()
+  const recordSuccessfulLocalCommand = vi.fn()
   const getTab = vi.fn((id) => tabsState.find((tab) => tab && tab.id === id) || null)
   const getActiveTab = vi.fn(
     () => tabsState.find((tab) => tab && tab.id === activeTabState) || null,
@@ -462,6 +466,10 @@ async function loadAppFns({
       mountShellPrompt: () => {},
       unmountShellPrompt: () => {},
       logClientError,
+      appendLine,
+      appendCommandEcho,
+      setStatus,
+      _recordSuccessfulLocalCommand: recordSuccessfulLocalCommand,
       tabs: tabsState,
       activeTabId: activeTabState,
       getTab,
@@ -551,6 +559,10 @@ async function loadAppFns({
     applyRunNotifyPreference,
     applyHudClockPreference,
     syncOptionsControls,
+    handleThemeCommand,
+    handleConfigCommand,
+    getRuntimeAutocompleteContext,
+    getRuntimeAutocompleteItems,
     openOptions,
     openThemeSelector,
     openFaq,
@@ -601,6 +613,10 @@ async function loadAppFns({
     submitComposerCommand: submitComposerCommandOverride,
     submitVisibleComposerCommand: submitVisibleComposerCommandOverride,
     logClientError,
+    appendLine,
+    appendCommandEcho,
+    setStatus,
+    recordSuccessfulLocalCommand,
     acDropdown,
     acHide: acHideOverride,
     shellPromptWrap: shellPromptWrapEl,
@@ -968,6 +984,270 @@ describe('app helpers', () => {
 
     expect(document.body.dataset.theme).toBe('theme_light_olive')
     expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
+  })
+
+  it('applies a theme from the terminal theme command', async () => {
+    const { handleThemeCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+      await loadAppFns({
+        themeRegistry: {
+          current: {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          themes: [
+            {
+              name: 'theme_light_blue',
+              label: 'Blue Paper',
+              source: 'variant',
+              vars: { '--bg': '#9ab7d0' },
+            },
+            {
+              name: 'theme_light_olive',
+              label: 'Olive Parchment',
+              source: 'variant',
+              vars: { '--bg': '#c0c0a8' },
+            },
+          ],
+        },
+      })
+
+    await handleThemeCommand('theme set theme_light_olive', 'tab-1')
+
+    expect(appendCommandEcho).toHaveBeenCalledWith('theme set theme_light_olive', 'tab-1')
+    expect(document.body.dataset.theme).toBe('theme_light_olive')
+    expect(document.cookie).toContain('pref_theme_name=theme_light_olive')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('theme set theme_light_olive')
+    expect(setStatus).toHaveBeenCalledWith('ok')
+  })
+
+  it('groups terminal theme list output by color scheme', async () => {
+    const { handleThemeCommand, setStatus, recordSuccessfulLocalCommand } =
+      await loadAppFns({
+        themeRegistry: {
+          current: {
+            name: 'darklab_obsidian',
+            label: 'Darklab Obsidian',
+            color_scheme: 'only dark',
+            source: 'variant',
+            vars: { '--bg': '#111111' },
+          },
+          themes: [
+            {
+              name: 'darklab_obsidian',
+              label: 'Darklab Obsidian',
+              color_scheme: 'only dark',
+              source: 'variant',
+              vars: { '--bg': '#111111' },
+            },
+            {
+              name: 'theme_light_blue',
+              label: 'Blue Paper',
+              color_scheme: 'only light',
+              source: 'variant',
+              vars: { '--bg': '#9ab7d0' },
+            },
+            {
+              name: 'theme_unknown',
+              label: 'Unknown Scheme',
+              source: 'variant',
+              vars: { '--bg': '#999999' },
+            },
+          ],
+        },
+      })
+
+    await handleThemeCommand('theme list', 'tab-1')
+
+    const output = [...document.querySelectorAll('#history-list .line-content')]
+      .map((line) => line.textContent)
+    expect(output).toEqual([
+      'current theme       Darklab Obsidian (current)',
+      '',
+      'Available themes:',
+      'Dark themes:',
+      '  * darklab_obsidian          Darklab Obsidian',
+      'Light themes:',
+      '    theme_light_blue          Blue Paper',
+      'Other themes:',
+      '    theme_unknown             Unknown Scheme',
+    ])
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('theme list')
+    expect(setStatus).toHaveBeenCalledWith('ok')
+  })
+
+  it('requires explicit set before applying a theme from the terminal theme command', async () => {
+    const { handleThemeCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+      await loadAppFns({
+        themeRegistry: {
+          current: {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          themes: [
+            {
+              name: 'theme_light_blue',
+              label: 'Blue Paper',
+              source: 'variant',
+              vars: { '--bg': '#9ab7d0' },
+            },
+            {
+              name: 'theme_light_olive',
+              label: 'Olive Parchment',
+              source: 'variant',
+              vars: { '--bg': '#c0c0a8' },
+            },
+          ],
+        },
+      })
+
+    await handleThemeCommand('theme theme_light_olive', 'tab-1')
+
+    expect(document.body.dataset.theme).toBe('theme_light_blue')
+    expect(appendCommandEcho).toHaveBeenCalledWith('theme theme_light_olive', 'tab-1')
+    expect(recordSuccessfulLocalCommand).not.toHaveBeenCalled()
+    expect(setStatus).toHaveBeenCalledWith('fail')
+  })
+
+  it('updates user options from the terminal config command', async () => {
+    const { handleConfigCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+      await loadAppFns({
+        cookies: {
+          pref_line_numbers: 'off',
+          pref_timestamps: 'off',
+          pref_welcome_intro: 'animated',
+        },
+      })
+
+    await handleConfigCommand('config set line-numbers on', 'tab-1')
+    await handleConfigCommand('config set welcome static', 'tab-1')
+
+    expect(appendCommandEcho).toHaveBeenCalledWith('config set line-numbers on', 'tab-1')
+    expect(document.body.classList.contains('ln-on')).toBe(true)
+    expect(document.cookie).toContain('pref_line_numbers=on')
+    expect(document.cookie).toContain('pref_welcome_intro=disable_animation')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set line-numbers on')
+    expect(recordSuccessfulLocalCommand).toHaveBeenCalledWith('config set welcome static')
+    expect(setStatus).toHaveBeenCalledWith('ok')
+  })
+
+  it('requires explicit set before updating user options from the terminal config command', async () => {
+    const { handleConfigCommand, appendCommandEcho, setStatus, recordSuccessfulLocalCommand } =
+      await loadAppFns({
+        cookies: {
+          pref_line_numbers: 'off',
+        },
+      })
+
+    await handleConfigCommand('config line-numbers on', 'tab-1')
+
+    expect(document.body.classList.contains('ln-on')).toBe(false)
+    expect(document.cookie).not.toContain('pref_line_numbers=on')
+    expect(appendCommandEcho).toHaveBeenCalledWith('config line-numbers on', 'tab-1')
+    expect(recordSuccessfulLocalCommand).not.toHaveBeenCalled()
+    expect(setStatus).toHaveBeenCalledWith('fail')
+  })
+
+  it('keeps config command output pinned to the tail when the tab is already following', async () => {
+    const output = document.createElement('div')
+    let scrollTop = 0
+    Object.defineProperty(output, 'scrollHeight', { configurable: true, get: () => 500 })
+    Object.defineProperty(output, 'scrollTop', {
+      configurable: true,
+      get: () => scrollTop,
+      set: (value) => {
+        scrollTop = value
+      },
+    })
+    const tab = { id: 'tab-1', followOutput: true, rawLines: [] }
+    const { handleConfigCommand } = await loadAppFns({
+      tabs: [tab],
+      getOutput: () => output,
+      cookies: {
+        pref_welcome_intro: 'animated',
+        pref_hud_clock: 'utc',
+      },
+    })
+
+    await handleConfigCommand('config set welcome static', 'tab-1')
+    scrollTop = 0
+    await handleConfigCommand('config set hud-clock local', 'tab-1')
+
+    expect(tab.followOutput).toBe(true)
+    expect(scrollTop).toBe(500)
+  })
+
+  it('serves runtime autocomplete context for theme and config values', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns({
+      themeRegistry: {
+        current: {
+          name: 'theme_light_blue',
+          label: 'Blue Paper',
+          source: 'variant',
+          vars: { '--bg': '#9ab7d0' },
+        },
+        themes: [
+          {
+            name: 'theme_light_blue',
+            label: 'Blue Paper',
+            source: 'variant',
+            vars: { '--bg': '#9ab7d0' },
+          },
+          {
+            name: 'theme_light_olive',
+            label: 'Olive Parchment',
+            source: 'variant',
+            vars: { '--bg': '#c0c0a8' },
+          },
+        ],
+      },
+    })
+    const context = getRuntimeAutocompleteContext({})
+
+    expect(context.theme.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'current', 'set'])
+    expect(context.theme.arg_hints.set.map(item => item.value)).toContain('theme_light_olive')
+    expect(context.theme.arg_hints.set.find(item => item.value === 'theme_light_blue')?.description)
+      .toContain('(current)')
+    expect(context.config.arg_hints.__positional__.map(item => item.value)).toEqual(['list', 'get', 'set'])
+    expect(context.config.sequence_arg_hints['set line-numbers'].map(item => item.value)).toEqual(['on', 'off'])
+  })
+
+  it('serves runtime autocomplete context for built-in command lookup helpers', async () => {
+    const { getRuntimeAutocompleteContext } = await loadAppFns()
+
+    const context = getRuntimeAutocompleteContext({ curl: {}, nmap: {} })
+
+    expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
+    expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
+    expect(context.status).toBeTruthy()
+    expect(context.whoami).toBeTruthy()
+    expect(context.man.arg_hints.__positional__.map(item => item.value)).toEqual(
+      expect.arrayContaining(['curl', 'nmap', 'status', 'whoami']),
+    )
+    expect(context.which.arg_hints.__positional__.map(item => item.value)).toEqual(
+      expect.arrayContaining(['curl', 'status']),
+    )
+    expect(context.type.arg_hints.__positional__.map(item => item.value)).toEqual(
+      expect.arrayContaining(['nmap', 'whoami']),
+    )
+  })
+
+  it('keeps code-owned built-ins out of autocomplete.yaml', () => {
+    const autocompleteYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/autocomplete.yaml'), 'utf8')
+    const yamlRoots = new Set(
+      [...autocompleteYaml.matchAll(/^  ([a-z0-9_-]+):/gm)].map(match => match[1]),
+    )
+    const runtimeRoots = [
+      'autocomplete', 'banner', 'clear', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
+      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
+      'ps', 'pwd', 'retention', 'route', 'session-token', 'shortcuts', 'status', 'theme', 'tty',
+      'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
+    ]
+
+    expect(runtimeRoots.filter(root => yamlRoots.has(root))).toEqual([])
   })
 
   it('groups theme cards into labeled sections in the preview modal', async () => {
@@ -2770,7 +3050,7 @@ describe('app helpers', () => {
 
     cmdInput.dispatchEvent(new KeyboardEvent('keydown', { key: 't', altKey: true, bubbles: true }))
 
-    expect(createTab).toHaveBeenCalledWith('tab 2')
+    expect(createTab).toHaveBeenCalledWith('shell 2')
   })
 
   it('supports macOS Option+T to create a new tab via physical key code', async () => {
@@ -2790,7 +3070,7 @@ describe('app helpers', () => {
       }),
     )
 
-    expect(createTab).toHaveBeenCalledWith('tab 2')
+    expect(createTab).toHaveBeenCalledWith('shell 2')
   })
 
   it('supports Alt+W to close the active tab', async () => {

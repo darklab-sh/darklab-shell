@@ -1045,8 +1045,7 @@ body #history-panel { background: var(--theme-history-panel-bg); }
 /* ── Selected-card primitive ─────────────────────────────────────────────
    Shared visual for "this card is the current selection from a set."
    Apply by toggling .is-selected-card on the surface element (e.g. theme
-   picker cards today; future workflow/preset pickers when they need a
-   selected state). The treatment uses the bright --green token, an outer
+   picker cards). The treatment uses the bright --green token, an outer
    glow ring, and a soft halo to stay visibly distinct from :hover (which
    uses --green-dim) and :focus-visible (which uses an outline). Surfaces
    that have a :hover or :focus-visible rule on the same element should

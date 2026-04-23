@@ -20,7 +20,7 @@ from commands import (
     load_welcome_hints,
 )
 from fake_commands import get_current_shortcuts, get_special_command_keys
-from helpers import get_client_ip, get_session_id, ip_is_in_cidrs, resolve_theme
+from helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs, resolve_theme
 
 log = logging.getLogger("shell")
 
@@ -32,7 +32,7 @@ def _log_content_view(route: str, **extra):
         "CONTENT_VIEWED",
         extra={
             "ip": get_client_ip(),
-            "session": get_session_id(),
+            "session": get_log_session_id(),
             "route": route,
             **extra,
         },
@@ -45,7 +45,7 @@ def _current_theme_entry():
         "THEME_SELECTED",
         extra={
             "ip": get_client_ip(),
-            "session": get_session_id(),
+            "session": get_log_session_id(),
             "route": request.path,
             "theme": name,
             "source": source,
@@ -57,34 +57,10 @@ def _current_theme_entry():
     )
 
 
-@content_bp.route("/")
-def index():
-    current_theme = _current_theme_entry()
-    log.info(
-        "PAGE_LOAD",
-        extra={
-            "ip": get_client_ip(),
-            "session": get_session_id(),
-            "theme": current_theme["name"],
-        },
-    )
-    return render_template(
-        "index.html",
-        app_name=_config.CFG["app_name"],
-        version=_config.APP_VERSION,
-        project_readme=_config.PROJECT_README,
-        prompt_prefix=_config.CFG["prompt_prefix"],
-        current_theme=current_theme,
-        current_theme_css=current_theme["vars"],
-        theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
-        fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
-    )
-
-@content_bp.route("/config")
-def get_config():
-    """Return frontend-relevant config values."""
+def _frontend_config_payload():
+    """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
-    payload = {
+    return {
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
         "prompt_prefix":         cfg["prompt_prefix"],
@@ -114,6 +90,37 @@ def get_config():
             cfg.get("diagnostics_allowed_cidrs") or [],
         ),
     }
+
+
+@content_bp.route("/")
+def index():
+    current_theme = _current_theme_entry()
+    log.info(
+        "PAGE_LOAD",
+        extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(),
+            "theme": current_theme["name"],
+        },
+    )
+    return render_template(
+        "index.html",
+        app_name=_config.CFG["app_name"],
+        version=_config.APP_VERSION,
+        project_readme=_config.PROJECT_README,
+        prompt_prefix=_config.CFG["prompt_prefix"],
+        current_theme=current_theme,
+        current_theme_css=current_theme["vars"],
+        theme_registry={"current": current_theme, "themes": _config.THEME_REGISTRY},
+        fallback_theme_css=_config.theme_runtime_css_vars(_config.DARK_THEME),
+        frontend_config=_frontend_config_payload(),
+    )
+
+
+@content_bp.route("/config")
+def get_config():
+    """Return frontend-relevant config values."""
+    payload = _frontend_config_payload()
     _log_content_view("/config", key_count=len(payload))
     return jsonify(payload)
 
@@ -171,7 +178,7 @@ def shortcuts():
 
 @content_bp.route("/autocomplete")
 def autocomplete():
-    """Return unified flat and contextual autocomplete data from autocomplete_context.yaml."""
+    """Return external-tool autocomplete context from autocomplete.yaml."""
     context = load_autocomplete_context()
     special_commands = get_special_command_keys()
     _log_content_view("/autocomplete")

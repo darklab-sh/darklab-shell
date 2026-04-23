@@ -378,7 +378,7 @@
   global.isMobileMenuOpen = isMenuSheetOpen;
 
   // Mobile re-routes the 'history' action to the recents pull-up sheet rather
-  // than the legacy history panel. controller.js owns the rest of the dispatch.
+  // than the desktop history side panel. controller.js owns the rest of the dispatch.
   menuSheet?.querySelectorAll('button[data-menu-action]').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const action = btn.dataset.menuAction;
@@ -1059,7 +1059,7 @@
     if (open) {
       show(kbHelper);
       // body.mobile-keyboard-open #mobile-edit-bar outranks .u-hidden, so
-      // suppress the legacy bar with an inline style while the helper row is
+      // suppress the shared edit bar with an inline style while the helper row is
       // active. Reset the style on close so the default CSS display:none
       // applies again.
       if (mobileEditBar && mobileEditBar.style) mobileEditBar.style.display = 'none';
@@ -1073,7 +1073,7 @@
   }
   syncKbHelper();
 
-  // The legacy #mobile-edit-bar handlers in app.js are bound to pointerdown,
+  // The #mobile-edit-bar handlers in app.js are bound to pointerdown,
   // not click, so proxy.click() on them does nothing. Invoke the same
   // performMobileEditAction entry point directly. preventDefault on
   // pointerdown keeps the composer input from losing focus when a helper

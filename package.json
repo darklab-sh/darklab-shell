@@ -11,9 +11,10 @@
     "test:e2e:ui": "./scripts/playwright/stop_e2e_servers.sh ${PLAYWRIGHT_PROJECT_COUNT:-5} ${PLAYWRIGHT_BASE_PORT:-5001}; playwright test --config config/playwright.parallel.config.js --ui",
     "capture:container-smoke-test": "node scripts/capture_output_for_smoke_test.mjs",
     "capture:ui-screenshots": "./scripts/capture_ui_screenshots.sh",
-    "lint": "npm run lint:py && npm run lint:js && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
+    "lint": "npm run lint:py && npm run lint:js && npm run lint:css && npm run lint:shell && npm run lint:docker && npm run lint:yaml && npm run lint:json && npm run lint:md && npm run vendor:check",
     "lint:py": "flake8 app/ tests/py/ && bandit -r app/ -ll -q",
     "lint:js": "npx eslint --config config/eslint.config.js tests/js/ config/ scripts/ app/static/js/**/*.js",
+    "lint:css": "stylelint \"app/static/css/**/*.css\" --config config/stylelint.config.mjs",
     "lint:shell": "shellcheck $(find . -name '*.sh' -not -path './.git/*' -not -path './node_modules/*' | xargs grep -lE '^#!/.*(bash|sh)')",
     "lint:docker": "hadolint --config config/hadolint.yaml Dockerfile",
     "lint:yaml": "yamllint -c config/yamllint.yml $(find . \\( -name '*.yml' -o -name '*.yaml' \\) -not -path './.git/*' -not -path './node_modules/*')",
@@ -35,6 +36,7 @@
     "eslint": "^10.2.0",
     "jsdom": "^29.0.2",
     "markdownlint-cli2": "^0.22.0",
+    "stylelint": "^17.8.0",
     "vitest": "^4.1.4"
   }
 }

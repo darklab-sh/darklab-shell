@@ -15,7 +15,7 @@ const FIXTURE_PATH = join(REPO_ROOT, 'tests/js/fixtures/button_primitive_allowli
 // either carry one of the allowed primitive classes (btn / nav-item /
 // close-btn / toggle-btn / kb-key) OR match a selector in the allowlist
 // fixture. The fixture documents surfaces that deliberately use a
-// legacy/surface-specific class family instead of the primitives.
+// surface-specific class family instead of the primitives.
 //
 // Scope is deliberately HTML-only plus `<a role="button">`:
 //  - <button> elements in app/templates/**.html

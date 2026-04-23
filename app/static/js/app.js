@@ -224,7 +224,14 @@ function _bindMobileEditBarInteractions(editBar) {
     const _clearRepeat = () => {
       if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
       if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('pointerup',     stopRepeat);
+        document.removeEventListener('pointercancel', stopRepeat);
+        document.removeEventListener('touchend',      stopRepeat);
+        document.removeEventListener('touchcancel',   stopRepeat);
+      }
     };
+    const stopRepeat = () => _clearRepeat();
     const handler = (e) => {
       e.preventDefault();
       e.stopPropagation();
@@ -234,9 +241,14 @@ function _bindMobileEditBarInteractions(editBar) {
         _repeatDelay = setTimeout(() => {
           _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
         }, 400);
+        if (typeof document !== 'undefined') {
+          document.addEventListener('pointerup',     stopRepeat);
+          document.addEventListener('pointercancel', stopRepeat);
+          document.addEventListener('touchend',      stopRepeat);
+          document.addEventListener('touchcancel',   stopRepeat);
+        }
       }
     };
-    const stopRepeat = () => _clearRepeat();
     if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
       btn.addEventListener('pointerdown', e => {
         handledPointerDown = true;
@@ -774,7 +786,8 @@ function shouldIgnoreGlobalShortcutTarget(target) {
 }
 
 function createNextTabLabel() {
-  return 'tab ' + (tabs.length + 1);
+  if (typeof createDefaultTabLabel === 'function') return createDefaultTabLabel();
+  return 'shell ' + (tabs.length + 1);
 }
 
 function createShortcutTab() {
@@ -970,7 +983,9 @@ function restoreTabSessionState() {
     const restoredIds = [];
     const restoredRecords = [];
     parsed.tabs.forEach((item, index) => {
-      const label = String(item && item.label || `tab ${index + 1}`);
+      const label = String(item && item.label || (
+        typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(index + 1) : `shell ${index + 1}`
+      ));
       const tabId = typeof createTab === 'function' ? createTab(label) : null;
       if (!tabId) return;
       const tab = typeof getTab === 'function' ? getTab(tabId) : null;
@@ -1475,74 +1490,6 @@ function bindMobileComposerSubmitAndInputListeners(mobileInput) {
   });
 }
 
-function bindMobileEditBarListeners(editBar) {
-  if (!editBar) return;
-  editBar.querySelectorAll('button[data-mobile-edit], button[data-edit-action]').forEach(btn => {
-    if (btn.dataset.mobileEditBound === '1') return;
-    btn.dataset.mobileEditBound = '1';
-    const action = btn.dataset.mobileEdit || btn.dataset.editAction;
-    const repeating = action === 'left' || action === 'right';
-    let handledPointerDown = false;
-    let _repeatDelay = null;
-    let _repeatInterval = null;
-    const _clearRepeat = () => {
-      if (_repeatDelay)    { clearTimeout(_repeatDelay);   _repeatDelay = null; }
-      if (_repeatInterval) { clearInterval(_repeatInterval); _repeatInterval = null; }
-      if (typeof document !== 'undefined') {
-        document.removeEventListener('pointerup',     stopRepeat);
-        document.removeEventListener('pointercancel', stopRepeat);
-        document.removeEventListener('touchend',      stopRepeat);
-        document.removeEventListener('touchcancel',   stopRepeat);
-      }
-    };
-    const stopRepeat = () => _clearRepeat();
-    const handler = e => {
-      e.preventDefault();
-      e.stopPropagation();
-      performMobileEditAction(action);
-      if (repeating) {
-        _clearRepeat();
-        _repeatDelay = setTimeout(() => {
-          _repeatInterval = setInterval(() => performMobileEditAction(action), 60);
-        }, 400);
-        if (typeof document !== 'undefined') {
-          document.addEventListener('pointerup',     stopRepeat);
-          document.addEventListener('pointercancel', stopRepeat);
-          document.addEventListener('touchend',      stopRepeat);
-          document.addEventListener('touchcancel',   stopRepeat);
-        }
-      }
-    };
-    if (typeof window !== 'undefined' && typeof window.PointerEvent === 'function') {
-      btn.addEventListener('pointerdown', e => {
-        handledPointerDown = true;
-        handler(e);
-      });
-      btn.addEventListener('mousedown', e => {
-        if (handledPointerDown) {
-          handledPointerDown = false;
-          e.preventDefault();
-          return;
-        }
-        handler(e);
-      });
-      if (repeating) {
-        btn.addEventListener('pointerup',     stopRepeat);
-        btn.addEventListener('pointercancel', stopRepeat);
-        btn.addEventListener('pointerleave',  stopRepeat);
-      }
-    } else {
-      btn.addEventListener('mousedown',  handler);
-      btn.addEventListener('touchstart', handler, { passive: false });
-      if (repeating) {
-        btn.addEventListener('mouseup',     stopRepeat);
-        btn.addEventListener('touchend',    stopRepeat);
-        btn.addEventListener('touchcancel', stopRepeat);
-      }
-    }
-  });
-}
-
 function findWordBoundaryLeft(value, index) {
   let next = Math.max(0, index);
   while (next > 0 && /\s/.test(value[next - 1])) next--;
@@ -1826,6 +1773,516 @@ function _setTsMode(mode) {
   if (tsBtn) { tsBtn.textContent = label; tsBtn.classList.toggle('active', mode !== 'off'); }
   if (typeof syncOutputPrefixes === 'function') syncOutputPrefixes();
   try { _refreshFollowingOutputsAfterLayout(); } catch (_) {}
+}
+
+// ── Terminal-native theme/config commands ──
+function _cliAppendLine(text, cls = '', tabId = null) {
+  if (typeof appendLine === 'function') appendLine(text, cls, tabId);
+}
+
+function _cliShouldPreserveOutputTail(tabId = null) {
+  const id = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : null);
+  const tab = typeof getTab === 'function' ? getTab(id) : null;
+  return !!tab && tab.followOutput !== false;
+}
+
+function _cliPreserveOutputTail(tabId = null, shouldPreserve = true) {
+  if (!shouldPreserve) return;
+  const id = tabId || (typeof activeTabId !== 'undefined' ? activeTabId : null);
+  const tab = typeof getTab === 'function' ? getTab(id) : null;
+  const out = typeof getOutput === 'function' ? getOutput(id) : null;
+  if (tab) tab.followOutput = true;
+  if (out && typeof _stickOutputToBottom === 'function') {
+    _stickOutputToBottom(out, tab);
+  } else if (out) {
+    out.scrollTop = out.scrollHeight;
+  }
+  if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+}
+
+function _cliSetStatus(statusValue) {
+  if (typeof setStatus === 'function') setStatus(statusValue);
+}
+
+function _cliRecordSuccess(command) {
+  if (typeof _recordSuccessfulLocalCommand === 'function') _recordSuccessfulLocalCommand(command);
+}
+
+function _cliThemeSlug(entry) {
+  return _normalizeThemeName(entry?.name || entry?.filename || '');
+}
+
+function _cliThemeEntries() {
+  return [..._getThemeThemes()].sort(_compareThemeEntries).filter(entry => _cliThemeSlug(entry));
+}
+
+function _cliThemeColorScheme(entry) {
+  const scheme = String(entry?.color_scheme || '').trim().toLowerCase();
+  if (scheme === 'light' || scheme === 'only light') return 'light';
+  if (scheme === 'dark' || scheme === 'only dark') return 'dark';
+  return 'other';
+}
+
+function _cliThemeColorSchemeLabel(scheme) {
+  if (scheme === 'light') return 'Light themes:';
+  if (scheme === 'dark') return 'Dark themes:';
+  return 'Other themes:';
+}
+
+function _cliThemeEntriesByColorScheme() {
+  const grouped = { dark: [], light: [], other: [] };
+  _cliThemeEntries().forEach((entry) => {
+    grouped[_cliThemeColorScheme(entry)].push(entry);
+  });
+  return grouped;
+}
+
+function _cliCurrentThemeEntry() {
+  return _resolveThemeEntry(document.body?.dataset?.theme || _savedThemeName());
+}
+
+function _cliCurrentThemeSlug() {
+  return _cliThemeSlug(_cliCurrentThemeEntry());
+}
+
+function _formatCliRecord(key, value, width = 18) {
+  return `${key.padEnd(width)}  ${value}`;
+}
+
+function _cliThemeDescription(entry) {
+  const label = String(entry?.label || entry?.name || '').trim();
+  const slug = _cliThemeSlug(entry);
+  const current = slug && slug === _cliCurrentThemeSlug();
+  return `${label || slug}${current ? ' (current)' : ''}`;
+}
+
+async function handleThemeCommand(cmd, tabId = null) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[1] || '').toLowerCase();
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+
+  if (parts.length === 1 || sub === 'list') {
+    const current = _cliCurrentThemeEntry();
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(current)), 'fake-kv', tabId);
+    _cliAppendLine('', 'fake-spacer', tabId);
+    _cliAppendLine('Available themes:', 'fake-section', tabId);
+    const grouped = _cliThemeEntriesByColorScheme();
+    ['dark', 'light', 'other'].forEach((scheme) => {
+      const entries = grouped[scheme] || [];
+      if (!entries.length) return;
+      _cliAppendLine(_cliThemeColorSchemeLabel(scheme), 'fake-section', tabId);
+      entries.forEach((entry) => {
+        const slug = _cliThemeSlug(entry);
+        const marker = slug === _cliCurrentThemeSlug() ? '*' : ' ';
+        _cliAppendLine(`  ${marker} ${slug.padEnd(24)}  ${String(entry.label || slug)}`, 'fake-help-row', tabId);
+      });
+    });
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  if (sub === 'current') {
+    _cliAppendLine(_formatCliRecord('current theme', _cliThemeDescription(_cliCurrentThemeEntry())), 'fake-kv', tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  const requested = sub === 'set' ? parts.slice(2).join(' ').trim() : '';
+  if (!requested) {
+    _cliAppendLine('usage: theme [list | current | set <theme>]', '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  const entry = _findThemeEntry(requested);
+  if (!entry) {
+    _cliAppendLine(`theme: unknown theme '${requested}'`, 'exit-fail', tabId);
+    _cliAppendLine("run 'theme list' to see available themes", '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  applyThemeSelection(entry.name);
+  _cliAppendLine(`theme set: ${_cliThemeDescription(entry)}`, '', tabId);
+  _cliRecordSuccess(cmd);
+  _cliSetStatus('ok');
+  return true;
+}
+
+const _cliConfigValueLabels = {
+  animated: 'animated',
+  static: 'static',
+  off: 'off',
+  ask: 'ask',
+};
+
+function _cliNormalizeValue(value) {
+  return String(value || '').trim().toLowerCase().replace(/_/g, '-');
+}
+
+function _cliConfigEntries() {
+  return [
+    {
+      key: 'line-numbers',
+      description: 'Show line numbers beside output and the live prompt',
+      values: ['on', 'off'],
+      get: () => (typeof lnMode === 'string' && lnMode === 'on' ? 'on' : 'off'),
+      set: (value) => applyLineNumberPreference(value),
+    },
+    {
+      key: 'timestamps',
+      description: 'Timestamp display mode',
+      values: _tsModes.slice(),
+      get: () => (_tsModes.includes(tsMode) ? tsMode : 'off'),
+      set: (value) => applyTimestampPreference(value),
+    },
+    {
+      key: 'welcome',
+      description: 'Welcome intro behavior',
+      values: ['animated', 'static', 'off'],
+      aliases: { disable_animation: 'static', disable: 'static', remove: 'off', removed: 'off' },
+      toStored: { animated: 'animated', static: 'disable_animation', off: 'remove' },
+      fromStored: { animated: 'animated', disable_animation: 'static', remove: 'off' },
+      get: function getWelcomeCliValue() {
+        return this.fromStored[getWelcomeIntroPreference()] || 'animated';
+      },
+      set: function setWelcomeCliValue(value) {
+        applyWelcomeIntroPreference(this.toStored[value] || value);
+      },
+    },
+    {
+      key: 'share-redaction',
+      description: 'Default redaction behavior for shared snapshots',
+      values: ['ask', 'redacted', 'raw'],
+      aliases: { unset: 'ask', prompt: 'ask', redacted: 'redacted', raw: 'raw' },
+      toStored: { ask: 'unset', redacted: 'redacted', raw: 'raw' },
+      fromStored: { unset: 'ask', redacted: 'redacted', raw: 'raw' },
+      get: function getShareRedactionCliValue() {
+        return this.fromStored[getShareRedactionDefaultPreference()] || 'ask';
+      },
+      set: function setShareRedactionCliValue(value) {
+        applyShareRedactionDefaultPreference(this.toStored[value] || value);
+      },
+    },
+    {
+      key: 'run-notifications',
+      description: 'Desktop notification when a run completes or is killed',
+      values: ['on', 'off'],
+      get: () => getRunNotifyPreference(),
+      set: (value) => applyRunNotifyPreference(value),
+    },
+    {
+      key: 'hud-clock',
+      description: 'HUD clock timezone',
+      values: _hudClockModes.slice(),
+      get: () => getHudClockPreference(),
+      set: (value) => applyHudClockPreference(value),
+    },
+  ];
+}
+
+function _findCliConfigEntry(key) {
+  const normalized = _cliNormalizeValue(key);
+  return _cliConfigEntries().find(entry => entry.key === normalized) || null;
+}
+
+function _normalizeCliConfigEntryValue(entry, value) {
+  const normalized = _cliNormalizeValue(value);
+  const aliased = entry.aliases && Object.prototype.hasOwnProperty.call(entry.aliases, normalized)
+    ? entry.aliases[normalized]
+    : normalized;
+  return entry.values.includes(aliased) ? aliased : null;
+}
+
+function _cliConfigDisplayValue(value) {
+  return _cliConfigValueLabels[value] || value;
+}
+
+function _printCliConfigEntry(entry, tabId) {
+  _cliAppendLine(
+    _formatCliRecord(entry.key, _cliConfigDisplayValue(entry.get()), 19),
+    'fake-kv',
+    tabId,
+  );
+}
+
+function _printCliConfigList(tabId) {
+  _cliAppendLine('Current user config:', 'fake-section', tabId);
+  _cliConfigEntries().forEach(entry => _printCliConfigEntry(entry, tabId));
+}
+
+async function handleConfigCommand(cmd, tabId = null) {
+  const parts = String(cmd || '').trim().split(/\s+/).filter(Boolean);
+  const sub = (parts[1] || '').toLowerCase();
+  const preserveTail = _cliShouldPreserveOutputTail(tabId);
+  if (typeof appendCommandEcho === 'function') appendCommandEcho(cmd, tabId);
+
+  if (parts.length === 1 || sub === 'list') {
+    _printCliConfigList(tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  if (sub === 'get') {
+    const key = parts[2] || '';
+    const entry = _findCliConfigEntry(key);
+    if (!entry) {
+      _cliAppendLine(`config: unknown option '${key}'`, 'exit-fail', tabId);
+      _cliAppendLine("run 'config list' to see available options", '', tabId);
+      _cliSetStatus('fail');
+      return true;
+    }
+    _printCliConfigEntry(entry, tabId);
+    _cliRecordSuccess(cmd);
+    _cliSetStatus('ok');
+    return true;
+  }
+
+  const isSet = sub === 'set';
+  const key = isSet ? parts[2] : '';
+  const value = isSet ? parts[3] : '';
+  const entry = _findCliConfigEntry(key);
+
+  if (!entry || !value) {
+    _cliAppendLine('usage: config [list | get <option> | set <option> <value>]', '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  const normalizedValue = _normalizeCliConfigEntryValue(entry, value);
+  if (!normalizedValue) {
+    _cliAppendLine(`config: invalid value '${value}' for ${entry.key}`, 'exit-fail', tabId);
+    _cliAppendLine(`allowed values: ${entry.values.join(', ')}`, '', tabId);
+    _cliSetStatus('fail');
+    return true;
+  }
+
+  await entry.set(normalizedValue);
+  _cliAppendLine(`config set: ${entry.key}=${_cliConfigDisplayValue(entry.get())}`, '', tabId);
+  _cliPreserveOutputTail(tabId, preserveTail);
+  _cliRecordSuccess(cmd);
+  _cliSetStatus('ok');
+  return true;
+}
+
+function _runtimeHint(value, description = '', insertValue = null, label = null) {
+  const item = { value, description };
+  if (insertValue != null) item.insertValue = insertValue;
+  if (label != null) item.label = label;
+  return item;
+}
+
+function _runtimeContextSpec({
+  flags = [],
+  expectsValue = [],
+  argHints = {},
+  sequenceArgHints = {},
+  argumentLimit = null,
+  pipeCommand = false,
+  pipeInsertValue = '',
+  pipeLabel = '',
+  pipeDescription = '',
+  examples = [],
+} = {}) {
+  return {
+    flags,
+    expects_value: expectsValue,
+    arg_hints: argHints,
+    sequence_arg_hints: sequenceArgHints,
+    argument_limit: argumentLimit,
+    pipe_command: pipeCommand,
+    pipe_insert_value: pipeInsertValue,
+    pipe_label: pipeLabel,
+    pipe_description: pipeDescription,
+    examples,
+  };
+}
+
+const _runtimeBuiltinCommandInfo = [
+  ['autocomplete', 'built-in: explain context-aware autocomplete for known commands'],
+  ['banner', 'built-in: print the configured banner art'],
+  ['clear', 'built-in: clear the current terminal tab output'],
+  ['config', 'built-in: show or update user options'],
+  ['date', 'built-in: show the current server time'],
+  ['df', 'built-in: show a compact filesystem summary'],
+  ['env', 'built-in: show core environment values for this shell'],
+  ['faq', 'built-in: show configured FAQ entries'],
+  ['fortune', 'built-in: print a short operator-themed one-liner'],
+  ['free', 'built-in: show a compact memory summary'],
+  ['groups', 'built-in: show the shell group membership'],
+  ['help', 'built-in: list all built-in commands'],
+  ['history', 'built-in: list recent commands from this session'],
+  ['hostname', 'built-in: show the configured shell instance name'],
+  ['id', 'built-in: show the shell identity'],
+  ['ip', 'built-in: show a minimal shell network interface view'],
+  ['jobs', 'built-in: list active jobs for this session'],
+  ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
+  ['limits', 'built-in: show configured runtime, history, and retention limits'],
+  ['ls', 'built-in: show the allowed command catalog'],
+  ['man', 'built-in: show a real or built-in manual page'],
+  ['ps', 'built-in: show the current shell process view'],
+  ['pwd', 'built-in: show the web shell workspace path'],
+  ['retention', 'built-in: show retention and persisted-output settings'],
+  ['route', 'built-in: show the shell routing table summary'],
+  ['session-token', 'built-in: show or manage persistent session tokens'],
+  ['shortcuts', 'built-in: show current keyboard shortcuts'],
+  ['status', 'built-in: show the current session and shell configuration summary'],
+  ['theme', 'built-in: show or apply the active shell theme'],
+  ['tty', 'built-in: show the web terminal device path'],
+  ['type', 'built-in: describe whether a command is built-in, installed, or missing'],
+  ['uname', 'built-in: show the shell platform string'],
+  ['uptime', 'built-in: show app uptime since process start'],
+  ['version', 'built-in: show shell, app, Flask, and Python version details'],
+  ['which', 'built-in: locate a built-in command or allowed runtime command'],
+  ['who', 'built-in: show the current shell user and session'],
+  ['whoami', 'built-in: describe this shell and link to the project README'],
+];
+
+function _runtimeBuiltinDescription(root) {
+  return _runtimeBuiltinCommandInfo.find(([name]) => name === root)?.[1] || 'built-in command';
+}
+
+function _runtimeAllowedCommandRoots() {
+  const roots = new Set();
+  const source = allowedCommandsFaqData && Array.isArray(allowedCommandsFaqData.commands)
+    ? allowedCommandsFaqData.commands
+    : [];
+  source.forEach((command) => {
+    const root = String(command || '').trim().split(/\s+/, 1)[0].toLowerCase();
+    if (root) roots.add(root);
+  });
+  return roots;
+}
+
+function _runtimeCommandLookupHints(baseRegistry = {}, descriptionForExternal = 'manual page') {
+  const builtinNames = new Set(_runtimeBuiltinCommandInfo.map(([name]) => name));
+  const externalRoots = new Set(Object.keys(baseRegistry || {}));
+  _runtimeAllowedCommandRoots().forEach(root => externalRoots.add(root));
+  builtinNames.forEach(root => externalRoots.delete(root));
+
+  const items = [];
+  [...externalRoots].sort().forEach(root => {
+    items.push(_runtimeHint(root, `${root} ${descriptionForExternal}`));
+  });
+  [...builtinNames].sort().forEach(root => {
+    items.push(_runtimeHint(root, _runtimeBuiltinDescription(root)));
+  });
+  items.push(_runtimeHint('<command>', 'Any built-in or allowed command'));
+  return items;
+}
+
+function _runtimeStaticBuiltinContext() {
+  const emptySpec = _runtimeContextSpec();
+  const context = Object.fromEntries(
+    _runtimeBuiltinCommandInfo.map(([root]) => [root, emptySpec]),
+  );
+
+  context.ps = _runtimeContextSpec({
+    flags: [
+      _runtimeHint('aux', 'All processes with user and memory info'),
+      _runtimeHint('-ef', 'All processes, full format'),
+    ],
+  });
+  context.df = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable disk usage')] });
+  context.free = _runtimeContextSpec({ flags: [_runtimeHint('-h', 'Human-readable memory usage')] });
+  context.uname = _runtimeContextSpec({ flags: [_runtimeHint('-a', 'All system information')] });
+  context.ip = _runtimeContextSpec({
+    argHints: { __positional__: [_runtimeHint('a', 'Show all network interfaces and addresses')] },
+  });
+  context.ls = _runtimeContextSpec({
+    flags: [
+      _runtimeHint('-la', 'Long listing including hidden files'),
+      _runtimeHint('-lh', 'Long listing with human-readable sizes'),
+      _runtimeHint('-l', 'Long listing format'),
+    ],
+  });
+  context['session-token'] = _runtimeContextSpec({
+    expectsValue: ['set', 'revoke'],
+    argHints: {
+      generate: [],
+      copy: [],
+      clear: [],
+      rotate: [],
+      list: [],
+      set: [_runtimeHint('<token>', 'Paste a tok_... token or UUID from another device')],
+      revoke: [_runtimeHint('<token>', 'tok_ token to permanently invalidate on the server')],
+      __positional__: [
+        _runtimeHint('generate', 'Generate a new session token and save it to this browser'),
+        _runtimeHint('set <token>', 'Activate an existing session token from another device', 'set '),
+        _runtimeHint('copy', 'Copy the active session token to the clipboard'),
+        _runtimeHint('clear', 'Confirm before removing the active session token'),
+        _runtimeHint('rotate', 'Generate a new token and migrate all history to it'),
+        _runtimeHint('list', 'Show the active session token and its creation date'),
+        _runtimeHint('revoke <token>', 'Permanently invalidate a tok_ token on this server', 'revoke '),
+      ],
+    },
+  });
+  return context;
+}
+
+function _runtimeThemeContext() {
+  const themeHints = _cliThemeEntries().map(entry => _runtimeHint(_cliThemeSlug(entry), _cliThemeDescription(entry)));
+  const argHints = {
+    list: [],
+    current: [],
+    set: themeHints,
+    __positional__: [
+      _runtimeHint('list', 'Show available themes'),
+      _runtimeHint('current', 'Show the active theme'),
+      _runtimeHint('set', 'Apply a theme', 'set '),
+    ],
+  };
+  themeHints.forEach(item => { argHints[item.value] = []; });
+  return _runtimeContextSpec({ expectsValue: ['set'], argHints });
+}
+
+function _runtimeConfigContext() {
+  const entries = _cliConfigEntries();
+  const optionHints = entries.map(entry => _runtimeHint(entry.key, entry.description));
+  const argHints = {
+    list: [],
+    get: optionHints,
+    set: optionHints,
+    __positional__: [
+      _runtimeHint('list', 'Show all current user config'),
+      _runtimeHint('get', 'Show one user config value', 'get '),
+      _runtimeHint('set', 'Set one user config value', 'set '),
+    ],
+  };
+  const sequenceArgHints = {};
+  entries.forEach((entry) => {
+    sequenceArgHints[`set ${entry.key}`] = entry.values.map(value => _runtimeHint(value, entry.description));
+    sequenceArgHints[`get ${entry.key}`] = [];
+    entry.values.forEach(value => { argHints[value] = []; });
+  });
+  return _runtimeContextSpec({ expectsValue: ['get', 'set'], argHints, sequenceArgHints });
+}
+
+function getRuntimeAutocompleteContext(baseRegistry = {}) {
+  const context = _runtimeStaticBuiltinContext();
+  const lookupHints = _runtimeCommandLookupHints(baseRegistry);
+  context.theme = _runtimeThemeContext();
+  context.config = _runtimeConfigContext();
+  context.man = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: lookupHints },
+  });
+  context.which = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command path') },
+  });
+  context.type = _runtimeContextSpec({
+    argumentLimit: 1,
+    argHints: { __positional__: _runtimeCommandLookupHints(baseRegistry, 'command type') },
+  });
+  return context;
+}
+
+function getRuntimeAutocompleteItems() {
+  return [];
 }
 
 let allowedCommandsFaqData = null;

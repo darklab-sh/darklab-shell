@@ -198,11 +198,13 @@ This route list belongs in the architecture document because it describes the ap
 | `POST` | `/session/starred` | Adds one command to the current session's starred list |
 | `DELETE` | `/session/starred` | Removes one command, or clears the whole starred list, for the current session |
 | `GET` | `/history` | Returns paginated history items for the current session as JSON, with support for `type=all\|runs\|snapshots` and a backward-compatible `runs` subset for run-only consumers |
+| `GET` | `/history/commands` | Returns the newest distinct command strings for compact command recall surfaces such as prompt Up/Down history, desktop rail recents, and the mobile recent peek |
 | `GET` | `/history/active` | Returns active-run metadata for the current session so reload can rebuild in-flight tabs |
 | `GET` | `/history/<run_id>` | Styled HTML permalink page for a single run; serves full output when a persisted artifact exists (`?json` for raw JSON) |
 | `GET` | `/history/<run_id>/full` | Backward-compatible alias for `/history/<run_id>` (`?json` for raw JSON) |
 | `GET` | `/share/<share_id>` | Styled HTML permalink page for a full tab snapshot (`?json` for raw JSON) |
 | `POST` | `/run` | Validates, rewrites, executes, and streams a command over SSE |
+| `POST` | `/run/client` | Persists allowlisted browser-owned built-in output (`theme`, `config`, `session-token`) as normal run history |
 | `POST` | `/kill` | Kills a running process by `run_id` |
 | `POST` | `/share` | Saves a tab snapshot and returns a permalink URL |
 | `GET` | `/health` | Returns `{"status": "ok", "db": true, "redis": true\|false\|null}`; `redis` is `null` when Redis is not configured |
@@ -260,7 +262,7 @@ This is still a classic-script frontend, not an ES-module app. The architecture 
 
 Prompt ownership lives in `composerState`, not in whichever DOM input happened to update last.
 
-The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
+The options modal is part of that same browser-owned layer. It does not change backend config; it owns user-specific UX preferences (timestamp/line-number quick toggles, welcome-intro behavior, snapshot redaction defaults, run-notification state, HUD clock timezone mode) and feeds them back into the classic-script runtime during boot and session changes. The terminal-native `config` command calls the same preference application path as the modal, so terminal and modal changes stay equivalent. Browser-owned terminal commands (`theme`, `config`, and `session-token`) render locally, then persist their masked command and transcript output through `/run/client` so history, recents, and reload hydration use the same server-backed run model as `/run`. Those preferences now persist server-side per session through the session-token model, while browser cookies/local storage remain the local cache and anonymous-session fallback layer. On mobile, that same shared Options surface hides the desktop-only `HUD Clock` and `Run Notifications` rows even though the underlying preference set remains shared with desktop.
 
 ### Browser Runtime
 
@@ -353,7 +355,7 @@ The detailed user-visible welcome behavior belongs in the README. Here, the impo
 
 Command editing is split into separate state machines rather than one overloaded dropdown path:
 
-- normal autocomplete loads structured `context` hints from `/autocomplete`, sourced from `autocomplete.yaml`
+- normal autocomplete merges structured external-tool `context` hints from `/autocomplete` with a code-owned runtime context for app built-ins, then runs both through the same token-aware matcher
 - reverse-history search owns its own pre-draft, query, selection, and exit paths
 - `controller.js` routes keyboard events into the appropriate mode before the normal submit/edit handlers run
 - navigation semantics stay consistent regardless of whether a dropdown opens above or below the prompt
@@ -397,6 +399,12 @@ The expand/collapse case is owned by `bindDisclosure` in `app/static/js/ui_discl
 Theme colors in the shell are semantic, not decorative. Every theme exposes four semantic tokens — `--amber` (caution / in-progress), `--red` (destructive / error), `--green` (completed success / enabled), `--muted` (neutral metadata) — and every UI decision that reaches for one of these colors must match the semantic meaning of that token rather than picking on visual taste. Themes control the exact visual tone of each token; the mapping from token to meaning is fixed.
 
 Full rules, the allowed exceptions (starred items, search-hit highlights, decorative macOS traffic-light chrome), and the `color-mix()`-in-theme-file pattern for surface-local tuning live in [THEME.md § Semantic Color Contract](THEME.md#semantic-color-contract). That document is the source of truth — this section does not restate the rules.
+
+### Scrollbar Styling Contract
+
+App-owned vertical scroll regions use the `.nice-scroll` CSS primitive so terminal output, autocomplete dropdowns, modal bodies, history surfaces, mobile sheets, rail lists, permalink output, and saved HTML export output share the same themed scrollbar treatment. New scrollable panels, drawers, sheets, dropdowns, and transcript-like surfaces should add `.nice-scroll` instead of hand-rolling `scrollbar-width`, `scrollbar-color`, or `::-webkit-scrollbar` selectors.
+
+Intentional hidden-scrollbar surfaces are separate from this primitive. Horizontally scrolling tab strips and touch-first overflow strips keep their explicit no-scrollbar rules because their contract is edge-glow or drag affordance, not visible scrollbar affordance.
 
 ### Confirmation Dialog Contract
 
@@ -638,6 +646,8 @@ This section groups log emission, health/status surfaces, and the operator diagn
 
 The application uses a dedicated `shell` logger configured by `logging_setup.py`. Logging is part of the runtime architecture rather than just a deployment concern because request hooks, run lifecycle handlers, diagnostics gates, and startup bootstrap all emit structured events that operators rely on for troubleshooting and auditing.
 
+Structured events use the `session` field for request correlation. Anonymous session IDs are logged as-is, while `tok_` session-token values are masked before logging because they are bearer credentials.
+
 ### Output Formats
 
 The logging layer supports two output formats selected by `log_format` in `config.yaml`:
@@ -669,6 +679,9 @@ The current event inventory is:
 | DEBUG | `HISTORY_DELETE_MISS` | `delete_run` | ip, run_id, session |
 | DEBUG | `THEME_SELECTED` | current theme resolution | ip, session, route, theme, source |
 | DEBUG | `CMD_PIPE` | `run_command` | ip, session, cmd, pipe_to |
+| DEBUG | `HISTORY_COMMANDS_VIEWED` | `get_history_commands` | ip, session, count, limit |
+| DEBUG | `SESSION_RUN_COUNT_VIEWED` | `session_run_count` | ip, session, session_kind, count |
+| DEBUG | `STARRED_COMMANDS_VIEWED` | `session_starred_list` | ip, session, session_kind, count |
 | INFO | `LOGGING_CONFIGURED` | `configure_logging` | level, format |
 | INFO | `CMD_REWRITE` | `run_command` | ip, original, rewritten |
 | INFO | `RUN_START` | `run_command` | ip, run_id, session, pid, cmd, cmd_type |
@@ -677,8 +690,16 @@ The current event inventory is:
 | INFO | `DB_PRUNED` | `db_init` | runs, snapshots, retention_days |
 | INFO | `PAGE_LOAD` | `index` | ip, session, theme |
 | INFO | `CONTENT_VIEWED` | content routes | ip, session, route, count/restricted/current/key_count |
+| INFO | `SESSION_TOKEN_GENERATED` | `session_token_generate` | ip, session, session_kind |
+| INFO | `SESSION_TOKEN_REVOKED` | `session_token_revoke` | ip, session, session_kind, revoked_current |
+| INFO | `SESSION_MIGRATED` | `session_migrate` | ip, session, from_session_kind, to_session_kind, migrated_runs, migrated_snapshots, migrated_stars, migrated_preferences |
+| INFO | `SESSION_PREFERENCES_SAVED` | `session_preferences_save` | ip, session, session_kind, key_count |
+| INFO | `STARRED_COMMAND_ADDED` | `session_starred_add` | ip, session, session_kind, command_root, changed |
+| INFO | `STARRED_COMMAND_REMOVED` | `session_starred_remove` | ip, session, session_kind, command_root, count |
+| INFO | `STARRED_COMMANDS_CLEARED` | `session_starred_remove` | ip, session, session_kind, count |
 | INFO | `SHARE_CREATED` | `save_share` | ip, session, share_id, label, redacted |
 | INFO | `SHARE_VIEWED` | `get_share` | ip, session, share_id, label |
+| INFO | `SHARE_DELETED` | `delete_share` | ip, session, share_id, deleted |
 | INFO | `RUN_VIEWED` | `get_run` | ip, run_id, cmd |
 | INFO | `HISTORY_VIEWED` | `get_history` | ip, session, count, q, output_search, command_root, exit_code_filter, date_range |
 | WARN | `FTS_SEARCH_FALLBACK` | `get_history` | session, q, error |
@@ -691,6 +712,9 @@ The current event inventory is:
 | WARN | `CMD_MISSING` | `run_command` | ip, session, cmd |
 | WARN | `CLIENT_ERROR` | `client_log` | ip, session, context, client_message |
 | WARN | `DIAG_DENIED` | `diag()` | ip, allowed_cidrs |
+| WARN | `SESSION_TOKEN_REVOKE_DENIED` | `session_token_revoke` | ip, session, reason |
+| WARN | `SESSION_MIGRATE_DENIED` | `session_migrate` | ip, session, reason, from_session_kind, to_session_kind |
+| WARN | `SESSION_PREFERENCES_INVALID` | `session_preferences_get` | ip, session, session_kind |
 | WARN | `UNTRUSTED_PROXY` | `get_client_ip` | ip, proxy_ip, forwarded_for, path |
 | WARN | `RATE_LIMIT` | `errorhandler(429)` | ip, path, limit |
 | WARN | `CMD_TIMEOUT` | `generate()` | ip, run_id, session, timeout, cmd |
@@ -770,7 +794,7 @@ The app also injects `--privileged` into `nmap` commands during rewrite so the b
 
 ## Configuration Surfaces
 
-The frontend fetches `/config` on page load and stores the normalized payload in `APP_CONFIG`. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than `config.yaml`; backend-only persistence and storage controls do not cross that boundary.
+The Flask index route embeds the same normalized browser config payload that `/config` returns, and `config.js` reads that server-rendered JSON into `APP_CONFIG` before the rest of the classic-script frontend loads. The `/config` endpoint remains available for runtime refresh and diagnostics, but both paths are built from the same Python payload helper. That payload is the browser bootstrap boundary for runtime values the frontend actually needs: naming, prompt text, limits, welcome timing, and selected browser-facing feature flags. It is intentionally narrower than `config.yaml`; backend-only persistence and storage controls do not cross that boundary.
 
 Not every `config.yaml` key is exposed to the browser. Server-side persistence controls such as `persist_full_run_output` and `full_output_max_mb` stay backend-only because the frontend does not need to know them to render the normal tab or history flows. The MB value is converted to bytes internally before any artifact truncation logic runs.
 
@@ -792,10 +816,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 867
-- `vitest`: 728
-- `playwright`: 199
-- total: 1,794
+- `pytest`: 886
+- `vitest`: 753
+- `playwright`: 200
+- total: 1,839
 
 ### Testing Architecture
 

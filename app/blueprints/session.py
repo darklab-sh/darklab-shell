@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from flask import Blueprint, jsonify, request
 
 from database import db_connect
-from helpers import get_client_ip, get_session_id
+from helpers import get_client_ip, get_log_session_id, get_session_id
 
 log = logging.getLogger("shell")
 
@@ -25,6 +25,14 @@ _SESSION_PREFERENCE_KEYS = {
     "pref_run_notify",
     "pref_hud_clock",
 }
+
+
+def _session_kind(session_id):
+    return "token" if str(session_id or "").startswith("tok_") else "anonymous"
+
+
+def _command_root(command):
+    return str(command or "").strip().split(maxsplit=1)[0].lower()
 
 
 def _normalize_session_preferences(raw):
@@ -63,7 +71,8 @@ def session_token_generate():
         conn.commit()
     log.info("SESSION_TOKEN_GENERATED", extra={
         "ip": get_client_ip(),
-        "session": get_session_id(),
+        "session": get_log_session_id(get_session_id()),
+        "session_kind": _session_kind(get_session_id()),
     })
     return jsonify({"session_token": session_token})
 
@@ -109,9 +118,20 @@ def session_token_revoke():
     """
     data = request.get_json(silent=True) or {}
     token = str(data.get("token") or "").strip()
+    current_session_id = get_session_id()
     if not token:
+        log.warning("SESSION_TOKEN_REVOKE_DENIED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(current_session_id),
+            "reason": "missing_token",
+        })
         return jsonify({"error": "token is required"}), 400
     if not token.startswith("tok_"):
+        log.warning("SESSION_TOKEN_REVOKE_DENIED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(current_session_id),
+            "reason": "not_tok_token",
+        })
         return jsonify({"error": "only tok_ tokens can be revoked"}), 400
     with db_connect() as conn:
         result = conn.execute(
@@ -119,10 +139,17 @@ def session_token_revoke():
         )
         conn.commit()
     if result.rowcount == 0:
+        log.warning("SESSION_TOKEN_REVOKE_DENIED", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(current_session_id),
+            "reason": "not_found",
+        })
         return jsonify({"error": "token not found"}), 404
     log.info("SESSION_TOKEN_REVOKED", extra={
         "ip": get_client_ip(),
-        "session": get_session_id(),
+        "session": get_log_session_id(current_session_id),
+        "session_kind": _session_kind(current_session_id),
+        "revoked_current": token == current_session_id,
     })
     return jsonify({"ok": True})
 
@@ -175,7 +202,10 @@ def session_migrate():
     if from_session_id != current_session_id:
         log.warning("SESSION_MIGRATE_DENIED", extra={
             "ip": get_client_ip(),
+            "session": get_log_session_id(current_session_id),
             "reason": "from_session_id does not match X-Session-ID",
+            "from_session_kind": _session_kind(from_session_id),
+            "to_session_kind": _session_kind(to_session_id),
         })
         return jsonify({"error": "from_session_id must match your current session"}), 403
 
@@ -186,6 +216,13 @@ def session_migrate():
                 "SELECT 1 FROM session_tokens WHERE token = ?", (to_session_id,)
             ).fetchone()
         if not row:
+            log.warning("SESSION_MIGRATE_DENIED", extra={
+                "ip": get_client_ip(),
+                "session": get_log_session_id(current_session_id),
+                "reason": "unknown_destination_token",
+                "from_session_kind": _session_kind(from_session_id),
+                "to_session_kind": _session_kind(to_session_id),
+            })
             return jsonify({"error": "destination token is not a known issued token"}), 400
 
     with db_connect() as conn:
@@ -202,7 +239,7 @@ def session_migrate():
             "SELECT ?, command FROM starred_commands WHERE session_id = ?",
             (to_session_id, from_session_id),
         )
-        conn.execute(
+        prefs_insert = conn.execute(
             "INSERT OR IGNORE INTO session_preferences (session_id, preferences, updated) "
             "SELECT ?, preferences, updated FROM session_preferences WHERE session_id = ?",
             (to_session_id, from_session_id),
@@ -223,12 +260,17 @@ def session_migrate():
     # counts rows actually written; DELETE counts all source rows including any
     # that were skipped because the destination already had the same command.
     migrated_stars = stars_insert.rowcount
+    migrated_preferences = prefs_insert.rowcount
 
     log.info("SESSION_MIGRATED", extra={
         "ip": get_client_ip(),
+        "session": get_log_session_id(current_session_id),
+        "from_session_kind": _session_kind(from_session_id),
+        "to_session_kind": _session_kind(to_session_id),
         "migrated_runs": migrated_runs,
         "migrated_snapshots": migrated_snapshots,
         "migrated_stars": migrated_stars,
+        "migrated_preferences": migrated_preferences,
     })
     return jsonify({
         "ok": True,
@@ -252,6 +294,11 @@ def session_preferences_get():
     try:
         prefs = _normalize_session_preferences(json.loads(row["preferences"] or "{}"))
     except json.JSONDecodeError:
+        log.warning("SESSION_PREFERENCES_INVALID", extra={
+            "ip": get_client_ip(),
+            "session": get_log_session_id(session_id),
+            "session_kind": _session_kind(session_id),
+        })
         prefs = {}
     return jsonify({"preferences": prefs, "updated": row["updated"]})
 
@@ -270,6 +317,12 @@ def session_preferences_save():
             (session_id, json.dumps(prefs, sort_keys=True), updated),
         )
         conn.commit()
+    log.info("SESSION_PREFERENCES_SAVED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "key_count": len(prefs),
+    })
     return jsonify({"ok": True, "preferences": prefs, "updated": updated})
 
 
@@ -288,7 +341,14 @@ def session_run_count():
             "SELECT COUNT(*) AS n FROM runs WHERE session_id = ?",
             (session_id,),
         ).fetchone()
-    return jsonify({"count": int(row["n"] if row else 0)})
+    count = int(row["n"] if row else 0)
+    log.debug("SESSION_RUN_COUNT_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "count": count,
+    })
+    return jsonify({"count": count})
 
 
 @session_bp.route("/session/starred")
@@ -300,6 +360,12 @@ def session_starred_list():
             "SELECT command FROM starred_commands WHERE session_id = ? ORDER BY command",
             (session_id,),
         ).fetchall()
+    log.debug("STARRED_COMMANDS_VIEWED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "count": len(rows),
+    })
     return jsonify({"commands": [row["command"] for row in rows]})
 
 
@@ -312,11 +378,18 @@ def session_starred_add():
         return jsonify({"error": "command is required"}), 400
     session_id = get_session_id()
     with db_connect() as conn:
-        conn.execute(
+        result = conn.execute(
             "INSERT OR IGNORE INTO starred_commands (session_id, command) VALUES (?, ?)",
             (session_id, command),
         )
         conn.commit()
+    log.info("STARRED_COMMAND_ADDED", extra={
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "command_root": _command_root(command),
+        "changed": bool(result.rowcount),
+    })
     return jsonify({"ok": True})
 
 
@@ -328,14 +401,25 @@ def session_starred_remove():
     session_id = get_session_id()
     with db_connect() as conn:
         if command:
-            conn.execute(
+            result = conn.execute(
                 "DELETE FROM starred_commands WHERE session_id = ? AND command = ?",
                 (session_id, command),
             )
+            event = "STARRED_COMMAND_REMOVED"
         else:
-            conn.execute(
+            result = conn.execute(
                 "DELETE FROM starred_commands WHERE session_id = ?",
                 (session_id,),
             )
+            event = "STARRED_COMMANDS_CLEARED"
         conn.commit()
+    extra = {
+        "ip": get_client_ip(),
+        "session": get_log_session_id(session_id),
+        "session_kind": _session_kind(session_id),
+        "count": result.rowcount,
+    }
+    if command:
+        extra["command_root"] = _command_root(command)
+    log.info(event, extra=extra)
     return jsonify({"ok": True})

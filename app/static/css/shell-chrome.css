@@ -3,11 +3,8 @@
    Mobile uses the stacked layout in mobile.css. */
 
 /* ============================================================
-   Shared helpers (scrollbars, buttons)
+   Shared helpers
    ============================================================ */
-
-.nice-scroll::-webkit-scrollbar { width: 6px; height: 6px; }
-.nice-scroll::-webkit-scrollbar-thumb { background: var(--border-bright); border-radius: 3px; }
 
 .tab-scroll::-webkit-scrollbar,
 .tabbar-scroll::-webkit-scrollbar { height: 4px; }

@@ -96,21 +96,21 @@ test.describe('keyboard shortcuts', () => {
     await page.locator('#new-tab-btn').click()
     await page.locator('#new-tab-btn').click()
     await expect(page.locator('.tab')).toHaveCount(3)
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: 'ArrowLeft',
       code: 'ArrowLeft',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 2')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 2')
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: 'ArrowRight',
       code: 'ArrowRight',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 
@@ -126,14 +126,14 @@ test.describe('keyboard shortcuts', () => {
       code: 'Digit3',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 3')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 3')
 
     await dispatchMacOptionKey(page, '#cmd', {
       key: '¡',
       code: 'Digit1',
       altKey: true,
     })
-    await expect(page.locator('.tab.active .tab-label')).toHaveText('tab 1')
+    await expect(page.locator('.tab.active .tab-label')).toHaveText('shell 1')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 

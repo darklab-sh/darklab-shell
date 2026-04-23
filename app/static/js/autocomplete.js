@@ -99,7 +99,7 @@ function _autocompletePipeContext(value, cursorPos) {
     const stageText = String(stage || '').trim();
     if (!stageText || shellControlRe.test(stageText)) return true;
     const stageRoot = stageText.split(/\s+/, 1)[0].toLowerCase();
-    const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+    const registry = _getAutocompleteRegistry();
     const spec = registry[stageRoot];
     return !spec || !spec.pipe_command;
   });
@@ -146,6 +146,18 @@ function _filterAutocompleteItems(items, query) {
   return filteredConcrete.concat(hintOnly);
 }
 
+function _mergeAutocompleteRegistry(base, overlay) {
+  return Object.assign({}, base || {}, overlay || {});
+}
+
+function _getAutocompleteRegistry() {
+  const yamlRegistry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+  const runtimeRegistry = typeof getRuntimeAutocompleteContext === 'function'
+    ? getRuntimeAutocompleteContext(yamlRegistry)
+    : {};
+  return _mergeAutocompleteRegistry(yamlRegistry, runtimeRegistry);
+}
+
 function _countCompletedPositionalArgs(ctx, spec) {
   const expectsValue = Array.isArray(spec.expects_value) ? spec.expects_value : [];
   const expectsValueExact = new Set(expectsValue.map(token => String(token || '')));
@@ -174,7 +186,7 @@ function _countCompletedPositionalArgs(ctx, spec) {
 }
 
 function _buildContextAutocomplete(ctx) {
-  const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+  const registry = _getAutocompleteRegistry();
   const spec = ctx.commandRoot ? registry[ctx.commandRoot] : null;
 
   if (!spec) {
@@ -237,6 +249,28 @@ function _buildContextAutocomplete(ctx) {
   const directHints = Object.prototype.hasOwnProperty.call(argHints, ctx.previousToken || '')
     ? argHints[ctx.previousToken || '']
     : (Object.prototype.hasOwnProperty.call(argHints, previousLower) ? argHints[previousLower] : null);
+  const completedTokens = ctx.tokens.filter(token => token.end <= ctx.tokenStart);
+  const sequenceArgHints = spec.sequence_arg_hints || {};
+  const priorToken = completedTokens.length >= 2
+    ? String(completedTokens[completedTokens.length - 2].value || '').toLowerCase()
+    : '';
+  const sequenceKey = `${priorToken} ${previousLower}`.trim();
+  const sequenceHints = Object.prototype.hasOwnProperty.call(sequenceArgHints, sequenceKey)
+    ? sequenceArgHints[sequenceKey]
+    : null;
+  if (sequenceHints !== null) {
+    return _filterAutocompleteItems(
+      sequenceHints.map(item => _buildAutocompleteItem({
+        value: item.value,
+        label: item.label || item.value,
+        description: item.description || '',
+        replaceStart: ctx.tokenStart,
+        replaceEnd: ctx.tokenEnd,
+        insertValue: item.insertValue != null ? item.insertValue : null,
+      })),
+      ctx.currentToken,
+    );
+  }
   if (directHints !== null) {
     return _filterAutocompleteItems(
       directHints.map(item => _buildAutocompleteItem({
@@ -315,7 +349,7 @@ function _buildPipeCommandAutocomplete(ctx, registry) {
 }
 
 function _buildPipeAutocomplete(ctx) {
-  const registry = (typeof acContextRegistry !== 'undefined' && acContextRegistry) || {};
+  const registry = _getAutocompleteRegistry();
   if (!ctx.commandRoot) return _buildPipeCommandAutocomplete(ctx, registry);
 
   const spec = registry[ctx.commandRoot];
@@ -335,7 +369,10 @@ function getAutocompleteMatches(value, cursorPos) {
   const text = String(value || '');
   const ctx = _autocompleteTokenContext(text, cursorPos);
   const pipeCtx = _autocompletePipeContext(text, cursorPos);
-  let items = pipeCtx ? _buildPipeAutocomplete(pipeCtx) : _buildContextAutocomplete(ctx);
+  const runtimeItems = !pipeCtx && typeof getRuntimeAutocompleteItems === 'function'
+    ? getRuntimeAutocompleteItems(ctx, _buildAutocompleteItem, _filterAutocompleteItems)
+    : [];
+  let items = runtimeItems.length ? runtimeItems : (pipeCtx ? _buildPipeAutocomplete(pipeCtx) : _buildContextAutocomplete(ctx));
   if (!items.length && !pipeCtx) items = _buildFlatAutocomplete(text);
 
   if (!items.length) return [];
