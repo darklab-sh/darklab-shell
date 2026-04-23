@@ -31,6 +31,8 @@ set -eu
 
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BASE_URL="${DEMO_BASE_URL:-http://localhost:8888}"
+FRAMES_DIR="${DEMO_FRAMES_DIR:-/tmp/darklab_shell-mobile-demo-frames}"
+PLAYWRIGHT_OUTPUT_DIR="${DEMO_PLAYWRIGHT_OUTPUT_DIR:-/tmp/darklab_shell-mobile-demo-output}"
 
 # Parse --base-url flag
 while [[ $# -gt 0 ]]; do
@@ -57,22 +59,24 @@ echo "Container is up."
 
 cd "$ROOT_DIR"
 
-# Clear previous frames and output
-rm -rf test-results/demo-mobile-frames/ test-results/demo-mobile-output/
+# Clear previous frames and Playwright output
+rm -rf "$FRAMES_DIR" "$PLAYWRIGHT_OUTPUT_DIR"
 
-DEMO_BASE_URL="$BASE_URL" RUN_DEMO=1 npx playwright test \
+DEMO_BASE_URL="$BASE_URL" \
+DEMO_FRAMES_DIR="$FRAMES_DIR" \
+DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
+RUN_DEMO=1 npx playwright test \
   --config config/playwright.demo.mobile.config.js
 
 # ── Stitch frames into video ──────────────────────────────────────────────────
-# The spec writes PNG frames to test-results/demo-mobile-frames/ via
-# page.screenshot(), which returns images at deviceScaleFactor resolution
+# The spec writes PNG frames to DEMO_FRAMES_DIR via page.screenshot(), which
+# returns images at deviceScaleFactor resolution
 # (1290×2796 for a 430×932 viewport at deviceScaleFactor: 3).
-FRAMES_DIR="$ROOT_DIR/test-results/demo-mobile-frames"
 FRAME_COUNT=$(find "$FRAMES_DIR" -name 'frame_*.png' 2>/dev/null | wc -l | tr -d ' ')
 
 if [ "$FRAME_COUNT" -eq 0 ]; then
   echo ""
-  echo "Error: no frames found in test-results/demo-mobile-frames/ — did the test pass?"
+  echo "Error: no frames found in ${FRAMES_DIR} — did the test pass?"
   exit 1
 fi
 

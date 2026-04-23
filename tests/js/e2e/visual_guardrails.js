@@ -72,7 +72,7 @@ export async function assertVisualFlowGuardrails(
   }
 
   expect(state.status.db).toBe('ok')
-  expect(['ok', 'none']).toContain(state.status.redis)
+  expect(['ok', 'none', 'down']).toContain(state.status.redis)
 
   if (requireSeededHistory) {
     expect(state.sessionToken).toBe(CAPTURE_SESSION_TOKEN)

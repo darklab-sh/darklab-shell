@@ -5,7 +5,7 @@ set -eu
 ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 THEME="${CAPTURE_THEME:-}"
 UI="${CAPTURE_UI:-all}"
-OUT_DIR="${CAPTURE_OUT_DIR:-test-results/ui-capture}"
+OUT_DIR="${CAPTURE_OUT_DIR:-/tmp/darklab_shell-ui-capture}"
 
 usage() {
   cat <<EOF
@@ -15,7 +15,7 @@ Usage:
 Options:
   --theme <name|all|default>  Theme to capture. Unset/default uses the app default.
   --ui <desktop|mobile|all>   Which UI pack(s) to capture. Default: all.
-  --out-dir <dir>             Output directory relative to repo root. Default: ${OUT_DIR}
+  --out-dir <dir>             Output directory. Relative paths resolve from repo root. Default: ${OUT_DIR}
 EOF
 }
 

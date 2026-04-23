@@ -222,6 +222,22 @@ const scenes = [
     },
   },
   {
+    slug: 'history-sheet-snapshot-row',
+    title: 'History sheet - snapshot row',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await runCommandMobile(page, 'hostname')
+      await createShareSnapshot(page)
+      await openRecentsSheet(page)
+      const snapshotItem = page.locator('#mobile-recents-list .sheet-item', { hasText: 'SNAPSHOT' }).first()
+      await expect(snapshotItem).toBeVisible()
+      await expect(snapshotItem.locator('.sheet-item-action', { hasText: 'open' })).toBeVisible()
+      await expect(snapshotItem.locator('.sheet-item-action', { hasText: 'copy link' })).toBeVisible()
+      await expect(snapshotItem.locator('.sheet-item-action', { hasText: 'delete' })).toBeVisible()
+    },
+  },
+  {
     slug: 'history-sheet-search-filters-expanded',
     title: 'History sheet - command search with filters expanded',
     route: '/',
@@ -310,6 +326,23 @@ const scenes = [
       await openMenu(page)
       await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
       await expect(page.locator('#options-modal')).toBeVisible()
+    },
+  },
+  {
+    slug: 'session-token-clear-confirmation',
+    title: 'Session-token clear confirmation modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await openMenu(page)
+      await page.locator('#mobile-menu-sheet [data-menu-action="options"]').click()
+      await expect(page.locator('#options-modal')).toBeVisible()
+      await expect(page.locator('#options-session-token-clear-btn')).toBeVisible()
+      await page.locator('#options-session-token-clear-btn').click()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toContainText('Clear the current session token')
+      await expect(page.locator('#confirm-host [data-confirm-action-id="copy"]')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-action-id="clear"]')).toBeVisible()
     },
   },
   {

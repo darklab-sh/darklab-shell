@@ -4,12 +4,12 @@
  * Drives a curated sequence of interactions against a running container for
  * use as a README demo video. Run via scripts/record_demo.sh rather than
  * directly — the wrapper handles health-checking the container, running this
- * spec, and stitching the captured frames into assets/demo.mp4 via ffmpeg.
+ * spec, and stitching the captured frames into assets/darklab_shell_demo.mp4 via ffmpeg.
  *
  * This spec captures frames via page.screenshot() (which respects
- * deviceScaleFactor, giving 2560×1600 images) rather than Playwright's built-in
+ * deviceScaleFactor, giving 3200×1800 images) rather than Playwright's built-in
  * video recorder (which ignores deviceScaleFactor and captures at CSS pixel
- * resolution). Frames are written to test-results/demo-frames/ and stitched
+ * resolution). Frames are written to /tmp/darklab_shell-demo-frames/ and stitched
  * by the wrapper script.
  *
  * Not part of the normal test suite. This file is only matched by
@@ -17,17 +17,23 @@
  */
 
 import { mkdirSync, writeFileSync, rmSync } from 'fs'
-import { dirname, resolve, join } from 'path'
-import { fileURLToPath } from 'url'
+import { join } from 'path'
 import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 
-const __dir = dirname(fileURLToPath(import.meta.url))
+// Keystroke delay — intentionally closer to a real person than a script.
+const TYPE_DELAY_MS = 62
 
-// Keystroke delay — human-like typing without being tedious to watch.
-const TYPE_DELAY_MS = 52
+function typingDelay(char, index, baseDelay) {
+  const cadence = [0, 18, 7, 28, 11, 23, 5, 34, 14]
+  let next = baseDelay + cadence[index % cadence.length]
+  if (char === ' ') next += 74
+  if (/[./:@-]/.test(char)) next += 32
+  if (index > 0 && index % 11 === 0) next += 90
+  return next
+}
 
 /**
  * Type a command into the active composer with a human-like keystroke delay.
@@ -38,7 +44,10 @@ async function typeSlowly(page, text, { delay = TYPE_DELAY_MS } = {}) {
   // may sit below the visible viewport when the welcome screen is rendered, so
   // Playwright's click (which requires viewport visibility) retries forever.
   await page.evaluate(() => document.getElementById('cmd').focus())
-  await page.keyboard.type(text, { delay })
+  for (const [index, char] of [...text].entries()) {
+    await page.keyboard.type(char)
+    await page.waitForTimeout(typingDelay(char, index, delay))
+  }
 }
 
 /**
@@ -64,7 +73,7 @@ async function waitForFinished(page, cmd, { timeoutMs = 30_000 } = {}) {
 async function submitCommand(page) {
   await page.keyboard.press('Enter')
   // Brief pause so the running state is visible before we move on.
-  await page.waitForTimeout(1_200)
+  await page.waitForTimeout(1_300)
 }
 
 /**
@@ -129,12 +138,28 @@ async function smoothScroll(page, selector, targetScrollTop, { durationMs = 1_50
   }
 }
 
+async function openFirstWorkflowFromRail(page) {
+  await page.waitForFunction(
+    () => document.querySelectorAll('#rail-workflows-list .rail-item').length > 0,
+    { timeout: 10_000 },
+  )
+  const workflowsClosed = await page.locator('#rail-section-workflows').evaluate((node) =>
+    node.classList.contains('closed'),
+  )
+  if (workflowsClosed) await page.locator('#rail-workflows-header').click()
+  const firstWorkflow = page.locator('#rail-workflows-list .rail-item').first()
+  await firstWorkflow.hover()
+  await page.waitForTimeout(360)
+  await firstWorkflow.click()
+  await page.locator('#workflows-overlay').waitFor({ state: 'visible' })
+}
+
 test('demo', async ({ page }) => {
   test.skip(!process.env.RUN_DEMO, 'set RUN_DEMO=1 to record the demo (use scripts/record_demo.sh)')
   test.setTimeout(300_000)
 
   // ── Frame capture setup ───────────────────────────────────────────────────
-  const FRAMES_DIR = resolve(__dir, '../../../test-results/demo-frames')
+  const FRAMES_DIR = process.env.DEMO_FRAMES_DIR || '/tmp/darklab_shell-demo-frames'
   try {
     rmSync(FRAMES_DIR, { recursive: true })
   } catch {
@@ -150,8 +175,9 @@ test('demo', async ({ page }) => {
   // Mock the history API so the drawer shows a full, realistic list regardless
   // of how many commands were actually run during this recording session.
   // DELETE requests are passed through so in-session runs are preserved.
-  await page.route('**/history', async (route) => {
+  await page.route('**/history**', async (route) => {
     if (route.request().method() !== 'GET') return route.continue()
+    if (new URL(route.request().url()).pathname !== '/history') return route.continue()
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -231,53 +257,44 @@ test('demo', async ({ page }) => {
   })
 
   // Let the welcome animation play briefly before settling.
-  await page.waitForTimeout(3_500)
+  await page.waitForTimeout(2_200)
   await ensurePromptReady(page, { cancelWelcome: false, timeout: 30_000 })
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(900)
 
   // ── Tab 1: ping — start and leave running ─────────────────────────────────
   await typeSlowly(page, 'ping -i 0.5 -c 50 darklab.sh')
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(800)
   await submitCommand(page)
 
   // Let a few lines of ping output accumulate before switching away.
-  await page.waitForTimeout(3_000)
+  await page.waitForTimeout(3_200)
 
-  // ── Tab 2: fast DNS / TLS commands ───────────────────────────────────────
+  // ── Tab 2: fast DNS lookups ───────────────────────────────────────────────
+  await page.waitForTimeout(900)
   await page.locator('#new-tab-btn').click()
   await ensurePromptReady(page, { timeout: 10_000 })
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(900)
 
   await typeSlowly(page, 'nslookup -type=A darklab.sh')
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(700)
   await waitForFinished(page, 'nslookup -type=A darklab.sh')
-  await page.waitForTimeout(1_200)
+  await page.waitForTimeout(1_600)
 
   await ensurePromptReady(page)
   await typeSlowly(page, 'dig @8.8.8.8 darklab.sh A')
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(700)
   await waitForFinished(page, 'dig @8.8.8.8 darklab.sh A')
-  await page.waitForTimeout(1_200)
-
-  await ensurePromptReady(page)
-  await typeSlowly(page, 'host -t A darklab.sh')
-  await page.waitForTimeout(400)
-  await waitForFinished(page, 'host -t A darklab.sh')
-  await page.waitForTimeout(1_200)
-
-  await ensurePromptReady(page)
-  await typeSlowly(page, 'openssl s_client -connect ip.darklab.sh:443 -showcerts')
-  await page.waitForTimeout(400)
-  await waitForFinished(page, 'openssl s_client -connect ip.darklab.sh:443 -showcerts', {
-    timeoutMs: 15_000,
-  })
-  await page.waitForTimeout(1_500)
+  await page.waitForTimeout(1_700)
 
   // ── Switch back to tab 1 to show ping still running ───────────────────────
+  await page.locator('.tab').first().hover()
+  await page.waitForTimeout(700)
   await page.locator('.tab').first().click()
-  await page.waitForTimeout(2_500)
+  await page.waitForTimeout(2_700)
 
   // ── History drawer ────────────────────────────────────────────────────────
+  await page.locator('.rail-nav [data-action="history"]').hover()
+  await page.waitForTimeout(800)
   await page.locator('.rail-nav [data-action="history"]').click()
   await page.locator('#history-panel').waitFor({ state: 'visible' })
   await page
@@ -285,85 +302,76 @@ test('demo', async ({ page }) => {
     .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
   // Pause so the viewer can read the top of the list before scrolling.
-  await page.waitForTimeout(2_200)
+  await page.waitForTimeout(3_200)
   // Smooth scroll down then back up at a natural reading pace.
-  await smoothScroll(page, '.history-panel-body', 570, { durationMs: 1_400 })
-  await page.waitForTimeout(700)
-  await smoothScroll(page, '.history-panel-body', 0, { durationMs: 1_000 })
-  await page.waitForTimeout(500)
+  await smoothScroll(page, '.history-panel-body', 570, { durationMs: 1_900 })
+  await page.waitForTimeout(1_300)
+  await smoothScroll(page, '.history-panel-body', 0, { durationMs: 1_450 })
+  await page.waitForTimeout(1_200)
 
+  await page.locator('#history-close').hover()
+  await page.waitForTimeout(650)
   await page.locator('#history-close').click()
   await page.locator('#history-panel').waitFor({ state: 'hidden' })
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(1_000)
+
+  // ── Guided workflows modal ────────────────────────────────────────────────
+  await openFirstWorkflowFromRail(page)
+  await page
+    .locator('#workflows-modal .workflow-card')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(5_200)
+  await smoothScroll(page, '#workflows-modal .workflows-body', 420, { durationMs: 1_700 })
+  await page.waitForTimeout(1_600)
+  await smoothScroll(page, '#workflows-modal .workflows-body', 0, { durationMs: 1_250 })
+  await page.waitForTimeout(1_700)
+  await page.locator('.workflows-close').hover()
+  await page.waitForTimeout(700)
+  await page.locator('.workflows-close').click()
+  await page.locator('#workflows-overlay').waitFor({ state: 'hidden' })
+  await page.waitForTimeout(1_100)
 
   // ── Theme switching ───────────────────────────────────────────────────────
-  // Each session resets scrollTop on open. Three segments per pick mirroring the
-  // mobile rhythm: scroll down, continue down, slight back-up before hovering.
-  // No mid-browse reversals — continuous downward intent with one correction.
+  // Reset scrollTop on open so stale position never carries over. The browse
+  // intentionally leaves time for the viewer to read the picker as a new scene.
 
+  await page.locator('.rail-nav [data-action="theme"]').hover()
+  await page.waitForTimeout(800)
   await page.locator('.rail-nav [data-action="theme"]').click()
   await page.locator('#theme-overlay').waitFor({ state: 'visible' })
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0
   })
-  await page.waitForTimeout(700)
+  await page.waitForTimeout(3_400)
   // Compute actual card positions now that the grid is rendered.
   const charcoalTop = await centeredScrollTop(page, 'charcoal_violet')
-  await smoothScroll(page, '.theme-body', 250, { durationMs: 1_100 }) // scrolling down
-  await page.waitForTimeout(1_000)
-  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 130, 620), { durationMs: 1_500 }) // past the card
-  await page.waitForTimeout(1_100)
-  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 900 }) // settle on card
-  await page.waitForTimeout(2_200) // hover — deciding
+  await smoothScroll(page, '.theme-body', 250, { durationMs: 1_650 }) // scrolling down
+  await page.waitForTimeout(1_600)
+  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 130, 620), { durationMs: 1_900 }) // past the card
+  await page.waitForTimeout(1_600)
+  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 1_250 }) // settle on card
+  await page.waitForTimeout(2_500) // hover — deciding
+  await page.locator('[data-theme-name="charcoal_violet"]').hover()
+  await page.waitForTimeout(900)
   await switchTheme(page, 'charcoal_violet')
   await page
     .locator('[data-theme-name="charcoal_violet"].theme-card-active')
     .waitFor({ state: 'attached', timeout: 5_000 })
-  await freezeFrame(2_000) // see the selected card
-  await page.locator('.theme-close').click()
-  await page.locator('#theme-overlay').waitFor({ state: 'hidden' })
-  await page.waitForTimeout(2_000)
-  await page.locator('.tab').nth(1).click()
-  await page.waitForTimeout(900)
-  await page.locator('.tab').first().click()
-  await page.waitForTimeout(1_200)
-
-  // Second session: pick ember_obsidian then return to the original in one
-  // continuous browse — no intermediate close so the viewer sees the contrast.
-  await page.locator('.rail-nav [data-action="theme"]').click()
-  await page.locator('#theme-overlay').waitFor({ state: 'visible' })
-  await page.locator('.theme-body').evaluate((el) => {
-    el.scrollTop = 0
-  })
+  await freezeFrame(3_800) // see the selected card
+  await page.locator('.theme-close').hover()
   await page.waitForTimeout(700)
-  const emberTop = await centeredScrollTop(page, 'ember_obsidian')
-  const darklabTop = await centeredScrollTop(page, 'darklab_obsidian')
-  await smoothScroll(page, '.theme-body', 260, { durationMs: 1_100 }) // scrolling down
-  await page.waitForTimeout(1_000)
-  await smoothScroll(page, '.theme-body', Math.max(emberTop + 160, 580), { durationMs: 1_500 }) // past ember
-  await page.waitForTimeout(1_100)
-  await smoothScroll(page, '.theme-body', emberTop, { durationMs: 900 }) // settle on ember
-  await page.waitForTimeout(2_200) // hover — deciding
-  await switchTheme(page, 'ember_obsidian')
-  await page
-    .locator('[data-theme-name="ember_obsidian"].theme-card-active')
-    .waitFor({ state: 'attached', timeout: 5_000 })
-  await freezeFrame(2_000) // see the selected card
-  // Return to darklab_obsidian — scroll up with a brief overshoot then settle.
-  await smoothScroll(page, '.theme-body', Math.max(darklabTop + 150, emberTop + 80), {
-    durationMs: 1_300,
-  }) // overshoot
-  await page.waitForTimeout(900)
-  await smoothScroll(page, '.theme-body', darklabTop, { durationMs: 900 }) // settle on darklab
-  await page.waitForTimeout(2_100) // hover — deciding
-  await switchTheme(page, 'darklab_obsidian')
-  await page
-    .locator('[data-theme-name="darklab_obsidian"].theme-card-active')
-    .waitFor({ state: 'attached', timeout: 5_000 })
-  await freezeFrame(1_500) // see the selected card
   await page.locator('.theme-close').click()
   await page.locator('#theme-overlay').waitFor({ state: 'hidden' })
-  await page.waitForTimeout(2_000)
+  await page.waitForTimeout(1_600)
+  await page.locator('.tab').nth(1).hover()
+  await page.waitForTimeout(700)
+  await page.locator('.tab').nth(1).click()
+  await page.waitForTimeout(1_000)
+  await page.locator('.tab').first().hover()
+  await page.waitForTimeout(700)
+  await page.locator('.tab').first().click()
+  await page.waitForTimeout(2_200)
 
   capture.done = true
   await capture.loop

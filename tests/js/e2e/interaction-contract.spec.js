@@ -84,20 +84,20 @@ test.describe('UI interaction contract — disclosures', () => {
   })
 
   test('desktop rail section header disclosure keeps aria-expanded in sync with the .closed class (panel: null caller-owns-visibility)', async ({ page }) => {
-    // Workflows section defaults to .closed in the template.
+    // Workflows section defaults to expanded in the template.
     const header = page.locator('#rail-workflows-header')
     const section = page.locator('#rail-section-workflows')
 
-    await expect(section).toHaveClass(/\bclosed\b/)
-    await expect(header).toHaveAttribute('aria-expanded', 'false')
-
-    await header.click()
     await expect(section).not.toHaveClass(/\bclosed\b/)
     await expect(header).toHaveAttribute('aria-expanded', 'true')
 
     await header.click()
     await expect(section).toHaveClass(/\bclosed\b/)
     await expect(header).toHaveAttribute('aria-expanded', 'false')
+
+    await header.click()
+    await expect(section).not.toHaveClass(/\bclosed\b/)
+    await expect(header).toHaveAttribute('aria-expanded', 'true')
   })
 
 })

@@ -191,7 +191,7 @@ scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
 scripts/capture_ui_screenshots.sh --theme all
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `test-results/ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `/tmp/darklab_shell-ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
@@ -2315,11 +2315,11 @@ These specs are not part of the normal test suite. They are excluded from both `
 
 #### `demo.spec.js`
 
-Desktop demo recording spec. Drives a curated interaction sequence — ping tab, DNS/TLS tab, history drawer scroll, three theme transitions — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a 22-entry realistic history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (3200×1800). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
+Desktop demo recording spec. Drives a tightened README-first interaction sequence — ping tab, DNS lookup tab, history drawer scroll, workflows modal, and one theme switch — against a live container to produce `assets/darklab_shell_demo.mp4` (or `.webm` on Linux). Mocks the `/history` route with a realistic paginated history list. Captures frames via `page.screenshot()` (not Playwright's built-in video recorder) to get full `deviceScaleFactor: 2` resolution (3200×1800). Stitched at 15 fps. Theme transitions call `applyThemeSelection()` directly in the page context rather than dispatching a DOM click — clicking a `<button>` triggers Chromium's focus-scroll management and causes a one-frame container jump even when the card is already fully visible.
 
 | Test | Description |
 | --- | --- |
-| `demo` | Full desktop shell demo sequence: ping, DNS/TLS commands, history drawer, theme switching. |
+| `demo` | Full desktop shell demo sequence: ping, DNS lookups, history drawer, workflows modal, theme switching. |
 
 #### `demo.mobile.spec.js`
 
@@ -2327,7 +2327,7 @@ Mobile demo recording spec. Mirrors `demo.spec.js` for the mobile shell UI (`#mo
 
 | Test | Description |
 | --- | --- |
-| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, history drawer, theme switching. |
+| `demo-mobile` | Full mobile shell demo sequence: ping, nslookup, history sheet, workflows modal, theme switching with README-first pacing. |
 
 ### UI Screenshot Capture Specs
 
@@ -2339,7 +2339,7 @@ Desktop UI screenshot capture spec. Walks the desktop shell through a curated pa
 
 | Test | Description |
 | --- | --- |
-| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
+| `desktop screenshot capture pack` | Full desktop screenshot pack: welcome, autocomplete, tabs, running states, rail/history/modal states, snapshot-row actions, session-token clear confirmation, confirmation modals (kill + 3-action stacked variant), keyboard-shortcuts overlay, line numbers/timestamps, snapshot/permalink/diag. |
 
 #### `ui-capture.mobile.capture.js`
 
@@ -2347,7 +2347,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 | Test | Description |
 | --- | --- |
-| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, search, line numbers/timestamps, snapshot/permalink/diag. |
+| `mobile screenshot capture pack` | Full mobile screenshot pack: settled welcome, tabs, running states (including the trailing running-indicator chip with two inactive running tabs), sheets/modals, snapshot-row actions, session-token clear confirmation, search, line numbers/timestamps, snapshot/permalink/diag. |
 
 ### Container Smoke Test Reference
 

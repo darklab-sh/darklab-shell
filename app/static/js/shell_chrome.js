@@ -61,7 +61,7 @@
       return Number.isFinite(raw) ? Math.max(MIN_W, Math.min(MAX_W, raw)) : DEFAULT_W;
     })(),
     recentOpen: readBool(PREF_RECENT, true),
-    workflowsOpen: readBool(PREF_WORKFLOWS, false),
+    workflowsOpen: readBool(PREF_WORKFLOWS, true),
     recentHeight: null, // null → auto-size next time Workflows opens
   };
 

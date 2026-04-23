@@ -90,8 +90,15 @@ export function buildVisualHistoryPayload(
   const currentPage = Math.max(1, Math.min(Number(params.get('page')) || 1, pageCount || 1))
   const offset = (currentPage - 1) * pageSize
   const pageRuns = filteredRuns.slice(offset, offset + pageSize)
+  const pageItems = pageRuns.map((run) => ({
+    ...run,
+    type: 'run',
+    label: run.command,
+    created: run.started,
+  }))
 
   const payload = {
+    items: pageItems,
     runs: pageRuns,
     roots: roots.slice(0, Math.max(VISUAL_HISTORY_MIN_ROOTS, roots.length)),
     page: currentPage,

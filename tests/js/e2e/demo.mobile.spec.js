@@ -8,12 +8,12 @@
  *
  * Run via scripts/record_demo_mobile.sh rather than directly — the wrapper
  * handles health-checking the container, running this spec, and stitching the
- * captured frames into assets/demo-mobile.webm via ffmpeg.
+ * captured frames into assets/darklab_shell_mobile_demo.mp4 via ffmpeg.
  *
  * This spec captures frames via page.screenshot() (which respects
  * deviceScaleFactor, giving 1290×2796 images) rather than Playwright's built-in
  * video recorder (which ignores deviceScaleFactor and captures at CSS pixel
- * resolution). Frames are written to test-results/demo-mobile-frames/ and
+ * resolution). Frames are written to /tmp/darklab_shell-mobile-demo-frames/ and
  * stitched by the wrapper script.
  *
  * Not part of the normal test suite. This file is only matched by
@@ -31,8 +31,18 @@ import { assertVisualFlowGuardrails } from './visual_guardrails.js'
 const __dir = dirname(fileURLToPath(import.meta.url))
 const KEYBOARD_SRC = `data:image/png;base64,${readFileSync(resolve(__dir, 'fixtures/ios-keyboard-dark.png')).toString('base64')}`
 
-// Keystroke delay — human-like typing without being tedious to watch.
-const TYPE_DELAY_MS = 52
+// Keystroke delay — intentionally closer to a real person than a script.
+const TYPE_DELAY_MS = 68
+const DEMO_TOP_SAFE_AREA_PX = 16
+
+function typingDelay(char, index, baseDelay) {
+  const cadence = [0, 20, 8, 30, 12, 25, 6, 36, 15]
+  let next = baseDelay + cadence[index % cadence.length]
+  if (char === ' ') next += 80
+  if (/[./:@-]/.test(char)) next += 34
+  if (index > 0 && index % 10 === 0) next += 100
+  return next
+}
 
 /**
  * Type a command into the mobile composer with a human-like keystroke delay.
@@ -45,7 +55,7 @@ const TYPE_DELAY_MS = 52
  * keyboard overlay renders correctly at the bottom of the stable 844px frame.
  */
 async function typeSlowly(page, text, { delay = TYPE_DELAY_MS } = {}) {
-  for (const char of text) {
+  for (const [index, char] of [...text].entries()) {
     await page.evaluate((c) => {
       const input = document.getElementById('mobile-cmd')
       if (!input) return
@@ -63,7 +73,7 @@ async function typeSlowly(page, text, { delay = TYPE_DELAY_MS } = {}) {
         }),
       )
     }, char)
-    await page.waitForTimeout(delay)
+    await page.waitForTimeout(typingDelay(char, index, delay))
   }
 }
 
@@ -225,7 +235,7 @@ test('demo-mobile', async ({ page }) => {
   // main demo (waitForTimeout, locator actions, etc.) yields the JS event loop,
   // giving the capture loop time to execute. page.screenshot() is safe to call
   // during most Playwright operations; errors are caught and the frame skipped.
-  const FRAMES_DIR = resolve(__dir, '../../../test-results/demo-mobile-frames')
+  const FRAMES_DIR = process.env.DEMO_FRAMES_DIR || '/tmp/darklab_shell-mobile-demo-frames'
   try {
     rmSync(FRAMES_DIR, { recursive: true })
   } catch {
@@ -238,8 +248,9 @@ test('demo-mobile', async ({ page }) => {
   // capture.paused is set by freezeFrame() while it's stamping duplicate frames.
   const capture = { done: false, paused: false, idx: 0, loop: null }
 
-  await page.route('**/history', async (route) => {
+  await page.route('**/history**', async (route) => {
     if (route.request().method() !== 'GET') return route.continue()
+    if (new URL(route.request().url()).pathname !== '/history') return route.continue()
     await route.fulfill({
       status: 200,
       contentType: 'application/json',
@@ -260,19 +271,18 @@ test('demo-mobile', async ({ page }) => {
   // getMobileKeyboardOffset to 0 prevents the visualViewport listener from
   // spuriously triggering keyboard-open state.
   //
-  // The inline style block raises the mobile header off the viewport's top
-  // edge (body.mobile-terminal-mode has padding: 0) so the captured frame
-  // always shows the full header with breathing room above the title — the
-  // first-frame title was sitting flush against y=0 before this padding.
-  await page.evaluate(() => {
+  // The recorder uses the full CSS viewport as page content, so add a small
+  // capture-only safe area above the header. This prevents video encoders and
+  // players from visually cropping the header against the very top edge.
+  await page.evaluate((topSafeAreaPx) => {
     window.getMobileKeyboardOffset = () => 0
     const style = document.createElement('style')
     style.id = '__demo-capture-css'
     style.textContent = `
-      body.mobile-terminal-mode { padding-top: 6px !important; }
+      body.mobile-terminal-mode { padding-top: ${topSafeAreaPx}px !important; }
     `
     document.head.appendChild(style)
-  })
+  }, DEMO_TOP_SAFE_AREA_PX)
 
   await expect(page.locator('#mobile-composer')).toBeVisible()
   await assertVisualFlowGuardrails(page, { mode: 'mobile' })
@@ -343,134 +353,124 @@ test('demo-mobile', async ({ page }) => {
   })
 
   // Let the welcome animation play briefly before settling.
-  await page.waitForTimeout(3_500)
+  await page.waitForTimeout(2_200)
   await ensurePromptReady(page, { cancelWelcome: false, timeout: 30_000 })
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(900)
 
   // ── Tab 1: ping — type, submit, keyboard closes, watch output fill screen ──
   await mountKeyboard(page)
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(700)
   await typeSlowly(page, 'ping -i 0.5 -c 50 darklab.sh')
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(800)
   // Short pause so the first output line is visible before dismissing —
   // gives a natural "command started, keyboard closes" feel.
-  await submitCommand(page, { pauseMs: 150 })
+  await submitCommand(page, { pauseMs: 550 })
   await unmountKeyboard(page)
 
   // Ping runs — full transcript visible, output lines accumulate.
-  await page.waitForTimeout(4_500)
+  await page.waitForTimeout(3_500)
 
   // ── Tab 2: quick DNS lookup while ping still runs in tab 1 ────────────────
+  await page.waitForTimeout(900)
   await page.locator('#new-tab-btn').click()
   await ensurePromptReady(page, { timeout: 10_000 })
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(800)
 
   await mountKeyboard(page)
-  await page.waitForTimeout(300)
+  await page.waitForTimeout(700)
   await typeSlowly(page, 'nslookup -type=A darklab.sh')
-  await page.waitForTimeout(400)
+  await page.waitForTimeout(800)
   await waitForFinished(page, 'nslookup -type=A darklab.sh')
   await unmountKeyboard(page)
 
   // nslookup output fills the screen briefly.
-  await page.waitForTimeout(1_500)
+  await page.waitForTimeout(2_100)
 
   // ── Switch back to tab 1 — show ping still scrolling ──────────────────────
+  await page.waitForTimeout(900)
   await page.locator('.tab').first().click()
-  await page.waitForTimeout(3_000)
+  await page.waitForTimeout(2_800)
 
   // ── History drawer ────────────────────────────────────────────────────────
-  // Open via the canonical pull-up peek row (#mobile-recent-peek) rather than
-  // hamburger → menu → history. The peek renders once there's at least one
-  // in-session run; ping + nslookup already satisfy that. It is currently
-  // hidden (u-hidden) when cmdHistory is empty, so wait for visibility first.
-  await page
-    .locator('#mobile-recent-peek')
-    .waitFor({ state: 'visible', timeout: 10_000 })
-  await page.waitForTimeout(600)
-
-  await page.locator('#mobile-recent-peek').click()
+  await page.waitForTimeout(900)
+  await page.locator('#hamburger-btn').click()
+  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
+  await page.waitForTimeout(900)
+  await page.locator('#mobile-menu-sheet [data-menu-action="history"]').click()
   await expect(page.locator('#mobile-recents-sheet')).toBeVisible()
   await page
     .locator('#mobile-recents-list .sheet-item')
     .first()
     .waitFor({ state: 'visible', timeout: 10_000 })
   // Pause so the viewer can read the top of the list before scrolling.
-  await page.waitForTimeout(2_000)
+  await page.waitForTimeout(3_200)
   // Smooth scroll down then back up at a natural reading pace.
-  await smoothScroll(page, '#mobile-recents-list', 425, { durationMs: 1_100 })
-  await page.waitForTimeout(600)
-  await smoothScroll(page, '#mobile-recents-list', 0, { durationMs: 800 })
-  await page.waitForTimeout(500)
+  await smoothScroll(page, '#mobile-recents-list', 425, { durationMs: 1_700 })
+  await page.waitForTimeout(1_250)
+  await smoothScroll(page, '#mobile-recents-list', 0, { durationMs: 1_250 })
+  await page.waitForTimeout(1_200)
 
-  await page.locator('#mobile-recents-sheet-scrim').click()
+  await page.locator('#mobile-recents-sheet .sheet-grab').click()
   await expect(page.locator('#mobile-recents-sheet')).toBeHidden()
-  await page.waitForTimeout(800)
+  await page.waitForTimeout(1_100)
 
-  // ── Theme switching ───────────────────────────────────────────────────────
-  // Each cycle resets scrollTop on open so stale position never carries over.
-  // Browsing uses three segments — quick peek, longer look, slight overshoot-
-  // and-back — so the motion reads as a person scanning rather than a script.
+  // ── Guided workflows modal ────────────────────────────────────────────────
+  await page.waitForTimeout(900)
   await page.locator('#hamburger-btn').click()
   await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
-  await page.waitForTimeout(500)
+  await page.waitForTimeout(900)
+
+  await page.locator('#mobile-menu-sheet [data-menu-action="workflows"]').click()
+  await expect(page.locator('#workflows-modal')).toBeVisible()
+  await page
+    .locator('#workflows-modal .workflow-card')
+    .first()
+    .waitFor({ state: 'visible', timeout: 10_000 })
+  await page.waitForTimeout(5_000)
+  await smoothScroll(page, '#workflows-modal .workflows-body', 520, { durationMs: 1_700 })
+  await page.waitForTimeout(1_600)
+  await smoothScroll(page, '#workflows-modal .workflows-body', 0, { durationMs: 1_250 })
+  await page.waitForTimeout(1_700)
+  await page.locator('#workflows-overlay').click({ position: { x: 10, y: 10 } })
+  await expect(page.locator('#workflows-modal')).toBeHidden()
+  await page.waitForTimeout(1_100)
+
+  // ── Theme switching ───────────────────────────────────────────────────────
+  // Reset scrollTop on open so stale position never carries over. The browse
+  // intentionally leaves time for the viewer to read the picker as a new scene.
+  await page.waitForTimeout(900)
+  await page.locator('#hamburger-btn').click()
+  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
+  await page.waitForTimeout(900)
 
   await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
   await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
   await page.locator('.theme-body').evaluate((el) => {
     el.scrollTop = 0
   })
-  await page.waitForTimeout(600)
+  await page.waitForTimeout(3_200)
   // Compute actual card positions now that the grid is rendered.
   const charcoalTop = await centeredScrollTop(page, 'charcoal_violet')
-  await smoothScroll(page, '.theme-body', 210, { durationMs: 700 }) // quick peek
-  await page.waitForTimeout(600)
-  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 120, 570), { durationMs: 1_000 }) // past the card
-  await page.waitForTimeout(650)
-  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 500 }) // settle on card
-  await page.waitForTimeout(1_300) // hover — deciding
+  await smoothScroll(page, '.theme-body', 210, { durationMs: 1_350 }) // quick peek
+  await page.waitForTimeout(1_500)
+  await smoothScroll(page, '.theme-body', Math.max(charcoalTop + 120, 570), { durationMs: 1_700 }) // past the card
+  await page.waitForTimeout(1_500)
+  await smoothScroll(page, '.theme-body', charcoalTop, { durationMs: 1_150 }) // settle on card
+  await page.waitForTimeout(2_400) // hover — deciding
   await switchTheme(page, 'charcoal_violet')
   await page
     .locator('[data-theme-name="charcoal_violet"].theme-card-active')
     .waitFor({ state: 'attached', timeout: 5_000 })
-  await freezeFrame(1_500) // see the selected card
+  await freezeFrame(3_600) // see the selected card
 
   await page.locator('.theme-close').click()
   await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
-  await page.waitForTimeout(1_800)
+  await page.waitForTimeout(1_600)
+  await page.waitForTimeout(700)
   await page.locator('.tab').nth(1).click()
-  await page.waitForTimeout(800)
-  await page.locator('.tab').first().click()
   await page.waitForTimeout(1_000)
-
-  // Second session: browse the grid and return to the original theme without
-  // picking an intermediate one. Browse down to explore, then scroll back up
-  // toward the top where darklab_obsidian lives.
-  await page.locator('#hamburger-btn').click()
-  await expect(page.locator('#mobile-menu-sheet')).toBeVisible()
-  await page.waitForTimeout(500)
-
-  await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
-  await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-  await page.locator('.theme-body').evaluate((el) => {
-    el.scrollTop = 0
-  })
-  await page.waitForTimeout(600)
-  const darklabTop = await centeredScrollTop(page, 'darklab_obsidian')
-  await smoothScroll(page, '.theme-body', 260, { durationMs: 800 }) // scrolling down
-  await page.waitForTimeout(600)
-  await smoothScroll(page, '.theme-body', Math.max(darklabTop + 150, 500), { durationMs: 1_050 }) // going deeper
-  await page.waitForTimeout(650)
-  await smoothScroll(page, '.theme-body', darklabTop, { durationMs: 1_100 }) // back to darklab
-  await page.waitForTimeout(1_300) // hover — deciding
-  await switchTheme(page, 'darklab_obsidian')
-  await page
-    .locator('[data-theme-name="darklab_obsidian"].theme-card-active')
-    .waitFor({ state: 'attached', timeout: 5_000 })
-  await freezeFrame(1_500) // see the selected card
-
-  await page.locator('.theme-close').click()
-  await expect(page.locator('#theme-overlay')).not.toHaveClass(/open/)
+  await page.waitForTimeout(700)
+  await page.locator('.tab').first().click()
   await page.waitForTimeout(2_000)
 
   // Stop the background capture loop and wait for it to flush the last frame.

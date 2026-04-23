@@ -122,57 +122,37 @@ test.describe('tab command recall', () => {
   test('running a command in one tab does not block another tab from running', async ({ page }) => {
     const secondCmd = 'status'
 
-    await page.addInitScript(
-      ([longCmd, secondCmd]) => {
-        const originalFetch = window.fetch.bind(window)
-        const encoder = new TextEncoder()
+    await page.route('**/run', async (route) => {
+      const payload = JSON.parse(route.request().postData() || '{}')
+      const command = payload.command || ''
 
-        window.fetch = async (input, init) => {
-          const url = typeof input === 'string' ? input : input.url
-          const rawBody = typeof init?.body === 'string' ? init.body : ''
+      if (command === LONG_CMD) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: [
+            'data: {"type":"started","run_id":"tabs-long-run"}\n\n',
+            'data: {"type":"output","text":"long run started\\n"}\n\n',
+          ].join(''),
+        })
+        return
+      }
 
-          if (url.endsWith('/run') && init?.method === 'POST') {
-            const payload = JSON.parse(rawBody || '{}')
-            const command = payload.command || ''
+      if (command === secondCmd) {
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: [
+            'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
+            'data: {"type":"output","text":"second tab output\\n"}\n\n',
+            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+          ].join(''),
+        })
+        return
+      }
 
-            if (command === longCmd) {
-              const body = new ReadableStream({
-                start(controller) {
-                  controller.enqueue(
-                    encoder.encode('data: {"type":"started","run_id":"tabs-long-run"}\n\n'),
-                  )
-                  controller.enqueue(
-                    encoder.encode('data: {"type":"output","text":"long run started\\n"}\n\n'),
-                  )
-                  // Leave the stream open so the originating tab stays in RUNNING.
-                },
-              })
-              return new Response(body, {
-                status: 200,
-                headers: { 'Content-Type': 'text/event-stream' },
-              })
-            }
-
-            if (command === secondCmd) {
-              return new Response(
-                [
-                  'data: {"type":"started","run_id":"tabs-second-run"}\n\n',
-                  'data: {"type":"output","text":"second tab output\\n"}\n\n',
-                  'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
-                ].join(''),
-                {
-                  status: 200,
-                  headers: { 'Content-Type': 'text/event-stream' },
-                },
-              )
-            }
-          }
-
-          return originalFetch(input, init)
-        }
-      },
-      [LONG_CMD, secondCmd],
-    )
+      await route.continue()
+    })
 
     await page.locator('#cmd').fill(LONG_CMD)
     await page.keyboard.press('Enter')

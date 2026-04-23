@@ -6,7 +6,7 @@ const BASE_URL = process.env.DEMO_BASE_URL || 'http://localhost:8888'
 export default defineConfig({
   testDir: '../tests/js/e2e',
   testMatch: '**/demo.mobile.spec.js',
-  outputDir: '../test-results/demo-mobile-output',
+  outputDir: process.env.DEMO_PLAYWRIGHT_OUTPUT_DIR || '/tmp/darklab_shell-mobile-demo-output',
   fullyParallel: false,
   workers: 1,
   retries: 0,

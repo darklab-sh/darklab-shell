@@ -265,6 +265,23 @@ const scenes = [
     },
   },
   {
+    slug: 'history-drawer-snapshot-row',
+    title: 'Main UI - history drawer with snapshot row',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await runCommand(page, 'hostname')
+      await createShareSnapshot(page)
+      await openHistory(page)
+      const snapshotEntry = page.locator('#history-list .history-entry-snapshot').first()
+      await expect(snapshotEntry).toBeVisible()
+      await expect(snapshotEntry.locator('.history-entry-kind-snapshot')).toHaveText('SNAPSHOT')
+      await expect(snapshotEntry.locator('[data-action="open"]')).toBeVisible()
+      await expect(snapshotEntry.locator('[data-action="link"]')).toBeVisible()
+      await expect(snapshotEntry.locator('[data-action="delete"]')).toBeVisible()
+    },
+  },
+  {
     slug: 'history-drawer-search-chip',
     title: 'Main UI - history drawer command search with chip',
     route: '/',
@@ -314,6 +331,22 @@ const scenes = [
     },
   },
   {
+    slug: 'session-token-clear-confirmation',
+    title: 'Main UI - session-token clear confirmation modal',
+    route: '/',
+    run: async (page, themeName) => {
+      await freshCaptureHome(page, { themeName })
+      await page.locator('.rail-nav [data-action="options"]').click()
+      await expect(page.locator('#options-modal')).toBeVisible()
+      await expect(page.locator('#options-session-token-clear-btn')).toBeVisible()
+      await page.locator('#options-session-token-clear-btn').click()
+      await expect(page.locator('#confirm-host [data-confirm-card]')).toBeVisible()
+      await expect(page.locator('#confirm-host')).toContainText('Clear the current session token')
+      await expect(page.locator('#confirm-host [data-confirm-action-id="copy"]')).toBeVisible()
+      await expect(page.locator('#confirm-host [data-confirm-action-id="clear"]')).toBeVisible()
+    },
+  },
+  {
     slug: 'theme-modal',
     title: 'Main UI - theme modal',
     route: '/',
@@ -354,7 +387,9 @@ const scenes = [
         { text: 'darklab-shell' },
         { text: '[process exited with code 0]', cls: 'exit-ok' },
       ])
-      await page.locator('#ln-btn').click()
+      await page.evaluate(() => {
+        if (typeof applyLineNumberPreference === 'function') applyLineNumberPreference('on', false)
+      })
       await expect(page.locator('body')).toHaveClass(/ln-on/)
     },
   },
@@ -365,7 +400,9 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await runCommand(page, 'ping -c 4 darklab.sh')
-      await page.locator('#ts-btn').click()
+      await page.evaluate(() => {
+        if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed', false)
+      })
       await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
     },
   },
@@ -376,8 +413,10 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await runCommand(page, 'ping -c 4 darklab.sh')
-      await page.locator('#ln-btn').click()
-      await page.locator('#ts-btn').click()
+      await page.evaluate(() => {
+        if (typeof applyLineNumberPreference === 'function') applyLineNumberPreference('on', false)
+        if (typeof applyTimestampPreference === 'function') applyTimestampPreference('elapsed', false)
+      })
       await expect(page.locator('body')).toHaveClass(/ln-on/)
       await expect(page.locator('body')).toHaveClass(/ts-elapsed/)
     },

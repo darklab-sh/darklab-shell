@@ -13,7 +13,7 @@ const THEMES_DIR = resolve(REPO_ROOT, 'app/conf/themes')
 
 export const CAPTURE_ROOT = process.env.CAPTURE_OUT_DIR
   ? resolve(REPO_ROOT, process.env.CAPTURE_OUT_DIR)
-  : resolve(REPO_ROOT, 'test-results/ui-capture')
+  : '/tmp/darklab_shell-ui-capture'
 
 export const LONG_RUN_CMD = 'capture-long-run'
 export const FAST_RUN_CMD = 'capture-fast-run'

@@ -6,7 +6,7 @@ import { DESKTOP_VISUAL_CONTRACT } from './playwright.visual.contracts.js'
 export default defineConfig({
   testDir,
   testMatch: '**/ui-capture.desktop.capture.js',
-  outputDir: '../test-results/ui-capture-desktop-output',
+  outputDir: process.env.CAPTURE_PLAYWRIGHT_OUTPUT_DIR || '/tmp/darklab_shell-ui-capture-desktop-output',
   fullyParallel: false,
   workers: 1,
   retries: 0,

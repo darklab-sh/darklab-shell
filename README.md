@@ -516,7 +516,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
 │   ├── record_demo.sh          # Records the desktop demo video — health-checks container, runs Playwright, stitches frames with ffmpeg
 │   ├── record_demo_mobile.sh   # Same as record_demo.sh but for the mobile shell UI
-│   └── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs + manifest to test-results/ui-capture/
+│   └── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs + manifest to /tmp/darklab_shell-ui-capture/
 ├── assets/                        # README media assets (demo videos)
 ├── tests/
 │   ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
@@ -593,8 +593,8 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │           ├── welcome.spec.js # welcome animation and settle-path coverage
 │           ├── welcome-interactions.spec.js # welcome command/badge interaction coverage
 │           ├── welcome-context.spec.js # welcome persistence across tabs and mobile context coverage
-│           ├── demo.spec.js    # Desktop demo recording (RUN_DEMO=1 only — used by scripts/record_demo.sh)
-│           ├── demo.mobile.spec.js # Mobile demo recording (RUN_DEMO=1 only — used by scripts/record_demo_mobile.sh)
+│           ├── demo.spec.js    # Desktop demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
+│           ├── demo.mobile.spec.js # Mobile demo recording with command, history, workflow, and theme scenes (RUN_DEMO=1 only)
 │           ├── ui_capture_shared.js # Shared scene registry for the UI screenshot capture pipeline (desktop + mobile)
 │           ├── ui-capture.desktop.capture.js # Desktop UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
 │           └── ui-capture.mobile.capture.js  # Mobile UI screenshot capture spec (RUN_CAPTURE=1 only — used by scripts/capture_ui_screenshots.sh)
