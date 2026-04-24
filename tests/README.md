@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 932
+- `pytest`: 933
 - `vitest`: 754
 - `playwright`: 200
-- total: 1,886
+- total: 1,887
 
 This document is organized in two parts:
 
@@ -189,11 +189,14 @@ scripts/capture_ui_screenshots.sh
 scripts/capture_ui_screenshots.sh --ui desktop
 scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
 scripts/capture_ui_screenshots.sh --theme all
+scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
 The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `/tmp/darklab_shell-ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
+
+Capture theme application now waits for the requested theme name, the active theme-registry entry, and the resolved `--bg` CSS variable to agree before screenshots are taken. The wrapper also accepts `--theme-variant light|dark|all` to restrict `--theme all` runs to one color-scheme family without changing the underlying theme registry or file order.
 
 Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags. That preset now stars only two commands so the desktop rail still shows Recent items, and its seeded commands come from the runtime autocomplete example set rather than hand-written fake commands.
 
@@ -415,6 +418,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
 | `TestAutocompleteContextLoading.test_missing_context_file_returns_empty_mapping` | Verifies that a missing autocomplete context file resolves to an empty mapping instead of throwing. |
 | `TestAutocompleteContextLoading.test_valid_context_entries_are_normalized` | Verifies that valid autocomplete YAML entries normalize into the runtime flag, value-hint, and pipe metadata shape. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned autocomplete or workflow order. |
 | `TestAutocompleteContextLoading.test_local_overlay_merges_unique_context_entries` | Verifies that local autocomplete overlays append only new flags, value-taking tokens, and pipe metadata without duplicating base entries. |
 | `TestAutocompleteContextLoading.test_value_hints_preserve_insert_with_trailing_whitespace` | Verifies that the Python normalizer preserves an author-supplied `insert` including trailing whitespace (so `"set "` stays intact), retains `<placeholder>` value hints verbatim with no synthetic insert text, and omits `insertValue` from the normalized output when YAML does not set it. |
 | `TestAutocompleteContextLoading.test_arguments_and_subcommands_normalize_into_runtime_hints` | Verifies that the readable autocomplete schema (`arguments`, `subcommands`, and `pipe`) compiles into the normalized runtime hint shape consumed by the frontend. |

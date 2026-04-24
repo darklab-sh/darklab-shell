@@ -1,4 +1,4 @@
-import { mkdirSync, readdirSync, writeFileSync } from 'fs'
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'fs'
 import { dirname, relative, resolve } from 'path'
 import { fileURLToPath } from 'url'
 
@@ -19,14 +19,30 @@ export const LONG_RUN_CMD = 'capture-long-run'
 export const FAST_RUN_CMD = 'capture-fast-run'
 export function resolveCaptureThemes() {
   const requested = String(process.env.CAPTURE_THEME || '').trim()
+  const variant = String(process.env.CAPTURE_THEME_VARIANT || '').trim().toLowerCase()
   if (!requested || requested === 'default') return [null]
   if (requested === 'all') {
     return readdirSync(THEMES_DIR)
       .filter((name) => name.endsWith('.yaml'))
       .map((name) => name.replace(/\.yaml$/, ''))
+      .filter((name) => {
+        if (!variant || variant === 'all') return true
+        return captureThemeVariant(name) === variant
+      })
       .sort()
   }
   return [requested]
+}
+
+function captureThemeVariant(themeName) {
+  const file = resolve(THEMES_DIR, `${themeName}.yaml`)
+  try {
+    const text = readFileSync(file, 'utf8')
+    const match = text.match(/^\s*color_scheme\s*:\s*(light|dark)\s*$/m)
+    return match ? match[1] : ''
+  } catch (_) {
+    return ''
+  }
 }
 
 export function themeLabel(themeName) {
@@ -38,6 +54,7 @@ export function createManifest(ui) {
     ui,
     generated_at: new Date().toISOString(),
     theme_mode: process.env.CAPTURE_THEME || 'default',
+    theme_variant: process.env.CAPTURE_THEME_VARIANT || 'all',
     entries: [],
   }
 }
@@ -169,6 +186,10 @@ export async function freshHome(
     }
   }, { sessionToken: useCaptureSession ? CAPTURE_SESSION_TOKEN : '' })
   await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(
+    () => window.__sessionPreferencesLoadState === 'settled',
+    { timeout: 10_000 },
+  )
   await page.waitForFunction(() => {
     if (typeof applyThemeSelection !== 'function') return false
     const registry = window.ThemeRegistry
@@ -187,10 +208,21 @@ export async function freshHome(
       }, themeName)
       try {
         await page.waitForFunction(
-          (name) => document.body?.dataset?.theme === name,
+          (name) => {
+            const bodyTheme = document.body?.dataset?.theme || ''
+            const registry = window.ThemeRegistry
+            const currentTheme = registry?.current?.name || ''
+            const entry = Array.isArray(registry?.themes)
+              ? registry.themes.find((theme) => theme && theme.name === name)
+              : null
+            const expectedBg = entry?.vars?.['--bg'] || ''
+            const appliedBg = getComputedStyle(document.body).getPropertyValue('--bg').trim()
+            return bodyTheme === name && currentTheme === name && (!expectedBg || appliedBg === expectedBg)
+          },
           themeName,
           { timeout: 2_500 },
         )
+        await page.waitForTimeout(100)
         themeApplied = true
       } catch (_) {
         if (attempt < 2) await page.waitForTimeout(250)
@@ -198,10 +230,21 @@ export async function freshHome(
     }
     if (!themeApplied) {
       await page.waitForFunction(
-        (name) => document.body?.dataset?.theme === name,
+        (name) => {
+          const bodyTheme = document.body?.dataset?.theme || ''
+          const registry = window.ThemeRegistry
+          const currentTheme = registry?.current?.name || ''
+          const entry = Array.isArray(registry?.themes)
+            ? registry.themes.find((theme) => theme && theme.name === name)
+            : null
+          const expectedBg = entry?.vars?.['--bg'] || ''
+          const appliedBg = getComputedStyle(document.body).getPropertyValue('--bg').trim()
+          return bodyTheme === name && currentTheme === name && (!expectedBg || appliedBg === expectedBg)
+        },
         themeName,
         { timeout: 10_000 },
       )
+      await page.waitForTimeout(100)
     }
   } else {
     await page.waitForFunction(() => Boolean(document.body?.dataset?.theme), { timeout: 10_000 })

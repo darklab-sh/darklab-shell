@@ -32,6 +32,10 @@ All notable changes to darklab_shell are documented here.
   - **Before:** the visual fixture could overwhelm the desktop rail with starred commands and seed less believable back-to-back duplicates.
   - **After:** the fixture now keeps only two starred commands and avoids adjacent duplicate seeded commands.
   - **Tests:** added backend coverage in `tests/py/test_backend_modules.py`.
+- **UI capture now supports light-only and dark-only theme passes** — visual review runs can target one color-scheme family without editing the theme registry or capture specs.
+  - **Before:** `--theme all` always iterated every shipped theme, and intermittent startup races could leave a requested capture scene on the wrong applied palette.
+  - **After:** `scripts/capture_ui_screenshots.sh` now accepts `--theme-variant light|dark|all`, and the shared capture helper waits for the requested theme name, active registry entry, and resolved background variable to agree before taking screenshots.
+  - **Tests:** no new automated cases — verified through the shared capture helper logic and script interface review.
 - **Demo recordings now start from a fresh seeded session each run** — local demo capture no longer reuses one stale tokenized history session across repeated recordings.
   - **Before:** the demo wrappers reused a fixed token, so repeated recordings could accumulate old stars and history rows even after the visual fixture was tightened.
   - **After:** the wrappers now generate a fresh demo token by default, seed the `visual-flows` fixture into that session, and the demo guardrails validate the actual seeded token in use.

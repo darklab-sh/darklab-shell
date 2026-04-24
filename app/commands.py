@@ -1222,6 +1222,71 @@ def load_autocomplete_context():
     return _merge_autocomplete_context(base.get("context", {}), local.get("context", {}))
 
 
+def _spread_sensitive_smoke_commands(commands: list[str]) -> list[str]:
+    """De-clump bursty network lookups without changing source ownership/order.
+
+    The smoke corpus should still be *collected* in source order from
+    autocomplete examples and workflow steps, but some roots are more likely to
+    hit transient upstream throttling when run back-to-back. Spread those roots
+    apart opportunistically while preserving relative order as much as possible.
+    """
+    sensitive_roots = {"dig", "whois"}
+    scheduled: list[str] = []
+    deferred: list[str] = []
+
+    def _root(command: str) -> str:
+        return split_command_argv(command)[0].lower() if command.strip() else ""
+
+    def _last_sensitive_root() -> str:
+        for command in reversed(scheduled):
+            root = _root(command)
+            if root in sensitive_roots:
+                return root
+        return ""
+
+    def _flush_deferred(*, allow_sensitive_after_sensitive: bool = False) -> None:
+        if not deferred:
+            return
+        last_root = _root(scheduled[-1]) if scheduled else ""
+        last_sensitive_root = _last_sensitive_root()
+        fallback_index = None
+        for index, command in enumerate(deferred):
+            root = _root(command)
+            if root == last_root:
+                continue
+            if (
+                not allow_sensitive_after_sensitive
+                and last_root in sensitive_roots
+                and root in sensitive_roots
+            ):
+                continue
+            if root != last_sensitive_root:
+                scheduled.append(deferred.pop(index))
+                return
+            if fallback_index is None:
+                fallback_index = index
+        if fallback_index is not None:
+            scheduled.append(deferred.pop(fallback_index))
+
+    for command in commands:
+        root = _root(command)
+        last_root = _root(scheduled[-1]) if scheduled else ""
+        if root in sensitive_roots and last_root in sensitive_roots:
+            deferred.append(command)
+            continue
+        scheduled.append(command)
+        if root not in sensitive_roots:
+            _flush_deferred()
+
+    while deferred:
+        before = len(deferred)
+        _flush_deferred(allow_sensitive_after_sensitive=True)
+        if len(deferred) == before:
+            scheduled.append(deferred.pop(0))
+
+    return scheduled
+
+
 def load_container_smoke_test_commands():
     """Return the user-facing smoke-test corpus from autocomplete examples and workflows."""
     commands = []
@@ -1251,7 +1316,7 @@ def load_container_smoke_test_commands():
             seen.add(command)
             commands.append(command)
 
-    return commands
+    return _spread_sensitive_smoke_commands(commands)
 
 
 def split_command_argv(command: str) -> list[str]:

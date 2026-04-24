@@ -1399,11 +1399,60 @@ class TestAutocompleteContextLoading:
 
         assert result == [
             "dig darklab.sh A",
-            "dig darklab.sh MX",
             "curl -I https://darklab.sh",
+            "dig darklab.sh MX",
             "host darklab.sh",
             "wget -S --spider https://darklab.sh",
         ]
+
+    def test_container_smoke_test_commands_spread_sensitive_roots(self):
+        autocomplete_context = {
+            "dig": {
+                "examples": [
+                    {"value": "dig darklab.sh A", "description": "A lookup"},
+                    {"value": "dig darklab.sh MX", "description": "MX lookup"},
+                    {"value": "dig darklab.sh NS", "description": "NS lookup"},
+                ]
+            },
+            "whois": {
+                "examples": [
+                    {"value": "whois darklab.sh", "description": "Domain ownership"},
+                    {"value": "whois 104.21.4.35", "description": "IP ownership"},
+                ]
+            },
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://darklab.sh", "description": "Headers"},
+                ]
+            },
+            "host": {
+                "examples": [
+                    {"value": "host darklab.sh", "description": "Host lookup"},
+                ]
+            },
+        }
+
+        with mock.patch("commands.load_autocomplete_context", return_value=autocomplete_context):
+            with mock.patch("commands.load_all_workflows", return_value=[]):
+                result = load_container_smoke_test_commands()
+
+        assert result == [
+            "dig darklab.sh A",
+            "curl -I https://darklab.sh",
+            "whois darklab.sh",
+            "host darklab.sh",
+            "dig darklab.sh MX",
+            "whois 104.21.4.35",
+            "dig darklab.sh NS",
+        ]
+        for previous, current in zip(result, result[1:]):
+            prev_root = previous.split()[0]
+            curr_root = current.split()[0]
+            assert prev_root != curr_root
+        dig_positions = [idx for idx, command in enumerate(result) if command.startswith("dig ")]
+        whois_positions = [idx for idx, command in enumerate(result) if command.startswith("whois ")]
+        assert dig_positions == [0, 4, 6]
+        assert whois_positions == [2, 5]
 
 
 class TestSeedHistoryFixtures:

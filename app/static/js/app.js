@@ -458,6 +458,9 @@ const _sessionPreferenceKeys = [
   'pref_hud_clock',
 ];
 let _sessionPreferenceOverrides = null;
+if (typeof window !== 'undefined') {
+  window.__sessionPreferencesLoadState = 'idle';
+}
 
 function getPreferenceCookie(name) {
   const prefix = `${name}=`;
@@ -592,40 +595,49 @@ async function _persistCurrentSessionPreferences() {
 }
 
 async function loadSessionPreferences() {
-  const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
-  const defaults = _defaultSessionPreferences();
-  const localFallback = sessionId && !sessionId.startsWith('tok_')
-    ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
-    : null;
-  let prefs = null;
+  if (typeof window !== 'undefined') {
+    window.__sessionPreferencesLoadState = 'pending';
+  }
   try {
-    const resp = await apiFetch('/session/preferences');
-    if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
-    const data = await resp.json();
-    const remote = _normalizeSessionPreferences(data && data.preferences);
-    if (data && data.preferences && Object.keys(data.preferences).length) {
-      prefs = remote;
+    const sessionId = (typeof SESSION_ID === 'string' && SESSION_ID.trim()) ? SESSION_ID.trim() : '';
+    const defaults = _defaultSessionPreferences();
+    const localFallback = sessionId && !sessionId.startsWith('tok_')
+      ? _normalizeSessionPreferences(_buildCurrentSessionPreferenceSnapshot())
+      : null;
+    let prefs = null;
+    try {
+      const resp = await apiFetch('/session/preferences');
+      if (resp && resp.ok === false) throw new Error(`HTTP ${resp.status}`);
+      const data = await resp.json();
+      const remote = _normalizeSessionPreferences(data && data.preferences);
+      if (data && data.preferences && Object.keys(data.preferences).length) {
+        prefs = remote;
+      }
+    } catch (err) {
+      logClientError('failed to load /session/preferences', err);
     }
-  } catch (err) {
-    logClientError('failed to load /session/preferences', err);
+    if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
+    if (!prefs) prefs = localFallback;
+    if (!prefs) prefs = defaults;
+    _sessionPreferenceOverrides = prefs;
+    _writePreferenceSnapshotToStorage(prefs);
+    _cacheSessionPreferences(prefs, sessionId);
+    applyThemePreference(prefs.pref_theme_name, false);
+    applyTimestampPreference(prefs.pref_timestamps, false);
+    applyLineNumberPreference(prefs.pref_line_numbers, false);
+    applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
+    applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
+    applyHudClockPreference(prefs.pref_hud_clock, false);
+    if (typeof applyRunNotifyPreference === 'function') {
+      await applyRunNotifyPreference(prefs.pref_run_notify, false);
+    }
+    syncOptionsControls();
+    return prefs;
+  } finally {
+    if (typeof window !== 'undefined') {
+      window.__sessionPreferencesLoadState = 'settled';
+    }
   }
-  if (!prefs) prefs = _readCachedSessionPreferences(sessionId);
-  if (!prefs) prefs = localFallback;
-  if (!prefs) prefs = defaults;
-  _sessionPreferenceOverrides = prefs;
-  _writePreferenceSnapshotToStorage(prefs);
-  _cacheSessionPreferences(prefs, sessionId);
-  applyThemePreference(prefs.pref_theme_name, false);
-  applyTimestampPreference(prefs.pref_timestamps, false);
-  applyLineNumberPreference(prefs.pref_line_numbers, false);
-  applyWelcomeIntroPreference(prefs.pref_welcome_intro, false);
-  applyShareRedactionDefaultPreference(prefs.pref_share_redaction_default, false);
-  applyHudClockPreference(prefs.pref_hud_clock, false);
-  if (typeof applyRunNotifyPreference === 'function') {
-    await applyRunNotifyPreference(prefs.pref_run_notify, false);
-  }
-  syncOptionsControls();
-  return prefs;
 }
 
 function getWelcomeIntroPreference() {
