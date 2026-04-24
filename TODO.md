@@ -162,11 +162,118 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 - **Workflow inputs and runnable forms**
   - Let workflows declare required inputs so the user can fill in the needed values and launch the full workflow directly from the UI instead of treating workflows as static reference text.
-  - The first version should stay narrowly scoped:
-    - declare required values in the workflow definition
-    - collect them in a lightweight app-native form
-    - render the final command sequence clearly before execution
-  - This should build on the existing workflows system rather than becoming a second parallel command-form feature.
+  - Keep this as a workflow-system extension, not a separate command-form feature. The existing workflows panel, workflow cards, and normal `/run` path should remain the foundation.
+  - Scope the first version around the current built-in workflow shapes:
+    - most workflows only need one required value such as `domain`, `host`, or `url`
+    - a smaller set may need two values, but the first implementation should avoid workflows that require more than two user-entered fields
+    - workflows should stay operator-readable after interpolation — the user must be able to see exactly what commands will run before anything executes
+  - Current workflow fit:
+    - one-input friendly:
+      - DNS troubleshooting (`domain`)
+      - email checks (`domain`)
+      - domain OSINT / passive recon (`domain`)
+      - quick reachability (`host`)
+      - TLS / HTTPS checks (`host` or `url`)
+      - HTTP triage (`url`)
+      - SSL / TLS deep dive (`host`)
+      - network path analysis (`host`)
+      - fast port discovery to fingerprint (`host`)
+      - web directory discovery (`url`)
+      - API recon (`url`)
+    - two-input candidates:
+      - subdomain enumeration / validation
+      - CDN / edge behavior checks
+    - implementation rule:
+      - if a workflow still needs more than two real operator inputs, simplify the workflow definition before supporting it in the runnable-form path
+  - Data-model extension:
+    - add optional `inputs` to workflow definitions
+    - each input should be explicit and structured, for example:
+      - `id`
+      - `label`
+      - `type`
+      - `required`
+      - optional `placeholder`
+      - optional `default`
+      - optional `help`
+    - supported first-pass types should stay small:
+      - `domain`
+      - `host`
+      - `url`
+      - `port`
+      - `path`
+    - steps should support lightweight token interpolation such as `{{domain}}`, `{{host}}`, `{{url}}`, and `{{port}}`
+    - interpolation should be plain value substitution only — no expressions, no conditionals, no shell templating
+  - Backend work:
+    - extend `load_workflows()` and built-in workflow definitions so `inputs` are loaded, validated, and returned to the client
+    - reject malformed workflow inputs the same way malformed steps are ignored today
+    - keep interpolation logic constrained and deterministic:
+      - only replace declared workflow input tokens
+      - preserve the final rendered command as a normal command string that still flows through the existing allowlist engine
+    - do not add a new server-side "run workflow" endpoint in the first pass
+  - Frontend form UX:
+    - clicking a workflow card should continue to support the current lightweight behavior for quick prompt-fill use
+    - add a second action for workflows with declared inputs, for example:
+      - open a lightweight app-native modal or sheet
+      - collect the required values
+      - show the fully rendered commands in order
+    - the form should feel native to the existing shell UI:
+      - use the current modal/sheet primitives
+      - reuse existing button / field styling
+      - preserve mobile parity
+    - the preview should be explicit:
+      - numbered steps
+      - rendered command for each step
+      - note text retained beneath each rendered step
+      - clear indication of what target values are being applied
+  - Execution model:
+    - phase 1:
+      - support "render and load" behavior cleanly
+      - allow users to:
+        - fill the workflow inputs
+        - preview the final commands
+        - load an individual rendered step into the prompt
+        - optionally copy the whole rendered workflow sequence
+    - phase 2:
+      - add "run full workflow" as a client-side queue over the existing command runner
+      - run one step at a time through the current `/run` path
+      - default behavior should be serial execution in the active tab
+      - each step should remain a normal run for history, snapshots, and permalinks
+      - start with a simple stop policy:
+        - stop on first failed step by default
+        - reconsider continue-on-failure only after the basic runner is stable
+      - killing a workflow should stop the currently running step and cancel the remaining queued steps
+  - Architecture guardrails:
+    - do not invent a second execution engine for workflows
+    - do not bypass the normal command allowlist, rewriting, history, or streaming paths
+    - do not turn workflow inputs into a generic arbitrary-shell builder
+    - keep workflow templates transparent enough that an operator can reason about the exact commands before running them
+  - UI state / history expectations:
+    - rendered workflow execution should still produce ordinary history entries per command
+    - the history drawer does not need workflow-grouping in the first pass
+    - if workflow progress is surfaced in the UI, it should be a thin client-side shell state rather than a new persisted server-side workflow-run model
+  - Validation / testing:
+    - unit tests for:
+      - workflow input parsing
+      - malformed workflow definitions
+      - token interpolation
+      - token names that are missing, repeated, or unused
+    - frontend unit tests for:
+      - workflow form rendering
+      - preview generation
+      - per-step load behavior
+      - queue execution state once phase 2 exists
+    - e2e coverage for:
+      - desktop workflow input modal flow
+      - mobile workflow input sheet flow
+      - preview correctness
+      - full workflow queue run for at least one one-input workflow
+      - kill / cancel behavior during queued execution
+  - Acceptance criteria:
+    - workflows can declare structured required inputs without breaking existing static workflows
+    - a user can fill in a workflow target and see the exact rendered commands before running them
+    - rendered workflow commands still pass through the existing allowlist and run pipeline
+    - at least one one-input workflow can be previewed and launched end-to-end on desktop and mobile
+    - the design stays clearly "workflow-driven" rather than becoming a second disconnected command-form system
 
 - **Share package** (annotations, notes, and lifecycle controls)
   - Snapshots currently have no metadata beyond the raw output. Add optional title, note, and tags as a unified share package rather than building annotations, operator notes, and sharing controls as disconnected features — they compose into one coherent model.

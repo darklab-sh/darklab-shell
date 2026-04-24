@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 932
+- `pytest`: 931
 - `vitest`: 754
 - `playwright`: 200
-- total: 1,886
+- total: 1,885
 
 This document is organized in two parts:
 
@@ -187,7 +187,7 @@ Standalone Playwright specs that generate a curated screenshot pack for design r
 ```bash
 scripts/capture_ui_screenshots.sh
 scripts/capture_ui_screenshots.sh --ui desktop
-scripts/capture_ui_screenshots.sh --theme blue_paper --ui mobile
+scripts/capture_ui_screenshots.sh --theme apricot_sand --ui mobile
 scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```

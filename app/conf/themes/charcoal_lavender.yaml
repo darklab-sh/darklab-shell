@@ -1,7 +1,7 @@
-# darklab_shell — Dark Theme: Charcoal Violet
+# darklab_shell — Dark Theme: Charcoal Lavender
 # ----------------------------------------------
 # A monochrome charcoal theme with a subtle violet accent.
-label: Charcoal Violet
+label: Charcoal Lavender
 color_scheme: dark
 group: Dark Neutral
 sort: 6
@@ -9,6 +9,7 @@ bg: '#101014'
 surface: '#18181e'
 border: rgba(171, 150, 233, 0.14)
 border_bright: rgba(171, 150, 233, 0.28)
+border_soft: "rgba(255, 255, 255, 0.08)"
 text: '#eceaf3'
 muted: '#8a8799'
 green: '#6bb36a'
@@ -17,6 +18,10 @@ green_glow: rgba(107, 179, 106, 0.10)
 amber: '#d1a864'
 red: '#df7077'
 blue: '#bcc9ff'
+status_bar_bg: "#111116"
+status_bar_border: "#22212b"
+status_bar_text: "#8a8799"
+welcome_ascii_color: "var(--green)"
 terminal_font_size: 14px
 terminal_line_height: '1.65'
 prompt_line_text: '#f7f4ff'

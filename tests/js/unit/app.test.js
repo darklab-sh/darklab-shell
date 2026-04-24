@@ -671,14 +671,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -764,7 +764,7 @@ describe('app helpers', () => {
           },
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -910,14 +910,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -941,14 +941,14 @@ describe('app helpers', () => {
     const themeRegistry = {
       current: {
         name: 'theme_light_blue',
-        label: 'Blue Paper',
+        label: 'Apricot Sand',
         source: 'variant',
         vars: { '--bg': '#9ab7d0' },
       },
       themes: [
         {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
@@ -971,7 +971,7 @@ describe('app helpers', () => {
       'theme_light_olive',
     ])
     expect(themeCards.map((card) => card.querySelector('.theme-card-label')?.textContent)).toEqual([
-      'Blue Paper',
+      'Apricot Sand',
       'Olive Parchment',
     ])
 
@@ -992,14 +992,14 @@ describe('app helpers', () => {
         themeRegistry: {
           current: {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
           themes: [
             {
               name: 'theme_light_blue',
-              label: 'Blue Paper',
+              label: 'Apricot Sand',
               source: 'variant',
               vars: { '--bg': '#9ab7d0' },
             },
@@ -1043,7 +1043,7 @@ describe('app helpers', () => {
             },
             {
               name: 'theme_light_blue',
-              label: 'Blue Paper',
+              label: 'Apricot Sand',
               color_scheme: 'only light',
               source: 'variant',
               vars: { '--bg': '#9ab7d0' },
@@ -1069,7 +1069,7 @@ describe('app helpers', () => {
       'Dark themes:',
       '  * darklab_obsidian          Darklab Obsidian',
       'Light themes:',
-      '    theme_light_blue          Blue Paper',
+      '    theme_light_blue          Apricot Sand',
       'Other themes:',
       '    theme_unknown             Unknown Scheme',
     ])
@@ -1083,14 +1083,14 @@ describe('app helpers', () => {
         themeRegistry: {
           current: {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
           themes: [
             {
               name: 'theme_light_blue',
-              label: 'Blue Paper',
+              label: 'Apricot Sand',
               source: 'variant',
               vars: { '--bg': '#9ab7d0' },
             },
@@ -1185,14 +1185,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -1254,18 +1254,18 @@ describe('app helpers', () => {
     await loadAppFns({
       themeRegistry: {
         current: {
-          name: 'blue_paper',
-          label: 'Blue Paper',
-          group: 'Cool Light',
+          name: 'apricot_sand',
+          label: 'Apricot Sand',
+          group: 'Warm Light',
           sort: 50,
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
-            name: 'blue_paper',
-            label: 'Blue Paper',
-            group: 'Cool Light',
+            name: 'apricot_sand',
+            label: 'Apricot Sand',
+            group: 'Warm Light',
             sort: 50,
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
@@ -1301,11 +1301,11 @@ describe('app helpers', () => {
     const groupTitles = Array.from(
       document.querySelectorAll('#theme-select .theme-picker-group-title'),
     ).map((node) => node.textContent)
-    expect(groupTitles).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    expect(groupTitles).toEqual(['Warm Light', 'Neutral Light'])
     const sectionGroups = Array.from(
       document.querySelectorAll('#theme-select .theme-picker-group'),
     ).map((node) => node.dataset.themeGroup)
-    expect(sectionGroups).toEqual(['Warm Light', 'Cool Light', 'Neutral Light'])
+    expect(sectionGroups).toEqual(['Warm Light', 'Neutral Light'])
     expect(
       document.getElementById('theme-select')?.style.getPropertyValue('--theme-picker-columns'),
     ).toBe('2')
@@ -1318,14 +1318,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -1352,7 +1352,7 @@ describe('app helpers', () => {
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -3517,14 +3517,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },
@@ -3962,14 +3962,14 @@ describe('app helpers', () => {
       themeRegistry: {
         current: {
           name: 'theme_light_blue',
-          label: 'Blue Paper',
+          label: 'Apricot Sand',
           source: 'variant',
           vars: { '--bg': '#9ab7d0' },
         },
         themes: [
           {
             name: 'theme_light_blue',
-            label: 'Blue Paper',
+            label: 'Apricot Sand',
             source: 'variant',
             vars: { '--bg': '#9ab7d0' },
           },

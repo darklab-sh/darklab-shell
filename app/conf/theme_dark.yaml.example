@@ -39,6 +39,9 @@ border: "#2a2a2a"
 # Prominent border (input focus rings, modal outlines)
 border_bright: "#3c3c3c"
 
+# Soft border (low-contrast separators inside denser chrome)
+border_soft: "rgba(255, 255, 255, 0.08)"
+
 # ── Text ──────────────────────────────────────────────────────────────────────
 
 # Primary text color
@@ -95,6 +98,9 @@ terminal_wrap_shadow: "rgba(210,210,210,0.24)"
 window_btn_close: "color-mix(in srgb, var(--red) 78%, var(--surface))"
 window_btn_minimize: "color-mix(in srgb, var(--amber) 78%, var(--surface))"
 window_btn_maximize: "color-mix(in srgb, var(--green) 78%, var(--surface))"
+status_bar_bg: "#0c0c0c"
+status_bar_border: "#2a2a2a"
+status_bar_text: "#9a9a9a"
 
 # Header / toolbar buttons
 toolbar_button_bg: "transparent"
@@ -191,6 +197,7 @@ mobile_menu_button_hover_bg: "var(--green-glow)"
 mobile_menu_button_hover_text: "#39ff14"
 
 # Welcome / onboarding styling
+welcome_ascii_color: "var(--green)"
 welcome_command_hover_bg: "color-mix(in srgb, var(--green) 6%, transparent)"
 welcome_command_hover_shadow: "0 0 0 1px var(--green-glow)"
 welcome_ascii_text_shadow: "0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)"

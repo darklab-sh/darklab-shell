@@ -25,11 +25,15 @@
   --theme-panel-alt-bg: #101010;
   --theme-panel-border: #2e2e2e;
   --theme-panel-shadow: rgba(0,0,0,0.7);
+  --theme-border-soft: rgba(255,255,255,0.08);
   --theme-terminal-bar-bg: #0d0d0d;
   --theme-terminal-bar-border: #1f1f1f;
   --theme-terminal-actions-bg: transparent;
   --theme-terminal-wrap-border: #2e2e2e;
   --theme-terminal-wrap-shadow: rgba(0,0,0,0.7);
+  --theme-status-bar-bg: #0c0c0c;
+  --theme-status-bar-border: #2a2a2a;
+  --theme-status-bar-text: #9a9a9a;
   --theme-toolbar-button-bg: transparent;
   --theme-toolbar-button-border: #2e2e2e;
   --theme-toolbar-button-text: #7a7a7a;
@@ -106,6 +110,7 @@
   --theme-mobile-menu-button-border: #1f1f1f;
   --theme-mobile-menu-button-hover-bg: var(--green-glow);
   --theme-mobile-menu-button-hover-text: #39ff14;
+  --theme-welcome-ascii-color: var(--green);
   --theme-welcome-command-hover-bg: color-mix(in srgb, var(--green) 6%, transparent);
   --theme-welcome-command-hover-shadow: 0 0 0 1px var(--green-glow);
   --theme-welcome-ascii-text-shadow: 0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4);

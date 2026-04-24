@@ -144,6 +144,17 @@ The theme preview grid is driven by the runtime theme registry. Clicking a previ
 
 The built-in `theme` button is a shortcut to the selector. The preview grid is the source of truth for named variants — registry entries without an explicit `label:` fall back to a humanized filename stem, and entries without a `group:` appear under "Other".
 
+The current built-in selector ships 18 named themes:
+
+- Dark Neon: `darklab_obsidian`, `emerald_obsidian`, `ember_obsidian`, `cobalt_obsidian`
+- Dark Neutral: `charcoal_amber`, `charcoal_steel`, `charcoal_lavender`
+- Dark Mid-tone: `slate_dusk`, `moss_stone`
+- Warm Light: `apricot_sand`, `olive_grove`, `rose_quartz`
+- Cool Light: `lavender_fog`, `mint_glass`
+- Neutral Light: `newsprint`, `chalk`
+- Neutral Mid-tone: `overcast`
+- Neutral Green Mid-tone: `sage`
+
 ---
 
 ## Editing Rules
@@ -229,6 +240,7 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `surface` | `#141414` | `#eef2f6` | Core panel, modal, and dropdown surface color |
 | `border` | `#1f1f1f` | `rgba(0,0,0,0.15)` | Subtle separators and low-emphasis borders |
 | `border_bright` | `#2e2e2e` | `rgba(0,0,0,0.28)` | Stronger borders, focus outlines, and modal chrome |
+| `border_soft` | `rgba(255, 255, 255, 0.08)` | `rgba(0,0,0,0.12)` | Soft dividers where a full border would read too heavy |
 | `text` | `#e0e0e0` | `#101820` | Primary body text |
 | `muted` | `#7a7a7a` | `#5a6878` | Secondary labels, hints, and timestamps |
 | `green` | `#39ff14` | `#2a5d18` | Prompt, success states, and primary active accent |
@@ -262,6 +274,9 @@ The tables below list every supported theme key from `_THEME_DEFAULTS`. Each row
 | `window_btn_close` | `#ff6b5f` | `#c25b4d` | Close button color in the terminal bar |
 | `window_btn_minimize` | `#ffbe3b` | `#b77f22` | Minimize button color in the terminal bar |
 | `window_btn_maximize` | `#32d74b` | `#2f7a43` | Maximize button color in the terminal bar |
+| `status_bar_bg` | `#0c0c0c` | `#b8c4d0` | Desktop HUD / status strip background |
+| `status_bar_border` | `#2a2a2a` | `#8898b0` | Desktop HUD / status strip top border |
+| `status_bar_text` | `#9a9a9a` | `#5a6878` | Neutral text inside the desktop HUD / status strip |
 
 ### Toolbar Buttons and Chips
 
@@ -377,6 +392,7 @@ Theme authors should also know that not every mobile overlay uses the same geome
 |-----|--------------|---------------|----------|
 | `welcome_command_hover_bg` | `color-mix(in srgb, var(--green) 6%, transparent)` | `rgba(42,93,24,0.06)` | Hover state for clickable welcome commands |
 | `welcome_command_hover_shadow` | `0 0 0 1px var(--green-glow)` | `0 0 0 1px rgba(42,93,24,0.1)` | Hover outline for clickable welcome commands |
+| `welcome_ascii_color` | `var(--green)` | `var(--green)` | Direct ASCII-art text color before filter and shadow treatment |
 | `welcome_ascii_text_shadow` | `0 0 10px color-mix(in srgb, var(--green) 14%, transparent), 0 0 4px color-mix(in srgb, var(--green) 18%, transparent), 0 1px 0 rgba(8,16,12,0.4)` | `0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)` | Welcome ASCII art text shadow |
 | `welcome_ascii_filter` | `saturate(1.12) contrast(1.08) brightness(1.08)` | `saturate(0.9) contrast(0.95) brightness(0.9)` | Welcome ASCII art filter |
 

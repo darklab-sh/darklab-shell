@@ -500,8 +500,8 @@ test.describe('mobile menu', () => {
     await page.locator('#hamburger-btn').click()
     await page.locator('#mobile-menu-sheet [data-menu-action="theme"]').click()
 
-    await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await page.locator('#theme-select [data-theme-name="apricot_sand"]').click()
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
 
     const shellColors = await page.evaluate(() => {
       const root = getComputedStyle(document.documentElement)
@@ -513,10 +513,10 @@ test.describe('mobile menu', () => {
       }
     })
 
-    expect(shellColors.bg).toBe('#eef4fa')
-    expect(shellColors.surface).toBe('#fbfdff')
-    expect(shellColors.terminalBar).toBe('#d9e5f1')
-    expect(shellColors.panel).toBe('#edf4fb')
+    expect(shellColors.bg).toBe('#fbf2e8')
+    expect(shellColors.surface).toBe('#fffaf3')
+    expect(shellColors.terminalBar).toBe('#e7d2b9')
+    expect(shellColors.panel).toBe('#f1e3d0')
   })
 
   test('clicking outside the menu closes it', async ({ page }) => {

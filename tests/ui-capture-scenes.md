@@ -44,12 +44,12 @@ order index (keeps directory listings lined up with the scene list below).
 ## Themes
 
 When `--theme all` is passed, every theme in `app/conf/themes/` is rendered.
-Currently 17 themes:
+Currently 18 themes:
 
-`apricot_sand`, `blue_paper`, `charcoal_amber`, `charcoal_steel`,
-`charcoal_violet`, `clean_slate`, `cobalt_obsidian`, `darklab_obsidian`,
-`ember_obsidian`, `emerald_obsidian`, `graphite`, `lavender_fog`, `mint_glass`,
-`newsprint`, `olive_grove`, `rose`, `rose_quartz`.
+`apricot_sand`, `chalk`, `charcoal_amber`, `charcoal_lavender`,
+`charcoal_steel`, `cobalt_obsidian`, `darklab_obsidian`, `ember_obsidian`,
+`emerald_obsidian`, `lavender_fog`, `mint_glass`, `moss_stone`,
+`newsprint`, `olive_grove`, `overcast`, `rose_quartz`, `sage`, `slate_dusk`.
 
 ## Cross-cutting patterns to check per theme
 

@@ -25,8 +25,10 @@ test.describe('theme selector', () => {
     expect(groupLabels).toEqual([
       'Dark Neon',
       'Dark Neutral',
+      'Dark Mid-tone',
       'Warm Light',
       'Cool Light',
+      'Neutral Mid-tone',
       'Neutral Light',
     ])
     await page.locator('#theme-select [data-theme-name="charcoal_steel"]').click()
@@ -191,7 +193,7 @@ test.describe('options modal', () => {
   }) => {
     await page.locator('.rail-nav [data-action="theme"]').click()
     await expect(page.locator('#theme-overlay')).toHaveClass(/open/)
-    await page.locator('#theme-select [data-theme-name="blue_paper"]').click()
+    await page.locator('#theme-select [data-theme-name="apricot_sand"]').click()
     await page.locator('.theme-close').click()
 
     await page.locator('.rail-nav [data-action="options"]').click()
@@ -201,7 +203,7 @@ test.describe('options modal', () => {
     await page.locator('#options-hud-clock-select').selectOption('local')
     await page.locator('.options-close').click()
 
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
     await expect(page.locator('#hud-clock')).not.toContainText('UTC')
@@ -210,7 +212,7 @@ test.describe('options modal', () => {
     await page.reload()
     await page.locator('#cmd').waitFor()
 
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
     await expect(page.locator('#ts-btn')).toHaveText('timestamps: elapsed')
     await expect(page.locator('#ln-btn')).toHaveText('line numbers: on')
     await expect(page.locator('#hud-clock')).not.toContainText('UTC')
