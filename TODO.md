@@ -22,6 +22,61 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
+- **Light theme polish and shared theme-token expansion**
+  - The current light themes are usable, but several of them still flatten important surfaces together:
+    - page background, panels, terminal surface, terminal title bar, history drawer, and destructive modal surfaces are too close in value
+    - borders and wrap shadows are too low-contrast on pale backgrounds
+    - muted text is marginal on some warm themes
+    - the welcome ASCII treatment on light themes tends to look washed out instead of intentional
+  - The right scope is token-level theme work, not component rewrites. The goal is to improve the visual hierarchy of the existing UI while keeping the current layout and interaction model intact.
+  - This work also needs a small theme-system expansion so the UI can style a few surfaces independently instead of reusing nearby tokens that were “close enough” for the dark themes:
+    - add theme support for a dedicated status-strip background, border, and text color
+    - add a soft-border token for subtle separators that should sit between `border` and `border_bright`
+    - add an explicit welcome-ASCII color token so the welcome mark can diverge from the generic success green where that improves the theme identity
+  - Repo touch points:
+    - [app/config.py](app/config.py)
+      - add the new theme keys to the default theme families
+      - add the keys to `_THEME_CSS_ORDER`
+      - ensure `theme_runtime_css_vars()` emits them for the browser, permalinks, and exports
+    - [app/static/css/base.css](app/static/css/base.css)
+      - declare the new `--theme-*` variables in `:root`
+    - [app/static/css/shell.css](app/static/css/shell.css) or the actual current status-strip rule location
+      - move the status strip off `panel_alt_bg` / `panel_border` / `muted`
+      - use the new status-strip tokens instead
+    - [app/static/css/welcome.css](app/static/css/welcome.css)
+      - allow the welcome ASCII block to use a dedicated theme token instead of always inheriting `--green`
+    - [app/conf/themes/*.yaml](app/conf/themes/)
+      - update all light themes with the revised hierarchy, accent, muted-text, and welcome-filter values
+      - add the new keys to dark themes too so the theme export path stays uniform across all theme files
+  - Design direction for the light-theme pass:
+    - widen the separation between `bg`, `panel_bg`, `surface`, `terminal_bar_bg`, `history_panel_bg`, and `confirm_modal_bg`
+    - deepen border / shadow tokens enough that panel edges remain visible at normal zoom
+    - darken muted text where needed to keep it safely readable on pale backgrounds
+    - make light-theme welcome ASCII feel deliberate rather than desaturated
+    - preserve each theme’s identity rather than collapsing them into one generic “good light theme”
+  - Important implementation rule:
+    - do the token plumbing first, then theme YAML changes
+    - verify the dark themes still look unchanged before accepting the light-theme visual diffs
+  - Validation should be capture-driven, not just eyeballed in one tab:
+    - regenerate light-theme screenshot captures and review them against the known desktop/mobile capture scenes
+    - run a dark-theme regression check on at least:
+      - main shell idle
+      - welcome completed
+      - history drawer open
+      - options modal
+      - destructive confirmation modal
+    - verify the new tokens reach:
+      - main UI
+      - permalink pages
+      - HTML export surfaces
+  - Acceptance criteria:
+    - light themes show clearer surface separation without losing their individual character
+    - the terminal wrap border and drawer/modal edges remain visible on light backgrounds
+    - muted text remains readable across the set
+    - the status strip reads as its own surface instead of blending into adjacent panels
+    - welcome ASCII color/filter treatment looks intentional on light themes
+    - dark themes show no unintended regressions after the shared token changes
+
 ---
 
 ## Research
