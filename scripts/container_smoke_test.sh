@@ -5,8 +5,8 @@
 # Run this after upgrading the base image, apt packages, or any pinned
 # tool version in the Dockerfile (Go binaries, pip packages, gems).
 # It builds a fresh image with docker compose, starts the container, and
-# runs every command from app/conf/autocomplete.yaml examples through /run, checking
-# each one against the expected output recorded in
+# runs every user-facing command in the shared smoke corpus through /run
+# (autocomplete examples plus workflow steps), checking each one against the expected output recorded in
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #
 # A failure means a command is missing, broken, or producing unexpected

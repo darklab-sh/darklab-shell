@@ -19,6 +19,7 @@ from typing import cast
 import pytest
 
 import app as shell_app
+import blueprints.run as run_routes
 import database as shell_db
 from config import PROJECT_README
 from database import db_connect
@@ -122,6 +123,32 @@ class TestRunStreaming:
         assert '"type": "exit"' in body
         assert "hello\\n" in body
         assert "world\\n" in body
+
+    def test_nonblocking_stream_reader_preserves_partial_lines_until_finalize(self):
+        read_fd, write_fd = os.pipe()
+        reader = os.fdopen(read_fd, "r", encoding="utf-8", newline="")
+        try:
+            state = run_routes._make_nonblocking_stream_reader(reader)
+            os.write(write_fd, b"partial output")
+
+            lines, eof = run_routes._read_available_stream_lines(state)
+
+            assert lines == []
+            assert eof is False
+            assert state["pending"] == "partial output"
+
+            os.close(write_fd)
+            write_fd = None
+
+            lines, eof = run_routes._read_available_stream_lines(state, finalize=True)
+
+            assert lines == ["partial output"]
+            assert eof is True
+            assert state["pending"] == ""
+        finally:
+            if write_fd is not None:
+                os.close(write_fd)
+            reader.close()
 
     def test_run_returns_500_when_spawn_fails(self):
         client = get_client()
@@ -371,7 +398,7 @@ class TestRunStreaming:
         finish = start + timedelta(seconds=2)
 
         class _FakeDateTime:
-            _now_values = iter([start, finish, finish])
+            _now_values = iter([start, finish, finish, finish])
 
             @staticmethod
             def now(_tz=None):

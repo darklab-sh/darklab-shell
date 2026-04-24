@@ -2,8 +2,8 @@
 Opt-in regression for the built Docker image.
 
 This suite builds a fresh image, starts the web app container, and runs every
-example command from app/conf/autocomplete.yaml through /run. Each command is
-checked against expected output recorded in
+user-facing command from the shared container smoke corpus through /run:
+autocomplete examples plus workflow steps. Each command is checked against expected output recorded in
 tests/py/fixtures/container_smoke_test-expectations.json so missing apt/pip/go/gem
 tools, broken fake-command wiring, or changed command output surface before an
 image or dependency update lands.
@@ -28,10 +28,10 @@ from pathlib import Path
 
 import pytest
 import yaml
+from commands import load_container_smoke_test_commands
 
 
 ROOT = Path(__file__).resolve().parents[2]
-AUTOCOMPLETE_FILE = ROOT / "app" / "conf" / "autocomplete.yaml"
 EXPECTATIONS_FILE = ROOT / "tests" / "py" / "fixtures" / "container_smoke_test-expectations.json"
 DEFAULT_BUILD_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_BUILD_TIMEOUT", "3600")
@@ -203,20 +203,6 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
     assert killed == [("http://example.test", "run-123")]
 
 
-def _load_autocomplete_commands() -> list[str]:
-    data = yaml.safe_load(AUTOCOMPLETE_FILE.read_text())
-    context = data.get("context", {})
-    commands: list[str] = []
-    for spec in context.values():
-        if not isinstance(spec, dict):
-            continue
-        for example in spec.get("examples") or []:
-            value = str(example.get("value", "")).strip()
-            if value:
-                commands.append(value)
-    return commands
-
-
 def _load_expectations() -> dict[str, dict[str, object]]:
     data = json.loads(EXPECTATIONS_FILE.read_text())
     records: dict[str, dict[str, object]] = {
@@ -278,7 +264,7 @@ def _collect_visible_lines(events: list[dict[str, object]], command: str) -> lis
 
 def _load_cases() -> list[dict[str, object]]:
     records = _load_expectations()
-    commands = _load_autocomplete_commands()
+    commands = load_container_smoke_test_commands()
     cases: list[dict[str, object]] = []
 
     for command in commands:
@@ -288,6 +274,14 @@ def _load_cases() -> list[dict[str, object]]:
         cases.append({"command": command, **record})
 
     return cases
+
+
+def _missing_expectation_commands() -> list[str]:
+    records = _load_expectations()
+    return [
+        command for command in load_container_smoke_test_commands()
+        if command not in records
+    ]
 
 
 def _selected_commands_from_env() -> list[str]:
@@ -458,9 +452,9 @@ def container_smoke_test():
         pytest.skip("set RUN_CONTAINER_SMOKE_TEST=1 to run the container smoke suite")
     _require_docker()
 
-    image_tag = f"darklab-shell-test:{uuid.uuid4().hex[:12]}"
-    runtime_image_tag = f"darklab-shell-test-runtime:{uuid.uuid4().hex[:12]}"
-    project = f"darklab-shell-test-{uuid.uuid4().hex[:8]}"
+    image_tag = f"darklab_shell-test:{uuid.uuid4().hex[:12]}"
+    runtime_image_tag = f"darklab_shell-test-runtime:{uuid.uuid4().hex[:12]}"
+    project = f"darklab_shell-test-{uuid.uuid4().hex[:8]}"
     reach_host = _docker_reach_host()
 
     STANDALONE_COMPOSE = ROOT / "docker-compose.yml"
@@ -476,7 +470,7 @@ def container_smoke_test():
             "command_timeout_seconds: 120\n"
         )
 
-        runtime_container_name = f"darklab-shell-test-runtime-{uuid.uuid4().hex[:12]}"
+        runtime_container_name = f"darklab_shell-test-runtime-{uuid.uuid4().hex[:12]}"
 
         # Load the base compose file and apply test-specific overrides:
         # - unique image tag so the build doesn't overwrite the dev image
@@ -584,6 +578,14 @@ if _SELECTED_COMMANDS:
 
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
+
+
+def test_container_smoke_test_expectations_cover_all_user_facing_commands(container_smoke_test):
+    missing = _missing_expectation_commands()
+    assert not missing, (
+        "Container smoke test expectations are missing records for these user-facing commands:\n"
+        + "\n".join(f"- {command}" for command in missing)
+    )
 
 
 @pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))

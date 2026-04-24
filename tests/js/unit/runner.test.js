@@ -49,6 +49,58 @@ describe('_formatElapsed', () => {
   })
 })
 
+describe('stall recovery notices', () => {
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  it('restores the tab to running if stream activity resumes after a stall', () => {
+    vi.useFakeTimers()
+    const appendLine = vi.fn()
+    const {
+      _resetStalledTimeout,
+      _recoverStalledRun,
+      status,
+      runBtn,
+      tabs,
+    } = loadRunnerFns({
+      tabs: [{
+        id: 'tab-1',
+        st: 'running',
+        runId: 'run-1',
+        historyRunId: 'run-1',
+        killed: false,
+        pendingKill: false,
+        runStart: Date.now() - 5_000,
+      }],
+      appendLine,
+    })
+
+    _resetStalledTimeout('tab-1')
+    vi.advanceTimersByTime(45_000)
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[connection stalled — no stream activity arrived from the server for 45s]',
+      'denied',
+      'tab-1',
+    )
+    expect(status.textContent).toBe('IDLE')
+    expect(tabs[0].st).toBe('fail')
+    expect(runBtn.disabled).toBe(false)
+
+    _recoverStalledRun('tab-1')
+
+    expect(appendLine).toHaveBeenCalledWith(
+      '[connection re-established — live output resumed]',
+      'exit-ok',
+      'tab-1',
+    )
+    expect(status.textContent).toBe('RUNNING')
+    expect(tabs[0].st).toBe('running')
+    expect(runBtn.disabled).toBe(true)
+  })
+})
+
 describe('_isSyntheticGrepCommand', () => {
   it('accepts the narrow synthetic grep form', () => {
     expect(_isSyntheticGrepCommand('ping darklab.sh | grep ttl')).toBe(true)
@@ -471,6 +523,9 @@ function loadRunnerFns({
     restoreActiveRunsAfterReload,
     pollActiveRunsAfterReload,
     syncActiveRunTimer,
+    _resetStalledTimeout,
+    _clearStalledTimeout,
+    _recoverStalledRun,
     _getPendingKillTabId: () => pendingKillTabId,
     }`,
     `${runnerInitCode}\nsetTabs(tabs); setActiveTabId(activeTabId);`,

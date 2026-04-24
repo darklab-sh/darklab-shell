@@ -48,6 +48,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - Pressing **Enter** on a blank prompt adds a fresh prompt line without calling `/run`.
 - **Ctrl+C** is context-aware: while a command is running it opens a kill confirmation dialog; while the tab is idle it drops a new prompt line.
 - After highlighting transcript text on desktop, **ArrowUp**, **ArrowDown**, **Enter**, and **Ctrl+R** return control to the prompt without clearing the selection.
+- Desktop prompt text is selectable in place: drag selection, reverse-direction selection, double-click word selection, and copied transcript ranges all behave like normal transcript text, including prompt prefixes from historical rows.
 - While a command is running the live input prompt hides so output has full focus; once the command completes the prompt reappears immediately.
 
 **Limits:** prompt flow is per-tab; selection-preserving key routing applies to desktop only (mobile uses native touch selection).
@@ -337,17 +338,18 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ## Output Streaming and Display
 
-**Purpose:** low-latency SSE streaming with a live tail, per-line prefix toggles (timestamps and line numbers), and an explicit stall notice when the connection silently drops.
+**Purpose:** low-latency SSE streaming with a live tail, per-line prefix toggles (timestamps and line numbers), and explicit recovery cues when the live stream goes quiet and later resumes.
 
 **Behavior:**
 
 - Command output arrives line-by-line over SSE; fast commands batch flushes, slow scans stream each line as it arrives.
-- The output view follows the live tail automatically; scrolling away surfaces a tab-scoped jump-to-live / jump-to-bottom helper that disappears once the tail is rejoined.
+- The output view follows the live tail automatically, including during bursty runs that repaint quickly; only an actual user scroll-away disables follow mode and surfaces the tab-scoped jump-to-live / jump-to-bottom helper until the tail is rejoined.
 - A live elapsed run-timer sits next to the status pill while a command runs; the final elapsed time is recorded in the exit line.
 - Timestamps (elapsed or clock) and line numbers are independently toggleable from the tabbar controls (or the mobile menu); both are rendered from shared per-line prefix metadata so toggling updates existing output in place without re-fetching.
-- When the SSE connection silently drops mid-run, the shell detects the stall and shows an inline notice instead of waiting indefinitely.
+- When the SSE stream goes quiet for 45 seconds, the shell shows inline warning copy instead of waiting indefinitely with a spinning run state.
+- If the original stream later resumes, the shell prints an inline reconnection success line, restores the tab/HUD to `RUNNING`, re-enables the kill affordance, and continues streaming output in place.
 
-**Limits:** stall detection fires after 45 seconds of silence per tab; each tab has its own stall timeout so concurrent runs don't interfere.
+**Limits:** stall detection fires after 45 seconds of silence per tab; each tab has its own stall timeout so concurrent runs don't interfere. This recovery path handles a quiet stream that later resumes on the same request; it is not a separate automatic replay/reconnect transport.
 
 **Configuration:** timestamp and line-number preferences persist in browser cookies; both are off by default.
 
@@ -399,7 +401,7 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 | **STATUS** | Active tab's run state (`running` / `ok` / `fail` / `killed` / `idle`) | Coloured pill identical to the inline tab status dot |
 | **LAST EXIT** | Exit code of the most recent finished run in any tab | `0` green, nonzero red, killed red, `—` muted when no run has finished yet; dims to muted while any tab is actively running |
 | **TABS** | Total tab count, with active-run annotation (`N · M active`) when any tab is running | Amber while any tab is running, muted when no tabs are active |
-| **TRANSPORT** | SSE connection state | Auto-managed by the SSE reconnect logic |
+| **TRANSPORT** | SSE connection state | Reflects live-stream health; quiet streams can warn inline and then resume without losing the active run |
 | **LATENCY** | Round-trip time to `/status` in ms | Green `<250ms`, amber `<500ms`, red `>=500ms` |
 | **MODE** | Current shell mode indicator | Shows the active shell mode |
 | **SESSION** | Active session identity | `ANON` (muted) for UUID sessions, masked `tok_XXXX••••` (green) for named tokens — see [Session Tokens](#session-tokens) |

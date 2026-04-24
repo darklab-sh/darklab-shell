@@ -53,6 +53,10 @@
   border-color: transparent;
 }
 
+.tabs-scroll-btn.u-hidden {
+  display: none;
+}
+
 .tab {
   display: flex;
   align-items: center;

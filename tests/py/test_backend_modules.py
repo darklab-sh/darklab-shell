@@ -15,11 +15,13 @@ Run with: pytest tests/ (from the repo root)
 import gzip
 import importlib.util
 import os
+import random
 import re
 import sqlite3
 import tempfile
 import textwrap
 import unittest.mock as mock
+from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
@@ -33,6 +35,7 @@ from commands import (
     split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
     load_mobile_welcome_hints, load_autocomplete_context,
+    load_container_smoke_test_commands,
     load_allowed_commands_grouped,
     is_command_allowed, rewrite_command,
 )
@@ -40,6 +43,16 @@ from permalinks import _format_retention, _expiry_note, _permalink_error_page, _
 from run_output_store import RunOutputCapture, RUN_OUTPUT_DIR, load_full_output_entries, load_full_output_lines
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
+SEED_HISTORY_PATH = REPO_ROOT / "scripts" / "seed_history.py"
+
+
+def _load_seed_history_module():
+    spec = importlib.util.spec_from_file_location("seed_history", SEED_HISTORY_PATH)
+    assert spec is not None
+    assert spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
 
 
 # ── split_chained_commands ────────────────────────────────────────────────────
@@ -1348,6 +1361,115 @@ class TestAutocompleteContextLoading:
         assert result["man"]["argument_limit"] == 2
         man_positionals = result["man"]["arg_hints"]["__positional__"]
         assert [item["value"] for item in man_positionals] == ["curl", "ping"]
+
+    def test_container_smoke_test_commands_include_autocomplete_examples_and_workflows(self):
+        autocomplete_context = {
+            "dig": {
+                "examples": [
+                    {"value": "dig darklab.sh A", "description": "A lookup"},
+                    {"value": "dig darklab.sh MX", "description": "MX lookup"},
+                ]
+            },
+            "curl": {
+                "examples": [
+                    {"value": "curl -I https://darklab.sh", "description": "Headers"},
+                ]
+            },
+        }
+        workflows = [
+            {
+                "title": "DNS",
+                "steps": [
+                    {"cmd": "dig darklab.sh MX", "note": "Duplicate on purpose"},
+                    {"cmd": "host darklab.sh", "note": "Workflow-only command"},
+                ],
+            },
+            {
+                "title": "HTTP",
+                "steps": [
+                    {"cmd": "curl -I https://darklab.sh", "note": "Duplicate on purpose"},
+                    {"cmd": "wget -S --spider https://darklab.sh", "note": "Workflow-only command"},
+                ],
+            },
+        ]
+
+        with mock.patch("commands.load_autocomplete_context", return_value=autocomplete_context):
+            with mock.patch("commands.load_all_workflows", return_value=workflows):
+                result = load_container_smoke_test_commands()
+
+        assert result == [
+            "dig darklab.sh A",
+            "dig darklab.sh MX",
+            "curl -I https://darklab.sh",
+            "host darklab.sh",
+            "wget -S --spider https://darklab.sh",
+        ]
+
+
+class TestSeedHistoryFixtures:
+    def test_visual_flows_fixture_only_stars_two_commands(self):
+        seed_history = _load_seed_history_module()
+
+        assert seed_history.VISUAL_HISTORY_FIXTURES["visual-flows"]["star"] == 2
+
+    def test_seed_history_uses_runtime_autocomplete_examples(self):
+        seed_history = _load_seed_history_module()
+        commands_from_seed = seed_history._load_autocomplete_example_commands()
+
+        expected_examples = []
+        seen = set()
+        for spec in load_autocomplete_context().values():
+            if not isinstance(spec, dict):
+                continue
+            for example in spec.get("examples") or []:
+                if not isinstance(example, dict):
+                    continue
+                value = str(example.get("value") or "").strip()
+                if not value or value in seen:
+                    continue
+                seen.add(value)
+                expected_examples.append(value)
+
+        assert commands_from_seed == expected_examples
+        assert "bogus-command" not in commands_from_seed
+
+    def test_seed_runs_avoids_adjacent_duplicate_commands(self):
+        seed_history = _load_seed_history_module()
+
+        class _FakeConn:
+            def executemany(self, *_args, **_kwargs):
+                return None
+
+            def commit(self):
+                return None
+
+        @contextmanager
+        def _fake_db_connect():
+            yield _FakeConn()
+
+        command_pool = [
+            "dig darklab.sh +short",
+            "curl -I https://ip.darklab.sh",
+            "ping -c 4 darklab.sh",
+        ]
+
+        with mock.patch.object(
+            seed_history,
+            "_load_autocomplete_example_commands",
+            return_value=command_pool,
+        ), mock.patch.object(seed_history, "db_connect", _fake_db_connect):
+            seeded_commands = seed_history.seed_runs(
+                "tok_deadbeefdeadbeefdeadbeefdeadbeef",
+                40,
+                7,
+                random.Random(4242),
+            )
+
+        assert len(seeded_commands) == 40
+        assert all(
+            current != previous
+            for previous, current in zip(seeded_commands, seeded_commands[1:])
+        )
 
 
 # ── load_allowed_commands_grouped ─────────────────────────────────────────────

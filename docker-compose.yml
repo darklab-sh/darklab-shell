@@ -18,7 +18,7 @@ services:
       context: .
       args:
         APP_PORT: ${APP_PORT:-8888}
-    container_name: darklab-shell
+    container_name: darklab_shell
     init: true
     ports:
       - "${APP_PORT:-8888}:${APP_PORT:-8888}"

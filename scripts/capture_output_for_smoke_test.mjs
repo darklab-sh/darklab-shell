@@ -9,8 +9,7 @@ import { fileURLToPath } from 'node:url'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const ROOT = path.resolve(__dirname, '..', '..')
-const AUTOCOMPLETE_FILE = path.join(ROOT, 'app', 'conf', 'autocomplete.yaml')
-const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab-shell-container-smoke-test-corpus')
+const DEFAULT_OUT_DIR = path.join('/tmp', 'darklab_shell-container-smoke-test-corpus')
 
 function parseArgs(argv) {
   const args = {
@@ -86,7 +85,7 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') {
       console.log(`Usage: node scripts/capture_output_for_smoke_test.mjs [options]
 
-By default, commands are read from app/conf/autocomplete.yaml (context.<root>.examples[].value).
+By default, commands are read from the shared container smoke corpus: autocomplete examples plus workflow steps.
 Use --commands-file to run a specific subset instead.
 
 Options:
@@ -128,13 +127,13 @@ function loadCommands(args) {
       .filter(line => line && !line.startsWith('#'))
   }
   const script = [
-    'import yaml, json, sys',
-    "d = yaml.safe_load(open(sys.argv[1]))",
-    "ctx = d.get('context', {})",
-    "cmds = [ex['value'] for spec in ctx.values() if isinstance(spec, dict) for ex in (spec.get('examples') or []) if str(ex.get('value', '')).strip()]",
-    "print(json.dumps(cmds))",
+    'import json',
+    'import sys',
+    `sys.path.insert(0, ${JSON.stringify(path.join(ROOT, 'app'))})`,
+    'import commands',
+    'print(json.dumps(commands.load_container_smoke_test_commands()))',
   ].join('\n')
-  const output = execFileSync('python3', ['-c', script, AUTOCOMPLETE_FILE], { encoding: 'utf8' }).trim()
+  const output = execFileSync('python3', ['-c', script], { cwd: ROOT, encoding: 'utf8' }).trim()
   return JSON.parse(output)
 }
 

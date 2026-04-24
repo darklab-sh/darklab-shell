@@ -131,6 +131,7 @@ Invariants:
 - The **Tests** sub-bullet is always present, even if the value is `no new cases — {how the change was verified}`.
 - One additional child-bullet level is allowed inside labeled sub-bullets such as `Before`, `After`, `Fix`, `What`, or `Tests` when it improves scanability by splitting parallel points.
 - Use T1 only when the change is genuinely an umbrella with multiple stages or coordinated subprojects, not merely because a T2 long entry needs child bullets for clarity.
+- When sibling entries in the same changelog subsection are already using the section-specific long form, prefer that same shape for new comparable entries so the section scans consistently.
 
 #### T1 vs T2 long: which one?
 

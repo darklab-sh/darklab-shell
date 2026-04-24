@@ -5,6 +5,7 @@
 // the result will appear in the history panel once it completes.
 // Keyed by tabId so multiple concurrent tabs each have their own independent timer.
 const _stalledTimeouts = new Map();
+const _stalledRuns = new Set();
 let _activeRunPollTimer = null;
 
 // Pending terminal confirmation: used by transcript-owned yes/no flows such as
@@ -18,8 +19,10 @@ function _resetStalledTimeout(tabId) {
   _stalledTimeouts.set(tabId, setTimeout(() => {
     const t = getTab(tabId);
     if (!t || t.killed) return;  // already handled
-    appendLine('[connection stalled — command may still be running on the server]', 'notice', tabId);
-    appendLine('[check the history panel for the result once it completes]', 'notice', tabId);
+    _stalledRuns.add(tabId);
+    appendLine('[connection stalled — no stream activity arrived from the server for 45s]', 'denied', tabId);
+    appendLine('[the command may still be running; if the stream resumes, live output will continue here]', 'denied', tabId);
+    appendLine('[otherwise check the history panel for the final result once it completes]', 'denied', tabId);
     if (tabId === activeTabId) setStatus('fail');
     setTabStatus(tabId, 'fail');
     stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId);
@@ -29,6 +32,22 @@ function _resetStalledTimeout(tabId) {
 function _clearStalledTimeout(tabId) {
   clearTimeout(_stalledTimeouts.get(tabId));
   _stalledTimeouts.delete(tabId);
+  _stalledRuns.delete(tabId);
+}
+
+function _recoverStalledRun(tabId) {
+  if (!_stalledRuns.has(tabId)) return;
+  _stalledRuns.delete(tabId);
+  appendLine('[connection re-established — live output resumed]', 'exit-ok', tabId);
+  const t = getTab(tabId);
+  if (!t || t.killed) return;
+  if (tabId === activeTabId) {
+    setStatus('running');
+    syncActiveRunTimer(tabId);
+  }
+  setTabStatus(tabId, 'running');
+  _setRunButtonDisabled(true);
+  showTabKillBtn(tabId);
 }
 
 // ── Status pill ──
@@ -1475,6 +1494,7 @@ function submitCommand(rawCmd) {
     function read() {
       reader.read().then(({ done, value }) => {
         if (done) { _clearStalledTimeout(tabId); stopTimer(); _setRunButtonDisabled(false); hideTabKillBtn(tabId); return; }
+        _recoverStalledRun(tabId);
         _resetStalledTimeout(tabId);
         buffer += decoder.decode(value, { stream: true });
         const parts = buffer.split('\n\n');

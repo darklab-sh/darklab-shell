@@ -234,6 +234,10 @@ header .version {
   margin-top: 0;
 }
 
+.shell-prompt-wrap.u-hidden {
+  display: none;
+}
+
 .shell-prompt-line {
   flex: 1;
   min-width: 0;
@@ -541,7 +545,6 @@ body.mobile-terminal-mode.mobile-keyboard-open .ac-dropdown {
 .prompt-prefix {
   color: var(--blue);
   margin-right: 10px;
-  user-select: none;
   font-weight: 700;
   font-size: var(--terminal-font-size);
   text-shadow: 0 0 6px color-mix(in srgb, var(--blue) 12%, transparent);

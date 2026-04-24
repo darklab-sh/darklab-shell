@@ -22,6 +22,7 @@ import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
+import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
 
 // Keystroke delay — intentionally closer to a real person than a script.
 const TYPE_DELAY_MS = 62
@@ -158,6 +159,14 @@ test('demo', async ({ page }) => {
   test.skip(!process.env.RUN_DEMO, 'set RUN_DEMO=1 to record the demo (use scripts/record_demo.sh)')
   test.setTimeout(300_000)
 
+  await page.addInitScript((token) => {
+    try {
+      localStorage.setItem('session_token', token)
+    } catch (_) {
+      // Ignore storage failures in non-standard contexts.
+    }
+  }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+
   // ── Frame capture setup ───────────────────────────────────────────────────
   const FRAMES_DIR = process.env.DEMO_FRAMES_DIR || '/tmp/darklab_shell-demo-frames'
   try {
@@ -188,7 +197,11 @@ test('demo', async ({ page }) => {
   // ── Boot ──────────────────────────────────────────────────────────────────
   await page.goto('/', { waitUntil: 'domcontentloaded' })
   await expect(page.locator('.terminal-wrap')).toBeVisible()
-  await assertVisualFlowGuardrails(page, { mode: 'desktop' })
+  await assertVisualFlowGuardrails(page, {
+    mode: 'desktop',
+    requireSeededHistory: true,
+    expectedSessionToken: process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN,
+  })
 
   // Start the capture loop only after the terminal is visible so the first
   // captured frame shows real UI rather than the blank pre-navigation page.

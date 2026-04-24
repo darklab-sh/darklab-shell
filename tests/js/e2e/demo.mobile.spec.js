@@ -27,6 +27,7 @@ import { test, expect } from '@playwright/test'
 import { ensurePromptReady } from './helpers.js'
 import { buildVisualHistoryPayload } from './visual_history_fixture.js'
 import { assertVisualFlowGuardrails } from './visual_guardrails.js'
+import { CAPTURE_SESSION_TOKEN } from '../../../config/playwright.visual.contracts.js'
 
 const __dir = dirname(fileURLToPath(import.meta.url))
 const KEYBOARD_SRC = `data:image/png;base64,${readFileSync(resolve(__dir, 'fixtures/ios-keyboard-dark.png')).toString('base64')}`
@@ -224,6 +225,14 @@ test('demo-mobile', async ({ page }) => {
   )
   test.setTimeout(300_000)
 
+  await page.addInitScript((token) => {
+    try {
+      localStorage.setItem('session_token', token)
+    } catch (_) {
+      // Ignore storage failures in non-standard contexts.
+    }
+  }, process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN)
+
   // ── Frame capture setup ───────────────────────────────────────────────────
   // page.screenshot() respects deviceScaleFactor (returns 1290×2796 for a
   // 430×932 viewport at deviceScaleFactor: 3). Playwright's built-in video
@@ -285,7 +294,11 @@ test('demo-mobile', async ({ page }) => {
   }, DEMO_TOP_SAFE_AREA_PX)
 
   await expect(page.locator('#mobile-composer')).toBeVisible()
-  await assertVisualFlowGuardrails(page, { mode: 'mobile' })
+  await assertVisualFlowGuardrails(page, {
+    mode: 'mobile',
+    requireSeededHistory: true,
+    expectedSessionToken: process.env.DEMO_SESSION_TOKEN || CAPTURE_SESSION_TOKEN,
+  })
 
   // Start the capture loop only after the UI is visible so the first captured
   // frame shows real content rather than the blank pre-navigation page.

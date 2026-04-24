@@ -713,8 +713,14 @@ def _builtin_workflows():
             "steps": [
                 {"cmd": "dig darklab.sh MX",       "note": "Which mail servers handle email for this domain?"},
                 {"cmd": "dig darklab.sh TXT",      "note": "Check SPF, DKIM policy, and other TXT records."},
-                {"cmd": "nc -zv darklab.sh 25",    "note": "Is SMTP port 25 open?"},
-                {"cmd": "nc -zv darklab.sh 587",   "note": "Is the submission port 587 open?"},
+                {"cmd": "dig _dmarc.darklab.sh TXT",
+                 "note": "Check the DMARC policy published for the domain."},
+                {"cmd": "dig @8.8.8.8 darklab.sh MX",
+                 "note": (
+                     "Confirm a public resolver sees the same MX records. If you want to test "
+                     "SMTP ports with nc, target one of the MX hosts returned above rather than "
+                     "the apex domain."
+                 )},
             ],
         },
         {
@@ -758,7 +764,7 @@ def _builtin_workflows():
                 },
                 {
                     "cmd": (
-                        "gobuster dir -u https://darklab.sh "
+                        "gobuster dir -u https://tor-stats.darklab.sh "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Run a second directory check with a different scanner.",
@@ -1214,6 +1220,38 @@ def load_autocomplete_context():
     root, ext = os.path.splitext(AUTOCOMPLETE_CONTEXT_FILE)
     local = _load_autocomplete_config(f"{root}.local{ext}")
     return _merge_autocomplete_context(base.get("context", {}), local.get("context", {}))
+
+
+def load_container_smoke_test_commands():
+    """Return the user-facing smoke-test corpus from autocomplete examples and workflows."""
+    commands = []
+    seen = set()
+
+    for spec in load_autocomplete_context().values():
+        if not isinstance(spec, dict):
+            continue
+        for example in spec.get("examples") or []:
+            if not isinstance(example, dict):
+                continue
+            command = str(example.get("value") or "").strip()
+            if not command or command in seen:
+                continue
+            seen.add(command)
+            commands.append(command)
+
+    for workflow in load_all_workflows():
+        if not isinstance(workflow, dict):
+            continue
+        for step in workflow.get("steps") or []:
+            if not isinstance(step, dict):
+                continue
+            command = str(step.get("cmd") or "").strip()
+            if not command or command in seen:
+                continue
+            seen.add(command)
+            commands.append(command)
+
+    return commands
 
 
 def split_command_argv(command: str) -> list[str]:

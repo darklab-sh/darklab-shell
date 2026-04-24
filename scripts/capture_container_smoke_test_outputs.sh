@@ -5,11 +5,13 @@
 # Run this against a known-good running container whenever the expected
 # output for one or more Container Smoke Test commands changes intentionally —
 # for example, after a tool upgrade that changes help text, a new command
-# added to app/conf/autocomplete.yaml, or a rewrite rule that alters output.
+# added to app/conf/autocomplete.yaml, added to workflows, or a rewrite rule
+# that alters output.
 #
 # It drives a live browser session against the running dev container
 # (default: http://localhost:8888) and records the visible output of every
-# command from app/conf/autocomplete.yaml examples into
+# user-facing command from the shared smoke corpus (autocomplete examples plus
+# workflow steps) into
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #
 # Rate limiting: the capture script runs every Container Smoke Test command in sequence
@@ -35,7 +37,7 @@
 #        scripts/container_smoke_test.sh
 #
 # Usage:
-#   scripts/capture_container_smoke_test_outputs.sh                        # capture all examples from autocomplete.yaml
+#   scripts/capture_container_smoke_test_outputs.sh                        # capture the full shared smoke corpus
 #   scripts/capture_container_smoke_test_outputs.sh --commands-file /tmp/missing.txt  # capture a specific subset
 #   scripts/capture_container_smoke_test_outputs.sh --start-from-command "nmap -h"
 #   scripts/capture_container_smoke_test_outputs.sh --base-url http://localhost:9000

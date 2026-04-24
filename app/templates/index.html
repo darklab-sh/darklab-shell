@@ -234,7 +234,7 @@
         </button>
       </div>
 
-      <a class="menu-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
+      <a class="menu-footer" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </div>
   </div>
 </div>
@@ -244,17 +244,17 @@
 </div>
 
 <div class="shell-root">
-  <aside class="rail" id="rail" aria-label="Shell sidebar">
+  <aside class="rail{% if initial_rail.collapsed %} rail-collapsed{% endif %}" id="rail" aria-label="Shell sidebar" style="--rail-w: {% if initial_rail.collapsed %}44px{% else %}{{ initial_rail.width }}px{% endif %};">
     <div class="rail-header">
       <div class="rail-wordmark">
         <div class="rail-wordmark-title">{{ app_name }}</div>
         <div class="rail-wordmark-sub">{% if version %}v{{ version }} · {% endif %}isolated</div>
       </div>
-      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="Collapse sidebar" title="Collapse sidebar (Alt+\)">«</button>
+      <button id="rail-collapse-btn" class="rail-collapse-btn" type="button" aria-label="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}" title="{% if initial_rail.collapsed %}Expand sidebar (Alt+\){% else %}Collapse sidebar (Alt+\){% endif %}">{% if initial_rail.collapsed %}»{% else %}«{% endif %}</button>
     </div>
 
-    <div class="rail-split-area" id="rail-split-area">
-      <div class="rail-section rail-section-recent" id="rail-section-recent">
+    <div class="rail-split-area{% if initial_rail.recent_open and initial_rail.workflows_open %} both-open{% endif %}{% if not initial_rail.workflows_open %} workflows-closed{% endif %}" id="rail-split-area">
+      <div class="rail-section rail-section-recent{% if not initial_rail.recent_open %} closed{% endif %}" id="rail-section-recent">
         <button class="rail-section-header" id="rail-recent-header" type="button" title="Toggle Recent commands section" aria-label="Toggle Recent">
           <span class="rail-section-header-left">
             <span class="disclosure-chev" aria-hidden="true">▸</span>
@@ -265,9 +265,9 @@
         <div class="rail-section-body nice-scroll" id="rail-recent-list" aria-live="polite"></div>
       </div>
 
-      <div class="rail-splitter" id="rail-splitter" hidden></div>
+      <div class="rail-splitter" id="rail-splitter"{% if not (initial_rail.recent_open and initial_rail.workflows_open) %} hidden{% endif %}></div>
 
-      <div class="rail-section rail-section-workflows" id="rail-section-workflows">
+      <div class="rail-section rail-section-workflows{% if not initial_rail.workflows_open %} closed{% endif %}" id="rail-section-workflows">
         <button class="rail-section-header" id="rail-workflows-header" type="button" title="Toggle Workflows section" aria-label="Toggle Workflows">
           <span class="rail-section-header-left">
             <span class="disclosure-chev" aria-hidden="true">▸</span>
@@ -285,7 +285,7 @@
       <button class="rail-nav-item" data-action="theme" type="button" title="Theme selector (Alt+Shift+T)"><span class="rail-nav-glyph">◑</span><span class="rail-nav-label">theme</span></button>
       <button class="rail-nav-item" data-action="faq" type="button" title="FAQ (Alt+/)"><span class="rail-nav-glyph">?</span><span class="rail-nav-label">FAQ</span></button>
       <a class="rail-nav-item u-hidden" data-action="diag" id="rail-diag-btn" href="/diag" target="_blank" rel="noopener noreferrer" title="Operator diagnostics"><span class="rail-nav-glyph">⊕</span><span class="rail-nav-label">diag</span></a>
-      <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ app_name }}{% if version %} v{{ version }}{% endif %}</a>
+      <a class="rail-nav-version" href="{{ project_readme or '#' }}" target="_blank" rel="noopener noreferrer">{{ project_name }}{% if version %} v{{ version }}{% endif %}</a>
     </nav>
 
     <div class="rail-resize-handle" id="rail-resize-handle" title="Drag to resize"></div>
@@ -294,12 +294,12 @@
   <main class="main-col">
     <div class="terminal-bar tabbar">
       <div class="tabbar-scroll tab-scroll">
-        <button id="tabs-scroll-left" class="tabs-scroll-btn" aria-label="Scroll tabs left" title="Scroll tabs left">◀</button>
+        <button id="tabs-scroll-left" class="tabs-scroll-btn u-hidden" aria-label="Scroll tabs left" title="Scroll tabs left" aria-hidden="true">◀</button>
         <div class="tabs-bar" id="tabs-bar">
           <!-- tabs injected here -->
           <button id="new-tab-btn" title="New tab (Option+T / Alt+T)" aria-label="New tab">+</button>
         </div>
-        <button id="tabs-scroll-right" class="tabs-scroll-btn" aria-label="Scroll tabs right" title="Scroll tabs right">▶</button>
+        <button id="tabs-scroll-right" class="tabs-scroll-btn u-hidden" aria-label="Scroll tabs right" title="Scroll tabs right" aria-hidden="true">▶</button>
       </div>
       <div class="tabbar-chrome">
         <button id="search-toggle-btn" class="chrome-btn" title="Search output (Alt+S)">⌕ search</button>
@@ -325,7 +325,7 @@
       <div id="tab-panels">
         <!-- panels injected here -->
       </div>
-      <div class="prompt-wrap shell-prompt-wrap" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
+      <div class="prompt-wrap shell-prompt-wrap u-hidden" id="shell-prompt-wrap" tabindex="0" aria-label="Command input">
         <span class="prompt-prefix">{{ prompt_prefix }}</span>
         <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
           <span class="shell-prompt-text" id="shell-prompt-text"></span>

@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 887
-- `vitest`: 753
+- `pytest`: 932
+- `vitest`: 754
 - `playwright`: 200
-- total: 1,840
+- total: 1,886
 
 This document is organized in two parts:
 
@@ -195,11 +195,11 @@ The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
-Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags.
+Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags. That preset now stars only two commands so the desktop rail still shows Recent items, and its seeded commands come from the runtime autocomplete example set rather than hand-written fake commands.
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing example command from `app/conf/autocomplete.yaml` through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. It catches drift between the shell's suggested examples and actual tool behavior — renamed flags, changed output, or missing tools. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, or `autocomplete.yaml` example changes.
+`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/autocomplete.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, or missing tools. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, `autocomplete.yaml` example changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -214,6 +214,8 @@ GitLab CI exposes this as the manual `container-smoke-test` job for verifying a 
 ## History Seeding
 
 `scripts/seed_history.py` populates the history database with realistic runs for a specific session (UUID or `tok_` token). It's a manual-QA helper, not a test — use it when you want to exercise user-facing flows that only reveal themselves against a populated history: the history drawer, fuzzy history search, reverse-i-search, date/exit/star filters, and token-migration workflows.
+
+Seeded commands are pulled from the runtime autocomplete example catalog, so the generated history stays aligned with the user-facing command examples shown in the app. The seeder also avoids adjacent duplicate commands, which keeps Recent/history surfaces looking closer to a real session while still allowing duplicates across the broader run set.
 
 The script must run **inside the container** so the same SQLite version that owns the DB does the writes; it refuses to write from the host by default.
 
@@ -354,6 +356,8 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_load_all_faq_appends_custom_entries_after_builtin_items` | Checks that load all FAQ appends custom entries after builtin items. |
 | `TestThemeRegistry.test_load_all_faq_uses_project_readme_in_builtin_answer` | Checks that load all FAQ uses project readme in builtin answer. |
 | `TestThemeRegistry.test_load_all_faq_uses_config_project_readme_by_default` | Checks that load all FAQ uses the config project readme by default. |
+| `TestThemeRegistry.test_load_all_faq_clarifies_snapshot_vs_run_permalink` | Checks that the built-in FAQ explains the difference between share snapshots and run permalinks. |
+| `TestThemeRegistry.test_load_all_faq_describes_built_in_shell_features` | Checks that the built-in FAQ describes both built-in commands and the allowlisted pipe helpers. |
 | `TestPathBlockingEdgeCases.test_tmp_at_end_of_command` | Checks that /tmp at end of command. |
 | `TestPathBlockingEdgeCases.test_tmp_with_subdirectory` | Checks /tmp with subdirectory handling. |
 | `TestPathBlockingEdgeCases.test_tmp_in_url_path_allowed` | Checks that /tmp in URL path allowed. |
@@ -409,17 +413,16 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_hints_loader_ignores_blank_lines_and_comments` | Checks that hints loader ignores blank lines and comments. |
 | `TestMobileWelcomeHintLoading.test_missing_mobile_hints_file_returns_empty_list` | Checks that missing mobile hints file returns empty list. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
-| `TestAutocompleteLoading.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
-| `TestAutocompleteLoading.test_valid_entries_returned` | Checks valid entries returned handling. |
-| `TestAutocompleteLoading.test_comment_lines_filtered` | Checks comment lines filtered handling. |
-| `TestAutocompleteLoading.test_blank_lines_filtered` | Checks blank lines filtered handling. |
-| `TestAutocompleteLoading.test_local_overlay_appends_unique_entries` | Checks that local overlay appends unique entries. |
+| `TestAutocompleteContextLoading.test_missing_context_file_returns_empty_mapping` | Verifies that a missing autocomplete context file resolves to an empty mapping instead of throwing. |
+| `TestAutocompleteContextLoading.test_valid_context_entries_are_normalized` | Verifies that valid autocomplete YAML entries normalize into the runtime flag, value-hint, and pipe metadata shape. |
+| `TestAutocompleteContextLoading.test_local_overlay_merges_unique_context_entries` | Verifies that local autocomplete overlays append only new flags, value-taking tokens, and pipe metadata without duplicating base entries. |
 | `TestAutocompleteContextLoading.test_value_hints_preserve_insert_with_trailing_whitespace` | Verifies that the Python normalizer preserves an author-supplied `insert` including trailing whitespace (so `"set "` stays intact), retains `<placeholder>` value hints verbatim with no synthetic insert text, and omits `insertValue` from the normalized output when YAML does not set it. |
 | `TestAutocompleteContextLoading.test_arguments_and_subcommands_normalize_into_runtime_hints` | Verifies that the readable autocomplete schema (`arguments`, `subcommands`, and `pipe`) compiles into the normalized runtime hint shape consumed by the frontend. |
 | `TestAutocompleteContextLoading.test_value_taking_flags_preserve_case_distinct_tokens` | Verifies that value-taking flags remain distinct when they differ only by case, such as `-W` and `-w`. |
 | `TestAutocompleteContextLoading.test_local_overlay_preserves_case_distinct_value_taking_flags` | Verifies that the local autocomplete overlay preserves case-distinct value-taking flags instead of collapsing them during merge. |
 | `TestAutocompleteContextLoading.test_local_overlay_merges_arguments_and_subcommands_without_duplication` | Verifies that local autocomplete overlays can add new `arguments` and `subcommands` without duplicating or collapsing the base normalized runtime hint buckets. |
 | `TestAutocompleteContextLoading.test_local_overlay_can_override_argument_limit` | Verifies that a local autocomplete overlay can replace a command's `argument_limit` while still merging its argument suggestions correctly. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_autocomplete_examples_and_workflows` | Verifies that the shared container smoke corpus includes both autocomplete examples and workflow commands while deduplicating overlaps in stable order. |
 | `TestAllowedCommandsGroupingBasics.test_missing_file_returns_none` | Checks that missing file returns none. |
 | `TestAllowedCommandsGroupingBasics.test_commands_grouped_by_header` | Checks that commands grouped by header. |
 | `TestAllowedCommandsGroupingBasics.test_commands_without_header_get_empty_name` | Checks that commands without header get empty name. |
@@ -458,6 +461,9 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_legacy_runs_table_gets_session_id_column_migrated` | Checks that legacy runs table gets session id column migrated. |
 | `TestDatabaseInit.test_migrate_schema_ignores_existing_column_error` | Checks that migrate schema ignores existing column error. |
 | `TestFakeStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
+| `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
+| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_autocomplete_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the runtime autocomplete examples and does not carry fake commands such as `bogus-command`. |
+| `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
 
 #### `test_container_smoke_test.py`
 
@@ -467,6 +473,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_parse_compose_port_output` | Checks that parse compose port output. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
+| `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that container smoke test command matches expected output. |
 
 #### `test_logging.py`
@@ -858,6 +865,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_run_filters_output_through_chained_synthetic_helpers` | Checks that chained synthetic helpers stream and persist the final post-processed output instead of the intermediate lines. |
 | `TestRunStreaming.test_run_rejects_invalid_synthetic_grep_regex` | Checks that invalid synthetic `grep -E` regexes fail as user-facing errors. |
 | `TestRunStreaming.test_run_emits_timeout_notice_when_command_exceeds_limit` | Checks that run emits timeout notice when command exceeds limit. |
+| `TestRunStreaming.test_nonblocking_stream_reader_preserves_partial_lines_until_finalize` | Checks that the nonblocking stream reader buffers partial lines until a newline or finalize flush completes them. |
 | `TestRunStreaming.test_run_still_exits_when_history_save_fails` | Checks that run still exits when history save fails. |
 | `TestRunStreaming.test_run_waits_before_emitting_exit_code` | Checks that successful runs wait before emitting the final exit code when the subprocess return code is still pending at EOF. |
 | `TestRunStreaming.test_run_cleans_up_stdout_and_waits_when_streaming_errors` | Checks that stream errors still close stdout and wait on the subprocess. |
@@ -1554,6 +1562,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `clears stale failed tab and HUD state after a successful client-side built-in` | Verifies that successful client-side built-ins reset stale failed tab indicators, tab exit codes, and HUD state. |
 | `setStatus shows RUNNING only while running and IDLE otherwise` | Verifies that setStatus shows RUNNING only while running and IDLE otherwise. |
 | `doKill sends /kill immediately when runId is already known` | Verifies that doKill sends /kill immediately when runId is already known. |
+| `restores the tab to running if stream activity resumes after a stall` | Verifies that stalled-run recovery returns the tab and HUD to the running state when the original stream resumes. |
 | `restoreActiveRunsAfterReload marks restored tabs as running placeholders` | Verifies that reload continuity restores running placeholder tabs with preserved run IDs and command labels. |
 | `restoreActiveRunsAfterReload does not overwrite a restored non-running tab` | Verifies that active-run reconnect creates a separate tab instead of clobbering an already-restored idle tab. |
 | `pollActiveRunsAfterReload restores a completed reconnected run through history` | Verifies that a reconnected placeholder tab swaps into the saved history view when the active run disappears. |
@@ -2161,7 +2170,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 
 | Test | Description |
 | --- | --- |
-| `a stalled SSE stream shows the recovery notice and clears the running state` | Verifies that a stalled SSE stream shows the recovery notice and clears the running state. |
+| `a stalled SSE stream shows the recovery notice and clears the running state` | Verifies that a stalled SSE stream shows the warning copy, then restores the tab to running if stream activity resumes. |
 
 #### `search.spec.js`
 
@@ -2365,13 +2374,13 @@ The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-com
 
 #### Updating expectations
 
-When example commands are added to `autocomplete.yaml` or a tool's output changes intentionally, run the capture script to record a fresh baseline:
+When user-facing smoke-test commands change intentionally, run the capture script to record a fresh baseline:
 
 ```bash
 ./scripts/capture_container_smoke_test_outputs.sh
 ```
 
-This launches a browser session against the running container (`http://localhost:8888` by default), runs every example command from `app/conf/autocomplete.yaml`, and writes the raw output files to `/tmp/darklab-shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
+This launches a browser session against the running container (`http://localhost:8888` by default), runs every command from the shared smoke corpus (autocomplete examples plus workflow steps), and writes the raw output files to `/tmp/darklab_shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
 
 The capture script does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`. Use the captured output files as a reference to write or update the expected text snippets in that file manually, then re-run the smoke test to confirm.
 
@@ -2385,9 +2394,9 @@ To capture only a specific subset (e.g. newly added examples or commands that dr
 
 | Flag | Description |
 | --- | --- |
-| `--commands-file <path>` | Plain-text file of commands to capture (one per line, `#` comments ignored). Default: all examples from `autocomplete.yaml`. |
+| `--commands-file <path>` | Plain-text file of commands to capture (one per line, `#` comments ignored). Default: the full shared smoke corpus. |
 | `--base-url <url>` | App URL to connect to. Default: `http://localhost:8888`. |
-| `--out-dir <dir>` | Directory to write captured `.txt` files. Default: `/tmp/darklab-shell-container-smoke-test-corpus`. |
+| `--out-dir <dir>` | Directory to write captured `.txt` files. Default: `/tmp/darklab_shell-container-smoke-test-corpus`. |
 | `--start-from-command <cmd>` | Skip all commands before the first exact match, to resume an interrupted run. |
 | `--pause-ms <ms>` | Pause between commands to avoid rate limits. Default: `500`. |
 | `--settle-ms <ms>` | Minimum wait after a command finishes before saving output. Default: `2500` (longer for heavy tools like `nmap`). |
@@ -2399,20 +2408,22 @@ To capture only a specific subset (e.g. newly added examples or commands that dr
 | `--no-clear-between` | Leave output in the tab between commands instead of clearing. |
 | `--keep-browser-open` | Leave the browser open after capture finishes. |
 
-#### Keeping expectations in sync with autocomplete.yaml
+#### Keeping expectations in sync with the smoke corpus
 
-The expectations file only covers commands that appear in `autocomplete.yaml` examples. To check which examples are missing expectations:
+The expectations file should cover every command in the shared smoke corpus. To check which surfaced commands are missing expectations:
 
 ```python
 python3 -c "
-import yaml, json
-examples = [ex['value'] for spec in yaml.safe_load(open('app/conf/autocomplete.yaml'))['context'].values() if isinstance(spec, dict) for ex in (spec.get('examples') or [])]
+import json, sys
+sys.path.insert(0, 'app')
+import commands
+examples = commands.load_container_smoke_test_commands()
 recorded = {r['command'] for r in json.load(open('tests/py/fixtures/container_smoke_test-expectations.json'))['records']}
 [print(c) for c in examples if c not in recorded]
 "
 ```
 
-Any entry in `container_smoke_test-expectations.json` whose command does not appear in `autocomplete.yaml` examples is stale and should be removed.
+Any entry in `container_smoke_test-expectations.json` whose command does not appear in the shared smoke corpus is stale and should be removed.
 
 ### History Seeding Reference
 
@@ -2445,7 +2456,7 @@ docker compose exec -T shell python - --new-token --count 40 --star 5 < scripts/
 | `--uuid <uuid>` | Seed an anonymous UUID session. |
 | `--count N` | Number of runs to insert (default 70). |
 | `--days N` | Spread the inserted runs across the last N days (default 7). |
-| `--star N` | Star this many distinct seeded commands (default 4, 0 to skip). |
+| `--star N` | Star this many distinct seeded commands (default 4, 0 to skip). The named `visual-flows` fixture overrides this to `2` so capture/demo sessions keep both stars and Recent rows visible in the desktop rail. |
 | `--seed N` | Fix the RNG seed for reproducible runs. |
 | `--allow-host-write` | Bypass the host-write refusal. Only use if you understand the FTS5 cross-version corruption risk and the container is not running. |
 

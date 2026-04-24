@@ -384,7 +384,7 @@ const scenes = [
       await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ hostname' },
-        { text: 'darklab-shell' },
+        { text: 'darklab_shell' },
         { text: '[process exited with code 0]', cls: 'exit-ok' },
       ])
       await page.evaluate(() => {
@@ -441,9 +441,12 @@ const scenes = [
     run: async (page, themeName) => {
       await freshCaptureHome(page, { themeName })
       await runCommand(page, 'hostname')
-      await waitForHistoryRuns(page, 1)
-      await openHistory(page)
-      await page.locator('.history-entry').first().locator('[data-action="permalink"]').click()
+      await openHistoryWithEntries(page)
+      await page
+        .locator('#history-list .history-entry:not(.history-entry-snapshot)')
+        .first()
+        .locator('[data-action="permalink"]')
+        .click()
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

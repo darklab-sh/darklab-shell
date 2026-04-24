@@ -108,7 +108,7 @@
   group: "advanced"
   out: "scan common web ports quickly with a bounded rate"
 
-- cmd: "gobuster dir -u https://darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
+- cmd: "gobuster dir -u https://tor-stats.darklab.sh -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
   group: "web"
   out: "brute force directories with an installed wordlist"
 

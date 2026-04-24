@@ -172,7 +172,7 @@ const scenes = [
       await freshCaptureHome(page, { themeName })
       await seedOutput(page, [
         { text: '$ hostname' },
-        { text: 'darklab-shell' },
+        { text: 'darklab_shell' },
         { text: '[process exited with code 0]', cls: 'exit-ok' },
       ])
       await page.evaluate(() => {
@@ -389,7 +389,13 @@ const scenes = [
       await runCommandMobile(page, 'hostname')
       await waitForHistoryRuns(page, 1)
       await openRecentsSheet(page)
-      await page.locator('#mobile-recents-list .sheet-item').first().locator('.sheet-item-action', { hasText: 'permalink' }).click()
+      const runItem = page
+        .locator('#mobile-recents-list .sheet-item')
+        .filter({
+          has: page.locator('.sheet-item-action', { hasText: 'permalink' }),
+        })
+        .first()
+      await runItem.locator('.sheet-item-action', { hasText: 'permalink' }).click()
       const copied = await page.evaluate(() => window.__clipboardText || '')
       await page.goto(copied, { waitUntil: 'domcontentloaded' })
       await expect(page.locator('body.permalink-page')).toBeVisible()

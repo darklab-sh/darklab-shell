@@ -169,13 +169,42 @@ export async function freshHome(
     }
   }, { sessionToken: useCaptureSession ? CAPTURE_SESSION_TOKEN : '' })
   await page.reload({ waitUntil: 'domcontentloaded' })
+  await page.waitForFunction(() => {
+    if (typeof applyThemeSelection !== 'function') return false
+    const registry = window.ThemeRegistry
+    return Boolean(registry && Array.isArray(registry.themes))
+  }, { timeout: 10_000 })
   if (themeName) {
-    await page.evaluate((name) => {
-      if (typeof applyThemeSelection === 'function') applyThemeSelection(name)
-    }, themeName)
-    await page.waitForFunction((name) => document.body?.dataset?.theme === name, themeName)
+    await page.waitForFunction((name) => {
+      const registry = window.ThemeRegistry
+      if (!registry || !Array.isArray(registry.themes)) return false
+      return registry.themes.some((theme) => theme && theme.name === name)
+    }, themeName, { timeout: 10_000 })
+    let themeApplied = false
+    for (let attempt = 0; attempt < 3 && !themeApplied; attempt += 1) {
+      await page.evaluate((name) => {
+        if (typeof applyThemeSelection === 'function') applyThemeSelection(name, false)
+      }, themeName)
+      try {
+        await page.waitForFunction(
+          (name) => document.body?.dataset?.theme === name,
+          themeName,
+          { timeout: 2_500 },
+        )
+        themeApplied = true
+      } catch (_) {
+        if (attempt < 2) await page.waitForTimeout(250)
+      }
+    }
+    if (!themeApplied) {
+      await page.waitForFunction(
+        (name) => document.body?.dataset?.theme === name,
+        themeName,
+        { timeout: 10_000 },
+      )
+    }
   } else {
-    await page.waitForFunction(() => Boolean(document.body?.dataset?.theme))
+    await page.waitForFunction(() => Boolean(document.body?.dataset?.theme), { timeout: 10_000 })
   }
   await ensurePromptReady(page, { cancelWelcome })
   if (guardrailMode) {

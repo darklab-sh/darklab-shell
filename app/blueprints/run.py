@@ -9,6 +9,7 @@ import logging
 import os
 import re
 import selectors
+import codecs
 import shutil
 import signal
 import subprocess  # nosec B404
@@ -16,6 +17,7 @@ import threading
 import uuid
 from collections import deque
 from datetime import datetime, timezone
+from typing import cast
 
 from flask import Blueprint, Response, jsonify, request
 
@@ -158,6 +160,61 @@ def _stdout_ready(stream, timeout):
         return bool(sel.select(timeout))
     finally:
         sel.close()
+
+
+def _make_nonblocking_stream_reader(stream):
+    fileno = getattr(stream, "fileno", None)
+    if not callable(fileno):
+        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
+    fd = fileno()
+    if not isinstance(fd, int):
+        return {"stream": stream, "fd": None, "decoder": None, "pending": ""}
+    fd = cast(int, fd)
+    os.set_blocking(fd, False)
+    encoding = getattr(stream, "encoding", None) or "utf-8"
+    errors = getattr(stream, "errors", None) or "replace"
+    return {
+        "fd": fd,
+        "decoder": codecs.getincrementaldecoder(encoding)(errors=errors),
+        "pending": "",
+    }
+
+
+def _read_available_stream_lines(reader_state, *, finalize=False):
+    if reader_state.get("fd") is None:
+        line = reader_state["stream"].readline()
+        if line:
+            return [line], False
+        return [], True
+
+    lines = []
+    pending = str(reader_state.get("pending", ""))
+    eof = False
+
+    while True:
+        try:
+            chunk = os.read(reader_state["fd"], 4096)
+        except BlockingIOError:
+            break
+        if not chunk:
+            eof = True
+            break
+        pending += reader_state["decoder"].decode(chunk)
+        split = pending.splitlines(keepends=True)
+        if split and not split[-1].endswith(("\n", "\r")):
+            pending = split.pop()
+        else:
+            pending = ""
+        lines.extend(split)
+
+    if finalize:
+        pending += reader_state["decoder"].decode(b"", final=True)
+        if pending:
+            lines.append(pending)
+            pending = ""
+
+    reader_state["pending"] = pending
+    return lines, eof
 
 
 def _cleanup_proc_stream(proc):
@@ -620,6 +677,7 @@ def run_command():
             run_started_dt = datetime.fromisoformat(run_started)
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
+            stream_reader = _make_nonblocking_stream_reader(proc.stdout)
             while True:
                 if COMMAND_TIMEOUT:
                     elapsed = (datetime.now(timezone.utc) - run_started_dt).total_seconds()
@@ -649,8 +707,10 @@ def run_command():
                         })
                         break
                 if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
-                    line = proc.stdout.readline()
-                    if line:
+                    lines, eof = _read_available_stream_lines(stream_reader)
+                    if not lines and eof:
+                        break
+                    for line in lines:
                         filtered_lines = postfilter.process_output_line(line)
                         for filtered_line in filtered_lines:
                             line_dt = datetime.now(timezone.utc)
@@ -659,12 +719,20 @@ def run_command():
                                 ts_clock=line_dt.strftime("%H:%M:%S"),
                                 ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                             )
-                    else:
-                        break
                 else:
                     if proc.poll() is not None:
                         break
 
+            trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
+            for line in trailing_lines:
+                filtered_lines = postfilter.process_output_line(line)
+                for filtered_line in filtered_lines:
+                    line_dt = datetime.now(timezone.utc)
+                    capture.add_line(
+                        filtered_line,
+                        ts_clock=line_dt.strftime("%H:%M:%S"),
+                        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                    )
             for filtered_line in postfilter.finalize_output_lines():
                 line_dt = datetime.now(timezone.utc)
                 capture.add_line(
@@ -706,6 +774,7 @@ def run_command():
 
             if proc.stdout is None:
                 raise RuntimeError("Process stdout pipe was not created")
+            stream_reader = _make_nonblocking_stream_reader(proc.stdout)
             while True:
                 # Check timeout at the top of every iteration so it fires even
                 # during continuous output, not only during idle heartbeat periods.
@@ -732,8 +801,11 @@ def run_command():
                         break
                 # Wait up to HEARTBEAT_INTERVAL seconds for output
                 if _stdout_ready(proc.stdout, HEARTBEAT_INTERVAL):
-                    line = proc.stdout.readline()
-                    if line:
+                    lines, eof = _read_available_stream_lines(stream_reader)
+                    if not lines and eof:
+                        # EOF — process has finished
+                        break
+                    for line in lines:
                         filtered_lines = postfilter.process_output_line(line)
                         for filtered_line in filtered_lines:
                             line_dt = datetime.now(timezone.utc)
@@ -743,9 +815,6 @@ def run_command():
                                 ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
                             )
                             yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
-                    else:
-                        # EOF — process has finished
-                        break
                 else:
                     # No output within the interval — send a heartbeat comment
                     # to keep nginx and the browser from treating the connection as idle
@@ -753,6 +822,17 @@ def run_command():
                         break
                     yield ": heartbeat\n\n"
 
+            trailing_lines, _ = _read_available_stream_lines(stream_reader, finalize=True)
+            for line in trailing_lines:
+                filtered_lines = postfilter.process_output_line(line)
+                for filtered_line in filtered_lines:
+                    line_dt = datetime.now(timezone.utc)
+                    capture.add_line(
+                        filtered_line,
+                        ts_clock=line_dt.strftime("%H:%M:%S"),
+                        ts_elapsed=f"+{(line_dt - run_started_dt).total_seconds():.1f}s",
+                    )
+                    yield f"data: {json.dumps({'type': 'output', 'text': filtered_line})}\n\n"
             for filtered_line in postfilter.finalize_output_lines():
                 line_dt = datetime.now(timezone.utc)
                 capture.add_line(

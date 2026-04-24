@@ -295,6 +295,7 @@ function _refreshFollowingOutputsAfterLayout() {
 function _maybeMountDeferredPrompt(tabId) {
   const tab = getTab(tabId);
   if (!tab || !tab.deferPromptMount || tab.st === 'running') return;
+  if (typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) return;
   const state = _pendingOutputBatches.get(tabId);
   if (state && (state.scheduled || state.items.length > 0)) return;
   tab.deferPromptMount = false;

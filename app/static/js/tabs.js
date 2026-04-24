@@ -9,6 +9,7 @@ const _TOUCH_TAB_DRAG_THRESHOLD = 14;
 const _TOUCH_TAB_DRAG_HOLD_MS = 180;
 const _POINTER_TAB_DRAG_THRESHOLD = 6;
 const _RUNNING_LABEL_DELAY_MS = 500;
+const _OUTPUT_USER_SCROLL_GRACE_MS = 800;
 
 function _syncTabDraggable(tab) {
   if (!tab) return;
@@ -64,6 +65,12 @@ function _getTabOutputEl(id) {
   return _getTabPanelEl(id)?.querySelector('.output') || null;
 }
 
+function _markOutputUserScrollIntent(id) {
+  const tab = getTab(id);
+  if (!tab) return;
+  tab.outputUserScrollUntil = Date.now() + _OUTPUT_USER_SCROLL_GRACE_MS;
+}
+
 
 function _clearTabDropIndicators() {
   if (!tabsBar) return;
@@ -88,10 +95,18 @@ function updateTabScrollButtons() {
   if (!leftBtn || !rightBtn || !tabsBar) return;
   const maxScroll = Math.max(0, tabsBar.scrollWidth - tabsBar.clientWidth);
   if (maxScroll <= 1) {
+    leftBtn.classList.add('u-hidden');
+    rightBtn.classList.add('u-hidden');
+    leftBtn.setAttribute('aria-hidden', 'true');
+    rightBtn.setAttribute('aria-hidden', 'true');
     leftBtn.disabled = true;
     rightBtn.disabled = true;
     return;
   }
+  leftBtn.classList.remove('u-hidden');
+  rightBtn.classList.remove('u-hidden');
+  leftBtn.setAttribute('aria-hidden', 'false');
+  rightBtn.setAttribute('aria-hidden', 'false');
   leftBtn.disabled = tabsBar.scrollLeft <= 1;
   rightBtn.disabled = tabsBar.scrollLeft >= (maxScroll - 1);
 }
@@ -367,6 +382,7 @@ function bindTabDragReorder(tab, id) {
 function unmountShellPrompt() {
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const prevParent = shellPromptWrap.parentElement;
+  shellPromptWrap.classList.add('u-hidden');
   if (shellPromptWrap.parentElement) shellPromptWrap.remove();
   if (prevParent && prevParent.classList && prevParent.classList.contains('output') && typeof syncOutputPrefixes === 'function') {
     syncOutputPrefixes(prevParent);
@@ -378,6 +394,10 @@ function mountShellPrompt(tabId, force = false) {
   // prompt state continuous when switching tabs instead of cloning inputs.
   if (typeof shellPromptWrap === 'undefined' || !shellPromptWrap) return;
   const mobileMode = !!(document.body && document.body.classList.contains('mobile-terminal-mode'));
+  if (!force && typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) {
+    unmountShellPrompt();
+    return;
+  }
   if (!force && !mobileMode && _welcomeBootPending) {
     unmountShellPrompt();
     return;
@@ -408,6 +428,7 @@ function mountShellPrompt(tabId, force = false) {
   if (prevParent !== out) {
     out.appendChild(shellPromptWrap);
   }
+  shellPromptWrap.classList.remove('u-hidden');
   out.scrollTop = out.scrollHeight;
   if (prevParent && prevParent.classList && prevParent.classList.contains('output') && typeof syncOutputPrefixes === 'function') {
     syncOutputPrefixes(prevParent);
@@ -622,10 +643,21 @@ function createTab(label) {
 
   const { panel, output: outputEl, terminalBody } = _createTabPanel(id);
   if (outputEl) {
+    const markUserScrollIntent = () => _markOutputUserScrollIntent(id);
+    outputEl.addEventListener('wheel', markUserScrollIntent, { passive: true });
+    outputEl.addEventListener('touchstart', markUserScrollIntent, { passive: true });
+    outputEl.addEventListener('pointerdown', markUserScrollIntent, { passive: true });
     outputEl.addEventListener('scroll', () => {
       const t = getTab(id);
       if (!t || t.suppressOutputScrollTracking) return;
-      t.followOutput = _isOutputAtTail(outputEl);
+      const atTail = _isOutputAtTail(outputEl);
+      const userScrolling = Date.now() <= Number(t.outputUserScrollUntil || 0);
+      if (!userScrolling && t.st === 'running' && t.followOutput !== false) {
+        if (atTail) t.followOutput = true;
+        updateOutputFollowButton(id);
+        return;
+      }
+      t.followOutput = atTail;
       updateOutputFollowButton(id);
     }, { passive: true });
   }
@@ -688,6 +720,7 @@ function createTab(label) {
     fullOutputAvailable: false,
     fullOutputLoaded: false,
     followOutput: true,
+    outputUserScrollUntil: 0,
     suppressOutputScrollTracking: false,
     deferPromptMount: false,
     closing: false,
@@ -849,8 +882,13 @@ function setTabStatus(id, st) {
   }
   _renderTabLabel(id);
   if (id === activeTabId) {
-    if (st === 'running') unmountShellPrompt();
-    else mountShellPrompt(id);
+    if (typeof _tabSessionRestoreInProgress !== 'undefined' && _tabSessionRestoreInProgress) {
+      unmountShellPrompt();
+    } else if (st === 'running') {
+      unmountShellPrompt();
+    } else {
+      mountShellPrompt(id);
+    }
     if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   }
   updateOutputFollowButton(id);

@@ -209,4 +209,4 @@ docker-build:
     - when: manual
       allow_failure: true
   script:
-    - docker build -t darklab-shell:$CI_COMMIT_SHA .
+    - docker build -t darklab_shell:$CI_COMMIT_SHA .

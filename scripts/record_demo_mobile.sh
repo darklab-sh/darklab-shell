@@ -33,6 +33,15 @@ ROOT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
 BASE_URL="${DEMO_BASE_URL:-http://localhost:8888}"
 FRAMES_DIR="${DEMO_FRAMES_DIR:-/tmp/darklab_shell-mobile-demo-frames}"
 PLAYWRIGHT_OUTPUT_DIR="${DEMO_PLAYWRIGHT_OUTPUT_DIR:-/tmp/darklab_shell-mobile-demo-output}"
+DEMO_HISTORY_FIXTURE="${DEMO_HISTORY_FIXTURE:-visual-flows}"
+
+generate_demo_session_token() {
+  local raw
+  raw="$(uuidgen | tr '[:upper:]' '[:lower:]' | tr -d '-')"
+  printf 'tok_%s\n' "${raw}"
+}
+
+DEMO_SESSION_TOKEN="${DEMO_SESSION_TOKEN:-$(generate_demo_session_token)}"
 
 # Parse --base-url flag
 while [[ $# -gt 0 ]]; do
@@ -59,12 +68,32 @@ echo "Container is up."
 
 cd "$ROOT_DIR"
 
+seed_demo_history() {
+  case "$BASE_URL" in
+    http://localhost:*|http://127.0.0.1:*|https://localhost:*|https://127.0.0.1:*)
+      ;;
+    *)
+      echo "Skipping demo history seed for non-local base URL: ${BASE_URL}"
+      return
+      ;;
+  esac
+
+  echo "Seeding demo history fixture (${DEMO_HISTORY_FIXTURE}) ..."
+  docker compose exec -T shell python - \
+    --fixture "$DEMO_HISTORY_FIXTURE" \
+    --token "$DEMO_SESSION_TOKEN" \
+    < "$ROOT_DIR/scripts/seed_history.py" >/dev/null
+}
+
+seed_demo_history
+
 # Clear previous frames and Playwright output
 rm -rf "$FRAMES_DIR" "$PLAYWRIGHT_OUTPUT_DIR"
 
 DEMO_BASE_URL="$BASE_URL" \
 DEMO_FRAMES_DIR="$FRAMES_DIR" \
 DEMO_PLAYWRIGHT_OUTPUT_DIR="$PLAYWRIGHT_OUTPUT_DIR" \
+DEMO_SESSION_TOKEN="$DEMO_SESSION_TOKEN" \
 RUN_DEMO=1 npx playwright test \
   --config config/playwright.demo.mobile.config.js
 

@@ -10,6 +10,7 @@ import yaml
 from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
 APP_VERSION = "1.5"
+PROJECT_NAME = "darklab_shell"
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
 

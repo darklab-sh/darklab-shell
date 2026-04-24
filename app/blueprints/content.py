@@ -57,12 +57,40 @@ def _current_theme_entry():
     )
 
 
+def _request_pref_bool(name: str, default: bool) -> bool:
+    raw = (request.cookies.get(name) or "").strip().lower()
+    if raw in {"1", "true"}:
+        return True
+    if raw in {"0", "false"}:
+        return False
+    return default
+
+
+def _request_pref_int(name: str, default: int, minimum: int, maximum: int) -> int:
+    raw = (request.cookies.get(name) or "").strip()
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, min(maximum, value))
+
+
+def _initial_rail_state():
+    return {
+        "collapsed": _request_pref_bool("pref_rail_collapsed", False),
+        "width": _request_pref_int("pref_rail_width", 214, 180, 360),
+        "recent_open": _request_pref_bool("pref_rail_recent_open", True),
+        "workflows_open": _request_pref_bool("pref_rail_workflows_open", True),
+    }
+
+
 def _frontend_config_payload():
     """Return the browser-facing config payload derived from server config."""
     cfg = _config.CFG
     return {
         "version":               _config.APP_VERSION,
         "app_name":              cfg["app_name"],
+        "project_name":          _config.PROJECT_NAME,
         "prompt_prefix":         cfg["prompt_prefix"],
         "project_readme":        _config.PROJECT_README,
         "default_theme":         cfg["default_theme"],
@@ -106,8 +134,10 @@ def index():
     return render_template(
         "index.html",
         app_name=_config.CFG["app_name"],
+        project_name=_config.PROJECT_NAME,
         version=_config.APP_VERSION,
         project_readme=_config.PROJECT_README,
+        initial_rail=_initial_rail_state(),
         prompt_prefix=_config.CFG["prompt_prefix"],
         current_theme=current_theme,
         current_theme_css=current_theme["vars"],

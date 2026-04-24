@@ -319,6 +319,7 @@ The prompt architecture is built around one editing state and two render surface
 
 - the hidden real `#cmd` input remains the canonical editing source for browser focus, selection, and keyboard semantics
 - the rendered prompt line inside the active output pane is only a visual mirror of that state
+- on desktop, starting a text selection gesture inside the visible prompt temporarily yields focus away from the hidden input so browser-native range selection can complete without the composer stealing focus back
 - on touch-sized viewports, `#mobile-cmd` becomes the visible editing surface, but it still syncs into the same shared composer state instead of creating a second command model
 - the mobile edit bar is a thin action layer over that same shared composer state, so word-jump and delete helpers reuse the same selection/update path as desktop keyboard shortcuts instead of forking mobile-specific command state
 - prompt rows that appear in transcript history are rendered output records, not live editable DOM
@@ -523,6 +524,8 @@ Synthetic post-filters also sit on this run-lifecycle boundary rather than on th
 Commands flow through `POST /run`, which validates and rewrites the request, resolves any app-native fake commands, starts an isolated scanner subprocess when needed, and streams output back over SSE.
 
 Fast output bursts are rendered in small batches instead of forcing a full DOM update per line. The batching keeps commands like `man curl` responsive enough for the browser to repaint while output is streaming, and the terminal stays pinned to the bottom only while the user has not scrolled away. If the user scrolls up, live following stops until they return to the tail.
+
+The `/run` generator keeps the transport alive with heartbeat comments during idle periods, and the subprocess stdout reader now uses a nonblocking buffered path rather than `select()` followed by `readline()`. That matters for tools that emit partial progress lines: partial output no longer wedges the generator waiting for a newline and starving the heartbeat stream. On the browser side, `runner.js` treats 45 seconds of silence as a stalled stream and surfaces a warning inline. If the same stream later resumes, the runner now prints an explicit recovery notice and restores the tab/HUD to `RUNNING` instead of leaving the UI in a failed-looking state while output silently continues.
 
 ### Output Prefixes And Follow State
 
@@ -816,10 +819,10 @@ The test stack is intentionally split into three layers:
 
 Current totals:
 
-- `pytest`: 887
-- `vitest`: 753
+- `pytest`: 932
+- `vitest`: 754
 - `playwright`: 200
-- total: 1,840
+- total: 1,886
 
 ### Testing Architecture
 

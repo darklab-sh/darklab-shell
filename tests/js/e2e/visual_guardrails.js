@@ -16,7 +16,7 @@ function contractFor(mode) {
 
 export async function assertVisualFlowGuardrails(
   page,
-  { mode, requireSeededHistory = false } = {},
+  { mode, requireSeededHistory = false, expectedSessionToken = CAPTURE_SESSION_TOKEN } = {},
 ) {
   const contract = contractFor(mode)
   const viewport = page.viewportSize()
@@ -75,7 +75,7 @@ export async function assertVisualFlowGuardrails(
   expect(['ok', 'none', 'down']).toContain(state.status.redis)
 
   if (requireSeededHistory) {
-    expect(state.sessionToken).toBe(CAPTURE_SESSION_TOKEN)
+    expect(state.sessionToken).toBe(expectedSessionToken)
     expect(state.historyRuns).toBeGreaterThanOrEqual(CAPTURE_SEEDED_HISTORY_MIN_RUNS)
     expect(state.historyRoots).toBeGreaterThanOrEqual(CAPTURE_SEEDED_HISTORY_MIN_ROOTS)
     expect(state.status.redis).toBe('ok')

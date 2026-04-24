@@ -4,7 +4,71 @@ All notable changes to darklab_shell are documented here.
 
 ---
 
-## [1.5] — Unreleased
+## [1.5.1] — Unreleased
+
+### Changed
+
+- **Stalled live streams now recover visibly when output resumes** — stalled runs now return to a clearly live state instead of silently appending output under a failed-looking tab.
+  - **Before:** once the stalled-stream warning appeared, later output could resume without the UI clearly returning to a running state.
+  - **After:** resumed output now restores the tab and HUD to `RUNNING`, prints a green `connection re-established` line, and continues streaming in place.
+  - **Tests:** updated browser coverage in `tests/js/unit/runner.test.js`, plus manual suspend/resume verification against a live local run.
+- **The built-in email workflow now stays accurate for external MX providers** — the `Email Server Check` workflow now validates the domain’s mail setup without assuming the apex host accepts SMTP directly.
+  - **Before:** the workflow tried to probe SMTP ports on `darklab.sh`, which is incorrect when mail is handled by external MX hosts.
+  - **After:** the workflow now stays domain-centric with MX, TXT, and DMARC checks, and points manual SMTP port checks at the returned MX hosts.
+  - **Tests:** no new automated cases — verified by reviewing the built-in workflow commands against the live workflow list.
+- **The container smoke corpus now covers both autocomplete examples and workflow commands** — image-level smoke checks now follow the full set of user-facing command examples surfaced by the shell.
+  - **Before:** the shared smoke corpus only followed autocomplete examples, so workflow-only commands could drift without entering the smoke expectation set.
+  - **After:** the shared loader now combines autocomplete examples and surfaced workflow step commands for both smoke execution and expectation capture.
+  - **Tests:** added backend coverage in `tests/py/test_backend_modules.py` and expectation-coverage checks in `tests/py/test_container_smoke_test.py`.
+- **Project-level naming now stays consistent as `darklab_shell` across local and CI surfaces** — the repo package/container/build identifiers now match the renamed project identity instead of mixing old hyphenated names into build output.
+  - **Before:** npm package metadata, Docker Compose container naming, and the GitLab Docker build tag still used `darklab-shell`.
+  - **After:** package metadata, local container naming, and CI build tagging now consistently use `darklab_shell`.
+  - **Tests:** no new automated cases — verified by reviewing the updated package, compose, and CI config paths together.
+- **History seeding now follows the surfaced command examples** — seeded history now reflects the same commands users see suggested in the shell.
+  - **Before:** `scripts/seed_history.py` maintained its own fake command list, which could drift from the runtime autocomplete examples.
+  - **After:** the seeder now draws commands from the runtime autocomplete example catalog.
+  - **Tests:** added backend coverage in `tests/py/test_backend_modules.py`.
+- **The `visual-flows` history fixture now stays clearer in demo and capture sessions** — the seeded visual-history session keeps both stars and Recent rows visible.
+  - **Before:** the visual fixture could overwhelm the desktop rail with starred commands and seed less believable back-to-back duplicates.
+  - **After:** the fixture now keeps only two starred commands and avoids adjacent duplicate seeded commands.
+  - **Tests:** added backend coverage in `tests/py/test_backend_modules.py`.
+- **Demo recordings now start from a fresh seeded session each run** — local demo capture no longer reuses one stale tokenized history session across repeated recordings.
+  - **Before:** the demo wrappers reused a fixed token, so repeated recordings could accumulate old stars and history rows even after the visual fixture was tightened.
+  - **After:** the wrappers now generate a fresh demo token by default, seed the `visual-flows` fixture into that session, and the demo guardrails validate the actual seeded token in use.
+  - **Tests:** updated `tests/js/e2e/demo.spec.js`, `tests/js/e2e/demo.mobile.spec.js`, and `tests/js/e2e/visual_guardrails.js`.
+- **The welcome command set now keeps the Gobuster example on a host with meaningful directory results** — the curated startup examples continue to act like plausible commands a user can actually run against the project’s own infrastructure.
+  - **Before:** the Gobuster welcome example targeted `https://darklab.sh`, which is less representative for directory enumeration than the project’s dedicated stats host.
+  - **After:** the Gobuster example now targets `https://tor-stats.darklab.sh`.
+  - **Tests:** no new automated cases — verified by reviewing the checked-in welcome example list.
+
+### Fixed
+
+- **Project footer links now always use the project identity** — the mobile menu footer and desktop rail footer no longer drift with the operator-facing app title.
+  - **Root cause:** those footer links were still rendering from `app_name`, even though they are meant to identify the project and link to the project README.
+  - **Fix:** the footer surfaces now use a server-owned `project_name` value and consistently render `darklab_shell v…`.
+  - **Tests:** route coverage in `tests/py/test_routes.py`.
+- **Refresh-time prompt flicker is gone** — reload no longer flashes a stray prompt during tab-session restore.
+  - **Root cause:** the live prompt could mount briefly during restore before the final active tab state was fully settled.
+  - **Fix:** prompt visibility now stays suppressed through restore and only appears once the active tab is finalized.
+  - **Tests:** no new automated cases — verified manually against reload and restore flows.
+- **Refresh-time tab-scroll glyph flicker is gone** — reload no longer flashes left/right tab-scroll controls before the tab row settles.
+  - **Root cause:** the scroll buttons rendered before overflow state had been resolved, so they could appear briefly even when the row did not need them.
+  - **Fix:** the controls now start hidden and only render when the tab row actually overflows.
+  - **Tests:** no new automated cases — verified manually against refresh on non-overflowing tab rows.
+- **Partial-line tools no longer trigger false stalled-connection warnings as easily** — long-running tools that emit progress without trailing newlines now keep streaming without tripping the stalled warning as often.
+  - **Root cause:** the stream reader could go quiet while waiting on newline-oriented reads even though the subprocess was still alive.
+  - **Fix:** run output now flows through a nonblocking buffered reader so partial-line progress keeps the stream alive cleanly.
+  - **Tests:** added backend coverage in `tests/py/test_run_history_share.py` and browser coverage in `tests/js/unit/runner.test.js`.
+- **Desktop prompt text selection now behaves like normal transcript selection** — active-prompt selection is stable again and copied ranges include prompt prefixes cleanly.
+  - **Root cause:** the hidden composer could keep reclaiming focus while the visible prompt was being selected, especially for reverse drag and double-click selection.
+  - **Fix:** prompt selection now yields focus to the browser selection path and preserves prompt-prefix selection in both active and historical transcript lines.
+  - **Tests:** no new automated cases — verified manually across drag, reverse-drag, and double-click selection behavior.
+- **Very fast streaming commands now stay pinned to the live tail unless the user actually scrolls away** — bursty output from tools such as `ffuf` no longer drops out of follow mode unexpectedly.
+  - **Root cause:** rapid layout-driven scroll churn could be mistaken for intentional user scrolling during fast output.
+  - **Fix:** follow mode now only disengages during active runs when there is recent real user scroll intent.
+  - **Tests:** no new automated cases — verified manually with high-volume live output.
+
+## [1.5] — 2026-04-23
 
 ### Added
 

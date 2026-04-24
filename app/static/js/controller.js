@@ -217,20 +217,21 @@ apiFetch('/config').then(r => r.json()).then(cfg => {
   document.title = cfg.app_name;
   if (headerTitle) headerTitle.textContent = cfg.app_name;
   const wmVersion = cfg.version ? ` v${cfg.version}` : '';
-  const wmText = `${cfg.app_name || 'darklab_shell'}${wmVersion}`;
+  const projectText = `${cfg.project_name || 'darklab_shell'}${wmVersion}`;
   document.querySelectorAll('.terminal-wordmark').forEach(el => {
-    el.textContent = wmText;
+    el.textContent = projectText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
-  document.querySelectorAll('.menu-footer').forEach(el => {
-    el.textContent = wmText;
+  document.querySelectorAll('.menu-footer, .rail-nav-version').forEach(el => {
+    el.textContent = projectText;
     if (cfg.project_readme) el.href = cfg.project_readme;
   });
   syncThemeSelectionControls();
   updateNewTabBtn();
   renderFaqLimits(cfg);
   if (cfg.diag_enabled) {
-    if (diagBtn) diagBtn.classList.remove('u-hidden');
+    const legacyDiagBtn = document.getElementById('diag-btn');
+    if (legacyDiagBtn) legacyDiagBtn.classList.remove('u-hidden');
     const railDiagBtn = document.getElementById('rail-diag-btn');
     if (railDiagBtn) railDiagBtn.classList.remove('u-hidden');
     const mobileDiagBtn = _uiOverlayRefs.mobileMenu?.querySelector('button[data-menu-action="diag"]');
@@ -1091,12 +1092,58 @@ if (typeof bindOutsideClickClose === 'function' && typeof shellPromptWrap !== 'u
   });
 }
 
+function _selectionTouchesElement(el) {
+  if (!el || typeof window === 'undefined' || typeof window.getSelection !== 'function') return false;
+  const selection = window.getSelection();
+  if (!selection) return false;
+  const nodes = [selection.anchorNode, selection.focusNode];
+  if (selection.rangeCount > 0) nodes.push(selection.getRangeAt(0).commonAncestorContainer);
+  return nodes.some(node => (
+    !!node && el.contains(node.nodeType === Node.ELEMENT_NODE ? node : node.parentNode)
+  ));
+}
+
+let _promptPointerSelectionState = null;
+let _suppressPromptFocusUntil = 0;
+let _pendingPromptFocusTimer = null;
+
 if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   shellPromptWrap.addEventListener('pointerdown', e => {
+    if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
     if (useMobileTerminalViewportMode()) {
       e.preventDefault();
       focusCommandInputFromGesture();
+      return;
     }
+    if (_pendingPromptFocusTimer) {
+      clearTimeout(_pendingPromptFocusTimer);
+      _pendingPromptFocusTimer = null;
+    }
+    _promptPointerSelectionState = {
+      id: e.pointerId,
+      x: e.clientX,
+      y: e.clientY,
+      moved: false,
+    };
+    if (document.activeElement === cmdInput && typeof cmdInput.blur === 'function') {
+      cmdInput.blur();
+    }
+  });
+  shellPromptWrap.addEventListener('pointermove', e => {
+    const state = _promptPointerSelectionState;
+    if (!state || state.id !== e.pointerId || state.moved) return;
+    if (Math.abs(e.clientX - state.x) > 4 || Math.abs(e.clientY - state.y) > 4) {
+      state.moved = true;
+    }
+  });
+  shellPromptWrap.addEventListener('pointerup', e => {
+    const state = _promptPointerSelectionState;
+    if (!state || state.id !== e.pointerId) return;
+    if (state.moved) _suppressPromptFocusUntil = Date.now() + 250;
+    _promptPointerSelectionState = null;
+  });
+  shellPromptWrap.addEventListener('pointercancel', () => {
+    _promptPointerSelectionState = null;
   });
   shellPromptWrap.addEventListener('touchstart', e => {
     if (useMobileTerminalViewportMode()) {
@@ -1106,7 +1153,26 @@ if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && cmdInput) {
   }, { passive: false });
   shellPromptWrap.addEventListener('click', e => {
     if (e.target === runBtn || (e.target && e.target.closest && e.target.closest('#run-btn'))) return;
-    focusCommandInputFromGesture();
+    if (useMobileTerminalViewportMode()) {
+      focusCommandInputFromGesture();
+      return;
+    }
+    if (e.detail > 1 || Date.now() < _suppressPromptFocusUntil) return;
+    if (_selectionTouchesElement(shellPromptWrap)) return;
+    if (_pendingPromptFocusTimer) clearTimeout(_pendingPromptFocusTimer);
+    _pendingPromptFocusTimer = setTimeout(() => {
+      _pendingPromptFocusTimer = null;
+      if (_selectionTouchesElement(shellPromptWrap)) return;
+      if (Date.now() < _suppressPromptFocusUntil) return;
+      focusCommandInputFromGesture();
+    }, 220);
+  });
+  shellPromptWrap.addEventListener('dblclick', () => {
+    if (_pendingPromptFocusTimer) {
+      clearTimeout(_pendingPromptFocusTimer);
+      _pendingPromptFocusTimer = null;
+    }
+    _suppressPromptFocusUntil = Date.now() + 400;
   });
 }
 
@@ -1139,6 +1205,13 @@ if (cmdInput) {
 if (typeof document !== 'undefined') {
   document.addEventListener('selectionchange', () => {
     if (!cmdInput) return;
+    if (typeof shellPromptWrap !== 'undefined' && shellPromptWrap && _selectionTouchesElement(shellPromptWrap)) {
+      if (_pendingPromptFocusTimer) {
+        clearTimeout(_pendingPromptFocusTimer);
+        _pendingPromptFocusTimer = null;
+      }
+      return;
+    }
     const composerInputs = typeof getComposerInputs === 'function' ? getComposerInputs() : {};
     const mobileInput = composerInputs.mobile || null;
     if (document.activeElement === cmdInput) {

@@ -14,7 +14,7 @@ if [[ ! -x "$PYTHON_BIN" ]]; then
   PYTHON_BIN="python3"
 fi
 
-TMP_ROOT="/tmp/darklab-shell-playwright"
+TMP_ROOT="/tmp/darklab_shell-playwright"
 mkdir -p "$TMP_ROOT"
 DATA_DIR="$(mktemp -d "$TMP_ROOT/${SLOT}.data.XXXXXX")"
 
