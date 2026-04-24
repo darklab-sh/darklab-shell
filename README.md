@@ -587,7 +587,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │           ├── interaction-contract.spec.js # end-to-end verification of the UI Interaction Helper contract against real chrome surfaces
 │           ├── shortcuts.spec.js # keyboard shortcuts including Ctrl+R history-search flow
 │           ├── timestamps.spec.js # timestamp and line-number toggle behavior
-│           ├── theme-audit.spec.js # walks all 17 themes to catch colour leaks and unstyled surfaces
+│           ├── theme-audit.spec.js # walks all built-in themes to catch colour leaks and unstyled surfaces
 │           ├── ui.spec.js      # theme selector, FAQ modal, and options modal behavior
 │           ├── tabs.spec.js    # tab lifecycle, rename, reorder, and new-tab behavior
 │           ├── welcome.spec.js # welcome animation and settle-path coverage

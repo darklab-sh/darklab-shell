@@ -757,7 +757,7 @@ def _builtin_workflows():
             "steps": [
                 {
                     "cmd": (
-                        "ffuf -u https://ip.darklab.sh/FUZZ "
+                        "ffuf -u https://tor-stats.darklab.sh/FUZZ "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Fuzz common paths and watch for non-baseline status codes or sizes.",
@@ -769,7 +769,8 @@ def _builtin_workflows():
                     ),
                     "note": "Run a second directory check with a different scanner.",
                 },
-                {"cmd": "curl -sIL https://ip.darklab.sh/admin", "note": "Inspect redirects and headers for a candidate path."},
+                {"cmd": "curl -sIL https://tor-stats.darklab.sh/admin",
+                 "note": "Inspect redirects and headers for a candidate path."},
             ],
         },
         {

@@ -29,6 +29,7 @@ SECTION_ORDER = [
         [
             ("# Subtle border (dividers, section separators)", "border"),
             ("# Prominent border (input focus rings, modal outlines)", "border_bright"),
+            ("# Soft border (low-contrast separators inside denser chrome)", "border_soft"),
         ],
     ),
     (
@@ -75,6 +76,9 @@ SECTION_ORDER = [
                     "window_btn_close",
                     "window_btn_minimize",
                     "window_btn_maximize",
+                    "status_bar_bg",
+                    "status_bar_border",
+                    "status_bar_text",
                 ],
             ),
             (
@@ -197,6 +201,7 @@ SECTION_ORDER = [
             (
                 "# Welcome / onboarding styling",
                 [
+                    "welcome_ascii_color",
                     "welcome_command_hover_bg",
                     "welcome_command_hover_shadow",
                     "welcome_ascii_text_shadow",

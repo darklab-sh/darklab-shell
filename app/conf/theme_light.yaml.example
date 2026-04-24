@@ -39,6 +39,9 @@ border: "rgba(0,0,0,0.15)"
 # Prominent border (input focus rings, modal outlines)
 border_bright: "rgba(0,0,0,0.28)"
 
+# Soft border (low-contrast separators inside denser chrome)
+border_soft: "rgba(0,0,0,0.12)"
+
 # ── Text ──────────────────────────────────────────────────────────────────────
 
 # Primary text color
@@ -84,7 +87,7 @@ prompt_line_text: "#1c201a"
 
 # Terminal pane / panel styling
 panel_bg: "#d4e0ec"
-panel_alt_bg: "#e8eef6"
+panel_alt_bg: "#b8c4d0"
 panel_border: "rgba(0,0,0,0.28)"
 panel_shadow: "rgba(0,0,0,0.22)"
 terminal_bar_bg: "#b8c4d0"
@@ -95,6 +98,9 @@ terminal_wrap_shadow: "rgba(34,58,88,0.18)"
 window_btn_close: "#c25b4d"
 window_btn_minimize: "#b77f22"
 window_btn_maximize: "#2f7a43"
+status_bar_bg: "#b8c4d0"
+status_bar_border: "#8898b0"
+status_bar_text: "#5a6878"
 
 # Header / toolbar buttons
 toolbar_button_bg: "#c8d4e0"
@@ -191,6 +197,7 @@ mobile_menu_button_hover_bg: "var(--bg)"
 mobile_menu_button_hover_text: "#101820"
 
 # Welcome / onboarding styling
+welcome_ascii_color: "var(--green)"
 welcome_command_hover_bg: "rgba(42,93,24,0.06)"
 welcome_command_hover_shadow: "0 0 0 1px rgba(42,93,24,0.1)"
 welcome_ascii_text_shadow: "0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)"

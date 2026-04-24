@@ -66,10 +66,10 @@ test.describe('permalink / share', () => {
 
     await page
       .context()
-      .addCookies([{ name: 'pref_theme_name', value: 'blue_paper', url: 'http://localhost:5001' }])
+      .addCookies([{ name: 'pref_theme_name', value: 'apricot_sand', url: 'http://localhost:5001' }])
     await page.goto(data.url)
 
-    await expect(page.locator('body')).toHaveAttribute('data-theme', 'blue_paper')
+    await expect(page.locator('body')).toHaveAttribute('data-theme', 'apricot_sand')
     await expect(page.locator('body')).toContainText('hostname', { timeout: 10_000 })
 
     await page.locator('#perm-save-btn').click()
@@ -82,7 +82,7 @@ test.describe('permalink / share', () => {
     for await (const chunk of htmlStream) htmlChunks.push(chunk)
     const html = Buffer.concat(htmlChunks).toString('utf8')
     expect(html).toContain('<body')
-    expect(html).toContain('--theme-bg: #eef4fa')
+    expect(html).toContain('--theme-bg: #fbf2e8')
   })
 
   test('permalink button on a fresh tab shows "No output" toast', async ({ page }) => {

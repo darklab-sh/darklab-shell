@@ -23,6 +23,7 @@ border: "#2a2a2a"
 
 # Prominent border (input focus rings, modal outlines)
 border_bright: "#3c3c3c"
+border_soft: "rgba(255, 255, 255, 0.08)"
 
 # ── Text ──────────────────────────────────────────────────────────────────────
 
@@ -53,6 +54,10 @@ red: "#ff3c3c"
 
 # Blue — used for the prompt prefix, welcome screen labels, notice lines, and command badges
 blue: "#6ab0f5"
+status_bar_bg: "#0c0c0c"
+status_bar_border: "#2a2a2a"
+status_bar_text: "#9a9a9a"
+welcome_ascii_color: "var(--green)"
 
 # ── Typography ────────────────────────────────────────────────────────────────
 

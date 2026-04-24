@@ -9,6 +9,7 @@ bg: '#0d0f12'
 surface: '#161a1f'
 border: rgba(122, 151, 181, 0.14)
 border_bright: rgba(122, 151, 181, 0.28)
+border_soft: "rgba(255, 255, 255, 0.08)"
 text: '#e4e8ed'
 muted: '#87929e'
 green: '#6bb36a'
@@ -17,6 +18,10 @@ green_glow: rgba(107, 179, 106, 0.10)
 amber: '#c6a05a'
 red: '#dd6a68'
 blue: '#a1c6ff'
+status_bar_bg: "#101419"
+status_bar_border: "#1c232b"
+status_bar_text: "#87929e"
+welcome_ascii_color: "var(--green)"
 terminal_font_size: 14px
 terminal_line_height: '1.65'
 prompt_line_text: '#f1f4f8'

@@ -9,7 +9,7 @@ from pathlib import Path
 import yaml
 from redaction import BUILTIN_SHARE_REDACTION_RULES, normalize_redaction_rules
 
-APP_VERSION = "1.5"
+APP_VERSION = "1.6"
 PROJECT_NAME = "darklab_shell"
 PROJECT_README = "https://gitlab.com/darklab.sh/darklab_shell#darklab_shell"
 APP_CONF_DIR = os.environ.get("APP_CONF_DIR", "")
@@ -146,6 +146,7 @@ _THEME_DEFAULTS = {
         "surface":             "#141414",
         "border":              "#2a2a2a",
         "border_bright":       "#3c3c3c",
+        "border_soft":         "rgba(255, 255, 255, 0.08)",
         "text":                "#e0e0e0",
         "muted":               "#9a9a9a",
         "green":               "#39ff14",
@@ -169,6 +170,9 @@ _THEME_DEFAULTS = {
         "window_btn_close":    "color-mix(in srgb, var(--red) 78%, var(--surface))",
         "window_btn_minimize": "color-mix(in srgb, var(--amber) 78%, var(--surface))",
         "window_btn_maximize": "color-mix(in srgb, var(--green) 78%, var(--surface))",
+        "status_bar_bg":       "#0c0c0c",
+        "status_bar_border":   "#2a2a2a",
+        "status_bar_text":     "#9a9a9a",
         "toolbar_button_bg":   "transparent",
         "toolbar_button_border": "#3c3c3c",
         "toolbar_button_text": "#9a9a9a",
@@ -252,6 +256,7 @@ _THEME_DEFAULTS = {
             "0 0 4px color-mix(in srgb, var(--green) 18%, transparent), "
             "0 1px 0 rgba(8,16,12,0.4)"
         ),
+        "welcome_ascii_color": "var(--green)",
         "welcome_ascii_filter": "saturate(1.12) contrast(1.08) brightness(1.08)",
     },
     "light": {
@@ -259,6 +264,7 @@ _THEME_DEFAULTS = {
         "surface":             "#eef2f6",
         "border":              "rgba(0,0,0,0.15)",
         "border_bright":       "rgba(0,0,0,0.28)",
+        "border_soft":         "rgba(0,0,0,0.12)",
         "text":                "#101820",
         "muted":               "#5a6878",
         "green":               "#2a5d18",
@@ -271,7 +277,7 @@ _THEME_DEFAULTS = {
         "terminal_line_height": "1.65",
         "prompt_line_text":    "#1c201a",
         "panel_bg":            "#d4e0ec",
-        "panel_alt_bg":        "#e8eef6",
+        "panel_alt_bg":        "#b8c4d0",
         "panel_border":        "rgba(0,0,0,0.28)",
         "panel_shadow":        "rgba(0,0,0,0.22)",
         "terminal_bar_bg":     "#b8c4d0",
@@ -282,6 +288,9 @@ _THEME_DEFAULTS = {
         "window_btn_close":    "#c25b4d",
         "window_btn_minimize": "#b77f22",
         "window_btn_maximize": "#2f7a43",
+        "status_bar_bg":       "#b8c4d0",
+        "status_bar_border":   "#8898b0",
+        "status_bar_text":     "#5a6878",
         "toolbar_button_bg":   "#c8d4e0",
         "toolbar_button_border": "#8898b0",
         "toolbar_button_text": "#202838",
@@ -360,6 +369,7 @@ _THEME_DEFAULTS = {
         "mobile_menu_button_border": "#dce6f0",
         "welcome_command_hover_bg": "rgba(42,93,24,0.06)",
         "welcome_command_hover_shadow": "0 0 0 1px rgba(42,93,24,0.1)",
+        "welcome_ascii_color": "var(--green)",
         "welcome_ascii_text_shadow": "0 0 0 transparent, 0 0 0 transparent, 0 1px 0 rgba(255,255,255,0.5)",
         "welcome_ascii_filter": "saturate(0.9) contrast(0.95) brightness(0.9)",
     },
@@ -372,6 +382,7 @@ _THEME_BASE_CSS_KEYS = (
     "surface",
     "border",
     "border_bright",
+    "border_soft",
     "text",
     "muted",
     "green",
@@ -390,6 +401,7 @@ _THEME_CSS_ORDER = (
     "surface",
     "border",
     "border_bright",
+    "border_soft",
     "text",
     "muted",
     "green",
@@ -413,6 +425,9 @@ _THEME_CSS_ORDER = (
     "window_btn_close",
     "window_btn_minimize",
     "window_btn_maximize",
+    "status_bar_bg",
+    "status_bar_border",
+    "status_bar_text",
     "toolbar_button_bg",
     "toolbar_button_border",
     "toolbar_button_text",
@@ -489,6 +504,7 @@ _THEME_CSS_ORDER = (
     "mobile_menu_button_hover_bg",
     "mobile_menu_button_hover_text",
     "mobile_menu_button_border",
+    "welcome_ascii_color",
     "welcome_command_hover_bg",
     "welcome_command_hover_shadow",
     "welcome_ascii_text_shadow",

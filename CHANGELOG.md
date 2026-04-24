@@ -4,9 +4,18 @@ All notable changes to darklab_shell are documented here.
 
 ---
 
-## [1.5.1] — Unreleased
+## [1.6] — Unreleased
 
 ### Changed
+
+- **The shared theme system now exposes dedicated HUD, divider, and welcome-ASCII tokens** — theme authors can tune the desktop status strip and welcome mark directly instead of borrowing nearby surface tokens that only happened to work on the original dark set.
+  - **Before:** the desktop HUD borrowed `panel_alt_bg`, `border`, and `muted`, and the welcome ASCII always inherited `--green`, so light-theme polish had to fight shared component assumptions instead of adjusting explicit theme slots.
+  - **After:** all themes now resolve `border_soft`, `status_bar_bg`, `status_bar_border`, `status_bar_text`, and `welcome_ascii_color`, with matching runtime CSS vars and template/export wiring from the shared theme path.
+  - **Tests:** `tests/py/test_routes.py -k theme`, `tests/js/unit/app.test.js`, `tests/js/unit/autocomplete.test.js`, `npm run lint:js`, `python3 -m flake8 app tests/py/test_routes.py`, and `tests/py/test_docs.py`.
+- **The built-in theme registry now reflects the new 18-theme set and current shipped names** — the live docs and selector-facing references now match the built-in files under `app/conf/themes/`, including the newer `chalk`, `sage`, `overcast`, `moss_stone`, `slate_dusk`, and `charcoal_lavender` themes.
+  - **Before:** the live docs still described the older 14-theme set and referenced retired names such as `graphite` and `charcoal_violet`, which no longer matched the built-in theme files.
+  - **After:** the current shipped registry is documented as 18 themes total, with the retired `blue_paper`, `clean_slate`, and `rose` variants still absent and the newer built-in theme names reflected consistently in the active theme docs.
+  - **Tests:** `tests/py/test_routes.py -k theme`, `tests/js/unit/app.test.js`, `tests/js/unit/autocomplete.test.js`, `tests/js/e2e/ui.spec.js`, `tests/js/e2e/mobile.spec.js`, `tests/js/e2e/share.spec.js`, and `tests/py/test_docs.py`.
 
 - **Stalled live streams now recover visibly when output resumes** — stalled runs now return to a clearly live state instead of silently appending output under a failed-looking tab.
   - **Before:** once the stalled-stream warning appeared, later output could resume without the UI clearly returning to a running state.

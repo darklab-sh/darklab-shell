@@ -59,6 +59,10 @@
 
 @media (min-width: 601px) {
 
+  :root {
+    --shell-top-chrome-height: 56px;
+  }
+
   /* Body reset: the shell owns the full viewport. */
   body:not(.mobile-terminal-mode) {
     padding: 0;
@@ -79,13 +83,13 @@
      mobile shell. */
   body:not(.mobile-terminal-mode) .terminal-actions { display: none !important; }
 
-  /* Shell root — flex row with a 10px top gutter above the tabbar. */
+  /* Shell root — rail sits flush to the top edge; the main column owns the
+     small top gutter above the tabbar. */
   .shell-root {
     display: flex;
     flex: 1 1 auto;
     min-height: 0;
     height: 100vh;
-    padding-top: 10px;
     background: var(--bg);
   }
 
@@ -112,7 +116,8 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 14px 16px;
+    padding: 12px 16px 14px;
+    height: var(--shell-top-chrome-height);
     border-bottom: 1px solid var(--border);
     flex: 0 0 auto;
   }
@@ -404,6 +409,7 @@
     align-items: stretch;
     gap: 0;
     padding: 0;
+    height: var(--shell-top-chrome-height);
     background: var(--theme-panel-alt-bg);
     border-bottom: 1px solid var(--border);
     min-width: 0;
@@ -421,7 +427,7 @@
   }
 
   .terminal-bar.tabbar .tabs-bar {
-    padding: 5px 0 0;
+    padding: 4px 0 0;
     flex: 1 1 auto;
     background: transparent;
   }
@@ -467,8 +473,9 @@
   .hud {
     display: flex;
     align-items: stretch;
-    border-top: 1px solid var(--border-bright);
-    background: linear-gradient(180deg, var(--bg) 0%, var(--theme-panel-alt-bg) 100%);
+    color: var(--theme-status-bar-text);
+    border-top: 1px solid var(--theme-status-bar-border);
+    background: var(--theme-status-bar-bg);
     flex: 0 0 auto;
     min-width: 0;
     font-family: var(--font-mono);
@@ -488,14 +495,14 @@
     flex-direction: column;
     gap: 3px;
     padding: 10px 16px;
-    border-right: 1px solid var(--border);
+    border-right: 1px solid var(--theme-border-soft);
     flex: 0 0 auto;
     white-space: nowrap;
   }
   .hud-cell.hud-status { cursor: pointer; }
 
   .hud-label {
-    color: var(--muted);
+    color: var(--theme-status-bar-text);
     font-size: 9px;
     letter-spacing: 1.8px;
     text-transform: uppercase;
@@ -524,7 +531,7 @@
     text-shadow: 0 0 8px color-mix(in srgb, var(--red) 22%, transparent);
   }
   .hud-muted {
-    color: var(--muted);
+    color: var(--theme-status-bar-text);
     opacity: 0.85;
   }
   .hud-value-dot::before {
@@ -559,7 +566,7 @@
   .hud-cell .status-pill.ok,
   .hud-cell .status-pill.fail,
   .hud-cell .status-pill.killed {
-    color: var(--muted);
+    color: var(--theme-status-bar-text);
     text-shadow: none;
     animation: none;
   }
@@ -601,7 +608,7 @@
   .hud-actions {
     display: flex;
     padding: 10px 14px;
-    border-left: 1px solid var(--border);
+    border-left: 1px solid var(--theme-border-soft);
     gap: 6px;
     align-items: center;
     white-space: nowrap;

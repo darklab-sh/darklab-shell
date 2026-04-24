@@ -384,23 +384,23 @@ class TestThemesRoute:
         client = get_client()
         data = json.loads(client.get("/themes").data)
         themes = {theme["name"]: theme for theme in data["themes"]}
-        assert "blue_paper" in themes
+        assert "apricot_sand" in themes
         assert "olive_grove" in themes
         assert "darklab_obsidian" in themes
         assert "emerald_obsidian" in themes
         assert "charcoal_steel" in themes
         assert "dark" not in themes
         assert "light" not in themes
-        assert themes["blue_paper"]["label"] == "Blue Paper"
+        assert themes["apricot_sand"]["label"] == "Apricot Sand"
         assert themes["olive_grove"]["label"] == "Olive Grove"
         assert themes["darklab_obsidian"]["label"] == "Darklab Obsidian"
         assert themes["emerald_obsidian"]["label"] == "Emerald Obsidian"
         assert themes["charcoal_steel"]["label"] == "Charcoal Steel"
-        assert themes["blue_paper"]["group"] == "Cool Light"
+        assert themes["apricot_sand"]["group"] == "Warm Light"
         assert themes["olive_grove"]["group"] == "Warm Light"
         assert themes["darklab_obsidian"]["group"] == "Dark Neon"
         assert themes["emerald_obsidian"]["group"] == "Dark Neon"
-        assert themes["blue_paper"]["filename"] == "blue_paper.yaml"
+        assert themes["apricot_sand"]["filename"] == "apricot_sand.yaml"
         assert themes["olive_grove"]["filename"] == "olive_grove.yaml"
         assert themes["darklab_obsidian"]["filename"] == "darklab_obsidian.yaml"
         assert themes["emerald_obsidian"]["filename"] == "emerald_obsidian.yaml"
@@ -422,11 +422,11 @@ class TestThemesRoute:
 
     def test_pref_theme_name_cookie_selects_variant(self):
         client = get_client(use_forwarded_for=False)
-        client.set_cookie("pref_theme_name", "blue_paper")
+        client.set_cookie("pref_theme_name", "apricot_sand")
         data = json.loads(client.get("/themes").data)
-        assert data["current"]["name"] == "blue_paper"
-        assert data["current"]["label"] == "Blue Paper"
-        assert data["current"]["group"] == "Cool Light"
+        assert data["current"]["name"] == "apricot_sand"
+        assert data["current"]["label"] == "Apricot Sand"
+        assert data["current"]["group"] == "Warm Light"
 
     def test_empty_registry_falls_back_to_built_in_dark_theme(self, monkeypatch):
         client = get_client(use_forwarded_for=False)
@@ -1607,11 +1607,11 @@ class TestShareRoute:
             headers={"X-Session-ID": "test-session"}
         )
         share_id = json.loads(create_resp.data)["id"]
-        client.set_cookie("pref_theme_name", "blue_paper")
+        client.set_cookie("pref_theme_name", "apricot_sand")
         resp = client.get(f"/share/{share_id}")
         body = resp.get_data(as_text=True)
         assert 'class="permalink-page"' in body
-        assert 'data-theme="blue_paper"' in body
+        assert 'data-theme="apricot_sand"' in body
         assert '/static/css/styles.css' in body
 
     def test_get_share_html_contains_label(self):

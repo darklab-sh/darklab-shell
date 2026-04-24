@@ -296,8 +296,8 @@ describe('autocomplete helpers', () => {
           if (ctx.commandRoot !== 'theme') return []
           return [
             buildItem({
-              value: 'blue_paper',
-              description: 'Blue Paper (current)',
+              value: 'apricot_sand',
+              description: 'Apricot Sand (current)',
               replaceStart: ctx.tokenStart,
               replaceEnd: ctx.tokenEnd,
             }),
@@ -313,8 +313,8 @@ describe('autocomplete helpers', () => {
 
     expect(items).toEqual([
       expect.objectContaining({
-        value: 'blue_paper',
-        description: 'Blue Paper (current)',
+        value: 'apricot_sand',
+        description: 'Apricot Sand (current)',
       }),
     ])
   })
