@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 933
+- `pytest`: 932
 - `vitest`: 754
 - `playwright`: 200
-- total: 1,887
+- total: 1,886
 
 This document is organized in two parts:
 
@@ -476,6 +476,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_docker_reach_host` | Checks docker reach host handling. |
 | `test_parse_compose_port_output` | Checks that parse compose port output. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
+| `test_should_retry_timeout` | Checks that the smoke suite retries only timeout-bound `nc` and `whois` commands instead of retrying every timed-out command generically. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
 | `test_container_smoke_test_command_matches_expected_output` | Checks that container smoke test command matches expected output. |

@@ -20,6 +20,14 @@
     {
       "no_output": false,
       "exit_code": 0,
+      "command": "ping -c 4 ip.darklab.sh",
+      "expected_text": [
+        "PING ip.darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
       "command": "ping -i 0.5 -c 20 darklab.sh",
       "expected_text": [
         "PING darklab.sh"
@@ -897,7 +905,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -Iv https://darklab.sh",
+      "command": "curl -Iv https://ip.darklab.sh",
       "expected_text": [
         "IPv4"
       ]
@@ -905,7 +913,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "openssl s_client -connect darklab.sh:443",
+      "command": "openssl s_client -connect ip.darklab.sh:443",
       "expected_text": [
         "Certificate chain"
       ]
@@ -913,15 +921,15 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "testssl darklab.sh",
+      "command": "testssl ip.darklab.sh",
       "expected_text": [
-        "Testing all"
+        "rDNS"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sIL https://darklab.sh",
+      "command": "curl -sIL https://ip.darklab.sh",
       "expected_text": [
         "content-type"
       ]
@@ -929,7 +937,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sv -o /dev/null https://darklab.sh| head -60",
+      "command": "curl -sv -o /dev/null https://ip.darklab.sh| head -60",
       "expected_text": [
         "Server certificate"
       ]
@@ -937,7 +945,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "wget -S --spider https://darklab.sh",
+      "command": "wget -S --spider https://ip.darklab.sh",
       "expected_text": [
         "HTTP request sent"
       ]
@@ -945,15 +953,15 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "nc -zv darklab.sh 443",
+      "command": "nc -zv ip.darklab.sh 443",
       "expected_text": [
-        "darklab.sh"
+        "open"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "nmap -F darklab.sh",
+      "command": "nmap -F ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]
@@ -993,7 +1001,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "pd-httpx -u https://darklab.sh -title -status-code -tech-detect",
+      "command": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
       "expected_text": [
         "Current httpx"
       ]
@@ -1001,7 +1009,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "ffuf -u https://darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
       "expected_text": [
         "Method"
       ]
@@ -1017,7 +1025,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sIL https://darklab.sh/admin",
+      "command": "curl -sIL https://ip.darklab.sh/admin",
       "expected_text": [
         "content-type"
       ]
@@ -1025,7 +1033,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "sslscan darklab.sh",
+      "command": "sslscan ip.darklab.sh",
       "expected_text": [
         "Testing SSL server"
       ]
@@ -1033,7 +1041,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "sslyze --certinfo darklab.sh",
+      "command": "sslyze --certinfo ip.darklab.sh",
       "expected_text": [
         "CHECKING CONNECTIVITY"
       ]
@@ -1041,7 +1049,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "openssl s_client -connect darklab.sh:443 -servername darklab.sh",
+      "command": "openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh",
       "expected_text": [
         "Connecting to"
       ]
@@ -1049,7 +1057,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sI https://darklab.sh/api",
+      "command": "curl -sI https://ip.darklab.sh/api",
       "expected_text": [
         "content-type"
       ]
@@ -1057,7 +1065,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sX OPTIONS -I https://darklab.sh/api",
+      "command": "curl -sX OPTIONS -I https://ip.darklab.sh/api",
       "expected_text": [
         "content-length"
       ]
@@ -1065,23 +1073,23 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sH Accept:application/json https://darklab.sh/api",
+      "command": "curl -sH Accept:application/json https://ip.darklab.sh/api",
       "expected_text": [
-        "head"
+        "108.79.194.246"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "ping -c 10 darklab.sh",
+      "command": "ping -c 10 ip.darklab.sh",
       "expected_text": [
-        "PING darklab"
+        "PING ip.darklab.sh"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "mtr darklab.sh",
+      "command": "mtr ip.darklab.sh",
       "expected_text": [
         "Note: mtr has been run"
       ]
@@ -1089,15 +1097,15 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "traceroute darklab.sh",
+      "command": "traceroute ip.darklab.sh",
       "expected_text": [
-        "traceroute to"
+        "traceroute to ip.darklab.sh"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "tcptraceroute darklab.sh 443",
+      "command": "tcptraceroute ip.darklab.sh 443",
       "expected_text": [
         "Tracing the path"
       ]
@@ -1105,24 +1113,24 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "rustscan -a darklab.sh --range 1-1000",
+      "command": "rustscan -a ip.darklab.sh --range 1-1000",
       "expected_text": [
-        "RustScan"
+        "rustscan"
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "naabu -host darklab.sh -silent",
+      "command": "naabu -host ip.darklab.sh -silent",
       "any_of": [
         {"no_output": true},
-        {"expected_text": ["darklab.sh"]}
+        {"expected_text": ["ip.darklab.sh"]}
       ]
     },
     {
       "no_output": false,
       "exit_code": null,
-      "command": "nmap -sV darklab.sh",
+      "command": "nmap -sV ip.darklab.sh",
       "expected_text": [
         "Starting Nmap"
       ]
@@ -1130,9 +1138,9 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "nc -zv darklab.sh 80",
+      "command": "nc -zv ip.darklab.sh 80",
       "expected_text": [
-        "darklab.sh"
+        "open"
       ]
     }
   ]

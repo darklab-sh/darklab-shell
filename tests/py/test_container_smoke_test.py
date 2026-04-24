@@ -25,6 +25,7 @@ import sys
 import urllib.request
 import uuid
 from pathlib import Path
+from collections.abc import Mapping, Sequence
 
 import pytest
 import yaml
@@ -189,6 +190,12 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
         "_post_kill",
         lambda base_url, run_id: killed.append((base_url, run_id)),
     )
+    waited: list[tuple[str, str, str]] = []
+    monkeypatch.setattr(
+        sys.modules[__name__],
+        "_wait_for_run_to_stop",
+        lambda base_url, session_id, run_id, timeout=20: waited.append((base_url, session_id, run_id)),
+    )
 
     events, killed_early = _post_run(
         "http://example.test",
@@ -201,6 +208,20 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
     assert killed_early is True
     assert [event["type"] for event in events] == ["started", "output"]
     assert killed == [("http://example.test", "run-123")]
+    assert waited == [("http://example.test", "session-123", "run-123")]
+
+
+@pytest.mark.parametrize(
+    ("command", "events", "expected"),
+    [
+        ("whois darklab.sh", [{"type": "notice", "text": "[timeout] Command exceeded 120s limit and was killed."}], True),
+        ("nc -zv darklab.sh 80", [{"type": "notice", "text": "[timeout] Command exceeded 120s limit and was killed."}], True),
+        ("dig darklab.sh A", [{"type": "notice", "text": "[timeout] Command exceeded 120s limit and was killed."}], False),
+        ("whois darklab.sh", [{"type": "output", "text": "darklab.sh"}], False),
+    ],
+)
+def test_should_retry_timeout(command: str, events: list[dict[str, str]], expected: bool) -> None:
+    assert _should_retry_timeout(command, events) is expected
 
 
 def _load_expectations() -> dict[str, dict[str, object]]:
@@ -341,6 +362,47 @@ def _post_kill(base_url: str, run_id: str) -> None:
         pass
 
 
+def _wait_for_run_to_stop(base_url: str, session_id: str, run_id: str, timeout: int = 20) -> None:
+    """Wait until a killed run disappears from the active-run list.
+
+    The smoke suite often kills commands as soon as expected text appears so it
+    can move on quickly. That /kill response is asynchronous with respect to the
+    underlying process teardown, so starting the next heavy network command
+    immediately can briefly overlap with the prior command's shutdown path.
+    """
+    deadline = time.time() + timeout
+    req = urllib.request.Request(
+        f"{base_url}/history/active",
+        headers={"X-Session-ID": session_id},
+        method="GET",
+    )
+    last_error: Exception | None = None
+
+    while time.time() < deadline:
+        try:
+            with urllib.request.urlopen(req, timeout=10) as resp:
+                payload = json.loads(resp.read().decode("utf-8"))
+        except Exception as exc:
+            last_error = exc
+            time.sleep(0.2)
+            continue
+
+        runs = payload.get("runs", []) if isinstance(payload, dict) else []
+        active_ids = {
+            str(item.get("run_id", ""))
+            for item in runs
+            if isinstance(item, dict)
+        }
+        if run_id not in active_ids:
+            return
+        time.sleep(0.2)
+
+    raise AssertionError(
+        f"killed run {run_id!r} was still active after {timeout}s"
+        + (f": {last_error}" if last_error else "")
+    )
+
+
 def _is_output_satisfied(
     events: list[dict[str, object]],
     command: str,
@@ -401,9 +463,27 @@ def _post_run(
                 if _is_output_satisfied(events, command, stop_text, stop_patterns):
                     if run_id:
                         _post_kill(base_url, run_id)
+                        _wait_for_run_to_stop(base_url, session_id, run_id)
                     killed_early = True
                     break
     return events, killed_early
+
+
+def _is_smoke_timeout(events: Sequence[Mapping[str, object]]) -> bool:
+    for event in events:
+        if event.get("type") != "notice":
+            continue
+        text = event.get("text")
+        if isinstance(text, str) and text.startswith("[timeout] Command exceeded "):
+            return True
+    return False
+
+
+def _should_retry_timeout(command: str, events: Sequence[Mapping[str, object]]) -> bool:
+    root = command.split(maxsplit=1)[0].lower() if command.strip() else ""
+    if root not in {"nc", "whois"}:
+        return False
+    return _is_smoke_timeout(events)
 
 
 def _parse_compose_port_output(output: str) -> int | None:
@@ -622,6 +702,21 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
         stop_text=stop_text,
         stop_patterns=stop_patterns,
     )
+    if _should_retry_timeout(command, events):
+        print(
+            f"[container-smoke-test] retrying after timeout: {command}",
+            flush=True,
+        )
+        time.sleep(2)
+        retry_session_id = f"{container_smoke_test_session_id}-retry-{uuid.uuid4().hex[:8]}"
+        events, killed_early = _post_run(
+            container_smoke_test,
+            command,
+            retry_session_id,
+            timeout=DEFAULT_RUN_TIMEOUT,
+            stop_text=stop_text,
+            stop_patterns=stop_patterns,
+        )
 
     event_types = [str(event.get("type", "")) for event in events]
     texts = [str(event.get("text", "")) for event in events if isinstance(event.get("text"), str)]

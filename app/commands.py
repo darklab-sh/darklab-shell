@@ -678,11 +678,11 @@ def _builtin_workflows():
             "title": "TLS / HTTPS Check",
             "description": "Verify a domain's certificate, chain, and TLS configuration.",
             "steps": [
-                {"cmd": "curl -Iv https://darklab.sh",
+                {"cmd": "curl -Iv https://ip.darklab.sh",
                  "note": "Check response headers and certificate details."},
-                {"cmd": "openssl s_client -connect darklab.sh:443",
+                {"cmd": "openssl s_client -connect ip.darklab.sh:443",
                  "note": "Inspect the raw TLS handshake and certificate chain."},
-                {"cmd": "testssl darklab.sh",
+                {"cmd": "testssl ip.darklab.sh",
                  "note": "Run a full TLS audit including ciphers and known vulnerabilities."},
             ],
         },
@@ -690,11 +690,11 @@ def _builtin_workflows():
             "title": "HTTP Triage",
             "description": "Investigate what a web server is returning.",
             "steps": [
-                {"cmd": "curl -sIL https://darklab.sh",
+                {"cmd": "curl -sIL https://ip.darklab.sh",
                  "note": "Follow redirects and inspect the final response headers."},
-                {"cmd": "curl -sv -o /dev/null https://darklab.sh| head -60",
+                {"cmd": "curl -sv -o /dev/null https://ip.darklab.sh| head -60",
                  "note": "Verbose output with timing, TLS detail, and headers."},
-                {"cmd": "wget -S --spider https://darklab.sh",
+                {"cmd": "wget -S --spider https://ip.darklab.sh",
                  "note": "Spider check with full server response headers."},
             ],
         },
@@ -702,9 +702,9 @@ def _builtin_workflows():
             "title": "Quick Reachability Check",
             "description": "Confirm a host is up and identify which ports are open.",
             "steps": [
-                {"cmd": "ping -c 4 darklab.sh",    "note": "Is the host reachable? Check latency and packet loss."},
-                {"cmd": "nc -zv darklab.sh 443",   "note": "Is HTTPS open and accepting connections?"},
-                {"cmd": "nmap -F darklab.sh",      "note": "Fast scan of the 100 most common ports."},
+                {"cmd": "ping -c 4 ip.darklab.sh",    "note": "Is the host reachable? Check latency and packet loss."},
+                {"cmd": "nc -zv ip.darklab.sh 443",   "note": "Is HTTPS open and accepting connections?"},
+                {"cmd": "nmap -F ip.darklab.sh",      "note": "Fast scan of the 100 most common ports."},
             ],
         },
         {
@@ -746,7 +746,7 @@ def _builtin_workflows():
                     "note": "Resolve common subdomains and keep the DNS response context.",
                 },
                 {
-                    "cmd": "pd-httpx -u https://darklab.sh -title -status-code -tech-detect",
+                    "cmd": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
                     "note": "Probe HTTPS and collect status, title, and technology hints.",
                 },
             ],
@@ -757,7 +757,7 @@ def _builtin_workflows():
             "steps": [
                 {
                     "cmd": (
-                        "ffuf -u https://darklab.sh/FUZZ "
+                        "ffuf -u https://ip.darklab.sh/FUZZ "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Fuzz common paths and watch for non-baseline status codes or sizes.",
@@ -769,20 +769,20 @@ def _builtin_workflows():
                     ),
                     "note": "Run a second directory check with a different scanner.",
                 },
-                {"cmd": "curl -sIL https://darklab.sh/admin", "note": "Inspect redirects and headers for a candidate path."},
+                {"cmd": "curl -sIL https://ip.darklab.sh/admin", "note": "Inspect redirects and headers for a candidate path."},
             ],
         },
         {
             "title": "SSL / TLS Deep Dive",
             "description": "Inspect certificates, protocol support, cipher exposure, and known TLS weaknesses.",
             "steps": [
-                {"cmd": "sslscan darklab.sh", "note": "Enumerate protocols, ciphers, and certificate metadata."},
-                {"cmd": "sslyze --certinfo darklab.sh", "note": "Validate certificate chain details."},
+                {"cmd": "sslscan ip.darklab.sh", "note": "Enumerate protocols, ciphers, and certificate metadata."},
+                {"cmd": "sslyze --certinfo ip.darklab.sh", "note": "Validate certificate chain details."},
                 {
-                    "cmd": "openssl s_client -connect darklab.sh:443 -servername darklab.sh",
+                    "cmd": "openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh",
                     "note": "Inspect the raw handshake and served certificate chain.",
                 },
-                {"cmd": "testssl darklab.sh", "note": "Run the broader TLS configuration audit."},
+                {"cmd": "testssl ip.darklab.sh", "note": "Run the broader TLS configuration audit."},
             ],
         },
         {
@@ -791,7 +791,7 @@ def _builtin_workflows():
             "steps": [
                 {"cmd": "dig darklab.sh A", "note": "Check the current address records."},
                 {"cmd": "whois darklab.sh", "note": "Review ownership and provider hints."},
-                {"cmd": "curl -sIL https://darklab.sh", "note": "Inspect redirects, cache headers, and edge headers."},
+                {"cmd": "curl -sIL https://ip.darklab.sh", "note": "Inspect redirects, cache headers, and edge headers."},
                 {"cmd": "wafw00f https://darklab.sh", "note": "Look for WAF or CDN fingerprints."},
             ],
         },
@@ -799,15 +799,18 @@ def _builtin_workflows():
             "title": "API Recon",
             "description": "Triage API-style endpoints with headers, methods, JSON negotiation, and path fuzzing.",
             "steps": [
-                {"cmd": "curl -sI https://darklab.sh/api", "note": "Check whether the API path responds and how."},
-                {"cmd": "curl -sX OPTIONS -I https://darklab.sh/api", "note": "Inspect allowed methods and CORS-style headers."},
+                {"cmd": "curl -sI https://ip.darklab.sh/api", "note": "Check whether the API path responds and how."},
                 {
-                    "cmd": "curl -sH Accept:application/json https://darklab.sh/api",
+                    "cmd": "curl -sX OPTIONS -I https://ip.darklab.sh/api",
+                    "note": "Inspect allowed methods and CORS-style headers.",
+                },
+                {
+                    "cmd": "curl -sH Accept:application/json https://ip.darklab.sh/api",
                     "note": "Ask for JSON explicitly and inspect the response shape.",
                 },
                 {
                     "cmd": (
-                        "ffuf -u https://darklab.sh/FUZZ "
+                        "ffuf -u https://ip.darklab.sh/FUZZ "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Fuzz common API-adjacent paths and versions.",
@@ -818,20 +821,20 @@ def _builtin_workflows():
             "title": "Network Path Analysis",
             "description": "Diagnose reachability, route shape, latency, and packet-loss symptoms.",
             "steps": [
-                {"cmd": "ping -c 10 darklab.sh", "note": "Measure basic reachability, latency, and packet loss."},
-                {"cmd": "mtr darklab.sh", "note": "Summarize path loss and latency in report mode."},
-                {"cmd": "traceroute darklab.sh", "note": "Capture a static routed path to the target."},
-                {"cmd": "tcptraceroute darklab.sh 443", "note": "Trace the TCP path toward HTTPS specifically."},
+                {"cmd": "ping -c 10 ip.darklab.sh", "note": "Measure basic reachability, latency, and packet loss."},
+                {"cmd": "mtr ip.darklab.sh", "note": "Summarize path loss and latency in report mode."},
+                {"cmd": "traceroute ip.darklab.sh", "note": "Capture a static routed path to the target."},
+                {"cmd": "tcptraceroute ip.darklab.sh 443", "note": "Trace the TCP path toward HTTPS specifically."},
             ],
         },
         {
             "title": "Fast Port Discovery to Service Fingerprint",
             "description": "Sweep for exposed ports quickly, then fingerprint and validate important services.",
             "steps": [
-                {"cmd": "rustscan -a darklab.sh --range 1-1000", "note": "Quickly sweep the first thousand ports."},
-                {"cmd": "naabu -host darklab.sh -silent", "note": "Run a second fast TCP discovery pass."},
-                {"cmd": "nmap -sV darklab.sh", "note": "Fingerprint services once you know exposure is present."},
-                {"cmd": "nc -zv darklab.sh 80", "note": "Validate a specific expected port manually."},
+                {"cmd": "rustscan -a ip.darklab.sh --range 1-1000", "note": "Quickly sweep the first thousand ports."},
+                {"cmd": "naabu -host ip.darklab.sh -silent", "note": "Run a second fast TCP discovery pass."},
+                {"cmd": "nmap -sV ip.darklab.sh", "note": "Fingerprint services once you know exposure is present."},
+                {"cmd": "nc -zv ip.darklab.sh 80", "note": "Validate a specific expected port manually."},
             ],
         },
     ]
