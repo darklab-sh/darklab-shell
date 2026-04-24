@@ -1,0 +1,225 @@
+{
+  "ui": "desktop",
+  "generated_at": "2026-04-24T02:02:46.926Z",
+  "theme_mode": "darklab_obsidian",
+  "theme_variant": "all",
+  "entries": [
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - welcome animation completed",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/01-main-welcome-settled.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - autocomplete menu open",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/02-main-autocomplete.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - reverse history search open",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/03-main-reverse-history-search.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - multiple tabs open",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/04-main-multiple-tabs.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - active tab running",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/05-main-running-active-tab.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - inactive tab running",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/06-main-running-inactive-tab.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - kill confirmation modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/07-kill-confirmation-modal.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - confirmation modal with three stacked actions",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/08-confirm-modal-three-actions-stacked.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - save menu open",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/09-save-menu-open.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - rail open with Recents and Workflows expanded",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/10-rail-open-both-expanded.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - rail open with Recents expanded and Workflows collapsed",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/11-rail-open-recents-only.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - rail open with Recents and Workflows collapsed",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/12-rail-open-both-collapsed.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - rail collapsed",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/13-rail-closed.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - search open with active matches",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/14-search-open-active-match.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - workflow modal example",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/15-workflow-modal-example.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - history drawer",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/16-history-drawer.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - history drawer with snapshot row",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/17-history-drawer-snapshot-row.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - history drawer command search with chip",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/18-history-drawer-search-chip.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - history drawer delete-all confirmation modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/19-history-drawer-delete-all-confirmation.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - history drawer delete confirmation modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/20-history-drawer-delete-confirmation.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - options modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/21-options-modal.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - session-token clear confirmation modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/22-session-token-clear-confirmation.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - theme modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/23-theme-modal.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - FAQ modal",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/24-faq-modal.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - keyboard shortcuts overlay",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/25-shortcuts-overlay.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - line numbers enabled",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/26-line-numbers-enabled.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - timestamps enabled",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/27-timestamps-enabled.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Main UI - line numbers and timestamps enabled",
+      "route": "/",
+      "file": "desktop/darklab_obsidian/28-line-numbers-and-timestamps-enabled.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Snapshot page",
+      "route": "/share/:id",
+      "file": "desktop/darklab_obsidian/29-snapshot-page.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Permalink page",
+      "route": "/history/:id",
+      "file": "desktop/darklab_obsidian/30-permalink-page.png"
+    },
+    {
+      "ui": "desktop",
+      "theme": "darklab_obsidian",
+      "title": "Diag page",
+      "route": "/diag",
+      "file": "desktop/darklab_obsidian/31-diag-page.png"
+    }
+  ]
+}
