@@ -50,6 +50,13 @@ function _recoverStalledRun(tabId) {
   showTabKillBtn(tabId);
 }
 
+function _shouldSuppressStreamOutputLine(tab, line) {
+  if (!tab || typeof line !== 'string') return false;
+  const root = String(tab.command || '').trim().split(/\s+/, 1)[0].toLowerCase();
+  if (root !== 'nc') return false;
+  return /^Warning: inverse host lookup failed for /i.test(line);
+}
+
 // ── Status pill ──
 // The HUD STATUS pill is a binary running-or-not indicator; the outcome of
 // the last run (exit code, killed) is surfaced by the adjacent LAST EXIT
@@ -1535,7 +1542,9 @@ function submitCommand(rawCmd) {
                   t.unknownCommand = true;
                 }
                 msg.text.split('\n').forEach((line, i, arr) => {
-                  if (i < arr.length - 1 || line) appendLine(line, msg.cls || '', tabId);
+                  if ((i < arr.length - 1 || line) && !_shouldSuppressStreamOutputLine(t, line)) {
+                    appendLine(line, msg.cls || '', tabId);
+                  }
                 });
               } else if (msg.type === 'exit') {
                 _clearStalledTimeout(tabId);

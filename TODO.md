@@ -22,60 +22,54 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 
 ## Open TODOs
 
-- **Light theme polish and shared theme-token expansion**
-  - The current light themes are usable, but several of them still flatten important surfaces together:
-    - page background, panels, terminal surface, terminal title bar, history drawer, and destructive modal surfaces are too close in value
-    - borders and wrap shadows are too low-contrast on pale backgrounds
-    - muted text is marginal on some warm themes
-    - the welcome ASCII treatment on light themes tends to look washed out instead of intentional
-  - The right scope is token-level theme work, not component rewrites. The goal is to improve the visual hierarchy of the existing UI while keeping the current layout and interaction model intact.
-  - This work also needs a small theme-system expansion so the UI can style a few surfaces independently instead of reusing nearby tokens that were “close enough” for the dark themes:
-    - add theme support for a dedicated status-strip background, border, and text color
-    - add a soft-border token for subtle separators that should sit between `border` and `border_bright`
-    - add an explicit welcome-ASCII color token so the welcome mark can diverge from the generic success green where that improves the theme identity
-  - Repo touch points:
-    - [app/config.py](app/config.py)
-      - add the new theme keys to the default theme families
-      - add the keys to `_THEME_CSS_ORDER`
-      - ensure `theme_runtime_css_vars()` emits them for the browser, permalinks, and exports
-    - [app/static/css/base.css](app/static/css/base.css)
-      - declare the new `--theme-*` variables in `:root`
-    - [app/static/css/shell.css](app/static/css/shell.css) or the actual current status-strip rule location
-      - move the status strip off `panel_alt_bg` / `panel_border` / `muted`
-      - use the new status-strip tokens instead
-    - [app/static/css/welcome.css](app/static/css/welcome.css)
-      - allow the welcome ASCII block to use a dedicated theme token instead of always inheriting `--green`
-    - [app/conf/themes/*.yaml](app/conf/themes/)
-      - update all light themes with the revised hierarchy, accent, muted-text, and welcome-filter values
-      - add the new keys to dark themes too so the theme export path stays uniform across all theme files
-  - Design direction for the light-theme pass:
-    - widen the separation between `bg`, `panel_bg`, `surface`, `terminal_bar_bg`, `history_panel_bg`, and `confirm_modal_bg`
-    - deepen border / shadow tokens enough that panel edges remain visible at normal zoom
-    - darken muted text where needed to keep it safely readable on pale backgrounds
-    - make light-theme welcome ASCII feel deliberate rather than desaturated
-    - preserve each theme’s identity rather than collapsing them into one generic “good light theme”
-  - Important implementation rule:
-    - do the token plumbing first, then theme YAML changes
-    - verify the dark themes still look unchanged before accepting the light-theme visual diffs
-  - Validation should be capture-driven, not just eyeballed in one tab:
-    - regenerate light-theme screenshot captures and review them against the known desktop/mobile capture scenes
-    - run a dark-theme regression check on at least:
-      - main shell idle
-      - welcome completed
-      - history drawer open
-      - options modal
-      - destructive confirmation modal
-    - verify the new tokens reach:
-      - main UI
-      - permalink pages
-      - HTML export surfaces
+- **Server-side output signals and summaries migration**
+  - Wait to begin until the current E2E suite has passed repeatedly after the recent intermittent-test fixes. The goal is to start this migration from a known-stable baseline rather than mixing architecture work with flake cleanup.
+  - Move findings, warnings, errors, summary-line detection, command grouping, and target extraction out of browser DOM scanning and into backend-owned output metadata.
+  - Treat this as the long-term source of truth rather than building a polished hybrid bridge. The frontend should render and navigate signal metadata, not independently decide what a finding/error/warning/summary is.
+
+  - Backend model:
+    - Add a Python signal classifier module, likely `app/output_signals.py`.
+    - Port the current frontend detection rules from `app/static/js/search.js` into backend tests and classifier logic.
+    - Classify output with command context: command root, full command, target, built-in command exclusion, signal kind, line text, and line index.
+    - Preserve the current behavior that built-in command output is excluded from findings, warnings, errors, and summaries.
+    - Preserve user-killed process behavior: do not classify user-killed output as an error.
+    - Keep raw output primary; metadata is additive.
+
+  - SSE/live stream model:
+    - Add signal metadata directly to streamed output events so the live UI can mark lines immediately.
+    - Prefer stable per-line metadata in each event, for example: `line_index`, `signals`, `command_root`, `target`, and `line_text` where appropriate.
+    - Ensure multi-line output chunks produce deterministic line indexes and metadata for each visible rendered line.
+    - Keep frontend line rendering responsible for CSS classes, chips, navigation, and active-match state.
+
+  - Persistence/API model:
+    - Persist signal metadata with completed run history.
+    - Include signal metadata in history restore responses and share/permalink payloads.
+    - Avoid rescanning restored DOM output when server-provided metadata exists.
+    - Decide whether older runs without metadata should be lazily classified on read or treated as metadata-unavailable.
+
+  - Frontend migration:
+    - Replace DOM regex classification in `search.js` with metadata-driven counts, chips, filters, highlight navigation, and summarize output.
+    - Keep only minimal fallback scanning if needed for legacy/no-metadata output, and remove it once all active surfaces provide server metadata.
+    - Keep the summarize button behavior, but generate grouped summaries from backend-provided command/target/signal metadata.
+    - Confirm search chips (`F`, `W`, `E`, `S`) still open search and cycle through scoped matches.
+
+  - Tests:
+    - Add Python fixture tests for classifier output using real-ish command samples:
+      - `dig`, `dig +short`, `host`, `nslookup`
+      - `nc -zv ip.darklab.sh ...`
+      - `nmap` open-port/service output
+      - `curl` status/redirect output
+      - denied commands, failed commands, timeout notices, and user-killed runs
+      - built-in command output exclusion
+    - Add backend/API tests verifying `/run`, history restore, and share payloads include signal metadata.
+    - Reduce frontend tests to rendering/navigation behavior using metadata fixtures instead of duplicating classifier rules in JS.
+    - Add at least one E2E proving live SSE metadata marks findings during streaming and restored history renders the same signals.
+
   - Acceptance criteria:
-    - light themes show clearer surface separation without losing their individual character
-    - the terminal wrap border and drawer/modal edges remain visible on light backgrounds
-    - muted text remains readable across the set
-    - the status strip reads as its own surface instead of blending into adjacent panels
-    - welcome ASCII color/filter treatment looks intentional on light themes
-    - dark themes show no unintended regressions after the shared token changes
+    - Live output, restored history, share/permalink views, search chips, and command findings summaries all agree on signal counts.
+    - Large restored transcripts do not require repeated DOM-wide regex rescans for discoverability counts.
+    - Existing findings behavior remains covered for `dig`, `host`, `nslookup`, `nc`, and built-in exclusion.
+    - Full E2E, unit, and relevant Python suites pass after migration.
 
 ---
 
@@ -88,6 +82,10 @@ This file tracks open work items, known issues, and product ideas for darklab_sh
 ---
 
 ## Technical Debt
+
+- **Mobile E2E setup can trip app rate limiting**
+  - The mobile tabs overflow coverage rapidly runs several built-in commands to create output-bearing tabs. It currently passes, but it can emit a backend rate-limit warning during full mobile-file runs.
+  - Consider mocking `/run` for that setup path or pacing the setup commands so the test keeps validating tab overflow behavior without depending on rate-limit timing.
 
 ---
 
@@ -111,7 +109,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 | Idea | Benefit | Complexity | Notes |
 |------|---------|------------|-------|
-| Command outcome summaries | H | M | Start narrow (nmap, dig, curl, openssl); highest signal-to-noise value of any feature on the list |
 | Additional export formats | M | L–M | JSONL is straightforward; Markdown needs formatting logic |
 | Bulk history operations | M | L–M | Checkbox mode in history drawer + bulk endpoints |
 | Share package | H | M | Unified design reduces total work vs building annotations, notes, and lifecycle separately |
@@ -124,7 +121,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 | Idea | Benefit | Complexity | Notes |
 |------|---------|------------|-------|
 | Structured command catalog ⬡ | H | H | Unblocks parameterized forms, improved autocomplete, and policy metadata; design forms against this before building them |
-| Structured output model ⬡ | H | H | Unblocks command summaries, run comparison, and richer exports; build summaries to be retro-fittable once this is in place |
 
 **Tier 4 — Moderate value, moderate effort**
 
@@ -160,121 +156,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
 
 ### Near-term
 
-- **Workflow inputs and runnable forms**
-  - Let workflows declare required inputs so the user can fill in the needed values and launch the full workflow directly from the UI instead of treating workflows as static reference text.
-  - Keep this as a workflow-system extension, not a separate command-form feature. The existing workflows panel, workflow cards, and normal `/run` path should remain the foundation.
-  - Scope the first version around the current built-in workflow shapes:
-    - most workflows only need one required value such as `domain`, `host`, or `url`
-    - a smaller set may need two values, but the first implementation should avoid workflows that require more than two user-entered fields
-    - workflows should stay operator-readable after interpolation — the user must be able to see exactly what commands will run before anything executes
-  - Current workflow fit:
-    - one-input friendly:
-      - DNS troubleshooting (`domain`)
-      - email checks (`domain`)
-      - domain OSINT / passive recon (`domain`)
-      - quick reachability (`host`)
-      - TLS / HTTPS checks (`host` or `url`)
-      - HTTP triage (`url`)
-      - SSL / TLS deep dive (`host`)
-      - network path analysis (`host`)
-      - fast port discovery to fingerprint (`host`)
-      - web directory discovery (`url`)
-      - API recon (`url`)
-    - two-input candidates:
-      - subdomain enumeration / validation
-      - CDN / edge behavior checks
-    - implementation rule:
-      - if a workflow still needs more than two real operator inputs, simplify the workflow definition before supporting it in the runnable-form path
-  - Data-model extension:
-    - add optional `inputs` to workflow definitions
-    - each input should be explicit and structured, for example:
-      - `id`
-      - `label`
-      - `type`
-      - `required`
-      - optional `placeholder`
-      - optional `default`
-      - optional `help`
-    - supported first-pass types should stay small:
-      - `domain`
-      - `host`
-      - `url`
-      - `port`
-      - `path`
-    - steps should support lightweight token interpolation such as `{{domain}}`, `{{host}}`, `{{url}}`, and `{{port}}`
-    - interpolation should be plain value substitution only — no expressions, no conditionals, no shell templating
-  - Backend work:
-    - extend `load_workflows()` and built-in workflow definitions so `inputs` are loaded, validated, and returned to the client
-    - reject malformed workflow inputs the same way malformed steps are ignored today
-    - keep interpolation logic constrained and deterministic:
-      - only replace declared workflow input tokens
-      - preserve the final rendered command as a normal command string that still flows through the existing allowlist engine
-    - do not add a new server-side "run workflow" endpoint in the first pass
-  - Frontend form UX:
-    - clicking a workflow card should continue to support the current lightweight behavior for quick prompt-fill use
-    - add a second action for workflows with declared inputs, for example:
-      - open a lightweight app-native modal or sheet
-      - collect the required values
-      - show the fully rendered commands in order
-    - the form should feel native to the existing shell UI:
-      - use the current modal/sheet primitives
-      - reuse existing button / field styling
-      - preserve mobile parity
-    - the preview should be explicit:
-      - numbered steps
-      - rendered command for each step
-      - note text retained beneath each rendered step
-      - clear indication of what target values are being applied
-  - Execution model:
-    - phase 1:
-      - support "render and load" behavior cleanly
-      - allow users to:
-        - fill the workflow inputs
-        - preview the final commands
-        - load an individual rendered step into the prompt
-        - optionally copy the whole rendered workflow sequence
-    - phase 2:
-      - add "run full workflow" as a client-side queue over the existing command runner
-      - run one step at a time through the current `/run` path
-      - default behavior should be serial execution in the active tab
-      - each step should remain a normal run for history, snapshots, and permalinks
-      - start with a simple stop policy:
-        - stop on first failed step by default
-        - reconsider continue-on-failure only after the basic runner is stable
-      - killing a workflow should stop the currently running step and cancel the remaining queued steps
-  - Architecture guardrails:
-    - do not invent a second execution engine for workflows
-    - do not bypass the normal command allowlist, rewriting, history, or streaming paths
-    - do not turn workflow inputs into a generic arbitrary-shell builder
-    - keep workflow templates transparent enough that an operator can reason about the exact commands before running them
-  - UI state / history expectations:
-    - rendered workflow execution should still produce ordinary history entries per command
-    - the history drawer does not need workflow-grouping in the first pass
-    - if workflow progress is surfaced in the UI, it should be a thin client-side shell state rather than a new persisted server-side workflow-run model
-  - Validation / testing:
-    - unit tests for:
-      - workflow input parsing
-      - malformed workflow definitions
-      - token interpolation
-      - token names that are missing, repeated, or unused
-    - frontend unit tests for:
-      - workflow form rendering
-      - preview generation
-      - per-step load behavior
-      - queue execution state once phase 2 exists
-    - e2e coverage for:
-      - desktop workflow input modal flow
-      - mobile workflow input sheet flow
-      - preview correctness
-      - full workflow queue run for at least one one-input workflow
-      - kill / cancel behavior during queued execution
-  - Acceptance criteria:
-    - workflows can declare structured required inputs without breaking existing static workflows
-    - a user can fill in a workflow target and see the exact rendered commands before running them
-    - rendered workflow commands still pass through the existing allowlist and run pipeline
-    - at least one one-input workflow can be previewed and launched end-to-end on desktop and mobile
-    - the design stays clearly "workflow-driven" rather than becoming a second disconnected command-form system
-
 - **Share package** (annotations, notes, and lifecycle controls)
   - Snapshots currently have no metadata beyond the raw output. Add optional title, note, and tags as a unified share package rather than building annotations, operator notes, and sharing controls as disconnected features — they compose into one coherent model.
   - Share package surface:
@@ -288,13 +169,6 @@ Ranked by user benefit weighted against implementation complexity. Benefit and c
     - expiring share links
     - one-time reveal links for sensitive snapshot sharing
   - Design all three (annotations, notes, lifecycle) together so the data model is consistent from the start.
-
-- **Additional export formats**
-  - Add Markdown and JSONL export in addition to `.txt` and themed `.html`.
-  - Pairs naturally with the existing export system and structured output work.
-  - Make structured exports first-class:
-    - include command, timestamps, exit code, line classes, and preview/full-output metadata
-    - treat `JSONL` as a real machine-readable export, not just another text dump
 
 - **Better output navigation**
   - For security tool output, 90% of lines are noise and 10% are findings. The most valuable part of this idea is jump-between-errors/warnings, not jump-to-top/bottom.

@@ -10,16 +10,15 @@ import config as _config
 from commands import (
     load_all_faq,
     load_all_workflows,
-    load_allowed_commands,
-    load_allowed_commands_grouped,
     load_ascii_art,
     load_ascii_mobile_art,
-    load_autocomplete_context,
+    load_autocomplete_context_from_commands_registry,
+    load_commands_registry,
     load_mobile_welcome_hints,
     load_welcome,
     load_welcome_hints,
 )
-from fake_commands import get_current_shortcuts, get_special_command_keys
+from fake_commands import get_current_shortcuts, get_fake_command_roots, get_special_command_keys
 from helpers import get_client_ip, get_log_session_id, ip_is_in_cidrs, resolve_theme
 
 log = logging.getLogger("shell")
@@ -170,11 +169,27 @@ def get_themes():
 @content_bp.route("/allowed-commands")
 def allowed_commands():
     """Return the list of allowed command prefixes for display in the UI."""
-    prefixes, _ = load_allowed_commands()
-    if prefixes is None:
+    registry = load_commands_registry()
+    groups = []
+    prefixes = []
+    group_map = {}
+    for entry in registry.get("commands", []):
+        raw_policy_value = entry.get("policy")
+        policy = raw_policy_value if isinstance(raw_policy_value, dict) else {}
+        allowed = [str(item) for item in policy.get("allow", []) if str(item).strip()]
+        if not allowed:
+            continue
+        prefixes.extend(allowed)
+        category = str(entry.get("category") or "Allowed commands")
+        group = group_map.get(category)
+        if group is None:
+            group = {"name": category, "commands": []}
+            group_map[category] = group
+            groups.append(group)
+        group["commands"].extend(allowed)
+    if not prefixes:
         _log_content_view("/allowed-commands", restricted=False, count=0)
         return jsonify({"restricted": False, "commands": [], "groups": []})
-    groups = load_allowed_commands_grouped() or []
     _log_content_view("/allowed-commands", restricted=True, count=len(prefixes))
     return jsonify({"restricted": True, "commands": prefixes, "groups": groups})
 
@@ -208,11 +223,17 @@ def shortcuts():
 
 @content_bp.route("/autocomplete")
 def autocomplete():
-    """Return external-tool autocomplete context from autocomplete.yaml."""
-    context = load_autocomplete_context()
+    """Return external-tool autocomplete context from the command registry."""
+    context = load_autocomplete_context_from_commands_registry()
+    builtin_command_roots = get_fake_command_roots()
     special_commands = get_special_command_keys()
     _log_content_view("/autocomplete")
-    return jsonify({"suggestions": [], "context": context, "special_commands": special_commands})
+    return jsonify({
+        "suggestions": [],
+        "context": context,
+        "special_commands": special_commands,
+        "builtin_command_roots": builtin_command_roots,
+    })
 
 
 @content_bp.route("/welcome")

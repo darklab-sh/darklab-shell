@@ -1195,6 +1195,34 @@ body.mobile-terminal-mode .output-follow-btn {
   font-style: italic;
   margin-bottom: 2px;
 }
+.line.fake-signal-summary-header {
+  color: var(--blue);
+  font-weight: 700;
+  margin-top: 8px;
+  margin-bottom: 2px;
+}
+.line.fake-signal-summary-section {
+  color: var(--text);
+  font-weight: 700;
+  margin-top: 6px;
+}
+.line.fake-signal-summary-row,
+.line.fake-signal-summary-note {
+  white-space: pre-wrap;
+}
+.line.fake-signal-summary-row {
+  color: var(--text);
+}
+.line.fake-signal-summary-note {
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 2px;
+}
+.line.fake-signal-summary-sep {
+  color: var(--border-bright);
+  letter-spacing: 0.04em;
+  margin: 6px 0;
+}
 .line.fake-catalog-item {
   color: color-mix(in srgb, var(--text) 94%, var(--blue));
 }
@@ -1425,6 +1453,62 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
   margin-bottom: 14px;
 }
 
+.workflow-input-panel {
+  margin-bottom: 14px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--theme-panel-alt-bg) 68%, transparent);
+}
+
+.workflow-input-intro,
+.workflow-input-hint {
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.workflow-input-intro {
+  color: var(--muted);
+  margin-bottom: 10px;
+}
+
+.workflow-input-hint {
+  color: var(--muted);
+  margin-top: 10px;
+}
+
+.workflow-input-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 10px;
+}
+
+.workflow-input-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 10px;
+}
+
+.workflow-input-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.workflow-input-label {
+  color: var(--text);
+  font-family: var(--font-display);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.workflow-input-help {
+  color: var(--muted);
+  font-size: 11px;
+  line-height: 1.5;
+}
+
 .workflow-steps {
   list-style: none;
   margin: 0;
@@ -1468,6 +1552,11 @@ body .tab .tab-status.ok { background: var(--theme-tab-status-ok-bg); }
   min-width: 0;
   max-width: 100%;
   overflow-wrap: anywhere;
+}
+
+.workflow-step-cmd.is-disabled {
+  opacity: 0.72;
+  cursor: default;
 }
 
 .workflow-step-run {

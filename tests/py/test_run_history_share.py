@@ -14,6 +14,7 @@ import uuid
 import unittest.mock as mock
 from collections.abc import Callable, Iterator, Sequence
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import cast
 
 import pytest
@@ -518,26 +519,32 @@ class TestRunStreaming:
         assert fake_proc.stdout.closed is True
         assert fake_proc.wait_calls == 1
 
-    def test_fake_ls_streams_allowed_commands_and_persists_history(self):
+    def test_fake_commands_streams_grouped_catalog_and_persists_history(self):
         client = get_client()
 
-        with mock.patch("fake_commands.load_allowed_commands_grouped", return_value=[
-            {"name": "Networking", "commands": ["ping", "dig"]},
-        ]):
-            resp = client.post("/run", json={"command": "ls"}, headers={"X-Session-ID": "sess-fake-ls"})
+        with mock.patch("fake_commands.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {"root": "dig", "category": "Networking", "policy": {"allow": ["dig"], "deny": []}},
+            ],
+            "pipe_helpers": [],
+        }):
+            resp = client.post("/run", json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
             body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
         assert '"type": "started"' in body
         assert '"type": "output"' in body
+        assert "Built-in commands:\\n" in body
+        assert "Allowed external commands:\\n" in body
         assert "[Networking]\\n" in body
         assert "ping\\n" in body
         assert "dig\\n" in body
         assert '"type": "exit"' in body
 
-        hist = client.get("/history", headers={"X-Session-ID": "sess-fake-ls"})
+        hist = client.get("/history", headers={"X-Session-ID": "sess-fake-commands"})
         data = json.loads(hist.data)
-        assert [r["command"] for r in data["runs"]] == ["ls"]
+        assert [r["command"] for r in data["runs"]] == ["commands"]
 
     def test_fake_clear_emits_clear_event_and_persists_history(self):
         client = get_client()
@@ -574,44 +581,72 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
+        assert "Help and discovery:\\n" in body
+        assert "Run `commands` to browse built-in and allowed external commands.\\n" in body
+        assert "Use `commands --built-in` or `commands --external` to filter that catalog.\\n" in body
+        assert "Run `faq` to browse the configured FAQ entries inside the terminal.\\n" in body
+        assert "Run `shortcuts` to see the current keyboard shortcuts.\\n" in body
+        assert "README:" in body
+        assert "Autocomplete appears as you type; press Tab to accept or cycle suggestions.\\n" in body
+        assert '"type": "exit"' in body
+
+    def test_fake_commands_lists_built_in_and_external_catalogs(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {"root": "dig", "category": "Networking", "policy": {"allow": ["dig +short", "dig MX"], "deny": []}},
+            ],
+            "pipe_helpers": [],
+        }):
+            resp = client.post("/run", json={"command": "commands"}, headers={"X-Session-ID": "sess-fake-commands"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
         assert "Built-in commands:\\n" in body
-        assert "banner" in body and "Print the configured banner art without replaying welcome." in body
-        assert "clear" in body and "Clear the current terminal tab output." in body
-        assert "date" in body and "Show the current server time." in body
-        assert "env" in body and "Show core environment values for this shell." in body
-        assert "faq" in body and "Show configured FAQ entries inside the terminal with question and answer formatting." in body
-        assert "fortune" in body and "Print a short operator-themed one-liner." in body
-        assert "groups" in body and "Show the shell group membership." in body
-        assert "autocomplete" in body and "Explain context-aware autocomplete for known commands." in body
-        assert "help" in body and "List the built-in commands available in this shell." in body
-        assert "history" in body and "List recent commands from this session." in body
-        assert "hostname" in body and "Show the configured shell instance name." in body
-        assert "ip a" in body and "Show a minimal shell network interface view." in body
-        assert "jobs" in body and "List active jobs for this session." in body
-        assert "limits" in body and "Show configured runtime, history, and retention limits." in body
-        assert "man <cmd>" in body and "Show the real man page for an allowed command." in body
-        assert "last" in body and "Show recent completed runs with timestamps and exit codes." in body
-        assert "retention" in body and "Show retention and persisted-output settings." in body
-        assert "route" in body and "Show the shell routing table summary." in body
-        assert "shortcuts" in body and "Show current keyboard shortcuts." in body
-        assert "status" in body and "Show the current session and shell configuration summary." in body
-        assert "Commands with built-in pipe support:\\n" in body
-        assert "Chain supported helpers like grep, head, tail, wc -l, sort, and uniq after a command.\\n" in body
-        assert "grep" in body and "command | grep <pattern>" in body
-        assert "head" in body and "command | head -n <count>" in body
-        assert "tail" in body and "command | tail -n <count>" in body
-        assert "wc -l" in body and "command | wc -l" in body
-        assert "sort" in body and "command | sort -u" in body
-        assert "uniq" in body and "command | uniq -c" in body
-        assert "tty" in body and "Show the web terminal device path." in body
-        assert "type <cmd>" in body and "Describe whether a command is built in, installed, or missing." in body
-        assert "uname [-a]" in body and "Show the shell platform string." in body
-        assert "uptime" in body and "Show app uptime since process start." in body
-        assert "version" in body and "Show shell, app, Flask, and Python version details." in body
-        assert "which <cmd>" in body and "Locate a built-in command or allowed runtime command." in body
-        assert "who" in body and "Show the current shell user and session." in body
-        assert "df -h" in body and "Show a compact filesystem summary." in body
-        assert "free -h" in body and "Show a compact memory summary." in body
+        assert "commands" in body and "List built-in and allowed external commands." in body
+        assert "help" in body and "Show guidance for README, FAQ, shortcuts, and command discovery." in body
+        assert "Allowed external commands:\\n" in body
+        assert "[Networking]\\n" in body
+        assert "ping\\n" in body
+        assert "dig\\n" in body
+        assert "dig +short\\n" not in body
+        assert '"type": "exit"' in body
+
+        hist = client.get("/history", headers={"X-Session-ID": "sess-fake-commands"})
+        data = json.loads(hist.data)
+        assert [r["command"] for r in data["runs"]] == ["commands"]
+
+    def test_fake_commands_supports_built_in_only_filter(self):
+        client = get_client()
+
+        resp = client.post("/run", json={"command": "commands --built-in"})
+        body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Built-in commands:\\n" in body
+        assert "Allowed external commands:\\n" not in body
+
+    def test_fake_commands_supports_external_only_filter(self):
+        client = get_client()
+
+        with mock.patch("fake_commands.load_commands_registry", return_value={
+            "commands": [
+                {"root": "ping", "category": "Networking", "policy": {"allow": ["ping"], "deny": []}},
+                {"root": "curl", "category": "Networking", "policy": {"allow": ["curl -I"], "deny": []}},
+            ],
+            "pipe_helpers": [],
+        }):
+            resp = client.post("/run", json={"command": "commands --external"})
+            body = resp.get_data(as_text=True)
+
+        assert resp.status_code == 200
+        assert "Built-in commands:\\n" not in body
+        assert "Allowed external commands:\\n" in body
+        assert "ping\\n" in body
+        assert "curl\\n" in body
+        assert "curl -I\\n" not in body
         assert '"type": "exit"' in body
 
     def test_fake_shortcuts_lists_current_shortcuts(self):
@@ -687,7 +722,8 @@ class TestRunStreaming:
         assert f"{shell_app.CFG['max_output_lines']}\\n" in limits_body
         assert status_resp.status_code == 200
         assert "session" in status_body
-        assert "sess-limits\\n" in status_body
+        assert "sess-lim" in status_body
+        assert "sess-limits\\n" not in status_body
         assert "tab limit" in status_body
         assert "4\\n" in status_body
         assert "retention" in status_body
@@ -1054,6 +1090,7 @@ class TestRunStreaming:
         body = resp.get_data(as_text=True)
 
         assert resp.status_code == 200
+        assert "Built-in command:\\n" not in body
         assert "Built-in commands:\\n" in body
         assert "history    List recent commands from this session.\\n" in body
 
@@ -1176,18 +1213,6 @@ class TestRunStreaming:
         assert "bash: fork bomb politely declined\\n" in fork_body
         assert "system remains operational\\n" in fork_body
 
-    def test_fake_autocomplete_explains_shell_completion_features(self):
-        client = get_client()
-
-        resp = client.post("/run", json={"command": "autocomplete"})
-        body = resp.get_data(as_text=True)
-
-        assert resp.status_code == 200
-        assert "Autocomplete:\\n" in body
-        assert "Known commands can suggest flags, values, and positional hints.\\n" in body
-        assert "Built-in pipe support can also suggest grep, head, tail, wc -l, sort, and uniq after `command |`.\\n" in body
-        assert '"type": "exit"' in body
-
     def test_fake_id_returns_synthetic_identity(self):
         client = get_client()
 
@@ -1263,7 +1288,7 @@ class TestRunStreaming:
 class TestRunOutputArtifacts:
     def _insert_run_with_artifact(self, run_id, session_id="sess-artifact"):
         ensure_run_output_dir()
-        artifact_path = os.path.join(RUN_OUTPUT_DIR, f"{run_id}.txt.gz")
+        artifact_path = Path(RUN_OUTPUT_DIR) / f"{run_id}.txt.gz"
         with gzip.open(artifact_path, "wt", encoding="utf-8") as handle:
             handle.write("line 1\nline 2\n")
 

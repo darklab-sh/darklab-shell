@@ -88,10 +88,6 @@
   group: "web"
   out: "probe HTTP services and inspect responses"
 
-- cmd: "amass enum -d darklab.sh"
-  group: "recon"
-  out: "broaden subdomain and asset discovery"
-
 - cmd: "assetfinder darklab.sh"
   group: "recon"
   out: "enumerate assets related to a domain"

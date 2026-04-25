@@ -29,7 +29,7 @@ def _check(cmd, allow=None, deny=None):
     """Call is_command_allowed with a mocked allowlist."""
     a = allow if allow is not None else ALLOW
     d = deny  if deny  is not None else DENY
-    with mock.patch("commands.load_allowed_commands", return_value=(a, d)):
+    with mock.patch("commands.load_command_policy", return_value=(a, d)):
         return is_command_allowed(cmd)
 
 
@@ -168,7 +168,7 @@ class TestAllowlist:
         assert not ok
 
     def test_unrestricted_when_no_file(self):
-        with mock.patch("commands.load_allowed_commands", return_value=(None, [])):
+        with mock.patch("commands.load_command_policy", return_value=(None, [])):
             ok, _ = is_command_allowed("anything goes")
         assert ok
 

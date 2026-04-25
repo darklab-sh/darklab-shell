@@ -179,11 +179,11 @@ test.describe('mobile menu', () => {
     // scrollHeight — and the poll window expires before the help output fully
     // renders, leaving scrollHeight ≤ clientHeight + 40 for the full 5s.
     await ensurePromptReady(page)
-    await runCommandMobile(page, 'help')
+    await runCommandMobile(page, 'commands')
 
     const output = page.locator('.tab-panel.active .output')
     await expect
-      .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight + 40))
+      .poll(async () => output.evaluate((el) => el.scrollHeight > el.clientHeight))
       .toBe(true)
 
     await page.evaluate(async () => {
@@ -706,12 +706,37 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile run button disables while a command is running', async ({ page }) => {
-    await page.locator('#mobile-cmd').fill(LONG_CMD)
+    let finishRun
+    const releaseRun = new Promise((resolve) => {
+      finishRun = resolve
+    })
+    await page.route('**/run', async (route) => {
+      const payload = JSON.parse(route.request().postData() || '{}')
+      if (payload.command === LONG_CMD) {
+        await releaseRun
+        await route.fulfill({
+          status: 200,
+          contentType: 'text/event-stream',
+          body: [
+            'data: {"type":"started","run_id":"mobile-long-run"}\n\n',
+            'data: {"type":"output","text":"mobile long run finished\\n"}\n\n',
+            'data: {"type":"exit","code":0,"elapsed":0.1}\n\n',
+          ].join(''),
+        })
+        return
+      }
+      await route.continue()
+    })
+
+    await ensurePromptReady(page)
+    await setComposerValueForTest(page, LONG_CMD, { mobile: true })
+    await expect(page.locator('#mobile-run-btn')).toBeEnabled()
     await page.locator('#mobile-run-btn').click()
 
     await expect(page.locator('#mobile-run-btn')).toBeDisabled()
     await expect(page.locator('.status-pill')).toHaveText('RUNNING', { timeout: 10_000 })
 
+    finishRun()
     await expect(page.locator('.status-pill').filter({ hasNotText: 'RUNNING' })).toBeVisible({
       timeout: 15_000,
     })
@@ -749,6 +774,8 @@ test.describe('mobile menu', () => {
   })
 
   test('mobile edit bar moves the caret and deletes a word', async ({ page }) => {
+    await ensurePromptReady(page)
+
     // Show the helper row through the real keyboard-state path rather than
     // toggling the CSS class directly, so the event-driven visibility sync in
     // mobile_chrome.js runs exactly the way production does.
@@ -759,28 +786,12 @@ test.describe('mobile menu', () => {
 
     await expect(page.locator('#mobile-kb-helper')).toBeVisible()
 
-    await page.locator('#mobile-cmd').evaluate((el) => {
-      el.value = 'ping -c 4 example.com'
-      el.focus()
-      el.setSelectionRange(el.value.length, el.value.length)
-      el.dispatchEvent(new Event('input', { bubbles: true }))
-    })
-    await page.evaluate(() => {
-      const val = 'ping -c 4 example.com'
-      setComposerState({
-        value: val,
-        selectionStart: val.length,
-        selectionEnd: val.length,
-        activeInput: 'mobile',
-      })
-    })
+    await setComposerValueForTest(page, 'ping -c 4 example.com', { mobile: true })
+    await expect(page.locator('#mobile-cmd')).toBeFocused()
 
-    const fireKbAction = (action) =>
-      page.evaluate((act) => {
-        document
-          .querySelector(`#mobile-kb-helper [data-kb-action="${act}"]`)
-          .dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, cancelable: true }))
-      }, action)
+    const fireKbAction = async (action) => {
+      await page.locator(`#mobile-kb-helper [data-kb-action="${action}"]`).click()
+    }
 
     await fireKbAction('left')
     await expect

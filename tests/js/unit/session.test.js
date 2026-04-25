@@ -113,7 +113,7 @@ describe('session.js', () => {
     const { describeFetchError } = loadSession()
 
     expect(describeFetchError(new Error('Failed to fetch'))).toBe(
-      'Unable to reach the server. Check that it is running and try again.',
+      'Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
     )
   })
 

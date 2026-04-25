@@ -63,6 +63,17 @@ function _isWelcomeLine(line) {
   return [...line.classList].some(cls => cls.startsWith('welcome-') || cls.startsWith('wlc-'));
 }
 
+function _isSyntheticSummaryLine(line) {
+  if (!line || !line.classList) return false;
+  return [
+    'fake-signal-summary-header',
+    'fake-signal-summary-section',
+    'fake-signal-summary-row',
+    'fake-signal-summary-note',
+    'fake-signal-summary-sep',
+  ].some(cls => line.classList.contains(cls));
+}
+
 function _getPendingOutputBatch(tabId) {
   // Output can arrive very quickly from SSE. Batch DOM writes per tab so large
   // scans do not thrash layout on every single line.
@@ -87,6 +98,11 @@ function _cancelPendingOutputBatch(tabId) {
   _pendingOutputBatches.delete(tabId);
 }
 
+function hasPendingOutputBatch(tabId) {
+  const state = _pendingOutputBatches.get(tabId);
+  return !!(state && (state.scheduled || state.items.length > 0));
+}
+
 function _schedulePendingOutputFlush(tabId) {
   const state = _getPendingOutputBatch(tabId);
   if (state.scheduled) return;
@@ -104,6 +120,8 @@ function _buildOutputLine(text, cls, tabId, now, runStart) {
   span.dataset.tsC = tsC;
   if (runStart) {
     span.dataset.tsE = '+' + ((now - runStart) / 1000).toFixed(1) + 's';
+  } else {
+    span.dataset.tsE = '+0.0s';
   }
 
   let rawTextForStorage = text;
@@ -235,6 +253,11 @@ function renderRestoredTabOutput(tabId, rawLines) {
     _stickOutputToBottom(out, tab);
   }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
+  if (tabId === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
+    if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
+    else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+    else refreshSearchDiscoverabilityUi();
+  }
 }
 
 function _flushPendingOutputBatch(tabId) {
@@ -272,6 +295,11 @@ function _flushPendingOutputBatch(tabId) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(tabId);
+  if (tabId === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
+    if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
+    else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+    else refreshSearchDiscoverabilityUi();
+  }
 
   if (state.items.length > 0) {
     _schedulePendingOutputFlush(tabId);
@@ -322,7 +350,7 @@ function syncOutputPrefixes(scope = document) {
     let visibleIndex = 0;
 
     lines.forEach(line => {
-      if (_isWelcomeLine(line)) {
+      if (_isWelcomeLine(line) || _isSyntheticSummaryLine(line)) {
         line.dataset.prefix = '';
         return;
       }
@@ -337,12 +365,17 @@ function syncOutputPrefixes(scope = document) {
       prefixStrings.push(prefix);
     });
 
-    const prompt = out.querySelector('#shell-prompt-wrap');
-    if (prompt) {
-      const promptPrefix = lnMode === 'on' ? String(visibleIndex + 1) : '';
-      prompt.dataset.prefix = promptPrefix;
-      prefixStrings.push(promptPrefix);
-    }
+  const prompt = out.querySelector('#shell-prompt-wrap');
+  if (prompt) {
+    const promptTsText = tsMode === 'elapsed'
+      ? '+0.0s'
+      : tsMode === 'clock'
+        ? new Date().toTimeString().slice(0, 8)
+        : '';
+    const promptPrefix = _formatOutputPrefix(visibleIndex + 1, promptTsText, true);
+    prompt.dataset.prefix = promptPrefix;
+    prefixStrings.push(promptPrefix);
+  }
 
     const prefixWidth = Math.max(0, ...prefixStrings.map(s => String(s || '').length));
     out.style.setProperty('--output-prefix-width', `${prefixWidth}ch`);
@@ -418,6 +451,11 @@ function appendLine(text, cls, tabId) {
     setTimeout(() => _stickOutputToBottom(out, tab), 0);
   }
   if (typeof updateOutputFollowButton === 'function') updateOutputFollowButton(id);
+  if (id === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
+    if (typeof isSearchBarOpen === 'function' && isSearchBarOpen()) runSearch();
+    else if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+    else refreshSearchDiscoverabilityUi();
+  }
 
   _syncTabRawLines(tab, rawLine);
 }

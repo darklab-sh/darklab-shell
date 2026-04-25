@@ -75,7 +75,10 @@ test.describe('timestamp toggle', () => {
 
     const prefixedLine = page.locator('.tab-panel.active .output .line[data-prefix]').first()
     await expect(prefixedLine).toHaveAttribute('data-prefix', /^\d+(\s+\+\d+\.\ds)?$/)
-    await expect(page.locator('#shell-prompt-wrap')).toHaveAttribute('data-prefix', /^\d+$/)
+    await expect(page.locator('#shell-prompt-wrap')).toHaveAttribute(
+      'data-prefix',
+      /^\d+\s+\+0\.0s$/,
+    )
   })
 
   test('toggling timestamps or line numbers keeps a long man page pinned to the live bottom', async ({

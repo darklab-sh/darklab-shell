@@ -62,6 +62,41 @@
     if (start > end) [start, end] = [end, start];
     return { start, end };
   };
+  let _setComposerValueInProgress = false;
+  const _baseSetComposerState = typeof global.setComposerState === 'function'
+    ? global.setComposerState
+    : null;
+  function _syncComposerInputsFromState() {
+    if (_setComposerValueInProgress || typeof getComposerState !== 'function') return;
+    const composer = getComposerState();
+    if (!composer) return;
+    const value = typeof composer.value === 'string' ? composer.value : '';
+    const start = typeof composer.selectionStart === 'number' ? Math.max(0, Math.min(composer.selectionStart, value.length)) : value.length;
+    const end = typeof composer.selectionEnd === 'number' ? Math.max(0, Math.min(composer.selectionEnd, value.length)) : start;
+    const inputs = global.getComposerInputs();
+    const target = composer.activeInput === 'mobile' ? inputs.mobile : inputs.desktop;
+    if (target) {
+      if (target.value !== value) target.value = value;
+      if (
+        typeof target.setSelectionRange === 'function'
+        && (document.activeElement === target || target === global.getVisibleComposerInput())
+      ) {
+        target.setSelectionRange(start, end);
+        _syncComposerCaretVisibility(target, start, end);
+      }
+    }
+    if (typeof global.syncRunButtonDisabled === 'function') global.syncRunButtonDisabled();
+  }
+  if (_baseSetComposerState) {
+    global.setComposerState = (next = {}) => {
+      const stateSnapshot = _baseSetComposerState(next);
+      _syncComposerInputsFromState();
+      return stateSnapshot;
+    };
+    if (global.APP_STATE_API) {
+      global.APP_STATE_API.setComposerState = (next) => global.setComposerState(next);
+    }
+  }
   global.applyMobileTextInputDefaults = (input) => {
     if (!input || typeof input.setAttribute !== 'function') return;
     input.setAttribute('autocomplete', 'off');
@@ -261,17 +296,22 @@
       ? getActiveComposerInput()
       : global.getVisibleComposerInput();
     if (typeof setComposerState === 'function') {
-      setComposerState({
-        value: nextValue,
-        selectionStart: nextStart,
-        selectionEnd: nextEnd,
-        activeInput: (typeof document !== 'undefined'
-          && document.body
-          && document.body.classList
-          && document.body.classList.contains('mobile-terminal-mode'))
-          ? 'mobile'
-          : 'desktop',
-      });
+      _setComposerValueInProgress = true;
+      try {
+        setComposerState({
+          value: nextValue,
+          selectionStart: nextStart,
+          selectionEnd: nextEnd,
+          activeInput: (typeof document !== 'undefined'
+            && document.body
+            && document.body.classList
+            && document.body.classList.contains('mobile-terminal-mode'))
+            ? 'mobile'
+            : 'desktop',
+        });
+      } finally {
+        _setComposerValueInProgress = false;
+      }
     }
     if (target && target !== exclude) {
       // Skip programmatic value assignment on the excluded input (typically the

@@ -5,12 +5,12 @@
 # Run this against a known-good running container whenever the expected
 # output for one or more Container Smoke Test commands changes intentionally —
 # for example, after a tool upgrade that changes help text, a new command
-# added to app/conf/autocomplete.yaml, added to workflows, or a rewrite rule
+# added to app/conf/commands.yaml, added to workflows, or a rewrite rule
 # that alters output.
 #
 # It drives a live browser session against the running dev container
 # (default: http://localhost:8888) and records the visible output of every
-# user-facing command from the shared smoke corpus (autocomplete examples plus
+# user-facing command from the shared smoke corpus (commands.yaml examples plus
 # workflow steps) into
 # tests/py/fixtures/container_smoke_test-expectations.json.
 #

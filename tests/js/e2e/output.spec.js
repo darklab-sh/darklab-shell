@@ -107,6 +107,36 @@ test.describe('output actions', () => {
     expect(html).not.toContain('fonts.googleapis.com')
     expect(html).not.toContain('fonts.gstatic.com')
   })
+
+  test('summarize appends a signal summary block for the active tab output', async ({ page }) => {
+    await page.evaluate(() => {
+      clearTab(activeTabId)
+      appendLine('443/tcp open https', '', activeTabId)
+      appendLine('warning: retrying request', 'notice', activeTabId)
+      appendLine('connection timed out', 'exit-fail', activeTabId)
+      appendLine('Nmap done: 1 IP address (1 host up) scanned in 1.23 seconds', '', activeTabId)
+    })
+
+    await page.locator('#search-summary-btn').click()
+
+    const lines = page.locator('.tab-panel.active .output .line')
+    await expect(lines.filter({ hasText: '[command findings]' })).toHaveCount(1)
+    await expect(lines.filter({ hasText: 'findings (1)' })).toHaveCount(1)
+    await expect(lines.filter({ hasText: '- 443/tcp open https' })).toHaveCount(1)
+    await expect(lines.filter({ hasText: 'warnings (1)' })).toHaveCount(1)
+    await expect(lines.filter({ hasText: 'errors (1)' })).toHaveCount(1)
+    await expect(lines.filter({ hasText: 'summaries (1)' })).toHaveCount(1)
+  })
+
+  test('summarize stays disabled when there are no signals', async ({ page }) => {
+    await page.evaluate(() => {
+      clearTab(activeTabId)
+      appendLine('plain output', '', activeTabId)
+      appendLine('still plain output', '', activeTabId)
+    })
+
+    await expect(page.locator('#search-summary-btn')).toBeDisabled()
+  })
 })
 
 test.describe('output actions with no exportable output', () => {
@@ -285,5 +315,74 @@ test.describe('output follow helper', () => {
       })
     await expect(followBtn).toBeVisible()
     await expect(followBtn).toHaveText('jump to bottom')
+  })
+})
+
+test.describe('output search scopes', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
+    await page.goto('/')
+    await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page, { cancelWelcome: true })
+    await page.evaluate(() => {
+      clearTab(activeTabId)
+      appendLine('noise line', '', activeTabId)
+      appendLine('warning: API returned a retry-after header', 'notice', activeTabId)
+      appendLine('warning: host seems down; retrying with TCP probe', 'notice', activeTabId)
+      appendLine('443/tcp open https', '', activeTabId)
+      appendLine('connection timed out', 'exit-fail', activeTabId)
+      appendLine('connection refused', 'exit-fail', activeTabId)
+      appendLine('verify return code: 0 (ok)', '', activeTabId)
+      appendLine('Nmap done: 1 IP address (1 host up) scanned in 2.31 seconds', '', activeTabId)
+    })
+  })
+
+  test('scoped search jumps between warnings and errors', async ({ page }) => {
+    await expect(page.locator('#search-toggle-btn')).toHaveText('⌕ search • 2 findings')
+    await expect(page.locator('#search-signal-summary')).toContainText('2F')
+    await expect(page.locator('#search-signal-summary')).toContainText('2W')
+    await expect(page.locator('#search-signal-summary')).toContainText('2E')
+    await expect(page.locator('#search-signal-summary')).toContainText('1S')
+    await page.locator('#search-toggle-btn').click()
+
+    await expect(page.locator('[data-search-scope="findings"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#search-input')).toBeDisabled()
+    await expect(page.locator('#search-count')).toHaveText('1 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('443/tcp open https')
+
+    await page.locator('[data-search-scope="warnings"]').click()
+
+    await expect(page.locator('#search-count')).toHaveText('1 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl')).toHaveCount(2)
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('warning:')
+    await expect(page.locator('#search-input')).toBeDisabled()
+
+    await page.locator('[data-search-scope="errors"]').click()
+
+    await expect(page.locator('#search-count')).toHaveText('1 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('timed out')
+
+    await page.locator('[data-search-scope="summaries"]').click()
+
+    await expect(page.locator('#search-count')).toHaveText('1 / 1')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('Nmap done:')
+
+    await page.keyboard.press('Escape')
+    await page.locator('[data-search-signal-scope="warnings"]').click()
+    await expect(page.locator('[data-search-scope="warnings"]')).toHaveAttribute('aria-pressed', 'true')
+    await expect(page.locator('#search-count')).toHaveText('1 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('retry-after')
+
+    await page.locator('[data-search-signal-scope="warnings"]').click()
+    await expect(page.locator('#search-count')).toHaveText('2 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('retrying with TCP probe')
+
+    await page.locator('[data-search-signal-scope="errors"]').click()
+    await expect(page.locator('#search-count')).toHaveText('1 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('timed out')
+
+    await page.locator('[data-search-signal-scope="errors"]').click()
+    await expect(page.locator('#search-count')).toHaveText('2 / 2')
+    await expect(page.locator('.tab-panel.active .line.search-signal-hl.current')).toContainText('refused')
   })
 })

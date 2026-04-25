@@ -259,9 +259,7 @@ function dispatchMobileMenuAction(action, btn = null) {
       hideSearchBar();
       clearSearch();
     } else {
-      showSearchBar();
-      focusElement(searchInput);
-      runSearch();
+      openSearchFromSignal();
     }
   }
   if (action === 'history') {
@@ -796,7 +794,7 @@ Promise.all([
     && restoreTabSessionState();
   const restoredActiveRuns = typeof restoreActiveRunsAfterReload === 'function'
     && restoreActiveRunsAfterReload(activeData.runs || []);
-  if (!restoredTabs && !restoredActiveRuns) {
+  if (!restoredTabs && !restoredActiveRuns && (!Array.isArray(tabs) || tabs.length === 0)) {
     createTab(typeof createDefaultTabLabel === 'function' ? createDefaultTabLabel(1) : 'shell 1');
     runWelcome();
     return;
@@ -820,6 +818,27 @@ newTabBtn.addEventListener('click', () => {
   createShortcutTab();
 });
 
+function openSearchFromSignal(scope = null) {
+  const normalizedScope = scope || null;
+  if (
+    normalizedScope
+    && typeof isSearchBarOpen === 'function'
+    && isSearchBarOpen()
+    && searchScope === normalizedScope
+  ) {
+    navigateSearch(1);
+    return;
+  }
+  if (typeof prepareSearchBarForScope === 'function' && normalizedScope) {
+    prepareSearchBarForScope(normalizedScope);
+  } else if (typeof prepareSearchBarForOpen === 'function') {
+    prepareSearchBarForOpen();
+  }
+  showSearchBar();
+  if (searchScope === 'text') focusElement(searchInput);
+  runSearch();
+}
+
 // ── Search ──
 searchToggleBtn.addEventListener('click', () => {
   const visible = isSearchBarOpen();
@@ -827,15 +846,28 @@ searchToggleBtn.addEventListener('click', () => {
     hideSearchBar();
     clearSearch();
   } else {
-    showSearchBar();
-    focusElement(searchInput);
-    runSearch();
+    openSearchFromSignal();
   }
 });
+
+if (typeof searchSummaryBtn !== 'undefined' && searchSummaryBtn) {
+  searchSummaryBtn.addEventListener('click', () => {
+    if (typeof summarizeCurrentOutputSignals === 'function') summarizeCurrentOutputSignals();
+    refocusComposerAfterAction({ defer: true });
+  });
+}
 
 searchInput.addEventListener('input', runSearch);
 searchPrevBtn.addEventListener('click', () => navigateSearch(-1));
 searchNextBtn.addEventListener('click', () => navigateSearch(1));
+if (typeof searchScopeButtons !== 'undefined' && Array.isArray(searchScopeButtons)) {
+  searchScopeButtons.forEach((btn) => {
+    btn.addEventListener('click', () => {
+      setSearchScope(btn.dataset.searchScope || 'text');
+      if (searchScope === 'text') focusElement(searchInput);
+    });
+  });
+}
 searchCloseBtn?.addEventListener('click', () => {
   hideSearchBar();
   clearSearch();
@@ -1245,6 +1277,9 @@ apiFetch('/autocomplete').then(r => r.json()).then(data => {
   acSuggestions = data.suggestions || [];
   acContextRegistry = data.context || {};
   acSpecialCommands = data.special_commands || [];
+  acBuiltinCommandRoots = data.builtin_command_roots || [];
+  if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+  else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
 }).catch(err => {
   logClientError('failed to load /autocomplete', err);
 });

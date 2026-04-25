@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test'
+import { ensurePromptReady } from './helpers.js'
 
 test.describe('theme selector', () => {
   test.beforeEach(async ({ page }) => {
@@ -121,18 +122,21 @@ test.describe('workflows modal', () => {
     await page.locator('#cmd').waitFor()
   })
 
-  test('each workflow step renders a chip and a per-step run button', async ({ page }) => {
+  test('input-driven workflows render prefilled form fields and runnable rendered steps', async ({ page }) => {
     await page.keyboard.press('Alt+g')
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
-    const firstStep = page.locator('.workflow-card').first().locator('.workflow-step').first()
+    const firstCard = page.locator('.workflow-card').first()
+    const input = firstCard.locator('.workflow-input-control')
+    await expect(input).toHaveCount(1)
+    await expect(input).toHaveValue('darklab.sh')
+    const firstStep = firstCard.locator('.workflow-step').first()
     await expect(firstStep.locator('.workflow-step-cmd')).toBeVisible()
     const runBtn = firstStep.locator('.workflow-step-run')
     await expect(runBtn).toBeVisible()
     await expect(runBtn).toHaveText('▶')
-    const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
-    expect(cmd && cmd.length > 0).toBe(true)
-    const ariaLabel = await runBtn.getAttribute('aria-label')
-    expect(ariaLabel).toBe(`Run: ${cmd}`)
+    await expect(runBtn).toBeEnabled()
+    await expect(firstCard.locator('.workflow-run-all')).toBeEnabled()
+    await expect(firstStep.locator('.workflow-step-cmd')).toContainText('dig darklab.sh A')
   })
 
   test('step layout is a two-row grid with chip on row 1 and note on row 2', async ({ page }) => {
@@ -148,14 +152,94 @@ test.describe('workflows modal', () => {
     expect(layout.children[1]).toContain('workflow-step-note')
   })
 
-  test('clicking a step run button closes the modal and submits the command', async ({ page }) => {
+  test('clearing a required workflow input disables step actions until the value is restored', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    const firstCard = page.locator('.workflow-card').first()
+    const input = firstCard.locator('.workflow-input-control')
+    const runBtn = firstCard.locator('.workflow-step').first().locator('.workflow-step-run')
+    const runAllBtn = firstCard.locator('.workflow-run-all')
+    await input.fill('')
+    await expect(runBtn).toBeDisabled()
+    await expect(runAllBtn).toBeDisabled()
+    await expect(firstCard.locator('.workflow-step').first().locator('.workflow-step-cmd')).toContainText('{{domain}}')
+    await input.fill('example.com')
+    await expect(runBtn).toBeEnabled()
+    await expect(runAllBtn).toBeEnabled()
+  })
+
+  test('editing workflow inputs rerenders steps and step run submits the rendered command', async ({ page }) => {
     await page.keyboard.press('Alt+g')
     await expect(page.locator('#workflows-overlay')).toHaveClass(/\bopen\b/)
-    const runBtn = page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-run')
+    const firstCard = page.locator('.workflow-card').first()
+    await firstCard.locator('.workflow-input-control').fill('example.com')
+    const runBtn = firstCard.locator('.workflow-step').first().locator('.workflow-step-run')
+    await expect(runBtn).toBeEnabled()
     const cmd = await runBtn.getAttribute('data-workflow-step-cmd')
+    expect(cmd).toBe('dig example.com A')
     await runBtn.click()
     await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
     await expect(page.locator('body')).toContainText(cmd)
+  })
+
+  test('rendered workflow chips load interpolated commands into the prompt', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    const firstCard = page.locator('.workflow-card').first()
+    await firstCard.locator('.workflow-input-control').fill('example.com')
+    const chip = firstCard.locator('.workflow-step').nth(1).locator('.workflow-step-cmd')
+    await expect(chip).toContainText('dig example.com NS')
+    await chip.click()
+    await expect(page.locator('#cmd')).toHaveValue('dig example.com NS ')
+  })
+
+  test('workflow inputs persist when the workflow modal is reopened', async ({ page }) => {
+    await page.keyboard.press('Alt+g')
+    const firstCard = page.locator('.workflow-card').first()
+    const input = firstCard.locator('.workflow-input-control')
+    await input.fill('persist.example')
+    await page.locator('.workflows-close').click()
+    await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
+    await page.keyboard.press('Alt+g')
+    await expect(page.locator('.workflow-card').first().locator('.workflow-input-control')).toHaveValue('persist.example')
+    await expect(page.locator('.workflow-card').first().locator('.workflow-step').first().locator('.workflow-step-cmd')).toContainText('dig persist.example A')
+  })
+
+  test('run all executes rendered workflow steps sequentially in the same tab', async ({ page }) => {
+    const postedCommands = []
+    await page.route('**/run', async (route) => {
+      const payload = JSON.parse(route.request().postData() || '{}')
+      const command = String(payload.command || '')
+      postedCommands.push(command)
+      await route.fulfill({
+        status: 200,
+        contentType: 'text/event-stream',
+        body: [
+          `data: {"type":"started","run_id":"workflow-${postedCommands.length}"}\n\n`,
+          `data: {"type":"output","text":"mock output for ${command}\\n"}\n\n`,
+          'data: {"type":"exit","code":0,"elapsed":0.01}\n\n',
+        ].join(''),
+      })
+    })
+
+    await ensurePromptReady(page)
+    await page.keyboard.press('Alt+g')
+    const firstCard = page.locator('.workflow-card').first()
+    await firstCard.locator('.workflow-input-control').fill('example.com')
+    await expect(firstCard.locator('.workflow-run-all')).toBeEnabled()
+    await firstCard.locator('.workflow-run-all').click()
+    await expect(page.locator('#workflows-overlay')).not.toHaveClass(/\bopen\b/)
+    await expect(page.locator('.tab')).toHaveCount(1)
+    await expect(page.locator('body')).toContainText('[workflow] Running 5 steps sequentially in this tab.')
+    await expect(page.locator('body')).toContainText('dig example.com A')
+    await expect(page.locator('body')).toContainText('dig example.com NS')
+    await expect(page.locator('body')).toContainText('dig example.com MX')
+    await expect(page.locator('body')).toContainText('[workflow] Completed all queued steps.')
+    await expect.poll(() => postedCommands).toEqual([
+      'dig example.com A',
+      'dig example.com NS',
+      'dig @8.8.8.8 example.com A',
+      'dig example.com +trace',
+      'dig example.com MX',
+    ])
   })
 
   test('clicking a rail workflow opens the scoped modal without collapsing the rail list', async ({ page }) => {

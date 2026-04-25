@@ -16,6 +16,7 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 - [Status HUD](#status-hud)
 - [Built-In Pipe Support](#built-in-pipe-support)
 - [Output Search](#output-search)
+- [Command Findings](#command-findings)
 - [Copy, Save, and Export](#copy-save-and-export)
 - [Tabs & Run History](#tabs--run-history)
 - [Guided Workflows](#guided-workflows)
@@ -85,18 +86,18 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Behavior:**
 
-- Tool suggestions load from `conf/autocomplete.yaml` at page load and match what the user types; the matched portion is highlighted in green.
+- Tool suggestions load from the structured command registry at page load and match what the user types; the matched portion is highlighted in green.
 - App-owned built-in commands complete from a runtime context that uses the same matching engine as YAML-backed tools.
 - The dropdown opens below the prompt when there is room and flips above when space is tight, preserving top-to-bottom keyboard navigation order.
 - `Tab` expands to the longest shared prefix, then cycles matches; `Shift+Tab` cycles backward; `Enter` accepts the highlighted match or runs the command if none is selected.
 - After a known command root, the dropdown switches to contextual flag/value hints for that tool; after `|`, it switches into the built-in pipe stage (`grep`, `head`, `tail`, `wc -l`, `sort`, `uniq`).
 - Already-used singleton-style flags are suppressed from contextual suggestions.
 
-**Limits:** external-tool completions come from the static YAML file(s), while app-owned built-ins come from the browser runtime. There is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
+**Limits:** external-tool completions come from the static command-registry YAML, while app-owned built-ins come from the browser runtime. There is no shell introspection, no `--help` parsing, and no fuzzy matching beyond prefix + expand.
 
-**Configuration:** external-tool suggestions use `conf/autocomplete.yaml` (plus optional `conf/autocomplete.local.yaml`). App-owned built-ins are defined in application code. YAML changes reload on the next page load — no server restart needed.
+**Configuration:** external-tool suggestions use `conf/commands.yaml` (plus optional `conf/commands.local.yaml`). App-owned built-ins are defined in application code. YAML changes reload on the next page load — no server restart needed.
 
-**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/conf/autocomplete.yaml`.
+**Related files:** `app/static/js/autocomplete.js`, `app/static/js/app.js`, `app/conf/commands.yaml`.
 
 **Keyboard controls:**
 
@@ -110,26 +111,32 @@ Full per-feature reference for darklab_shell. See the [README](README.md) for th
 
 **Structured context format**
 
-`conf/autocomplete.yaml` uses a single `context` key for root-aware flag, argument, subcommand, and pipe hints:
+`conf/commands.yaml` stores each external command under `commands`, with root-aware flag, argument, subcommand, and example hints under that command's `autocomplete` block:
 
 ```yaml
-context:
-  nmap:
-    flags:
-      - value: -sV
-        description: Service/version detection
+commands:
+  - root: nmap
+    category: Port & Service Scanning
+    policy:
+      allow:
+        - nmap
+      deny:
+        - nmap -sU
+    autocomplete:
+      flags:
+        - value: -sV
+          description: Service/version detection
 ```
 
-Inside `context`, each command root can define:
+Inside each command's `autocomplete` block, a root can define:
 
 ```yaml
-man:
-  argument_limit: 1
-  arguments:
-    - value: curl
-      description: curl manual page
-    - placeholder: "<command>"
-      description: Manual page for any allowed command
+argument_limit: 1
+arguments:
+  - value: https://
+    description: Start an HTTP or HTTPS URL
+  - placeholder: <url>
+    description: Target URL to request
 ```
 
 How the keys work:
@@ -149,35 +156,42 @@ How the keys work:
   - these appear both at `command ` and while the user types the argument value
   - use `placeholder` for persistent guidance and `value` for concrete starter text
 - `subcommands`
-  - command trees such as `session-token generate`, `session-token set <token>`, or `git clone`
+  - command trees such as `gobuster dir`, `gobuster vhost`, or other external-tool subcommands
   - each subcommand can also use `takes_value`, `value_hint`, `suggest`, `insert`, and `closes`
-- `pipe`
-  - marks entries that should appear after `command |`
-  - `enabled: true` turns the entry on in pipe position
-  - `insert`, `label`, and `description` control how the pipe-stage entry is inserted and displayed
+- `pipe_helpers`
+  - top-level registry entries for helpers that appear after `command |`
+  - each helper has its own `autocomplete.pipe.enabled`, flags, arguments, and optional insert/display metadata
 
 More examples:
 
 ```yaml
-curl:
-  flags:
-    - value: -H
-      description: Add request header
-      takes_value: true
-      suggest:
-        - value: "Authorization: Bearer <token>"
-          description: Example auth header
-    - value: -o
-      description: Write body to file
-      takes_value: true
-      suggest:
-        - value: "/dev/null"
-          description: Discard body and keep metadata
-  arguments:
-    - value: "https://"
-      description: Start an HTTP or HTTPS URL
-    - placeholder: "<url>"
-      description: Target URL to request
+commands:
+  - root: curl
+    category: HTTP & Web
+    policy:
+      allow:
+        - curl
+      deny:
+        - curl -K
+    autocomplete:
+      flags:
+        - value: -H
+          description: Add request header
+          takes_value: true
+          suggest:
+            - value: "Authorization: Bearer <token>"
+              description: Example auth header
+        - value: -o
+          description: Write body to file
+          takes_value: true
+          suggest:
+            - value: /dev/null
+              description: Discard body and keep metadata
+      arguments:
+        - value: https://
+          description: Start an HTTP or HTTPS URL
+        - placeholder: <url>
+          description: Target URL to request
 ```
 
 That means:
@@ -262,7 +276,7 @@ That means:
 - `help | head -n ` or `help | tail -n ` can suggest common count values
 - `help | wc ` can suggest `-l`
 
-To update suggestions, edit `conf/autocomplete.yaml` and/or `conf/autocomplete.local.yaml`, then reload the page — no server restart needed.
+To update suggestions, edit `conf/commands.yaml` and/or `conf/commands.local.yaml`, then reload the page — no server restart needed.
 
 ---
 
@@ -477,6 +491,40 @@ Both surfaces read from the same canonical list in the backend (exposed to the b
 
 ---
 
+## Command Findings
+
+**Purpose:** surface high-signal lines from the active tab so operators can review findings, warnings, errors, and roll-up summaries without manually skimming every line of noisy tool output.
+
+**Behavior:**
+
+- The tabbar search control now advertises findings directly as **⌕ search • N findings** when the active tab contains matched findings.
+- A compact signal strip beside search shows scoped counts for **F / W / E / S**:
+  - **F** — findings
+  - **W** — warnings
+  - **E** — errors
+  - **S** — summary lines
+- Clicking a signal chip opens the search bar in that scope immediately. Re-clicking the same chip cycles to the next match in the same way as the search bar’s **↓** button.
+- The search bar now supports scope buttons for **text**, **findings**, **warnings**, **errors**, and **summaries**. Scope buttons show live counts, and findings-heavy output opens directly into the **findings** scope.
+- Findings are pattern-driven rather than command-whitelisted. The current matcher is tuned for the tool output the shell already surfaces most often:
+  - open-port and service rows from scanners such as `nmap`, `naabu`, `rustscan`, and `nc`
+  - hit rows from `ffuf`, `gobuster`, and related directory fuzzers
+  - severity-tagged result rows from `nuclei`
+  - DNS answers from `dig`, `host`, and `nslookup`
+  - certificate and TLS verdict lines from `openssl s_client`, `sslscan`, `sslyze`, and `testssl`
+- Noise-heavy lines are intentionally excluded from findings when they behave like banners, progress meters, or startup chatter instead of actionable results.
+- User-killed runs are intentionally **not** counted as errors; the transcript still shows the kill line, but the signal counts stay focused on issues the operator may need to investigate.
+- The **summarize** button appends a synthetic **[command findings]** block to the active tab. The summary groups external command blocks by command and extracted target when possible, merges repeated runs for the same command/target, includes only command blocks that produced at least one finding/warning/error/summary line, and falls back to per-command sections when a clean target cannot be inferred.
+- Built-in command output is intentionally excluded from findings, warnings, errors, summaries, and generated command-findings blocks so help/status/catalog text does not create review noise.
+- Summary blocks are helper UI output, not raw command output. They do not feed back into the signal counters or search matches.
+
+**Limits:** signal detection is heuristic, scoped to the active tab’s rendered transcript, and intentionally favors the project’s supported toolset over arbitrary command output. A command with no matched findings, warnings, errors, or summary lines does not appear in the generated summary block.
+
+**Configuration:** none — the current scopes, heuristics, and summary format are app-defined and not operator-configurable.
+
+**Related files:** `app/static/js/search.js` (signal matching, scoped navigation, summaries), `app/static/js/controller.js` (chip-to-search navigation), `app/static/js/output.js` (summary line rendering behavior), `app/static/css/components.css` and `app/static/css/shell-chrome.css` (tabbar signal controls).
+
+---
+
 ## Copy, Save, and Export
 
 **Purpose:** surface consistent copy-to-clipboard and download-output actions (`txt` / `html` / `pdf`) across the desktop HUD, the mobile menu, and the permalink page.
@@ -535,7 +583,7 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 - Built-in workflows cover DNS troubleshooting, TLS/HTTPS checks, HTTP triage, quick reachability, email server checks, passive domain recon, subdomain enumeration and validation, web directory discovery, SSL/TLS deep dives, CDN/edge behavior checks, API recon, network path analysis, and fast port/service triage.
 - Custom workflows can be added to `conf/workflows.yaml`; the file is re-read on every request so edits take effect without a restart.
 
-**Limits:** step commands still run through the allowlist — a workflow step is only usable if its `cmd` is permitted by `allowed_commands.txt`.
+**Limits:** step commands still run through the command policy — a workflow step is only usable if its `cmd` is permitted by `commands.yaml`.
 
 **Configuration:** `conf/workflows.yaml` — list of entries with the following fields:
 
@@ -630,8 +678,9 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Utility commands**
 
-- `help`, `history`, `last`, `limits`, `retention`, `status`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `autocomplete`, `ls`, `version`, and `whoami` are available in every session.
-- `status` prints a compact session summary: active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, and the current instance-level save/retention limits.
+- `help`, `commands`, `history`, `last`, `limits`, `retention`, `status`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `fortune`, `jobs`, `shortcuts`, `clear`, `version`, and `whoami` are available in every session.
+- `status` prints a compact session summary: masked active session ID, session type, run count, snapshot count, starred-command count, whether saved Options exist for the session, active-job count, and the current instance-level save/retention limits.
+- `stats` prints session activity totals and external-tool command-root breakdowns: runs, snapshots, starred commands, active jobs, success rate, average duration, and the top non-built-in command roots by run count.
 - `theme` lists and applies runtime theme variants from the terminal. `config` lists, reads, and updates user options such as line numbers, timestamps, welcome behavior, share redaction defaults, run notifications, and HUD clock mode.
 - `ps` lists currently running processes for the session (PID, TTY, STAT, START, CMD columns), or shows a `no running processes` notice when idle.
 
@@ -662,36 +711,35 @@ On mobile, the **☰** menu in the top-right header opens a bottom-sheet that gr
 
 **Behavior:**
 
-- Every `/run` request is checked against `conf/allowed_commands.txt` before dispatch.
+- Every `/run` request is checked against the `policy` blocks in `conf/commands.yaml` before dispatch.
 - Allow entries match by prefix — a prefix of `ping` permits `ping google.com`, `ping -c 4 1.1.1.1`, etc. Be as specific or broad as you like: `nmap -sT` permits only TCP connect scans while `nmap` permits any nmap invocation.
-- Deny entries (`!`-prefixed) take priority over allow entries and match anywhere in the command as space-separated tokens (not as a prefix).
-- Category headings (`##`) group the FAQ command chips; comments (`#`) are ignored; deny entries are not surfaced to users.
-- The file is re-read on every request, so edits take effect without a restart. Deleting or emptying the file disables restrictions entirely.
+- Deny entries take priority over allow entries and match anywhere in the command as space-separated tokens (not as a prefix).
+- Category metadata also drives the command catalog; deny entries are not surfaced to users.
+- The registry is re-read on every request for command policy, so edits take effect without a restart. Deleting or emptying the registry disables restrictions entirely.
 - Tool names and subcommand prefixes are matched **case-insensitively**; flag names are matched **with exact case** (so `!curl -K` blocks `-K` without blocking `-k`).
 - `/dev/null` exception: denied output flags (`-o`, `-O`) are permitted when their argument is `/dev/null`, allowing patterns like `curl -o /dev/null -w "%{http_code}"`.
 
 **Limits:** prefix matching is deliberately coarse — operators must be explicit with deny entries to block flag combinations on otherwise-allowed tools. Deny matching only applies once the tool prefix matches (e.g., `!nmap -sU` only affects `nmap` commands).
 
-**Configuration:** `conf/allowed_commands.txt`, re-read per request.
+**Configuration:** `conf/commands.yaml`, re-read per request for command policy.
 
-```text
-## Network Diagnostics
-ping
-curl
-dig
-
-## Vulnerability Scanning
-nmap
-!nmap -sU
-!nmap --script
+```yaml
+commands:
+- root: nmap
+  category: Port & Service Scanning
+  policy:
+    allow:
+    - nmap
+    deny:
+    - nmap -sU
+    - nmap --script
 ```
 
-- One command prefix per line.
-- `#` — comment (ignored).
-- `##` — category group shown in the FAQ command list.
-- `!` — deny prefix (takes priority over allow entries).
+- `policy.allow` — allowed command prefixes.
+- `policy.deny` — denied prefixes/flags that take priority over allow entries.
+- `category` — command catalog grouping.
 
-**Related files:** `app/conf/allowed_commands.txt` (allowlist file), `app/command_policy.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/run` entry point).
+**Related files:** `app/conf/commands.yaml` (command registry), `app/commands.py` (allow/deny matching logic), `app/blueprints/run.py` (policy gate at the `/run` entry point).
 
 ### Deny Prefixes
 
@@ -722,7 +770,7 @@ wget -q -O /dev/null --server-response https://example.com
 
 **Configuration:** no operator-facing config; the install path (`/usr/share/wordlists/seclists/`) is fixed.
 
-**Related files:** `Dockerfile` (SecLists install step), `app/conf/allowed_commands.txt` (tools that accept `-w`).
+**Related files:** `Dockerfile` (SecLists install step), `app/conf/commands.yaml` (tools that accept `-w`).
 
 **Layout reference:**
 
@@ -968,7 +1016,7 @@ If a session has run history, the terminal flows (`generate`, `set`, `clear`) us
 
 **Configuration:**
 
-- `allowed_commands.txt` — dispatch gate (see [Command Allowlist](#command-allowlist)).
+- `commands.yaml` — dispatch gate (see [Command Allowlist](#command-allowlist)).
 - `trusted_proxy_cidrs` in `config.yaml` — CIDRs whose `X-Forwarded-For` is honored.
 - `diagnostics_allowed_cidrs` in `config.yaml` — CIDRs permitted to reach `/diag`.
 - `docker-compose.yml` — `read_only: true`, `init: true`, `user` directives, and the port-egress guard.

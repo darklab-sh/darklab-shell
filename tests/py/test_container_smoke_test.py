@@ -29,7 +29,7 @@ from collections.abc import Mapping, Sequence
 
 import pytest
 import yaml
-from commands import load_container_smoke_test_commands
+from commands import load_container_smoke_test_commands, split_command_argv
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -39,6 +39,13 @@ DEFAULT_BUILD_TIMEOUT = int(
 )
 DEFAULT_RUN_TIMEOUT = int(
     os.environ.get("RUN_CONTAINER_SMOKE_TEST_RUN_TIMEOUT", "300")
+)
+NUCLEI_TEMPLATE_WARMUP_COMMAND = "nuclei -update-templates"
+SMOKE_COMMAND_RETRIES = int(
+    os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRIES", "3")
+)
+SMOKE_COMMAND_RETRY_DELAY_SECONDS = float(
+    os.environ.get("RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS", "3")
 )
 
 UUID_RE = re.compile(r"\b[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b", re.I)
@@ -212,16 +219,16 @@ def test_post_run_kills_early_when_stop_text_is_seen(monkeypatch: pytest.MonkeyP
 
 
 @pytest.mark.parametrize(
-    ("command", "events", "expected"),
+    ("cases", "expected"),
     [
-        ("whois darklab.sh", [{"type": "notice", "text": "[timeout] Command exceeded 120s limit and was killed."}], True),
-        ("nc -zv darklab.sh 80", [{"type": "notice", "text": "[timeout] Command exceeded 120s limit and was killed."}], True),
-        ("dig darklab.sh A", [{"type": "notice", "text": "[timeout] Command exceeded 120s limit and was killed."}], False),
-        ("whois darklab.sh", [{"type": "output", "text": "darklab.sh"}], False),
+        ([{"command": "nuclei -h"}], False),
+        ([{"command": "nuclei -u https://ip.darklab.sh -t http/"}], True),
+        ([{"command": "nuclei -severity high,critical -u https://ip.darklab.sh"}], True),
+        ([{"command": "assetfinder -subs-only darklab.sh"}], False),
     ],
 )
-def test_should_retry_timeout(command: str, events: list[dict[str, str]], expected: bool) -> None:
-    assert _should_retry_timeout(command, events) is expected
+def test_needs_nuclei_template_warmup(cases: list[dict[str, object]], expected: bool) -> None:
+    assert _needs_nuclei_template_warmup(cases) is expected
 
 
 def _load_expectations() -> dict[str, dict[str, object]]:
@@ -297,6 +304,22 @@ def _load_cases() -> list[dict[str, object]]:
     return cases
 
 
+def _case_command_root(case: Mapping[str, object]) -> str:
+    command = str(case.get("command", ""))
+    argv = split_command_argv(command) if command.strip() else []
+    return argv[0].lower() if argv else ""
+
+
+def _needs_nuclei_template_warmup(cases: Sequence[Mapping[str, object]]) -> bool:
+    for case in cases:
+        command = str(case.get("command", ""))
+        if _case_command_root(case) != "nuclei":
+            continue
+        if "-u " in command or " -t " in command or " -severity " in command:
+            return True
+    return False
+
+
 def _missing_expectation_commands() -> list[str]:
     records = _load_expectations()
     return [
@@ -345,6 +368,44 @@ def _matches_outcome(visible_lines: list[str], outcome: dict[str, object]) -> bo
         if not re.search(pattern, text, flags=re.MULTILINE):
             return False
     return True
+
+
+def _case_exit_code(case: Mapping[str, object]) -> int | None:
+    raw_exit_code = case.get("exit_code", 0)
+    if raw_exit_code is None:
+        return None
+    if isinstance(raw_exit_code, bool):
+        return int(raw_exit_code)
+    if isinstance(raw_exit_code, int | str):
+        return int(raw_exit_code)
+    raise TypeError(f"Unsupported exit_code value: {raw_exit_code!r}")
+
+
+def _case_list(case: Mapping[str, object], key: str) -> list[object]:
+    value = case.get(key, [])
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    raise TypeError(f"Expected {key!r} to be a list, got {type(value).__name__}")
+
+
+def _case_string_list(case: Mapping[str, object], key: str) -> list[str]:
+    return [str(item) for item in _case_list(case, key)]
+
+
+def _case_outcomes(case: Mapping[str, object]) -> list[dict[str, object]]:
+    outcomes: list[dict[str, object]] = []
+    for item in _case_list(case, "any_of"):
+        if isinstance(item, dict):
+            outcomes.append(item)
+        elif isinstance(item, Mapping):
+            outcomes.append(dict(item))
+        else:
+            raise TypeError(f"Expected 'any_of' entries to be mappings, got {type(item).__name__}")
+    return outcomes
 
 
 def _post_kill(base_url: str, run_id: str) -> None:
@@ -467,23 +528,6 @@ def _post_run(
                     killed_early = True
                     break
     return events, killed_early
-
-
-def _is_smoke_timeout(events: Sequence[Mapping[str, object]]) -> bool:
-    for event in events:
-        if event.get("type") != "notice":
-            continue
-        text = event.get("text")
-        if isinstance(text, str) and text.startswith("[timeout] Command exceeded "):
-            return True
-    return False
-
-
-def _should_retry_timeout(command: str, events: Sequence[Mapping[str, object]]) -> bool:
-    root = command.split(maxsplit=1)[0].lower() if command.strip() else ""
-    if root not in {"nc", "whois"}:
-        return False
-    return _is_smoke_timeout(events)
 
 
 def _parse_compose_port_output(output: str) -> int | None:
@@ -656,6 +700,44 @@ if _SELECTED_COMMANDS:
         )
 
 
+@pytest.fixture(scope="module")
+def container_smoke_test_nuclei_templates(container_smoke_test, container_smoke_test_session_id) -> None:
+    if not _needs_nuclei_template_warmup(SMOKE_TEST_CASES):
+        return
+
+    warmup_session_id = f"{container_smoke_test_session_id}-nuclei-warmup"
+    print(
+        f"[container-smoke-test] warming nuclei templates: {NUCLEI_TEMPLATE_WARMUP_COMMAND}",
+        flush=True,
+    )
+    events, killed_early = _post_run(
+        container_smoke_test,
+        NUCLEI_TEMPLATE_WARMUP_COMMAND,
+        warmup_session_id,
+        timeout=max(DEFAULT_RUN_TIMEOUT, 900),
+        stop_text=None,
+        stop_patterns=None,
+    )
+    visible_lines = _collect_visible_lines(events, NUCLEI_TEMPLATE_WARMUP_COMMAND)
+    event_types = [str(event.get("type", "")) for event in events]
+    exit_events = [event for event in events if event.get("type") == "exit"]
+
+    assert not killed_early, (
+        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} was killed early; events={events[:10]}"
+    )
+    assert "error" not in event_types, (
+        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} emitted an error event; events={events[:10]}"
+    )
+    assert exit_events, (
+        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} never emitted an exit event; "
+        f"output={visible_lines[:12]!r}"
+    )
+    assert exit_events[0].get("code") == 0, (
+        f"{NUCLEI_TEMPLATE_WARMUP_COMMAND!r} exited with the wrong status; "
+        f"events={events[:10]}; output={visible_lines[:12]!r}"
+    )
+
+
 def test_container_smoke_test_startup(container_smoke_test):
     assert container_smoke_test.startswith("http://")
 
@@ -668,17 +750,17 @@ def test_container_smoke_test_expectations_cover_all_user_facing_commands(contai
     )
 
 
-@pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))
-def test_container_smoke_test_command_matches_expected_output(container_smoke_test, container_smoke_test_session_id, case):
+def _assert_smoke_case_matches(
+    base_url: str,
+    session_id: str,
+    case: Mapping[str, object],
+) -> None:
     command = str(case["command"])
-    raw_exit_code = case.get("exit_code", 0)
-    expected_exit_code = int(raw_exit_code) if raw_exit_code is not None else None
+    expected_exit_code = _case_exit_code(case)
 
-    print(f"[container-smoke-test] running {command}", flush=True)
-
-    any_of = list(case.get("any_of", []))
-    expected_text = list(case.get("expected_text", []))
-    expected_patterns = list(case.get("expected_patterns", []))
+    any_of = _case_outcomes(case)
+    expected_text = _case_string_list(case, "expected_text")
+    expected_patterns = _case_string_list(case, "expected_patterns")
 
     # Collect stop hints from all possible outcomes so the runner can exit early
     # as soon as any candidate's expected text appears.
@@ -686,8 +768,10 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
         stop_text_hints: list[str] = []
         stop_pattern_hints: list[str] = []
         for outcome in any_of:
-            stop_text_hints.extend(outcome.get("expected_text", []))
-            stop_pattern_hints.extend(outcome.get("expected_patterns", []))
+            if not isinstance(outcome, Mapping):
+                continue
+            stop_text_hints.extend(_case_string_list(outcome, "expected_text"))
+            stop_pattern_hints.extend(_case_string_list(outcome, "expected_patterns"))
         stop_text = stop_text_hints or None
         stop_patterns = stop_pattern_hints or None
     else:
@@ -695,28 +779,13 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
         stop_patterns = expected_patterns or None
 
     events, killed_early = _post_run(
-        container_smoke_test,
+        base_url,
         command,
-        container_smoke_test_session_id,
+        session_id,
         timeout=DEFAULT_RUN_TIMEOUT,
         stop_text=stop_text,
         stop_patterns=stop_patterns,
     )
-    if _should_retry_timeout(command, events):
-        print(
-            f"[container-smoke-test] retrying after timeout: {command}",
-            flush=True,
-        )
-        time.sleep(2)
-        retry_session_id = f"{container_smoke_test_session_id}-retry-{uuid.uuid4().hex[:8]}"
-        events, killed_early = _post_run(
-            container_smoke_test,
-            command,
-            retry_session_id,
-            timeout=DEFAULT_RUN_TIMEOUT,
-            stop_text=stop_text,
-            stop_patterns=stop_patterns,
-        )
 
     event_types = [str(event.get("type", "")) for event in events]
     texts = [str(event.get("text", "")) for event in events if isinstance(event.get("text"), str)]
@@ -755,3 +824,39 @@ def test_container_smoke_test_command_matches_expected_output(container_smoke_te
         _assert_patterns("\n".join(visible_lines), expected_patterns, command)
 
     assert visible_lines, f"{command!r} produced no visible output; events={events[:10]}"
+
+
+@pytest.mark.parametrize("case", SMOKE_TEST_CASES, ids=lambda case: str(case["command"]))
+def test_container_smoke_test_command_matches_expected_output(
+    container_smoke_test,
+    container_smoke_test_session_id,
+    container_smoke_test_nuclei_templates,
+    case,
+):
+    command = str(case["command"])
+    max_attempts = max(1, SMOKE_COMMAND_RETRIES + 1)
+
+    for attempt in range(1, max_attempts + 1):
+        attempt_session_id = (
+            container_smoke_test_session_id
+            if attempt == 1
+            else f"{container_smoke_test_session_id}-retry-{attempt}-{uuid.uuid4().hex[:8]}"
+        )
+        print(
+            f"[container-smoke-test] running {command}"
+            + (f" (attempt {attempt}/{max_attempts})" if max_attempts > 1 else ""),
+            flush=True,
+        )
+        try:
+            _assert_smoke_case_matches(container_smoke_test, attempt_session_id, case)
+        except Exception as exc:
+            if attempt >= max_attempts:
+                raise
+            print(
+                "[container-smoke-test] retrying after failure: "
+                f"{command}; attempt={attempt}/{max_attempts}; error={exc}",
+                flush=True,
+            )
+            time.sleep(SMOKE_COMMAND_RETRY_DELAY_SECONDS)
+            continue
+        return

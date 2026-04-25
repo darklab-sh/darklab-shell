@@ -20,7 +20,7 @@ RUN mandb -c
 ENV GOBIN=/usr/local/bin
 
 # Install nuclei.
-RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.7.1
+RUN go install -v github.com/projectdiscovery/nuclei/v3/cmd/nuclei@v3.8.0
 
 # Install the ProjectDiscovery suite via Go.
 # Rename httpx to pd-httpx to avoid colliding with the Python httpx package.
@@ -32,7 +32,6 @@ RUN go install -v github.com/projectdiscovery/naabu/v2/cmd/naabu@v2.5.0
 RUN go install -v github.com/projectdiscovery/katana/cmd/katana@v1.5.0
 
 # Install additional reconnaissance binaries via Go.
-RUN CGO_ENABLED=0 go install -v github.com/owasp-amass/amass/v5/cmd/amass@v5.1.1
 RUN go install github.com/tomnomnom/assetfinder@v0.1.1
 RUN go install github.com/OJ/gobuster/v3@v3.8.2
 RUN go install github.com/ffuf/ffuf/v2@v2.1.0

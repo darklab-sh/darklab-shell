@@ -9,6 +9,9 @@ Long output is trimmed so the terminal stays responsive.
 Arrow Up/Down cycles command history when autocomplete is not active.
 The welcome banner uses sampled examples from the allowlist.
 Use the search bar to scan output with case-sensitive or regex matching.
+When findings are detected, the search button shows a findings count.
+Use the F, W, E, and S chips beside search to jump through findings, warnings, errors, and summaries.
+Click summarize to append a command findings recap for the current tab.
 Built-in pipe support lets commands chain | grep, | head, | tail, | wc -l, | sort, and | uniq.
 Double-click a tab label to rename it without losing later command output.
 The timestamps toggle cycles between off, elapsed, and clock time.
@@ -40,6 +43,9 @@ Run 'config list' to inspect user options or 'config set <option> <value>' to ch
 Run 'session-token generate' to carry history, starred commands, snapshots, and user options across devices.
 Run 'status' for a compact summary of session type, runs, snapshots, stars, saved options, and active jobs.
 Use the Workflows rail menu to load multi-step diagnostic playbooks into the prompt.
+Workflow inputs let you run the same playbook against your own target.
+Use Run all in a workflow to execute its rendered steps sequentially in the same tab.
 Press any key to end the welcome animation early and jump to the prompt.
-Run the command 'help' to view the shell's built-in commands.
-Run the command 'ls' to view all available commands.
+Run the command 'help' for README, FAQ, shortcuts, and command-discovery guidance.
+Run the command 'commands' to browse built-in and allowed external commands.
+Run 'commands --built-in' or 'commands --external' to filter the command catalog.

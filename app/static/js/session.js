@@ -69,11 +69,12 @@ function apiFetch(url, options = {}) {
 }
 
 function describeFetchError(err, context = 'server') {
+  const offlineMessage = `Unable to contact the ${context} right now. Please try again in a moment. If this keeps happening, contact the shell operator.`;
   const message = (err && typeof err.message === 'string') ? err.message.trim() : '';
-  if (!message) return `Unable to reach the ${context}. Check that it is running and try again.`;
+  if (!message) return offlineMessage;
   const lower = message.toLowerCase();
   if (lower.includes('networkerror') || lower.includes('failed to fetch') || lower.includes('network down') || lower.includes('load failed')) {
-    return `Unable to reach the ${context}. Check that it is running and try again.`;
+    return offlineMessage;
   }
   return `Request to the ${context} failed: ${message}`;
 }

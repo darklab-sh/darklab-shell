@@ -65,7 +65,7 @@ test.describe('failure paths', () => {
 
     await expect(page.locator('.status-pill')).toHaveText('IDLE')
     await expect(page.locator('.tab-panel.active .output')).toContainText(
-      '[connection error] Unable to reach the server. Check that it is running and try again.',
+      '[connection error] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
     )
   })
 

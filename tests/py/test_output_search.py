@@ -4,6 +4,7 @@ import json
 import os
 import sqlite3
 import uuid
+from pathlib import Path
 
 import pytest
 
@@ -207,7 +208,7 @@ class TestOutputSearch:
             "443/tcp open  https",
             "Nmap done.",
         ]
-        with gzip.open(os.path.join(artifact_dir, artifact_rel), "wt", encoding="utf-8") as f:
+        with gzip.open(Path(artifact_dir) / artifact_rel, "wt", encoding="utf-8") as f:
             for line in all_lines:
                 f.write(json.dumps({"text": line, "cls": "", "tsC": "", "tsE": ""}) + "\n")
 

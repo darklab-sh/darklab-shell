@@ -18,10 +18,10 @@ The suites are intentionally layered:
 
 Current totals:
 
-- `pytest`: 931
-- `vitest`: 754
-- `playwright`: 200
-- total: 1,885
+- `pytest`: 921
+- `vitest`: 775
+- `playwright`: 207
+- total: 1,903
 
 This document is organized in two parts:
 
@@ -192,17 +192,17 @@ scripts/capture_ui_screenshots.sh --theme all
 scripts/capture_ui_screenshots.sh --theme all --theme-variant light
 ```
 
-The wrapper sets `RUN_CAPTURE=1` and writes PNGs plus per-UI manifest JSON files to `/tmp/darklab_shell-ui-capture/`. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
+The wrapper sets `RUN_CAPTURE=1` and writes PNGs, per-UI manifest JSON files, and a static `index.html` review page to `/tmp/darklab_shell-ui-capture/`. Unset `--theme` and `--theme default` resolve to the configured app default theme slug from `app/config.py`, so default captures are stored under that real theme name instead of a duplicate `default/` folder. The review page groups scenes by UI/theme and includes a full-screen image viewer with left/right keyboard navigation. Capture runs boot an isolated temp app instance with seeded history, a fixed capture session token, and an in-memory fake Redis client so HUD status, `/diag`, recents, and history-heavy states look production-like. See the appendix [UI Screenshot Capture Specs](#ui-screenshot-capture-specs) for per-spec details, and [`tests/ui-capture-scenes.md`](./ui-capture-scenes.md) for the reviewer companion that describes every scene (desktop + mobile) with per-scene "what to look for" notes and the cross-cutting design-system contracts each scene exercises.
 
 The capture configs use the same shared visual contract file as the demo pipeline, and `ui_capture_shared.js` runs `visual_guardrails.js` during each `freshHome(...)` reset. That means every captured scene re-checks viewport, density, touch/mobile-mode expectations, `/status` health, the fixed capture token, and the minimum seeded `/history` shape before screenshots are taken.
 
 Capture theme application now waits for the requested theme name, the active theme-registry entry, and the resolved `--bg` CSS variable to agree before screenshots are taken. The wrapper also accepts `--theme-variant light|dark|all` to restrict `--theme all` runs to one color-scheme family without changing the underlying theme registry or file order.
 
-Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags. That preset now stars only two commands so the desktop rail still shows Recent items, and its seeded commands come from the runtime autocomplete example set rather than hand-written fake commands.
+Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py`, so the isolated app instance always starts with the same history volume and age spread instead of relying on hard-coded wrapper flags. That preset now stars only two commands so the desktop rail still shows Recent items, and its seeded commands come from the command-registry example set rather than hand-written fake commands.
 
 ### Container Smoke Test
 
-`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/autocomplete.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, or missing tools. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, `autocomplete.yaml` example changes, or workflow command changes.
+`scripts/container_smoke_test.sh` builds a fresh container image, runs every user-facing command from the shared smoke corpus through the live app, and compares each command's output against `tests/py/fixtures/container_smoke_test-expectations.json`. The shared corpus includes both `app/conf/commands.yaml` examples and workflow step commands, so the smoke suite covers the commands the shell suggests directly plus the guided playbooks exposed through the workflows UI. It catches drift between those surfaced commands and actual tool behavior — renamed flags, changed output, or missing tools. Not part of the default fast loop; run after Dockerfile, packaged-tool, base-image, command-registry example changes, or workflow command changes.
 
 ```bash
 ./scripts/container_smoke_test.sh                           # full run
@@ -210,7 +210,7 @@ Capture seeding uses the named `visual-flows` preset in `scripts/seed_history.py
 ./scripts/container_smoke_test.sh --cmd "nmap -h"           # single command
 ```
 
-GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. See the appendix [Container Smoke Test Reference](#container-smoke-test-reference) for flags, the capture workflow for updating expectations, and the `autocomplete.yaml` sync helper.
+GitLab CI exposes this as the manual `container-smoke-test` job for verifying a fresh image before merging dependency or Dockerfile changes. See the appendix [Container Smoke Test Reference](#container-smoke-test-reference) for flags, the capture workflow for updating expectations, and the command-registry sync helper.
 
 ---
 
@@ -218,7 +218,7 @@ GitLab CI exposes this as the manual `container-smoke-test` job for verifying a 
 
 `scripts/seed_history.py` populates the history database with realistic runs for a specific session (UUID or `tok_` token). It's a manual-QA helper, not a test — use it when you want to exercise user-facing flows that only reveal themselves against a populated history: the history drawer, fuzzy history search, reverse-i-search, date/exit/star filters, and token-migration workflows.
 
-Seeded commands are pulled from the runtime autocomplete example catalog, so the generated history stays aligned with the user-facing command examples shown in the app. The seeder also avoids adjacent duplicate commands, which keeps Recent/history surfaces looking closer to a real session while still allowing duplicates across the broader run set.
+Seeded commands are pulled from the command-registry example catalog, so the generated history stays aligned with the user-facing command examples shown in the app. The seeder also avoids adjacent duplicate commands, which keeps Recent/history surfaces looking closer to a real session while still allowing duplicates across the broader run set.
 
 The script must run **inside the container** so the same SQLite version that owns the DB does the writes; it refuses to write from the host by default.
 
@@ -259,7 +259,7 @@ Use `Playwright` when the change primarily affects:
 
 Use the container smoke test when the change primarily affects:
 
-- `autocomplete.yaml` example commands (adding, removing, or editing examples)
+- command-registry example commands (adding, removing, or editing examples)
 - Dockerfile contents
 - packaged binaries or scanners
 - runtime image behavior
@@ -327,16 +327,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestLoadConfig.test_share_redaction_enabled_defaults_true` | Checks that share redaction defaults enabled when omitted from config. |
 | `TestLoadConfig.test_get_share_redaction_rules_includes_builtins_and_custom_rules_when_enabled` | Checks that effective share redaction rules include the built-in baseline plus operator rules when enabled. |
 | `TestLoadConfig.test_get_share_redaction_rules_returns_empty_when_disabled` | Checks that effective share redaction rules are empty when the feature is disabled. |
-| `TestLoadAllowedCommands.test_missing_file_returns_none_and_empty_deny` | Checks that missing file returns none and empty deny. |
-| `TestLoadAllowedCommands.test_allow_entries_parsed` | Checks allow entries parsed handling. |
-| `TestLoadAllowedCommands.test_deny_entries_stripped_of_bang_and_preserve_case` | Checks that deny entries stripped of bang and preserve case. |
-| `TestLoadAllowedCommands.test_comments_and_blank_lines_ignored` | Checks that comments and blank lines ignored. |
-| `TestLoadAllowedCommands.test_only_deny_entries_returns_none_allow` | Checks that only deny entries returns none allow. |
-| `TestLoadAllowedCommands.test_allow_entries_are_lowercased` | Checks that allow entries are lowercased. |
-| `TestLoadAllowedCommands.test_empty_file_returns_none_allow` | Checks that empty file returns none allow. |
-| `TestLoadAllowedCommands.test_local_overlay_appends_and_dedupes_entries` | Checks that local overlay appends and dedupes entries. |
-| `TestLoadAllowedCommands.test_local_overlay_preserves_case_in_denies` | Checks that local overlay preserves case in denies. |
-| `TestLoadAllowedCommands.test_local_overlay_merges_group_headers` | Checks that local overlay merges group headers. |
+| `TestDerivedCommandRegistry.test_commands_registry_loader_normalizes_policy_and_autocomplete` | Verifies that the `commands.yaml` loader normalizes policy entries and autocomplete metadata, including pipe-helper entries. |
+| `TestDerivedCommandRegistry.test_commands_registry_local_overlay_appends_policy_and_context` | Verifies that `commands.local.yaml` appends policy entries, adds new roots, overrides categories, and merges autocomplete hints without replacing the base registry. |
+| `TestDerivedCommandRegistry.test_autocomplete_context_can_be_derived_from_commands_registry` | Verifies that browser autocomplete context can be derived from command and pipe-helper registry entries. |
+| `TestDerivedCommandRegistry.test_command_policy_can_be_derived_from_commands_registry` | Verifies that command-policy allow and deny prefixes are derived from `commands.yaml` policy entries. |
 | `TestLoadFaq.test_missing_file_returns_empty_list` | Checks that missing file returns empty list. |
 | `TestLoadFaq.test_valid_entries_returned` | Checks valid entries returned handling. |
 | `TestLoadFaq.test_markdown_style_markup_renders_to_answer_html` | Checks that markdown style markup renders to answer HTML. |
@@ -350,6 +344,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestThemeRegistry.test_light_theme_uses_light_defaults_for_missing_keys` | Checks that light theme uses light defaults for missing keys. |
 | `TestThemeRegistry.test_missing_color_scheme_still_falls_back_to_dark_defaults` | Checks that missing color scheme still falls back to dark defaults. |
 | `TestThemeRegistry.test_theme_example_files_match_generated_defaults` | Detects drift between `_THEME_DEFAULTS` in `app/config.py` and the checked-in `app/conf/theme_dark.yaml.example` / `app/conf/theme_light.yaml.example` files. Fails with `theme_dark.yaml.example is out of sync` if the built-in defaults changed without regenerating the example files. Fix by running `./.venv/bin/python scripts/generate_theme_examples.py` and committing the updated files. |
+| `TestThemeRegistry.test_darklab_obsidian_matches_dark_defaults_and_example` | Detects drift between the visible `darklab_obsidian` theme file, the app's default dark theme values, and the checked-in dark example file. |
 | `TestThemeRegistry.test_entries_missing_question_filtered_out` | Checks that entries missing question filtered out. |
 | `TestThemeRegistry.test_non_list_yaml_returns_empty` | Checks that non list YAML returns empty. |
 | `TestThemeRegistry.test_theme_color_scheme_marks_light_backgrounds_as_only_light` | Checks that theme color scheme marks light backgrounds as only light. |
@@ -416,23 +411,11 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunOutputCapture.test_hints_loader_ignores_blank_lines_and_comments` | Checks that hints loader ignores blank lines and comments. |
 | `TestMobileWelcomeHintLoading.test_missing_mobile_hints_file_returns_empty_list` | Checks that missing mobile hints file returns empty list. |
 | `TestMobileWelcomeHintLoading.test_mobile_hints_loader_ignores_blank_lines_and_comments` | Checks that mobile hints loader ignores blank lines and comments. |
-| `TestAutocompleteContextLoading.test_missing_context_file_returns_empty_mapping` | Verifies that a missing autocomplete context file resolves to an empty mapping instead of throwing. |
-| `TestAutocompleteContextLoading.test_valid_context_entries_are_normalized` | Verifies that valid autocomplete YAML entries normalize into the runtime flag, value-hint, and pipe metadata shape. |
-| `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned autocomplete or workflow order. |
-| `TestAutocompleteContextLoading.test_local_overlay_merges_unique_context_entries` | Verifies that local autocomplete overlays append only new flags, value-taking tokens, and pipe metadata without duplicating base entries. |
-| `TestAutocompleteContextLoading.test_value_hints_preserve_insert_with_trailing_whitespace` | Verifies that the Python normalizer preserves an author-supplied `insert` including trailing whitespace (so `"set "` stays intact), retains `<placeholder>` value hints verbatim with no synthetic insert text, and omits `insertValue` from the normalized output when YAML does not set it. |
-| `TestAutocompleteContextLoading.test_arguments_and_subcommands_normalize_into_runtime_hints` | Verifies that the readable autocomplete schema (`arguments`, `subcommands`, and `pipe`) compiles into the normalized runtime hint shape consumed by the frontend. |
-| `TestAutocompleteContextLoading.test_value_taking_flags_preserve_case_distinct_tokens` | Verifies that value-taking flags remain distinct when they differ only by case, such as `-W` and `-w`. |
-| `TestAutocompleteContextLoading.test_local_overlay_preserves_case_distinct_value_taking_flags` | Verifies that the local autocomplete overlay preserves case-distinct value-taking flags instead of collapsing them during merge. |
-| `TestAutocompleteContextLoading.test_local_overlay_merges_arguments_and_subcommands_without_duplication` | Verifies that local autocomplete overlays can add new `arguments` and `subcommands` without duplicating or collapsing the base normalized runtime hint buckets. |
-| `TestAutocompleteContextLoading.test_local_overlay_can_override_argument_limit` | Verifies that a local autocomplete overlay can replace a command's `argument_limit` while still merging its argument suggestions correctly. |
-| `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_autocomplete_examples_and_workflows` | Verifies that the shared container smoke corpus includes both autocomplete examples and workflow commands while deduplicating overlaps in stable order. |
-| `TestAllowedCommandsGroupingBasics.test_missing_file_returns_none` | Checks that missing file returns none. |
-| `TestAllowedCommandsGroupingBasics.test_commands_grouped_by_header` | Checks that commands grouped by header. |
-| `TestAllowedCommandsGroupingBasics.test_commands_without_header_get_empty_name` | Checks that commands without header get empty name. |
-| `TestAllowedCommandsGroupingBasics.test_deny_entries_excluded_from_groups` | Checks that deny entries excluded from groups. |
-| `TestAllowedCommandsGroupingBasics.test_empty_groups_filtered_out` | Checks that empty groups filtered out. |
-| `TestAllowedCommandsGroupingBasics.test_empty_file_returns_none` | Checks that empty file returns none. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_spread_sensitive_roots` | Verifies that the smoke-test command corpus spaces repeated `dig` and `whois` commands apart during smoke execution without changing the source-owned registry or workflow order. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_include_registry_examples_and_workflows` | Verifies that the shared container smoke corpus includes both registry examples and workflow commands while deduplicating overlaps in stable order. |
+| `TestAutocompleteContextLoading.test_container_smoke_test_commands_render_workflow_defaults` | Verifies that workflow-backed smoke commands render declared default input values instead of leaking raw `{{token}}` placeholders into the shared smoke corpus. |
+| `TestWorkflowInputLoading.test_load_workflows_keeps_declared_inputs` | Verifies that workflow input metadata is preserved when every referenced token is declared in the workflow schema. |
+| `TestWorkflowInputLoading.test_load_workflows_drops_steps_with_undeclared_tokens` | Verifies that workflow steps referencing undeclared input tokens are rejected instead of reaching the client as partially renderable templates. |
 | `TestRewriteIdempotent.test_mtr_already_report_wide_unchanged` | Checks that mtr already report wide unchanged. |
 | `TestRewriteIdempotent.test_mtr_report_flag_unchanged` | Checks that mtr report flag unchanged. |
 | `TestRewriteIdempotent.test_nmap_already_privileged_unchanged` | Checks that nmap already privileged unchanged. |
@@ -465,8 +448,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestDatabaseInit.test_legacy_runs_table_gets_session_id_column_migrated` | Checks that legacy runs table gets session id column migrated. |
 | `TestDatabaseInit.test_migrate_schema_ignores_existing_column_error` | Checks that migrate schema ignores existing column error. |
 | `TestFakeStatus.test_includes_session_summary_counts` | Checks that the `status` built-in reports session type, run and snapshot counts, starred-command count, saved-options presence, and active-job count for the current session. |
+| `TestFakeStats.test_reports_session_activity_and_command_breakdown` | Checks that the `stats` built-in reports masked session identity, activity totals, success rate, average duration, and external command-root breakdowns for the current session. |
+| `TestFakeStats.test_top_commands_empty_state_ignores_builtin_only_sessions` | Verifies that built-in-only sessions still affect `stats` totals but do not appear in the external-tool Top commands section. |
 | `TestSeedHistoryFixtures.test_visual_flows_fixture_only_stars_two_commands` | Verifies that the `visual-flows` seed fixture limits starred commands to two so capture and demo runs keep Recent rows visible. |
-| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_autocomplete_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the runtime autocomplete examples and does not carry fake commands such as `bogus-command`. |
+| `TestSeedHistoryFixtures.test_seed_history_uses_runtime_command_registry_examples` | Verifies that `scripts/seed_history.py` pulls its seeded command pool from the command-registry examples and does not carry fake commands such as `bogus-command`. |
 | `TestSeedHistoryFixtures.test_seed_runs_avoids_adjacent_duplicate_commands` | Verifies that seeded history avoids back-to-back duplicate commands even when the overall run set still includes repeats. |
 
 #### `test_container_smoke_test.py`
@@ -476,10 +461,10 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `test_docker_reach_host` | Checks docker reach host handling. |
 | `test_parse_compose_port_output` | Checks that parse compose port output. |
 | `test_post_run_kills_early_when_stop_text_is_seen` | Checks that post run kills early when stop text is seen. |
-| `test_should_retry_timeout` | Checks that the smoke suite retries only timeout-bound `nc` and `whois` commands instead of retrying every timed-out command generically. |
+| `test_needs_nuclei_template_warmup` | Checks that the smoke suite warms nuclei templates only when scan-style nuclei commands are in the selected corpus. |
 | `test_container_smoke_test_startup` | Checks that container smoke test startup. |
 | `test_container_smoke_test_expectations_cover_all_user_facing_commands` | Checks that the smoke-test expectation fixture covers every command in the shared user-facing smoke corpus. |
-| `test_container_smoke_test_command_matches_expected_output` | Checks that container smoke test command matches expected output. |
+| `test_container_smoke_test_command_matches_expected_output` | Checks that each smoke command matches expected output, retrying transient failures with `RUN_CONTAINER_SMOKE_TEST_RETRIES` before failing. |
 
 #### `test_logging.py`
 
@@ -650,8 +635,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestKillRoute.test_kill_uses_scanner_sudo_path_when_configured` | Checks that kill uses scanner sudo path when configured. |
 | `TestKillRoute.test_kill_rejects_non_object_json` | Checks that kill rejects non object JSON. |
 | `TestKillRoute.test_kill_rejects_non_string_run_id` | Checks that kill rejects non string run id. |
-| `TestAllowedCommandsGroupingEdges.test_groups_commands_by_headers_and_excludes_denies` | Checks that groups commands by headers and excludes denies. |
-| `TestAllowedCommandsGroupingEdges.test_missing_file_returns_none` | Checks that missing file returns none. |
 | `TestWelcomeLoadingEdges.test_valid_yaml_is_normalized` | Checks that valid YAML is normalized. |
 | `TestWelcomeLoadingEdges.test_missing_file_returns_empty` | Checks that missing file returns empty. |
 | `TestIsCommandAllowedEdges.test_prefix_exactness_ls_does_not_allow_lsblk` | Checks that prefix exactness ls does not allow lsblk. |
@@ -749,6 +732,7 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestWorkflowsRoute.test_returns_200` | Checks `/workflows` returns 200. |
 | `TestWorkflowsRoute.test_includes_v15_recon_playbooks` | Verifies that the v1.5 recon workflow playbooks are present in the workflow payload. |
 | `TestWorkflowsRoute.test_payload_steps_are_prompt_fillable` | Verifies that every workflow step exposes a prompt-fill command and note text. |
+| `TestWorkflowsRoute.test_payload_includes_input_driven_workflows` | Verifies that `/workflows` includes workflows with declared inputs so the client can render prefilled, user-editable workflow forms. |
 | `TestShortcutsRoute.test_returns_200` | Checks `/shortcuts` returns 200. |
 | `TestShortcutsRoute.test_payload_shape` | Verifies `sections[].title`, `sections[].items[]`, and `note` schema. |
 | `TestShortcutsRoute.test_sections_cover_terminal_tabs_and_ui` | Confirms the three canonical section titles (`Terminal`, `Tabs`, `UI`) are present in order. |
@@ -875,10 +859,13 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_run_waits_before_emitting_exit_code` | Checks that successful runs wait before emitting the final exit code when the subprocess return code is still pending at EOF. |
 | `TestRunStreaming.test_run_cleans_up_stdout_and_waits_when_streaming_errors` | Checks that stream errors still close stdout and wait on the subprocess. |
 | `TestRunStreaming.test_run_disconnect_detaches_and_cleans_up_stdout` | Checks that disconnect-driven detaches still close stdout and wait on the subprocess. |
-| `TestRunStreaming.test_fake_ls_streams_allowed_commands_and_persists_history` | Checks that fake ls streams allowed commands and persists history. |
+| `TestRunStreaming.test_fake_commands_streams_grouped_catalog_and_persists_history` | Checks that fake `commands` streams the grouped command catalog and persists the run to history. |
 | `TestRunStreaming.test_fake_clear_emits_clear_event_and_persists_history` | Checks that fake clear emits clear event and persists history. |
 | `TestRunStreaming.test_fake_env_returns_web_environment` | Checks that fake env returns web environment. |
 | `TestRunStreaming.test_fake_help_lists_available_helpers` | Checks that fake help lists available helpers. |
+| `TestRunStreaming.test_fake_commands_lists_built_in_and_external_catalogs` | Checks that fake `commands` prints built-in and allowed external sections while deduping external command variants down to roots. |
+| `TestRunStreaming.test_fake_commands_supports_built_in_only_filter` | Checks that `commands --built-in` prints only the built-in command section. |
+| `TestRunStreaming.test_fake_commands_supports_external_only_filter` | Checks that `commands --external` prints only the allowed external command section. |
 | `TestRunStreaming.test_fake_shortcuts_lists_current_shortcuts` | Checks that fake shortcuts lists current shortcuts. |
 | `TestRunStreaming.test_fake_shortcuts_renders_mac_keys_for_mac_user_agent` | Confirms a Macintosh User-Agent switches the built-in command's Tabs/UI rendering to `Option+*` chords. |
 | `TestRunStreaming.test_fake_banner_renders_ascii_art` | Checks that fake banner renders ascii art. |
@@ -912,7 +899,6 @@ The `TestThemeRegistry` group covers the theme loading and fallback system. One 
 | `TestRunStreaming.test_fake_uname_a_returns_web_shell_environment` | Checks that fake uname a returns web shell environment. |
 | `TestRunStreaming.test_fake_uname_without_flags_returns_kernel_name` | Checks that plain `uname` returns the short kernel name form. |
 | `TestRunStreaming.test_fake_xyzzy_coffee_and_fork_bomb_easter_eggs` | Checks that the undocumented `xyzzy`, `coffee`, and fork-bomb easter eggs return their special responses. |
-| `TestRunStreaming.test_fake_autocomplete_explains_shell_completion_features` | Checks that running `autocomplete` explains tab-completion context hints and the built-in pipe suggestion support. |
 | `TestRunStreaming.test_fake_id_returns_synthetic_identity` | Checks that fake id returns synthetic identity. |
 | `TestRunStreaming.test_fake_whoami_streams_project_description` | Checks that fake whoami streams project description. |
 | `TestRunStreaming.test_fake_ps_lists_active_session_processes` | Checks that `ps aux` lists active run processes for the current session. |
@@ -1161,7 +1147,7 @@ Meta-tests that verify documentation stays in sync with the test suite. Runs `py
 | `keeps config command output pinned to the tail when the tab is already following` | Verifies that terminal-native `config set` output preserves tail-follow state after async preference application. |
 | `serves runtime autocomplete context for theme and config values` | Verifies that theme slugs, config keys, and config values are generated into the shared autocomplete context instead of duplicated static lists. |
 | `serves runtime autocomplete context for built-in command lookup helpers` | Verifies that runtime built-in context covers `session-token`, simple built-ins, and dynamic `man` / `which` / `type` lookup suggestions. |
-| `keeps code-owned built-ins out of autocomplete.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing autocomplete YAML. |
+| `keeps code-owned built-ins out of commands.yaml` | Verifies that app-owned built-ins are not duplicated in the operator-facing command registry. |
 | `groups theme cards into labeled sections in the preview modal` | Verifies that groups theme cards into labeled sections in the preview modal. |
 | `falls back to the current/default theme when localStorage references a missing theme` | Verifies that falls back to the current/default theme when localStorage references a missing theme. |
 | `falls back to the baked-in dark palette when the configured default theme is missing` | Verifies that falls back to the baked-in dark palette when the configured default theme is missing. |
@@ -1486,10 +1472,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `wraps output content in a line-content container so prefix mode does not reshape the line flow` | Verifies that wraps output content in a line-content container so prefix mode does not reshape the line flow. |
 | `trims old lines and keeps rawLines in sync` | Verifies that trims old lines and keeps rawLines in sync. |
 | `adds timestamp dataset fields` | Verifies that adds timestamp dataset fields. |
+| `uses +0.0s for lines without a true elapsed runtime` | Verifies that synthetic or untimed lines surface `+0.0s` instead of a blank elapsed prefix. |
 | `toggles the line-number body class and button labels` | Verifies that toggles the line-number body class and button labels. |
 | `numbers the prompt line after the current output rows` | Verifies that numbers the prompt line after the current output rows. |
 | `does not assign prefixes to welcome animation lines` | Verifies that does not assign prefixes to welcome animation lines. |
+| `does not assign prefixes to synthetic summary lines` | Verifies that synthetic command-findings summary rows do not render timestamp or line-number prefixes. |
 | `combines line numbers and timestamps into a compact shared prefix` | Verifies that combines line numbers and timestamps into a compact shared prefix. |
+| `shows +0.0s for the active prompt in elapsed mode` | Verifies that the active prompt surfaces `+0.0s` when elapsed timestamps are enabled. |
 | `does nothing when there is no output container for the target tab` | Verifies that does nothing when there is no output container for the target tab. |
 | `batches large bursts of output and finishes rendering on the next tick` | Verifies that batches large bursts of output and finishes rendering on the next tick. |
 
@@ -1590,6 +1579,7 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line` | Verifies that runCommand handles a synthetic clear event by clearing the tab and suppressing the exit line. |
 | `runCommand appends a count-aware preview truncation notice on exit` | Verifies that runCommand appends a count-aware preview truncation notice on exit. |
 | `runCommand preserves output classes from streamed events` | Verifies that runCommand preserves output classes from streamed events. |
+| `runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result` | Verifies that `nc` reverse-DNS warning noise is filtered while the meaningful open-port line remains visible. |
 | `doKill shows a notice when the kill request fails` | Verifies that doKill shows a notice when the kill request fails. |
 | `returns true on empty input (blank Enter)` | Verifies that returns true on empty input (blank Enter). |
 | `returns 'settle' on empty input during active welcome` | Verifies that returns 'settle' on empty input during active welcome. |
@@ -1650,6 +1640,23 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `highlights mixed-content lines without flattening helper markup` | Verifies that highlights mixed-content lines without flattening helper markup. |
 | `merges adjacent text nodes between searches so a fragmented line is not re-split per fragment` | Verifies that merges adjacent text nodes between searches so a fragmented line is not re-split per fragment. |
 | `navigates by logical match across inline-element boundaries` | Verifies that navigates by logical match across inline-element boundaries. |
+| `scopes to warning lines and navigates between them` | Verifies that the warning scope filters down to warning lines and cycles through them independently of plain-text matches. |
+| `scopes to finding lines using command-like output heuristics` | Verifies that findings mode matches high-signal scanner, DNS, and service-result rows rather than banners and boilerplate. |
+| `treats nslookup answer rows as findings without matching the server header` | Verifies that `nslookup` answer sections count as findings while the resolver header does not. |
+| `clearSearch resets scoped search back to text mode` | Verifies that closing search clears any active findings/warnings/errors/summaries scope and returns to plain text mode. |
+| `updates the search button and scope labels with scoped counts` | Verifies that the tabbar search affordance and scoped buttons expose live signal counts. |
+| `signal chips are clickable and route to the matching scope` | Verifies that F/W/E/S chips open search in the matching scope. |
+| `disables summarize when there are no signals` | Verifies that summarize stays disabled until the current tab has at least one finding, warning, error, or summary line. |
+| `prefers the findings scope when opening search for findings-heavy output` | Verifies that search opens directly in findings mode when the current transcript is findings-heavy. |
+| `scopes to summary lines and ignores detail rows` | Verifies that summaries mode targets roll-up lines without re-matching the detailed output underneath them. |
+| `does not count user-killed runs as errors` | Verifies that `[killed by user ...]` lines stay out of the error count and error scope. |
+| `appends a synthetic signal summary without inflating scoped counts` | Verifies that the generated command-findings block does not feed back into the signal counters or scoped search matches. |
+| `summarizes each command block in a reused tab` | Verifies that summarize walks every command block in the current tab instead of recapping only the first or last command. |
+| `groups summary output by command and extracted target` | Verifies that summarize clusters repeated command runs under the same command and target while preserving their findings, warnings, and summary lines. |
+| `groups nc summary output by host instead of positional ports` | Verifies that `nc` summaries group repeated port checks by host while ignoring positional port arguments. |
+| `falls back to command summaries when a target cannot be extracted` | Verifies that summarize keeps the per-command output shape when a command has signals but no reliable target extractor. |
+| `omits command blocks that have no signals` | Verifies that summarize skips commands with zero findings, warnings, errors, and summary lines. |
+| `ignores built-in command output for signals and summaries` | Verifies that built-in command output is excluded from findings, warnings, errors, summaries, and generated command-findings blocks. |
 
 #### `session.test.js`
 
@@ -2161,9 +2168,12 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `save-txt button triggers a .txt file download` | Verifies that save-txt button triggers a .txt file download. |
 | `save-html button triggers a .html file download` | Verifies that save-html button triggers a .html file download. |
 | `downloaded html file contains the command text` | Verifies that downloaded html file contains the command text. |
+| `summarize appends a signal summary block for the active tab output` | Verifies that the summarize action appends the synthetic command-findings recap block to the active tab. |
+| `summarize stays disabled when there are no signals` | Verifies that summarize remains disabled until the tab has at least one matched signal. |
 | `copy button shows a toast when there is no output to copy` | Verifies that copy button shows a toast when there is no output to copy. |
 | `save-txt button shows a toast when there is no output to export` | Verifies that save-txt button shows a toast when there is no output to export. |
 | `shows only when scrolled off tail and swaps from live to bottom state` | Verifies that shows only when scrolled off tail and swaps from live to bottom state. |
+| `scoped search jumps between warnings and errors` | Verifies that the scoped search controls and signal chips jump between warning and error matches in the live transcript. |
 
 #### `rate-limit.spec.js`
 
@@ -2289,9 +2299,13 @@ Contract-layer coverage for the mobile running-indicator surface in `app/static/
 | `close button inside the FAQ modal closes it` | Verifies that close button inside the FAQ modal closes it. |
 | `clicking the overlay backdrop closes the FAQ modal` | Verifies that clicking the overlay backdrop closes the FAQ modal. |
 | `renders backend-driven FAQ content and allowlist chips` | Verifies that renders backend-driven FAQ content and allowlist chips. |
-| `each workflow step renders a chip and a per-step run button` | Verifies that each workflow step in the workflows modal renders a chip and a per-step run button with the matching `aria-label`. |
+| `input-driven workflows render prefilled form fields and runnable rendered steps` | Verifies that input-driven workflow cards render prefilled fields, runnable rendered steps, and a `Run all` control. |
 | `step layout is a two-row grid with chip on row 1 and note on row 2` | Verifies that the workflow step layout is a CSS grid with `.workflow-step-main` on row 1 and `.workflow-step-note` on row 2. |
-| `clicking a step run button closes the modal and submits the command` | Verifies that clicking a workflow step run button closes the workflows modal and submits the step command. |
+| `clearing a required workflow input disables step actions until the value is restored` | Verifies that required workflow inputs gate both per-step run buttons and the `Run all` action until the value is restored. |
+| `editing workflow inputs rerenders steps and step run submits the rendered command` | Verifies that editing workflow inputs rerenders the displayed commands and that the per-step run button submits the interpolated command. |
+| `rendered workflow chips load interpolated commands into the prompt` | Verifies that workflow chips load the rendered command text, not the raw template, into the active prompt. |
+| `workflow inputs persist when the workflow modal is reopened` | Verifies that workflow form values persist across closing and reopening the workflows modal. |
+| `run all executes rendered workflow steps sequentially in the same tab` | Verifies that `Run all` executes the rendered workflow commands sequentially in the active tab instead of opening separate tabs. |
 | `clicking a rail workflow opens the scoped modal without collapsing the rail list` | Verifies that clicking a workflow entry in the desktop rail opens a one-workflow modal view without replacing the full rail workflow list. |
 | `persists theme, timestamps, line number, and HUD clock preferences across reload` | Verifies that persists theme, timestamps, line number, and HUD clock preferences across reload. |
 
@@ -2349,7 +2363,7 @@ These specs are also standalone. They are excluded from both `config/playwright.
 
 #### `ui-capture.desktop.capture.js`
 
-Desktop UI screenshot capture spec. Walks the desktop shell through a curated pack of settled states for design review and theming QA, then saves labelled PNGs plus a manifest entry per scene. Uses the dedicated desktop capture config and a seeded isolated app instance so history-heavy, workflow, and diagnostics states look production-like.
+Desktop UI screenshot capture spec. Walks the desktop shell through a curated pack of settled states for design review and theming QA, then saves labelled PNGs plus a manifest entry per scene and refreshes the shared HTML review index. Uses the dedicated desktop capture config and a seeded isolated app instance so history-heavy, workflow, and diagnostics states look production-like.
 
 | Test | Description |
 | --- | --- |
@@ -2357,7 +2371,7 @@ Desktop UI screenshot capture spec. Walks the desktop shell through a curated pa
 
 #### `ui-capture.mobile.capture.js`
 
-Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the mobile shell, including the settled welcome screen, running-tab states, mobile sheets/modals, search, timestamp/line-number views, and standalone snapshot/permalink/diag pages. Uses the dedicated mobile capture config and the same seeded isolated app instance strategy.
+Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the mobile shell, including the settled welcome screen, running-tab states, mobile sheets/modals, search, timestamp/line-number views, and standalone snapshot/permalink/diag pages. Saves labelled PNGs plus manifest entries and refreshes the shared HTML review index using the same seeded isolated app instance strategy.
 
 | Test | Description |
 | --- | --- |
@@ -2367,7 +2381,7 @@ Mobile UI screenshot capture spec. Mirrors the desktop capture concept for the m
 
 Detailed runtime behaviour, flag reference, and capture/sync workflow for the opt-in Container Smoke Test. See the [Container Smoke Test](#container-smoke-test) overview above for motivation and the common run commands.
 
-The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. All test cases run to completion and failures are reported together at the end.
+The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-compose.yml`, builds a unique base image with `docker build --pull`, commits a runtime image with the repo `app/` tree and a generated `config.local.yaml`, and writes a temporary compose file that runs the committed image with no bind mounts. It strips fixed `container_name` values so locally running stacks do not collide with the test services. The wrapper performs a startup gate first — build, compose startup, or health-check failures stop the run immediately. When scan-style nuclei commands are in the selected corpus, the fixture warms `/tmp/nuclei-templates` with `nuclei -update-templates` before running command cases. Each command case retries transient failures before failing so externally backed tools can prove their command syntax and runtime wiring without making the full smoke suite fail on a single dropped external response. All test cases run to completion and failures are reported together at the end.
 
 **`scripts/container_smoke_test.sh` flags:**
 
@@ -2377,6 +2391,13 @@ The underlying `tests/py/test_container_smoke_test.py` fixture reads `docker-com
 | `-k <pattern>` | Passed through to pytest to filter by test ID pattern. |
 | Any other flag | Passed through to pytest directly. |
 
+**Retry tuning:**
+
+| Environment variable | Default | Description |
+| --- | --- | --- |
+| `RUN_CONTAINER_SMOKE_TEST_RETRIES` | `3` | Number of retries after a command case fails. Total attempts are retries plus the first attempt. |
+| `RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS` | `3` | Delay between retry attempts. |
+
 #### Updating expectations
 
 When user-facing smoke-test commands change intentionally, run the capture script to record a fresh baseline:
@@ -2385,7 +2406,7 @@ When user-facing smoke-test commands change intentionally, run the capture scrip
 ./scripts/capture_container_smoke_test_outputs.sh
 ```
 
-This launches a browser session against the running container (`http://localhost:8888` by default), runs every command from the shared smoke corpus (autocomplete examples plus workflow steps), and writes the raw output files to `/tmp/darklab_shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
+This launches a browser session against the running container (`http://localhost:8888` by default), runs every command from the shared smoke corpus (`commands.yaml` examples plus workflow steps), and writes the raw output files to `/tmp/darklab_shell-container-smoke-test-corpus/`. It captures the full real output including the true exit code — no commands are killed early.
 
 The capture script does **not** automatically update `tests/py/fixtures/container_smoke_test-expectations.json`. Use the captured output files as a reference to write or update the expected text snippets in that file manually, then re-run the smoke test to confirm.
 

@@ -6,13 +6,15 @@ supposed to demonstrate, and what cross-cutting patterns to look for per theme.
 
 A machine-readable manifest (`{desktop,mobile}-manifest.json` with one entry per
 rendered PNG) is written alongside the PNG pack at
-`/tmp/darklab_shell-ui-capture/`; this doc is the human-authored counterpart and is
-the source of truth for scene intent.
+`/tmp/darklab_shell-ui-capture/`. The capture helper also writes an `index.html`
+review page that groups captured scenes by UI and theme with labeled thumbnails.
+This doc remains the human-authored counterpart and source of truth for scene
+intent.
 
 ## Running the pack
 
-- `npm run capture:ui-screenshots` — desktop + mobile, default theme, writes to
-  `/tmp/darklab_shell-ui-capture/`.
+- `npm run capture:ui-screenshots` — desktop + mobile, configured default
+  theme from `app/config.py`, writes to `/tmp/darklab_shell-ui-capture/`.
 - `scripts/capture_ui_screenshots.sh --ui desktop --theme all` — every theme,
   desktop only.
 - `scripts/capture_ui_screenshots.sh --ui mobile --theme charcoal_amber` —
@@ -28,6 +30,7 @@ as part of `npm run test:e2e`.
 
 ```text
 /tmp/darklab_shell-ui-capture/
+├── index.html
 ├── desktop-manifest.json
 ├── mobile-manifest.json
 ├── desktop/
@@ -38,8 +41,13 @@ as part of `npm run test:e2e`.
         └── NN-<slug>.png
 ```
 
-`<theme>` is `default` unless `--theme` was passed; `NN` is a zero-padded scene
-order index (keeps directory listings lined up with the scene list below).
+`<theme>` is the real theme slug, including the configured app default theme
+when `--theme` is unset or `--theme default` is used. `NN` is a zero-padded
+scene order index (keeps directory listings lined up with the scene list below).
+Open `index.html` in the output directory for a lightweight review page with
+collapsible theme sections, labeled thumbnails, and a full-screen image viewer.
+Click any thumbnail to review screenshots in place; use left/right arrows to
+move between images and `Escape` to return to the index.
 
 ## Themes
 

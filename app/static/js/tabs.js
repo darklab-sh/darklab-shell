@@ -34,7 +34,7 @@ function _getTabLabelEl(id) {
 
 function createDefaultTabLabel(index = null) {
   const explicitIndex = index !== null && index !== undefined && index !== '';
-  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : tabs.length + 1;
+  const next = explicitIndex && Number.isFinite(Number(index)) ? Number(index) : _tabSeq + 1;
   return `shell ${Math.max(1, next)}`;
 }
 
@@ -607,8 +607,9 @@ function createTab(label) {
     showToast(`Tab limit reached (max ${APP_CONFIG.max_tabs})`);
     return null;
   }
+  const nextSeq = _tabSeq + 1;
   const id = 'tab-' + (++_tabSeq);
-  const stableLabel = String(label || createDefaultTabLabel());
+  const stableLabel = String(label || createDefaultTabLabel(nextSeq));
 
   const { tab, labelEl } = _createTabHeader(id, stableLabel);
   tab.addEventListener('click', e => {
@@ -771,7 +772,11 @@ function activateTab(id, { focusComposer = true } = {}) {
   // suggestions from the previous tab's typing session don't persist.
   if (typeof acHide === 'function') acHide();
   if (typeof acFiltered !== 'undefined') acFiltered = [];
-  const draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
+  let draft = (t && t.st !== 'running') ? (t.draftInput || '') : '';
+  if (!prevId && !draft && typeof getComposerValue === 'function') {
+    const liveDraft = getComposerValue();
+    if (liveDraft && liveDraft.trim()) draft = liveDraft;
+  }
   if (typeof setComposerValue === 'function') {
     setComposerValue(draft, draft.length, draft.length, { dispatch: false });
   }
@@ -780,6 +785,8 @@ function activateTab(id, { focusComposer = true } = {}) {
   if (focusComposer) refocusComposerAfterAction({ preventScroll: true });
   if (typeof syncRunButtonDisabled === 'function') syncRunButtonDisabled();
   updateOutputFollowButton(id);
+  if (typeof scheduleSearchDiscoverabilityRefresh === 'function') scheduleSearchDiscoverabilityRefresh();
+  else if (typeof refreshSearchDiscoverabilityUi === 'function') refreshSearchDiscoverabilityUi();
   if (typeof schedulePersistTabSessionState === 'function') schedulePersistTabSessionState();
   if (typeof emitUiEvent === 'function') {
     emitUiEvent('app:tab-activated', { id, prevId, activeTabId });
@@ -976,6 +983,9 @@ function clearTab(id, { preserveRunState = false } = {}) {
     if (id === activeTabId) { setStatus('idle'); clearSearch(); }
   }
   updateOutputFollowButton(id);
+  if (id === activeTabId && typeof refreshSearchDiscoverabilityUi === 'function') {
+    refreshSearchDiscoverabilityUi();
+  }
   if (typeof document !== 'undefined'
     && document.body
     && document.body.classList

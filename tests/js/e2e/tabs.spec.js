@@ -358,10 +358,12 @@ test.describe('tab strip interactions', () => {
     await page.setExtraHTTPHeaders({ 'X-Forwarded-For': TEST_IP })
     await page.goto('/')
     await page.locator('#cmd').waitFor()
+    await ensurePromptReady(page)
   })
 
   test('drag reordering the active tab returns focus to the terminal input', async ({ page }) => {
     await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(2)
 
     const secondTab = page.locator('.tab').nth(1)
     const firstTab = page.locator('.tab').first()
@@ -383,8 +385,11 @@ test.describe('tab strip interactions', () => {
   })
 
   test('touch dragging reorders tabs and clears mobile drag state on release', async ({ page }) => {
+    await expect(page.locator('.tab')).toHaveCount(1)
     await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(2)
     await page.locator('#new-tab-btn').click()
+    await expect(page.locator('.tab')).toHaveCount(3)
 
     const firstTab = page.locator('.tab').nth(0)
     const thirdTab = page.locator('.tab').nth(2)

@@ -85,7 +85,7 @@ function parseArgs(argv) {
     if (arg === '--help' || arg === '-h') {
       console.log(`Usage: node scripts/capture_output_for_smoke_test.mjs [options]
 
-By default, commands are read from the shared container smoke corpus: autocomplete examples plus workflow steps.
+By default, commands are read from the shared container smoke corpus: commands.yaml examples plus workflow steps.
 Use --commands-file to run a specific subset instead.
 
 Options:
@@ -272,7 +272,7 @@ async function main() {
       : 0
 
     if (args.resumeFromCommand && startIndex === -1) {
-      throw new Error(`Could not find start command in autocomplete.yaml examples: ${args.resumeFromCommand}`)
+      throw new Error(`Could not find start command in the shared smoke corpus: ${args.resumeFromCommand}`)
     }
 
     for (let index = startIndex; index < commands.length; index += 1) {

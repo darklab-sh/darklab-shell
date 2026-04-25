@@ -778,9 +778,21 @@
     min-height: 32px;
     flex: 1 1 100%;
   }
+  body.mobile-terminal-mode .search-signal-summary {
+    display: none;
+  }
   body.mobile-terminal-mode .search-count {
     font-size: 13px;
     flex: 0 0 auto;
+  }
+  body.mobile-terminal-mode .search-scopes {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+  body.mobile-terminal-mode .search-scopes .search-scope-btn {
+    min-height: 28px;
+    padding: 0 8px;
+    font-size: 13px;
   }
   body.mobile-terminal-mode .search-nav button {
     min-height: 28px;

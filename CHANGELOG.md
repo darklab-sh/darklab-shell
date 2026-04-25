@@ -16,6 +16,22 @@ All notable changes to darklab_shell are documented here.
   - **Before:** the live docs still described the older 14-theme set and referenced retired names such as `graphite` and `charcoal_violet`, which no longer matched the built-in theme files.
   - **After:** the current shipped registry is documented as 18 themes total, with the retired `blue_paper`, `clean_slate`, and `rose` variants still absent and the newer built-in theme names reflected consistently in the active theme docs.
   - **Tests:** `tests/py/test_routes.py -k theme`, `tests/js/unit/app.test.js`, `tests/js/unit/autocomplete.test.js`, `tests/js/e2e/ui.spec.js`, `tests/js/e2e/mobile.spec.js`, `tests/js/e2e/share.spec.js`, and `tests/py/test_docs.py`.
+- **Workflows now support input-driven runnable forms and sequential `Run all` execution** — guided workflows can now act like reusable playbooks against a user’s own target instead of staying static example text.
+  - **Before:** workflow cards were fixed prompt-fill references; users could only load or run the hard-coded example commands step by step, and closing the modal discarded any in-progress target edits because there were no structured inputs or execution queue.
+  - **After:** workflows can declare structured inputs with defaults and lightweight `{{token}}` interpolation, the modal renders editable target fields plus live rendered commands, workflow values persist across reopening the modal, per-step actions use the rendered command text, and `Run all` executes the rendered workflow sequentially in the active tab so the full run stays reviewable and snapshot-friendly.
+  - **Tests:** `tests/py/test_backend_modules.py`, `tests/py/test_routes.py -k workflows`, `tests/js/e2e/ui.spec.js`, `tests/js/unit/app.test.js`, `npm run lint:js`, `python3 -m flake8 app/commands.py tests/py/test_backend_modules.py tests/py/test_routes.py`, and `tests/py/test_docs.py`.
+- **Output review now surfaces command findings, scoped signal navigation, and transcript-native summaries** — noisy runs are easier to review without manually skimming the full transcript.
+  - **Before:** output search was plain text only. Users could search manually once they opened the bar, but there was no built-in notion of findings vs warnings vs errors, no discoverability signal when a run produced interesting lines, and no one-click recap of the important output from the current tab.
+  - **After:** the tabbar search control now advertises findings directly, the adjacent F/W/E/S chips expose per-scope counts and act as scoped navigation shortcuts, the search bar supports dedicated `findings`, `warnings`, `errors`, and `summaries` scopes, and the `summarize` action appends a `[command findings]` recap block that groups repeated external-command output by command and extracted target when possible, with per-command fallback for ambiguous output. Built-in command output is excluded from signal counts and summaries so help/status/catalog text does not create review noise.
+  - **Tests:** `tests/js/unit/search.test.js`, `tests/js/unit/output.test.js`, `tests/js/unit/runner.test.js`, `tests/js/e2e/output.spec.js`, `npm run lint:js`, and `tests/py/test_docs.py`.
+- **External command policy, catalog metadata, autocomplete hints, and smoke examples now share `commands.yaml`** — the operator-facing command model has one source of truth instead of separate allowlist and autocomplete files.
+  - **Before:** allowed-command prefixes lived in `allowed_commands.txt`, external-tool autocomplete lived in `autocomplete.yaml`, and related consumers had to keep their own merge, grouping, and example-loading logic in sync. That made drift easy: runnable tools such as `tcptraceroute` and `assetfinder` could be allowed without autocomplete entries, while removed or low-value tools could linger in only one surface.
+  - **After:** `app/conf/commands.yaml` owns each external command root, category, `policy.allow`, `policy.deny`, autocomplete metadata, pipe helpers, and user-facing examples. `commands.local.yaml` is the matching deployment overlay. The old `allowed_commands.txt` and `autocomplete.yaml` files are gone, the command catalog and `/run` gate derive from the registry, the smoke corpus reads registry examples plus workflows, seeded history uses registry examples, `amass` has been removed, and `assetfinder` now has `-h`, `-subs-only`, and `assetfinder -subs-only darklab.sh` coverage.
+  - **Tests:** `tests/py/test_backend_modules.py` covers registry loading, local overlay merging, policy derivation, autocomplete derivation, seeded-history command pools, and smoke-corpus generation; `tests/py/test_routes.py` and `tests/js/unit/app.test.js` cover registry-backed route/frontend expectations; `tests/py/test_container_smoke_test.py` verifies expectation coverage for registry examples plus workflow commands.
+- **The new `stats` built-in summarizes current-session activity** — session analytics now have their own terminal-native command instead of bloating the quick health-oriented `status` output.
+  - **Before:** `status` covered identity, counts, saved options, active jobs, and backend health, but there was no shell-native view of command-root activity, success rate, or average run duration for the current session.
+  - **After:** `stats` reports masked session identity, run/snapshot/star/job totals, success rate, average duration, and the top non-built-in command roots by run count with per-root success and duration summaries.
+  - **Tests:** backend coverage in `tests/py/test_backend_modules.py`.
 
 - **Stalled live streams now recover visibly when output resumes** — stalled runs now return to a clearly live state instead of silently appending output under a failed-looking tab.
   - **Before:** once the stalled-stream warning appeared, later output could resume without the UI clearly returning to a running state.
@@ -25,26 +41,34 @@ All notable changes to darklab_shell are documented here.
   - **Before:** the workflow tried to probe SMTP ports on `darklab.sh`, which is incorrect when mail is handled by external MX hosts.
   - **After:** the workflow now stays domain-centric with MX, TXT, and DMARC checks, and points manual SMTP port checks at the returned MX hosts.
   - **Tests:** no new automated cases — verified by reviewing the built-in workflow commands against the live workflow list.
-- **The container smoke corpus now covers both autocomplete examples and workflow commands** — image-level smoke checks now follow the full set of user-facing command examples surfaced by the shell.
-  - **Before:** the shared smoke corpus only followed autocomplete examples, so workflow-only commands could drift without entering the smoke expectation set.
-  - **After:** the shared loader now combines autocomplete examples and surfaced workflow step commands for both smoke execution and expectation capture.
+- **The container smoke corpus now covers both command-registry examples and workflow commands** — image-level smoke checks now follow the full set of user-facing command examples surfaced by the shell.
+  - **Before:** the shared smoke corpus only followed registry examples, so workflow-only commands could drift without entering the smoke expectation set.
+  - **After:** the shared loader now combines command-registry examples and surfaced workflow step commands for both smoke execution and expectation capture.
   - **Tests:** added backend coverage in `tests/py/test_backend_modules.py` and expectation-coverage checks in `tests/py/test_container_smoke_test.py`.
+- **Container smoke command checks now tolerate transient external-tool failures** — the smoke suite is still strict about command syntax and expected output, but no longer treats one dropped upstream response as proof that the surfaced command is broken.
+  - **Before:** most smoke cases failed on the first mismatch, so externally backed tools could fail a full image validation run because a passive source returned no data, a remote service stalled once, or nuclei tried to scan before its template directory had finished warming.
+  - **After:** each command case retries failed assertions up to `RUN_CONTAINER_SMOKE_TEST_RETRIES` times with a configurable `RUN_CONTAINER_SMOKE_TEST_RETRY_DELAY_SECONDS`, using a fresh smoke session per retry. When scan-style nuclei commands are present, the fixture first runs `nuclei -update-templates` through the normal `/run` path so template-backed scan examples start from a populated `/tmp/nuclei-templates` directory instead of depending on first-scan auto-install timing.
+  - **Tests:** `tests/py/test_container_smoke_test.py` covers the nuclei warmup selector and the docs/test-count drift checks cover the updated smoke-test appendix.
 - **Project-level naming now stays consistent as `darklab_shell` across local and CI surfaces** — the repo package/container/build identifiers now match the renamed project identity instead of mixing old hyphenated names into build output.
   - **Before:** npm package metadata, Docker Compose container naming, and the GitLab Docker build tag still used `darklab-shell`.
   - **After:** package metadata, local container naming, and CI build tagging now consistently use `darklab_shell`.
   - **Tests:** no new automated cases — verified by reviewing the updated package, compose, and CI config paths together.
 - **History seeding now follows the surfaced command examples** — seeded history now reflects the same commands users see suggested in the shell.
-  - **Before:** `scripts/seed_history.py` maintained its own fake command list, which could drift from the runtime autocomplete examples.
-  - **After:** the seeder now draws commands from the runtime autocomplete example catalog.
+  - **Before:** `scripts/seed_history.py` maintained its own fake command list, which could drift from the runtime command-registry examples.
+  - **After:** the seeder now draws commands from the runtime command-registry example catalog.
   - **Tests:** added backend coverage in `tests/py/test_backend_modules.py`.
 - **The `visual-flows` history fixture now stays clearer in demo and capture sessions** — the seeded visual-history session keeps both stars and Recent rows visible.
   - **Before:** the visual fixture could overwhelm the desktop rail with starred commands and seed less believable back-to-back duplicates.
   - **After:** the fixture now keeps only two starred commands and avoids adjacent duplicate seeded commands.
   - **Tests:** added backend coverage in `tests/py/test_backend_modules.py`.
-- **UI capture now supports light-only and dark-only theme passes** — visual review runs can target one color-scheme family without editing the theme registry or capture specs.
+- **UI capture now supports light-only and dark-only theme passes plus named default captures** — visual review runs can target one color-scheme family without editing the theme registry or capture specs, and the no-argument capture path no longer creates a duplicate `default` theme bucket.
   - **Before:** `--theme all` always iterated every shipped theme, and intermittent startup races could leave a requested capture scene on the wrong applied palette.
-  - **After:** `scripts/capture_ui_screenshots.sh` now accepts `--theme-variant light|dark|all`, and the shared capture helper waits for the requested theme name, active registry entry, and resolved background variable to agree before taking screenshots.
-  - **Tests:** no new automated cases — verified through the shared capture helper logic and script interface review.
+  - **After:** `scripts/capture_ui_screenshots.sh` now accepts `--theme-variant light|dark|all`, unset/default theme runs resolve the configured `default_theme` from `app/config.py`, and the shared capture helper waits for the requested theme name, active registry entry, and resolved background variable to agree before taking screenshots.
+  - **Tests:** `npm run lint:js -- tests/js/e2e/ui_capture_shared.js` plus a direct helper import check for unset/default theme resolution.
+- **UI capture packs now include a static review index with an image viewer** — screenshot output is easier to browse without opening every PNG by hand.
+  - **Before:** capture runs wrote PNG folders plus per-UI manifest JSON, so reviewers had to cross-reference filenames, manifests, and the scene companion manually.
+  - **After:** each capture run refreshes an `index.html` in the output root, grouping desktop and mobile screenshots by theme with labeled scene cards plus a full-screen viewer with previous/next controls and keyboard navigation.
+  - **Tests:** `npm run lint:js -- tests/js/e2e/ui_capture_shared.js` plus a synthetic manifest generation smoke check.
 - **Demo recordings now start from a fresh seeded session each run** — local demo capture no longer reuses one stale tokenized history session across repeated recordings.
   - **Before:** the demo wrappers reused a fixed token, so repeated recordings could accumulate old stars and history rows even after the visual fixture was tightened.
   - **After:** the wrappers now generate a fresh demo token by default, seed the `visual-flows` fixture into that session, and the demo guardrails validate the actual seeded token in use.
@@ -56,6 +80,14 @@ All notable changes to darklab_shell are documented here.
 
 ### Fixed
 
+- **UI capture setup commands no longer trip the app rate limiter** — repeated capture scenes now render command output instead of intermittent rate-limit errors.
+  - **Root cause:** the capture pack ran visual setup commands such as `hostname`, `date`, and `ping -c 4 darklab.sh` against the live backend for every scene/theme pass, so long capture runs could exhaust the normal app command limiter.
+  - **Fix:** the shared capture helper now mocks those deterministic setup commands with normal SSE `started` / `output` / `exit` events, preserving the UI path while keeping repeated visual setup out of backend rate-limit buckets.
+  - **Tests:** `npm run lint:js -- tests/js/e2e/ui_capture_shared.js`.
+- **The `status` built-in now masks session tokens** — terminal health output no longer prints the active token value in full.
+  - **Root cause:** `session-token` already used display-safe token masking, but `status` rendered the raw session identifier while expanding its session summary.
+  - **Fix:** `status` now uses the same masked token display as the session-token helper while preserving anonymous-session UUID masking.
+  - **Tests:** backend coverage in `tests/py/test_backend_modules.py`.
 - **Project footer links now always use the project identity** — the mobile menu footer and desktop rail footer no longer drift with the operator-facing app title.
   - **Root cause:** those footer links were still rendering from `app_name`, even though they are meant to identify the project and link to the project README.
   - **Fix:** the footer surfaces now use a server-owned `project_name` value and consistently render `darklab_shell v…`.

@@ -496,7 +496,7 @@ function loadRunnerFns({
       describeFetchError: (err, context = 'server') => {
         const message = err && err.message ? err.message : 'unknown network error'
         if (message === 'Failed to fetch' || message === 'network down') {
-          return `Unable to reach the ${context}. Check that it is running and try again.`
+          return `Unable to contact the ${context} right now. Please try again in a moment. If this keeps happening, contact the shell operator.`
         }
         return `Request to the ${context} failed: ${message}`
       },
@@ -1009,7 +1009,7 @@ describe('runner helpers', () => {
       }),
     )
     expect(appendLine).toHaveBeenLastCalledWith(
-      '[connection error] Unable to reach the server. Check that it is running and try again.',
+      '[connection error] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
       'exit-fail',
       'tab-1',
     )
@@ -1282,6 +1282,56 @@ describe('runner helpers', () => {
     expect(appendLine).toHaveBeenCalledWith('A  Example answer', 'fake-faq-a', 'tab-1')
   })
 
+  it('runCommand suppresses nc inverse-host-lookup noise while keeping the open-port result', async () => {
+    const appendLine = vi.fn()
+    const apiFetch = vi.fn(() =>
+      Promise.resolve({
+        ok: true,
+        status: 200,
+        body: {
+          getReader: () => {
+            let done = false
+            return {
+              read: () => {
+                if (done) return Promise.resolve({ done: true, value: undefined })
+                done = true
+                const payload =
+                  [
+                    'data: {"type":"started","run_id":"run-nc"}',
+                    'data: {"type":"output","text":"Warning: inverse host lookup failed for 107.178.109.44: No address associated with name\\nip.darklab.sh [107.178.109.44] 80 (http) open\\n"}',
+                    'data: {"type":"exit","code":0,"elapsed":0.1}',
+                  ].join('\n\n') + '\n\n'
+                return Promise.resolve({ done: false, value: new TextEncoder().encode(payload) })
+              },
+            }
+          },
+        },
+      }),
+    )
+    const loaded = loadRunnerFns({
+      cmdValue: 'nc -zv ip.darklab.sh 80',
+      tabs: [{ id: 'tab-1', st: 'idle', runId: null, killed: false, pendingKill: false }],
+      apiFetch,
+      appendLine,
+    })
+
+    loaded.runCommand()
+    await Promise.resolve()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(appendLine).not.toHaveBeenCalledWith(
+      'Warning: inverse host lookup failed for 107.178.109.44: No address associated with name',
+      '',
+      'tab-1',
+    )
+    expect(appendLine).toHaveBeenCalledWith(
+      'ip.darklab.sh [107.178.109.44] 80 (http) open',
+      '',
+      'tab-1',
+    )
+  })
+
   it('doKill shows a notice when the kill request fails', async () => {
     const apiFetch = vi.fn(() => Promise.reject(new Error('Failed to fetch')))
     const appendLine = vi.fn()
@@ -1299,7 +1349,7 @@ describe('runner helpers', () => {
       'Failed to send kill request; command may still be running',
     )
     expect(appendLine).toHaveBeenCalledWith(
-      '[kill request failed] Unable to reach the server. Check that it is running and try again.',
+      '[kill request failed] Unable to contact the server right now. Please try again in a moment. If this keeps happening, contact the shell operator.',
       'notice',
       'tab-1',
     )

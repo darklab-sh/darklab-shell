@@ -11,7 +11,7 @@ from pathlib import Path
 
 from flask import Blueprint, abort, jsonify, render_template, request, send_file
 
-from commands import command_root, load_allowed_commands
+from commands import command_root, load_command_policy
 from config import APP_VERSION, CFG, get_theme_entry
 from database import db_connect
 from helpers import FONT_FILES, current_theme_name, get_client_ip, get_log_session_id, ip_is_in_cidrs
@@ -299,7 +299,7 @@ def diag():
 
     # ── Tools ─────────────────────────────────────────────────────────────────
     # Collect unique command roots from the allow list and probe each with which().
-    allow_prefixes, _ = load_allowed_commands()
+    allow_prefixes, _ = load_command_policy()
     roots: set[str] = set()
     if allow_prefixes is not None:
         for prefix in allow_prefixes:

@@ -4,6 +4,8 @@
 Tap the prompt to open the mobile keyboard quickly.
 Use the mobile menu for search, history, and theme.
 Use the mobile menu's Workflows item to load multi-step diagnostic playbooks.
+Workflow inputs let you run the same playbook against your own mobile target.
+Use Run all in a workflow to execute each rendered step in the same tab.
 Use built-in pipe support like | grep, | head, | tail, | wc -l, | sort, or | uniq for quick trimming.
 After `nmap ` or `curl -`, autocomplete can offer command-specific flags and argument hints.
 The helper row appears only while the keyboard is open.
@@ -20,8 +22,11 @@ Mobile history pagination keeps large sessions browsable without losing filters.
 Pull up the Recent peek row to reopen the recents sheet and reload a past command.
 Starred history entries stay easier to find when the drawer gets crowded.
 Use the search bar to scan long output without leaving the current tab.
+Tap the F, W, E, or S chips to jump through findings, warnings, errors, or summaries.
+Tap summarize to append a command findings recap for the current tab.
 Timestamps and line numbers make copied mobile output easier to reference later.
 If output is scrolled away from the tail, use jump to live to snap back down.
 Theme changes apply to the full mobile shell, not just the picker preview.
 Run 'session-token generate' to carry history, stars, snapshots, and user options to another device.
 Run 'theme list' or 'config list' when you want to inspect app settings from the mobile prompt.
+Run 'commands --external' to list allowed runtime tools from the mobile prompt.

@@ -17,8 +17,7 @@ import config as app_config
 
 _HERE = os.path.dirname(__file__)
 _CONF = os.path.join(_HERE, "conf")
-ALLOWED_COMMANDS_FILE = os.path.join(_CONF, "allowed_commands.txt")
-AUTOCOMPLETE_CONTEXT_FILE = os.path.join(_CONF, "autocomplete.yaml")
+COMMANDS_REGISTRY_FILE = os.path.join(_CONF, "commands.yaml")
 FAQ_FILE              = os.path.join(_CONF, "faq.yaml")
 WORKFLOWS_FILE        = os.path.join(_CONF, "workflows.yaml")
 WELCOME_FILE          = os.path.join(_CONF, "welcome.yaml")
@@ -582,61 +581,178 @@ def parse_synthetic_postfilter(command: str) -> tuple[dict | None, str | None]:
     }, None
 
 
-def load_allowed_commands():
-    """Read allowed_commands.txt and return (allow_prefixes, deny_prefixes).
-    allow_prefixes is None if the file doesn't exist or has no allow entries (= unrestricted).
-    deny_prefixes is always a list. Lines starting with ! are deny prefixes and take
-    priority over allow prefixes — use them to block specific flags on an allowed command.
-    Allow prefixes are normalized to lowercase for case-insensitive matching; deny prefixes
-    preserve their original flag casing so entries like !curl -K do not block curl -k."""
-    # Returning (None, []) is the app-wide sentinel for unrestricted mode.
-    if not os.path.exists(ALLOWED_COMMANDS_FILE):
-        return None, []
-    prefixes = []
-    denied = []
-    for raw_line in _load_text_lines(ALLOWED_COMMANDS_FILE):
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
+def _empty_autocomplete_context_entry() -> dict:
+    return {
+        "flags": [],
+        "expects_value": [],
+        "arg_hints": {},
+        "argument_limit": None,
+        "pipe_command": False,
+        "pipe_insert_value": "",
+        "pipe_label": "",
+        "pipe_description": "",
+        "examples": [],
+    }
+
+
+def _normalize_policy_list(items, *, lowercase: bool) -> list[str]:
+    result = []
+    seen = set()
+    for item in items or []:
+        value = str(item or "").strip()
+        if not value:
             continue
-        if line.startswith("!"):
-            denied.append(line[1:].strip())
-        else:
-            prefixes.append(line.lower())
-    prefixes = _dedupe_preserve_order(prefixes)
-    denied = _dedupe_preserve_order(denied)
-    return (prefixes if prefixes else None), denied
+        if lowercase:
+            value = value.lower()
+        if value in seen:
+            continue
+        seen.add(value)
+        result.append(value)
+    return result
 
 
-def load_allowed_commands_grouped():
-    """Read allowed_commands.txt and return commands grouped by ## Category headers.
-    Returns a list of {name, commands} dicts, or None if file is empty/missing.
-    Lines starting with ! (deny prefixes) are excluded from the display list."""
-    if not os.path.exists(ALLOWED_COMMANDS_FILE):
+def _normalize_registry_autocomplete(root: str, raw_spec) -> dict:
+    if not isinstance(raw_spec, dict) or not raw_spec:
+        return {}
+    return _normalize_autocomplete_context({root: raw_spec}).get(root, {})
+
+
+def _normalize_commands_registry_entry(raw_entry, *, pipe_helper: bool = False) -> dict | None:
+    if not isinstance(raw_entry, dict):
         return None
-    groups = []
-    group_map = {}
-    current = None
-    for raw_line in _load_text_lines(ALLOWED_COMMANDS_FILE):
-        line = raw_line.strip()
-        if line.startswith("## "):
-            name = line[3:].strip()
-            current = group_map.get(name)
-            if current is None:
-                current = {"name": name, "commands": []}
-                groups.append(current)
-                group_map[name] = current
-        elif line and not line.startswith("#") and not line.startswith("!"):
-            if current is None:
-                current = group_map.get("")
-                if current is None:
-                    current = {"name": "", "commands": []}
-                    groups.append(current)
-                    group_map[""] = current
-            current["commands"].append(line.lower())
-    for group in groups:
-        group["commands"] = _dedupe_preserve_order(group["commands"])
-    groups = [g for g in groups if g["commands"]]
-    return groups if groups else None
+    root = str(raw_entry.get("root") or "").strip().lower()
+    if not root:
+        return None
+
+    entry = {
+        "root": root,
+        "autocomplete": _normalize_registry_autocomplete(root, raw_entry.get("autocomplete")),
+    }
+    if pipe_helper:
+        return entry
+
+    raw_policy_value = raw_entry.get("policy")
+    raw_policy = raw_policy_value if isinstance(raw_policy_value, dict) else {}
+    entry["category"] = str(raw_entry.get("category") or "").strip()
+    entry["policy"] = {
+        "allow": _normalize_policy_list(raw_policy.get("allow"), lowercase=True),
+        "deny": _normalize_policy_list(raw_policy.get("deny"), lowercase=False),
+    }
+    return entry
+
+
+def _load_commands_registry_file(path: str) -> dict:
+    loaded = _load_yaml_mapping(path)
+    commands = []
+    pipe_helpers = []
+    for raw_entry in loaded.get("commands", []) or []:
+        entry = _normalize_commands_registry_entry(raw_entry)
+        if entry:
+            commands.append(entry)
+    for raw_entry in loaded.get("pipe_helpers", []) or []:
+        entry = _normalize_commands_registry_entry(raw_entry, pipe_helper=True)
+        if entry:
+            pipe_helpers.append(entry)
+    return {
+        "version": int(loaded.get("version") or 1),
+        "commands": commands,
+        "pipe_helpers": pipe_helpers,
+    }
+
+
+def _merge_command_registry_entries(base_entry: dict, overlay_entry: dict, *, pipe_helper: bool = False) -> dict:
+    merged = deepcopy(base_entry)
+    if not pipe_helper:
+        if overlay_entry.get("category"):
+            merged["category"] = overlay_entry["category"]
+        policy = merged.setdefault("policy", {"allow": [], "deny": []})
+        for allow in overlay_entry.get("policy", {}).get("allow", []) or []:
+            if allow not in policy.setdefault("allow", []):
+                policy["allow"].append(allow)
+        for deny in overlay_entry.get("policy", {}).get("deny", []) or []:
+            if deny not in policy.setdefault("deny", []):
+                policy["deny"].append(deny)
+
+    base_autocomplete = merged.get("autocomplete") or _empty_autocomplete_context_entry()
+    overlay_autocomplete = overlay_entry.get("autocomplete") or {}
+    if overlay_autocomplete:
+        merged["autocomplete"] = _merge_autocomplete_context(
+            {merged["root"]: base_autocomplete},
+            {merged["root"]: overlay_autocomplete},
+        )[merged["root"]]
+    elif "autocomplete" not in merged:
+        merged["autocomplete"] = {}
+    return merged
+
+
+def _merge_commands_registry(base: dict, overlay: dict) -> dict:
+    merged = {
+        "version": int(base.get("version") or 1),
+        "commands": deepcopy(base.get("commands") or []),
+        "pipe_helpers": deepcopy(base.get("pipe_helpers") or []),
+    }
+
+    def merge_list(key: str, *, pipe_helper: bool = False) -> None:
+        existing = {entry["root"]: index for index, entry in enumerate(merged[key])}
+        for overlay_entry in overlay.get(key) or []:
+            root = overlay_entry["root"]
+            if root in existing:
+                index = existing[root]
+                merged[key][index] = _merge_command_registry_entries(
+                    merged[key][index],
+                    overlay_entry,
+                    pipe_helper=pipe_helper,
+                )
+            else:
+                existing[root] = len(merged[key])
+                merged[key].append(deepcopy(overlay_entry))
+
+    merge_list("commands")
+    merge_list("pipe_helpers", pipe_helper=True)
+    return merged
+
+
+def load_commands_registry():
+    """Read commands.yaml plus optional commands.local.yaml overlays."""
+    base = _load_commands_registry_file(COMMANDS_REGISTRY_FILE)
+    root, ext = os.path.splitext(COMMANDS_REGISTRY_FILE)
+    local = _load_commands_registry_file(f"{root}.local{ext}")
+    return _merge_commands_registry(base, local)
+
+
+def load_command_policy():
+    """Return allow/deny prefixes from commands.yaml."""
+    registry = load_commands_registry()
+    allow_prefixes: list[str] = []
+    deny_prefixes: list[str] = []
+    for entry in registry.get("commands", []) or []:
+        if not isinstance(entry, dict):
+            continue
+        raw_policy_value = entry.get("policy")
+        policy = raw_policy_value if isinstance(raw_policy_value, dict) else {}
+        allow_prefixes.extend(policy.get("allow") or [])
+        deny_prefixes.extend(policy.get("deny") or [])
+
+    allow_prefixes = _dedupe_preserve_order(allow_prefixes)
+    deny_prefixes = _dedupe_preserve_order(deny_prefixes)
+    return (allow_prefixes if allow_prefixes else None), deny_prefixes
+
+
+def autocomplete_context_from_commands_registry(registry: dict) -> dict:
+    """Return the browser autocomplete context from a loaded command registry."""
+    context = {}
+    for section in ("commands", "pipe_helpers"):
+        for entry in registry.get(section, []) or []:
+            root = str(entry.get("root") or "").strip().lower()
+            autocomplete = entry.get("autocomplete")
+            if root and isinstance(autocomplete, dict) and autocomplete:
+                context[root] = autocomplete
+    return context
+
+
+def load_autocomplete_context_from_commands_registry() -> dict:
+    """Read autocomplete metadata from commands.yaml."""
+    return autocomplete_context_from_commands_registry(load_commands_registry())
 
 
 def load_faq():
@@ -666,56 +782,82 @@ def _builtin_workflows():
         {
             "title": "DNS Troubleshooting",
             "description": "Diagnose why a domain isn't resolving or returns unexpected results.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "dig darklab.sh A",          "note": "Does it resolve? Check the ANSWER section."},
-                {"cmd": "dig darklab.sh NS",          "note": "Which nameservers are authoritative?"},
-                {"cmd": "dig @8.8.8.8 darklab.sh A", "note": "Does a public resolver see it differently?"},
-                {"cmd": "dig darklab.sh +trace",      "note": "Trace delegation step by step from the root."},
-                {"cmd": "dig darklab.sh MX",          "note": "Check mail exchanger records."},
+                {"cmd": "dig {{domain}} A", "note": "Does it resolve? Check the ANSWER section."},
+                {"cmd": "dig {{domain}} NS", "note": "Which nameservers are authoritative?"},
+                {"cmd": "dig @8.8.8.8 {{domain}} A", "note": "Does a public resolver see it differently?"},
+                {"cmd": "dig {{domain}} +trace", "note": "Trace delegation step by step from the root."},
+                {"cmd": "dig {{domain}} MX", "note": "Check mail exchanger records."},
             ],
         },
         {
             "title": "TLS / HTTPS Check",
             "description": "Verify a domain's certificate, chain, and TLS configuration.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "curl -Iv https://ip.darklab.sh",
-                 "note": "Check response headers and certificate details."},
-                {"cmd": "openssl s_client -connect ip.darklab.sh:443",
+                {"cmd": "curl -Iv https://{{host}}", "note": "Check response headers and certificate details."},
+                {"cmd": "openssl s_client -connect {{host}}:443",
                  "note": "Inspect the raw TLS handshake and certificate chain."},
-                {"cmd": "testssl ip.darklab.sh",
-                 "note": "Run a full TLS audit including ciphers and known vulnerabilities."},
+                {"cmd": "testssl {{host}}", "note": "Run a full TLS audit including ciphers and known vulnerabilities."},
             ],
         },
         {
             "title": "HTTP Triage",
             "description": "Investigate what a web server is returning.",
+            "inputs": [
+                {
+                    "id": "url", "label": "URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "curl -sIL https://ip.darklab.sh",
-                 "note": "Follow redirects and inspect the final response headers."},
-                {"cmd": "curl -sv -o /dev/null https://ip.darklab.sh| head -60",
+                {"cmd": "curl -sIL {{url}}", "note": "Follow redirects and inspect the final response headers."},
+                {"cmd": "curl -sv -o /dev/null {{url}}| head -60",
                  "note": "Verbose output with timing, TLS detail, and headers."},
-                {"cmd": "wget -S --spider https://ip.darklab.sh",
-                 "note": "Spider check with full server response headers."},
+                {"cmd": "wget -S --spider {{url}}", "note": "Spider check with full server response headers."},
             ],
         },
         {
             "title": "Quick Reachability Check",
             "description": "Confirm a host is up and identify which ports are open.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "ping -c 4 ip.darklab.sh",    "note": "Is the host reachable? Check latency and packet loss."},
-                {"cmd": "nc -zv ip.darklab.sh 443",   "note": "Is HTTPS open and accepting connections?"},
-                {"cmd": "nmap -F ip.darklab.sh",      "note": "Fast scan of the 100 most common ports."},
+                {"cmd": "ping -c 4 {{host}}", "note": "Is the host reachable? Check latency and packet loss."},
+                {"cmd": "nc -zv {{host}} 443", "note": "Is HTTPS open and accepting connections?"},
+                {"cmd": "nmap -F {{host}}", "note": "Fast scan of the 100 most common ports."},
             ],
         },
         {
             "title": "Email Server Check",
             "description": "Verify mail delivery configuration for a domain.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "dig darklab.sh MX",       "note": "Which mail servers handle email for this domain?"},
-                {"cmd": "dig darklab.sh TXT",      "note": "Check SPF, DKIM policy, and other TXT records."},
-                {"cmd": "dig _dmarc.darklab.sh TXT",
+                {"cmd": "dig {{domain}} MX", "note": "Which mail servers handle email for this domain?"},
+                {"cmd": "dig {{domain}} TXT", "note": "Check SPF, DKIM policy, and other TXT records."},
+                {"cmd": "dig _dmarc.{{domain}} TXT",
                  "note": "Check the DMARC policy published for the domain."},
-                {"cmd": "dig @8.8.8.8 darklab.sh MX",
+                {"cmd": "dig @8.8.8.8 {{domain}} MX",
                  "note": (
                      "Confirm a public resolver sees the same MX records. If you want to test "
                      "SMTP ports with nc, target one of the MX hosts returned above rather than "
@@ -726,27 +868,43 @@ def _builtin_workflows():
         {
             "title": "Domain OSINT / Passive Recon",
             "description": "Gather ownership, delegation, and passive subdomain context before active probing.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "whois darklab.sh", "note": "Review registration, registrar, and allocation context."},
-                {"cmd": "dig darklab.sh NS", "note": "Identify authoritative nameservers for the domain."},
-                {"cmd": "subfinder -d darklab.sh -silent", "note": "Find passively observed subdomains."},
-                {"cmd": "dnsrecon -d darklab.sh", "note": "Enumerate common DNS records and transfer hints."},
+                {"cmd": "whois {{domain}}", "note": "Review registration, registrar, and allocation context."},
+                {"cmd": "dig {{domain}} NS", "note": "Identify authoritative nameservers for the domain."},
+                {"cmd": "subfinder -d {{domain}} -silent", "note": "Find passively observed subdomains."},
+                {"cmd": "dnsrecon -d {{domain}}", "note": "Enumerate common DNS records and transfer hints."},
             ],
         },
         {
             "title": "Subdomain Enumeration & Validation",
             "description": "Discover candidate subdomains, resolve them, and probe likely web services.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+                {
+                    "id": "url", "label": "Probe URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "subfinder -d darklab.sh -silent", "note": "Collect passive subdomain candidates."},
+                {"cmd": "subfinder -d {{domain}} -silent", "note": "Collect passive subdomain candidates."},
                 {
                     "cmd": (
-                        "dnsx -d darklab.sh "
+                        "dnsx -d {{domain}} "
                         "-w /usr/share/wordlists/seclists/Discovery/DNS/subdomains-top1million-5000.txt -resp"
                     ),
                     "note": "Resolve common subdomains and keep the DNS response context.",
                 },
                 {
-                    "cmd": "pd-httpx -u https://ip.darklab.sh -title -status-code -tech-detect",
+                    "cmd": "pd-httpx -u {{url}} -title -status-code -tech-detect",
                     "note": "Probe HTTPS and collect status, title, and technology hints.",
                 },
             ],
@@ -754,64 +912,92 @@ def _builtin_workflows():
         {
             "title": "Web Directory Discovery",
             "description": "Look for common web paths and follow up on interesting responses.",
+            "inputs": [
+                {
+                    "id": "url", "label": "URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://tor-stats.darklab.sh",
+                },
+            ],
             "steps": [
                 {
                     "cmd": (
-                        "ffuf -u https://tor-stats.darklab.sh/FUZZ "
+                        "ffuf -u {{url}}/FUZZ "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Fuzz common paths and watch for non-baseline status codes or sizes.",
                 },
                 {
                     "cmd": (
-                        "gobuster dir -u https://tor-stats.darklab.sh "
+                        "gobuster dir -u {{url}} "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Run a second directory check with a different scanner.",
                 },
-                {"cmd": "curl -sIL https://tor-stats.darklab.sh/admin",
+                {"cmd": "curl -sIL {{url}}/admin",
                  "note": "Inspect redirects and headers for a candidate path."},
             ],
         },
         {
             "title": "SSL / TLS Deep Dive",
             "description": "Inspect certificates, protocol support, cipher exposure, and known TLS weaknesses.",
-            "steps": [
-                {"cmd": "sslscan ip.darklab.sh", "note": "Enumerate protocols, ciphers, and certificate metadata."},
-                {"cmd": "sslyze --certinfo ip.darklab.sh", "note": "Validate certificate chain details."},
+            "inputs": [
                 {
-                    "cmd": "openssl s_client -connect ip.darklab.sh:443 -servername ip.darklab.sh",
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "sslscan {{host}}", "note": "Enumerate protocols, ciphers, and certificate metadata."},
+                {"cmd": "sslyze --certinfo {{host}}", "note": "Validate certificate chain details."},
+                {
+                    "cmd": "openssl s_client -connect {{host}}:443 -servername {{host}}",
                     "note": "Inspect the raw handshake and served certificate chain.",
                 },
-                {"cmd": "testssl ip.darklab.sh", "note": "Run the broader TLS configuration audit."},
+                {"cmd": "testssl {{host}}", "note": "Run the broader TLS configuration audit."},
             ],
         },
         {
             "title": "CDN / Edge Behavior Check",
             "description": "Compare DNS, ownership, redirects, headers, and WAF/CDN edge signals.",
+            "inputs": [
+                {
+                    "id": "domain", "label": "Domain", "type": "domain", "required": True,
+                    "placeholder": "example.com", "default": "darklab.sh",
+                },
+                {
+                    "id": "url", "label": "Web URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "dig darklab.sh A", "note": "Check the current address records."},
-                {"cmd": "whois darklab.sh", "note": "Review ownership and provider hints."},
-                {"cmd": "curl -sIL https://ip.darklab.sh", "note": "Inspect redirects, cache headers, and edge headers."},
-                {"cmd": "wafw00f https://darklab.sh", "note": "Look for WAF or CDN fingerprints."},
+                {"cmd": "dig {{domain}} A", "note": "Check the current address records."},
+                {"cmd": "whois {{domain}}", "note": "Review ownership and provider hints."},
+                {"cmd": "curl -sIL {{url}}", "note": "Inspect redirects, cache headers, and edge headers."},
+                {"cmd": "wafw00f https://{{domain}}", "note": "Look for WAF or CDN fingerprints."},
             ],
         },
         {
             "title": "API Recon",
             "description": "Triage API-style endpoints with headers, methods, JSON negotiation, and path fuzzing.",
-            "steps": [
-                {"cmd": "curl -sI https://ip.darklab.sh/api", "note": "Check whether the API path responds and how."},
+            "inputs": [
                 {
-                    "cmd": "curl -sX OPTIONS -I https://ip.darklab.sh/api",
+                    "id": "url", "label": "Base URL", "type": "url", "required": True,
+                    "placeholder": "https://example.com", "default": "https://ip.darklab.sh",
+                },
+            ],
+            "steps": [
+                {"cmd": "curl -sI {{url}}/api", "note": "Check whether the API path responds and how."},
+                {
+                    "cmd": "curl -sX OPTIONS -I {{url}}/api",
                     "note": "Inspect allowed methods and CORS-style headers.",
                 },
                 {
-                    "cmd": "curl -sH Accept:application/json https://ip.darklab.sh/api",
+                    "cmd": "curl -sH Accept:application/json {{url}}/api",
                     "note": "Ask for JSON explicitly and inspect the response shape.",
                 },
                 {
                     "cmd": (
-                        "ffuf -u https://ip.darklab.sh/FUZZ "
+                        "ffuf -u {{url}}/FUZZ "
                         "-w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt"
                     ),
                     "note": "Fuzz common API-adjacent paths and versions.",
@@ -821,24 +1007,116 @@ def _builtin_workflows():
         {
             "title": "Network Path Analysis",
             "description": "Diagnose reachability, route shape, latency, and packet-loss symptoms.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "ping -c 10 ip.darklab.sh", "note": "Measure basic reachability, latency, and packet loss."},
-                {"cmd": "mtr ip.darklab.sh", "note": "Summarize path loss and latency in report mode."},
-                {"cmd": "traceroute ip.darklab.sh", "note": "Capture a static routed path to the target."},
-                {"cmd": "tcptraceroute ip.darklab.sh 443", "note": "Trace the TCP path toward HTTPS specifically."},
+                {"cmd": "ping -c 10 {{host}}", "note": "Measure basic reachability, latency, and packet loss."},
+                {"cmd": "mtr {{host}}", "note": "Summarize path loss and latency in report mode."},
+                {"cmd": "traceroute {{host}}", "note": "Capture a static routed path to the target."},
+                {"cmd": "tcptraceroute {{host}} 443", "note": "Trace the TCP path toward HTTPS specifically."},
             ],
         },
         {
             "title": "Fast Port Discovery to Service Fingerprint",
             "description": "Sweep for exposed ports quickly, then fingerprint and validate important services.",
+            "inputs": [
+                {
+                    "id": "host", "label": "Host", "type": "host", "required": True,
+                    "placeholder": "example.com", "default": "ip.darklab.sh",
+                },
+            ],
             "steps": [
-                {"cmd": "rustscan -a ip.darklab.sh --range 1-1000", "note": "Quickly sweep the first thousand ports."},
-                {"cmd": "naabu -host ip.darklab.sh -silent", "note": "Run a second fast TCP discovery pass."},
-                {"cmd": "nmap -sV ip.darklab.sh", "note": "Fingerprint services once you know exposure is present."},
-                {"cmd": "nc -zv ip.darklab.sh 80", "note": "Validate a specific expected port manually."},
+                {"cmd": "rustscan -a {{host}} --range 1-1000", "note": "Quickly sweep the first thousand ports."},
+                {"cmd": "naabu -host {{host}} -silent", "note": "Run a second fast TCP discovery pass."},
+                {"cmd": "nmap -sV {{host}}", "note": "Fingerprint services once you know exposure is present."},
+                {"cmd": "nc -zv {{host}} 80", "note": "Validate a specific expected port manually."},
             ],
         },
     ]
+
+
+_WORKFLOW_INPUT_TYPES = {"domain", "host", "url", "port", "path"}
+_WORKFLOW_INPUT_ID_RE = re.compile(r"^[a-z][a-z0-9_]*$")
+_WORKFLOW_TOKEN_RE = re.compile(r"{{\s*([a-z][a-z0-9_]*)\s*}}")
+
+
+def _workflow_tokens(value: str) -> set[str]:
+    return set(_WORKFLOW_TOKEN_RE.findall(value or ""))
+
+
+def _render_workflow_text(value: str, inputs: dict[str, str]) -> str:
+    return _WORKFLOW_TOKEN_RE.sub(lambda match: inputs.get(match.group(1), ""), value or "")
+
+
+def _normalize_workflow_inputs(raw_inputs):
+    if not isinstance(raw_inputs, list):
+        return []
+    result = []
+    seen_ids = set()
+    for item in raw_inputs:
+        if not isinstance(item, dict):
+            continue
+        input_id = str(item.get("id") or "").strip().lower()
+        input_type = str(item.get("type") or "").strip().lower()
+        if (
+            not input_id
+            or input_id in seen_ids
+            or not _WORKFLOW_INPUT_ID_RE.fullmatch(input_id)
+            or input_type not in _WORKFLOW_INPUT_TYPES
+        ):
+            continue
+        label = str(item.get("label") or input_id.replace("_", " ").title()).strip()
+        placeholder = str(item.get("placeholder") or "").strip()
+        default = str(item.get("default") or "").strip()
+        help_text = str(item.get("help") or "").strip()
+        normalized = {
+            "id": input_id,
+            "label": label or input_id.replace("_", " ").title(),
+            "type": input_type,
+            "required": bool(item.get("required", False)),
+            "placeholder": placeholder,
+            "default": default,
+            "help": help_text,
+        }
+        result.append(normalized)
+        seen_ids.add(input_id)
+    return result
+
+
+def _normalize_workflow_entry(entry):
+    if not isinstance(entry, dict):
+        return None
+    title = str(entry.get("title") or "").strip()
+    description = str(entry.get("description") or "").strip()
+    steps = entry.get("steps") or []
+    if not title or not isinstance(steps, list):
+        return None
+    inputs = _normalize_workflow_inputs(entry.get("inputs") or [])
+    declared_ids = {item["id"] for item in inputs}
+    clean_steps = []
+    for step in steps:
+        if not isinstance(step, dict):
+            continue
+        cmd = str(step.get("cmd") or "").strip()
+        note = str(step.get("note") or "").strip()
+        if not cmd:
+            continue
+        tokens = _workflow_tokens(cmd) | _workflow_tokens(note)
+        if tokens and not tokens.issubset(declared_ids):
+            continue
+        clean_steps.append({"cmd": cmd, "note": note})
+    if not clean_steps:
+        return None
+    return {
+        "title": title,
+        "description": description,
+        "inputs": inputs,
+        "steps": clean_steps,
+    }
 
 
 def load_workflows():
@@ -848,29 +1126,20 @@ def load_workflows():
         return []
     result = []
     for entry in data:
-        if not isinstance(entry, dict):
-            continue
-        title = str(entry.get("title") or "").strip()
-        description = str(entry.get("description") or "").strip()
-        steps = entry.get("steps") or []
-        if not title or not isinstance(steps, list):
-            continue
-        clean_steps = []
-        for step in steps:
-            if not isinstance(step, dict):
-                continue
-            cmd = str(step.get("cmd") or "").strip()
-            note = str(step.get("note") or "").strip()
-            if cmd:
-                clean_steps.append({"cmd": cmd, "note": note})
-        if clean_steps:
-            result.append({"title": title, "description": description, "steps": clean_steps})
+        normalized = _normalize_workflow_entry(entry)
+        if normalized:
+            result.append(normalized)
     return result
 
 
 def load_all_workflows():
     """Return the built-in workflows followed by any custom workflows.yaml entries."""
-    return [*_builtin_workflows(), *load_workflows()]
+    builtins = []
+    for entry in _builtin_workflows():
+        normalized = _normalize_workflow_entry(entry)
+        if normalized:
+            builtins.append(normalized)
+    return [*builtins, *load_workflows()]
 
 
 def load_welcome():
@@ -936,17 +1205,6 @@ def load_mobile_welcome_hints():
             hints.append(line)
             seen.add(line)
     return hints
-
-
-def _load_autocomplete_config(path):
-    loaded = _load_yaml_mapping(path)
-    if not loaded:
-        return {"context": {}}
-
-    raw_context = loaded.get("context", {})
-    return {
-        "context": _normalize_autocomplete_context(raw_context),
-    }
 
 
 def _load_yaml_mapping(path):
@@ -1218,19 +1476,11 @@ def _merge_autocomplete_context(base, overlay):
     return merged
 
 
-def load_autocomplete_context():
-    """Read the unified autocomplete YAML and return structured root-aware suggestions."""
-    base = _load_autocomplete_config(AUTOCOMPLETE_CONTEXT_FILE)
-    root, ext = os.path.splitext(AUTOCOMPLETE_CONTEXT_FILE)
-    local = _load_autocomplete_config(f"{root}.local{ext}")
-    return _merge_autocomplete_context(base.get("context", {}), local.get("context", {}))
-
-
 def _spread_sensitive_smoke_commands(commands: list[str]) -> list[str]:
     """De-clump bursty network lookups without changing source ownership/order.
 
     The smoke corpus should still be *collected* in source order from
-    autocomplete examples and workflow steps, but some roots are more likely to
+    registry examples and workflow steps, but some roots are more likely to
     hit transient upstream throttling when run back-to-back. Spread those roots
     apart opportunistically while preserving relative order as much as possible.
     """
@@ -1292,11 +1542,11 @@ def _spread_sensitive_smoke_commands(commands: list[str]) -> list[str]:
 
 
 def load_container_smoke_test_commands():
-    """Return the user-facing smoke-test corpus from autocomplete examples and workflows."""
+    """Return the user-facing smoke-test corpus from registry examples and workflows."""
     commands = []
     seen = set()
 
-    for spec in load_autocomplete_context().values():
+    for spec in load_autocomplete_context_from_commands_registry().values():
         if not isinstance(spec, dict):
             continue
         for example in spec.get("examples") or []:
@@ -1311,10 +1561,20 @@ def load_container_smoke_test_commands():
     for workflow in load_all_workflows():
         if not isinstance(workflow, dict):
             continue
+        workflow_inputs = {
+            item["id"]: str(item.get("default") or "").strip()
+            for item in workflow.get("inputs") or []
+            if isinstance(item, dict) and str(item.get("id") or "").strip()
+        }
         for step in workflow.get("steps") or []:
             if not isinstance(step, dict):
                 continue
             command = str(step.get("cmd") or "").strip()
+            tokens = _workflow_tokens(command)
+            if tokens:
+                if not tokens.issubset({key for key, value in workflow_inputs.items() if value}):
+                    continue
+                command = _render_workflow_text(command, workflow_inputs).strip()
             if not command or command in seen:
                 continue
             seen.add(command)
@@ -1438,9 +1698,9 @@ def _is_denied(command: str, deny_entries: list[str]) -> bool:
 def is_command_allowed(command: str) -> tuple[bool, str]:
     """Return (allowed, reason). Blocks if any chained segment isn't on the allowlist,
     or if the raw input contains shell operators or references to protected paths.
-    Deny prefixes (lines starting with ! in allowed_commands.txt) take priority over
+    Deny prefixes from the command registry take priority over
     allow prefixes, letting operators block specific flags on an otherwise-allowed command."""
-    allowed, denied = load_allowed_commands()
+    allowed, denied = load_command_policy()
     if allowed is None:
         return True, ""  # no file or empty file = unrestricted
 

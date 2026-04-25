@@ -1,7 +1,7 @@
 """
 Tests for pure utility functions across the app modules:
   - split_chained_commands      (commands.py)
-  - load_allowed_commands       (commands.py)
+  - command registry loading    (commands.py)
   - load_faq                    (commands.py)
   - _is_denied edge cases       (commands.py)
   - is_command_allowed path-blocking edge cases (commands.py)
@@ -25,6 +25,7 @@ from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+import yaml
 import process
 import database
 import app as shell_app
@@ -32,11 +33,11 @@ import config as app_config
 import commands  # noqa: F401 — used as mock.patch("commands.X") target
 import fake_commands
 from commands import (
-    split_chained_commands, load_allowed_commands, load_all_faq, load_faq,
+    split_chained_commands, load_all_faq, load_faq,
     load_welcome, load_ascii_art, load_ascii_mobile_art, load_welcome_hints,
-    load_mobile_welcome_hints, load_autocomplete_context,
-    load_container_smoke_test_commands,
-    load_allowed_commands_grouped,
+    load_mobile_welcome_hints, autocomplete_context_from_commands_registry,
+    load_autocomplete_context_from_commands_registry, load_command_policy, load_container_smoke_test_commands,
+    load_commands_registry, load_workflows,
     is_command_allowed, rewrite_command,
 )
 from permalinks import _format_retention, _expiry_note, _permalink_error_page, _normalize_permalink_lines, _prompt_echo_text
@@ -107,8 +108,6 @@ class TestSplitChainedCommands:
         assert split_chained_commands("") == []
 
 
-# ── load_allowed_commands ─────────────────────────────────────────────────────
-
 class TestLoadConfig:
     def test_local_config_overrides_base_config_without_replacing_defaults(self):
         with tempfile.TemporaryDirectory() as tmp:
@@ -169,105 +168,172 @@ class TestLoadConfig:
             ],
         })
         assert rules == []
-
-class TestLoadAllowedCommands:
-    def _write(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
-
-    def _write_local(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.local.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
-
-    def test_missing_file_returns_none_and_empty_deny(self):
-        with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/nonexistent/path.txt"):
-            allow, deny = load_allowed_commands()
-        assert allow is None
-        assert deny == []
-
-    def test_allow_entries_parsed(self):
+class TestDerivedCommandRegistry:
+    def test_commands_registry_loader_normalizes_policy_and_autocomplete(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("ping\nnmap\ndig\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping", "nmap", "dig"]
-        assert deny == []
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: PING
+                category: Network
+                policy:
+                  allow:
+                    - PING
+                    - ping
+                  deny:
+                    - ping -f
+                autocomplete:
+                  flags:
+                    - value: -c
+                      description: Count
+                      takes_value: true
+                      suggest:
+                        - value: "4"
+                          description: Four probes
+                  examples:
+                    - value: ping -c 4 darklab.sh
+                      description: Send four probes
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines
+                  flags:
+                    - value: -i
+                      description: Ignore case
+            """))
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                registry = load_commands_registry()
 
-    def test_deny_entries_stripped_of_bang_and_preserve_case(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("ping\n!NMAP -SU\n!curl -o\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow is not None
-        assert "ping" in allow
-        assert "NMAP -SU" in deny
-        assert "curl -o" in deny
+        ping = registry["commands"][0]
+        assert ping["root"] == "ping"
+        assert ping["category"] == "Network"
+        assert ping["policy"]["allow"] == ["ping"]
+        assert ping["policy"]["deny"] == ["ping -f"]
+        assert ping["autocomplete"]["flags"][0] == {"value": "-c", "description": "Count"}
+        assert ping["autocomplete"]["expects_value"] == ["-c"]
+        assert ping["autocomplete"]["arg_hints"]["-c"][0]["value"] == "4"
+        assert ping["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        grep = registry["pipe_helpers"][0]
+        assert grep["root"] == "grep"
+        assert grep["autocomplete"]["pipe_command"] is True
+        assert grep["autocomplete"]["pipe_description"] == "Filter lines"
 
-    def test_comments_and_blank_lines_ignored(self):
+    def test_commands_registry_local_overlay_appends_policy_and_context(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("# comment\n\nping\n  \n# another\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping"]
+            base_path = Path(tmp) / "commands.yaml"
+            local_path = Path(tmp) / "commands.local.yaml"
+            base_path.write_text(textwrap.dedent("""
+            version: 1
+            commands:
+              - root: ping
+                category: Network
+                policy:
+                  allow:
+                    - ping
+                  deny: []
+                autocomplete:
+                  flags:
+                    - value: -c
+                      description: Count
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  pipe:
+                    enabled: true
+                    description: Filter lines
+            """))
+            local_path.write_text(textwrap.dedent("""
+            commands:
+              - root: ping
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - ping -c
+                  deny:
+                    - ping -f
+                autocomplete:
+                  examples:
+                    - value: ping -c 4 darklab.sh
+                      description: Send four probes
+              - root: curl
+                category: Network Diagnostics
+                policy:
+                  allow:
+                    - curl
+                  deny:
+                    - curl -O
+                autocomplete:
+                  flags:
+                    - value: -I
+                      description: HEAD request
+            pipe_helpers:
+              - root: grep
+                autocomplete:
+                  flags:
+                    - value: -i
+                      description: Ignore case
+            """))
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(base_path)):
+                registry = load_commands_registry()
 
-    def test_only_deny_entries_returns_none_allow(self):
-        # File with only ! lines → no allow prefixes → unrestricted
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("!nmap -su\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow is None
-        assert deny == ["nmap -su"]
+        by_root = {entry["root"]: entry for entry in registry["commands"]}
+        assert [entry["root"] for entry in registry["commands"]] == ["ping", "curl"]
+        assert by_root["ping"]["category"] == "Network Diagnostics"
+        assert by_root["ping"]["policy"]["allow"] == ["ping", "ping -c"]
+        assert by_root["ping"]["policy"]["deny"] == ["ping -f"]
+        assert by_root["ping"]["autocomplete"]["flags"][0]["value"] == "-c"
+        assert by_root["ping"]["autocomplete"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        assert by_root["curl"]["policy"]["deny"] == ["curl -O"]
+        grep = registry["pipe_helpers"][0]
+        assert grep["autocomplete"]["pipe_command"] is True
+        assert grep["autocomplete"]["flags"][0]["value"] == "-i"
 
-    def test_allow_entries_are_lowercased(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("PING\nNMAP\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, _ = load_allowed_commands()
-        assert allow is not None
-        assert "ping" in allow
-        assert "nmap" in allow
+    def test_autocomplete_context_can_be_derived_from_commands_registry(self):
+        context = autocomplete_context_from_commands_registry({
+            "commands": [
+                {"root": "ping", "autocomplete": {"examples": [{"value": "ping -c 4 darklab.sh"}]}},
+                {"root": "empty", "autocomplete": {}},
+            ],
+            "pipe_helpers": [
+                {"root": "grep", "autocomplete": {"pipe_command": True}},
+            ],
+        })
+        assert list(context) == ["ping", "grep"]
+        assert context["ping"]["examples"][0]["value"] == "ping -c 4 darklab.sh"
+        assert context["grep"]["pipe_command"] is True
 
-    def test_empty_file_returns_none_allow(self):
+    def test_command_policy_can_be_derived_from_commands_registry(self):
         with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                allow, deny = load_allowed_commands()
-        assert allow is None
-        assert deny == []
+            path = Path(tmp) / "commands.yaml"
+            path.write_text(
+                textwrap.dedent(
+                    """
+                    version: 1
+                    commands:
+                    - root: curl
+                      policy:
+                        allow:
+                        - curl
+                        deny:
+                        - curl -K
+                    - root: nmap
+                      policy:
+                        allow:
+                        - nmap
+                        deny:
+                        - nmap -sU
+                    """
+                )
+            )
 
-    def test_local_overlay_appends_and_dedupes_entries(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = self._write("ping\nnmap\n!curl -o\n", tmp)
-            self._write_local("nmap\ncurl\n!curl -o\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping", "nmap", "curl"]
-        assert deny == ["curl -o"]
+            with mock.patch("commands.COMMANDS_REGISTRY_FILE", str(path)):
+                allow, deny = load_command_policy()
 
-    def test_local_overlay_preserves_case_in_denies(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = self._write("ping\n!curl -K\n", tmp)
-            self._write_local("!curl -k\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
-                allow, deny = load_allowed_commands()
-        assert allow == ["ping"]
-        assert deny == ["curl -K", "curl -k"]
-
-    def test_local_overlay_merges_group_headers(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = self._write("## Network\nping\n", tmp)
-            self._write_local("## Network\ncurl\n## Scanning\nnmap\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", base_path):
-                groups = load_allowed_commands_grouped()
-        assert groups is not None
-        assert [group["name"] for group in groups] == ["Network", "Scanning"]
-        assert groups[0]["commands"] == ["ping", "curl"]
-        assert groups[1]["commands"] == ["nmap"]
+        assert allow == ["curl", "nmap"]
+        assert deny == ["curl -K", "nmap -sU"]
 
 
 # ── load_faq ──────────────────────────────────────────────────────────────────
@@ -497,6 +563,19 @@ class TestThemeRegistry:
         assert dark_actual == dark_expected, "theme_dark.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
         assert light_actual == light_expected, "theme_light.yaml.example is out of sync; run ./scripts/generate_theme_examples.py"
 
+    def test_darklab_obsidian_matches_dark_defaults_and_example(self):
+        dark_example = yaml.safe_load((REPO_ROOT / "app" / "conf" / "theme_dark.yaml.example").read_text()) or {}
+        darklab_obsidian = yaml.safe_load(
+            (REPO_ROOT / "app" / "conf" / "themes" / "darklab_obsidian.yaml").read_text()
+        ) or {}
+
+        metadata_keys = {"label", "group", "sort"}
+        darklab_values = {key: value for key, value in darklab_obsidian.items() if key not in metadata_keys}
+        dark_defaults = {"color_scheme": "dark", **app_config._THEME_DEFAULTS["dark"]}
+
+        assert darklab_values == dark_defaults, "darklab_obsidian.yaml drifted from the app's default dark theme"
+        assert darklab_values == dark_example, "darklab_obsidian.yaml drifted from theme_dark.yaml.example"
+
     def test_entries_missing_question_filtered_out(self):
         yaml_content = "- answer: No question here.\n- question: Has one.\n  answer: Yes.\n"
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -638,7 +717,7 @@ class TestThemeRegistry:
 def _check(cmd, allow=None, deny=None):
     a = allow if allow is not None else ["curl", "nmap", "ls"]
     d = deny if deny is not None else []
-    with mock.patch("commands.load_allowed_commands", return_value=(a, d)):
+    with mock.patch("commands.load_command_policy", return_value=(a, d)):
         return is_command_allowed(cmd)
 
 
@@ -1054,316 +1133,8 @@ class TestMobileWelcomeHintLoading:
 
 
 class TestAutocompleteContextLoading:
-    def test_missing_context_file_returns_empty_mapping(self):
-        with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", "/nonexistent/autocomplete_context.yaml"):
-            result = load_autocomplete_context()
-        assert result == {}
-
-    def test_valid_context_entries_are_normalized(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              nmap:
-                flags:
-                  - value: -sV
-                    description: Service detection
-                  - -Pn
-                  - value: -p
-                    description: Port list
-                    takes_value: true
-                    value_hint:
-                      placeholder: "<ports>"
-                      description: Port list
-              wc:
-                pipe:
-                  enabled: true
-                  insert: wc -l
-                  label: wc -l
-                  description: Count lines
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
-        assert result["nmap"]["flags"][0] == {"value": "-sV", "description": "Service detection"}
-        assert result["nmap"]["flags"][1] == {"value": "-Pn", "description": ""}
-        assert result["nmap"]["expects_value"] == ["-p"]
-        assert result["nmap"]["arg_hints"]["-p"][0]["value"] == "<ports>"
-        assert result["wc"]["pipe_command"] is True
-        assert result["wc"]["pipe_insert_value"] == "wc -l"
-        assert result["wc"]["pipe_label"] == "wc -l"
-        assert result["wc"]["pipe_description"] == "Count lines"
-
-    def test_value_hints_preserve_insert_with_trailing_whitespace(self):
-        # YAML authors use `insert: "set "` to leave the caret past a
-        # trailing space so the next argument can be typed. The normalizer
-        # must not strip the space or drop the key.
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              session-token:
-                subcommands:
-                  - value: set
-                    description: Activate an existing session token
-                    takes_value: true
-                    value_hint:
-                      placeholder: "<token>"
-                      description: Paste a tok_ token
-                  - value: clear
-                    description: Remove the session token
-                    closes: true
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
-        positional = result["session-token"]["arg_hints"]["__positional__"]
-        set_entry = next(p for p in positional if p["value"] == "set <token>")
-        assert set_entry["insertValue"] == "set "  # preserves trailing space
-        clear_entry = next(p for p in positional if p["value"] == "clear")
-        assert "insertValue" not in clear_entry  # not set → key absent
-        # arg_hints value without insertValue is an intentional placeholder;
-        # the frontend detects <placeholder> and flags it hintOnly.
-        set_hint = result["session-token"]["arg_hints"]["set"][0]
-        assert set_hint["value"] == "<token>"
-        assert "insertValue" not in set_hint
-
-    def test_arguments_and_subcommands_normalize_into_runtime_hints(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              ping:
-                argument_limit: 1
-                flags:
-                  - value: -c
-                    description: Count
-                    takes_value: true
-                    suggest:
-                      - value: "4"
-                        description: Four probes
-                arguments:
-                  - placeholder: "<host>"
-                    description: Hostname or IP address
-              session-token:
-                subcommands:
-                  - value: generate
-                    description: Generate a new token
-                    closes: true
-                  - value: set
-                    description: Activate an existing token
-                    takes_value: true
-                    value_hint:
-                      placeholder: "<token>"
-                      description: Paste a token
-              grep:
-                pipe:
-                  enabled: true
-                  description: Filter lines by pattern
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
-
-        assert result["ping"]["expects_value"] == ["-c"]
-        assert result["ping"]["arg_hints"]["-c"][0]["value"] == "4"
-        assert result["ping"]["arg_hints"]["__positional__"][0]["value"] == "<host>"
-        assert result["ping"]["argument_limit"] == 1
-
-        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
-        assert session_positionals[0]["value"] == "generate"
-        set_entry = next(item for item in session_positionals if item["value"] == "set <token>")
-        assert set_entry["insertValue"] == "set "
-        assert result["session-token"]["expects_value"] == ["set"]
-        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
-        assert result["session-token"]["arg_hints"]["generate"] == []
-
-        assert result["grep"]["pipe_command"] is True
-        assert result["grep"]["pipe_description"] == "Filter lines by pattern"
-
-    def test_value_taking_flags_preserve_case_distinct_tokens(self):
-        with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
-            f.write(textwrap.dedent("""
-            context:
-              ping:
-                flags:
-                  - value: -W
-                    description: Per-packet timeout
-                    takes_value: true
-                  - value: -w
-                    description: Deadline before ping exits
-                    takes_value: true
-            """))
-            path = f.name
-        try:
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", path):
-                result = load_autocomplete_context()
-        finally:
-            os.unlink(path)
-
-        assert result["ping"]["expects_value"] == ["-W", "-w"]
-
-    def test_local_overlay_merges_unique_context_entries(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  nmap:
-                    flags:
-                      - -sV
-                      - value: -p
-                        description: Port list
-                        takes_value: true
-                  wc:
-                    pipe:
-                      enabled: true
-                      insert: wc -l
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  nmap:
-                    flags:
-                      - -Pn
-                      - value: --top-ports
-                        description: Top ports
-                        takes_value: true
-                  ffuf:
-                    flags:
-                      - -u
-                  wc:
-                    pipe:
-                      label: wc -l
-                      description: Count lines
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
-        assert [item["value"] for item in result["nmap"]["flags"]] == ["-sV", "-p", "-Pn", "--top-ports"]
-        assert result["nmap"]["expects_value"] == ["-p", "--top-ports"]
-        assert [item["value"] for item in result["ffuf"]["flags"]] == ["-u"]
-        assert result["wc"]["pipe_command"] is True
-        assert result["wc"]["pipe_insert_value"] == "wc -l"
-        assert result["wc"]["pipe_label"] == "wc -l"
-        assert result["wc"]["pipe_description"] == "Count lines"
-
-    def test_local_overlay_preserves_case_distinct_value_taking_flags(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  ping:
-                    flags:
-                      - value: -W
-                        description: Per-packet timeout
-                        takes_value: true
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  ping:
-                    flags:
-                      - value: -w
-                        description: Deadline before exit
-                        takes_value: true
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
-
-        assert result["ping"]["expects_value"] == ["-W", "-w"]
-
-    def test_local_overlay_merges_arguments_and_subcommands_without_duplication(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  session-token:
-                    subcommands:
-                      - value: generate
-                        description: Generate a new token
-                        closes: true
-                      - value: set
-                        description: Activate an existing token
-                        takes_value: true
-                        value_hint:
-                          placeholder: "<token>"
-                          description: Paste a token
-                  curl:
-                    arguments:
-                      - placeholder: "<url>"
-                        description: Target URL
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  session-token:
-                    subcommands:
-                      - value: revoke
-                        description: Revoke a token
-                        takes_value: true
-                        value_hint:
-                          placeholder: "<token>"
-                          description: Token to revoke
-                  curl:
-                    arguments:
-                      - value: "https://"
-                        description: Start an HTTP or HTTPS URL
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
-
-        session_positionals = result["session-token"]["arg_hints"]["__positional__"]
-        assert [item["value"] for item in session_positionals] == ["generate", "set <token>", "revoke <token>"]
-        assert result["session-token"]["expects_value"] == ["set", "revoke"]
-        assert result["session-token"]["arg_hints"]["generate"] == []
-        assert result["session-token"]["arg_hints"]["set"][0]["value"] == "<token>"
-        assert result["session-token"]["arg_hints"]["revoke"][0]["value"] == "<token>"
-
-        curl_positionals = result["curl"]["arg_hints"]["__positional__"]
-        assert [item["value"] for item in curl_positionals] == ["<url>", "https://"]
-
-    def test_local_overlay_can_override_argument_limit(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            base_path = os.path.join(tmp, "autocomplete_context.yaml")
-            local_path = os.path.join(tmp, "autocomplete_context.local.yaml")
-            with open(base_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  man:
-                    argument_limit: 1
-                    arguments:
-                      - value: curl
-                        description: curl manual page
-                """))
-            with open(local_path, "w") as f:
-                f.write(textwrap.dedent("""
-                context:
-                  man:
-                    argument_limit: 2
-                    arguments:
-                      - value: ping
-                        description: ping manual page
-                """))
-            with mock.patch("commands.AUTOCOMPLETE_CONTEXT_FILE", base_path):
-                result = load_autocomplete_context()
-
-        assert result["man"]["argument_limit"] == 2
-        man_positionals = result["man"]["arg_hints"]["__positional__"]
-        assert [item["value"] for item in man_positionals] == ["curl", "ping"]
-
-    def test_container_smoke_test_commands_include_autocomplete_examples_and_workflows(self):
-        autocomplete_context = {
+    def test_container_smoke_test_commands_include_registry_examples_and_workflows(self):
+        registry_context = {
             "dig": {
                 "examples": [
                     {"value": "dig darklab.sh A", "description": "A lookup"},
@@ -1393,7 +1164,7 @@ class TestAutocompleteContextLoading:
             },
         ]
 
-        with mock.patch("commands.load_autocomplete_context", return_value=autocomplete_context):
+        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value=registry_context):
             with mock.patch("commands.load_all_workflows", return_value=workflows):
                 result = load_container_smoke_test_commands()
 
@@ -1406,7 +1177,7 @@ class TestAutocompleteContextLoading:
         ]
 
     def test_container_smoke_test_commands_spread_sensitive_roots(self):
-        autocomplete_context = {
+        registry_context = {
             "dig": {
                 "examples": [
                     {"value": "dig darklab.sh A", "description": "A lookup"},
@@ -1432,7 +1203,7 @@ class TestAutocompleteContextLoading:
             },
         }
 
-        with mock.patch("commands.load_autocomplete_context", return_value=autocomplete_context):
+        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value=registry_context):
             with mock.patch("commands.load_all_workflows", return_value=[]):
                 result = load_container_smoke_test_commands()
 
@@ -1454,6 +1225,117 @@ class TestAutocompleteContextLoading:
         assert dig_positions == [0, 4, 6]
         assert whois_positions == [2, 5]
 
+    def test_container_smoke_test_commands_render_workflow_defaults(self):
+        with mock.patch("commands.load_autocomplete_context_from_commands_registry", return_value={}):
+            with mock.patch(
+                "commands.load_all_workflows",
+                return_value=[
+                    {
+                        "title": "DNS",
+                        "inputs": [
+                            {
+                                "id": "domain",
+                                "type": "domain",
+                                "default": "darklab.sh",
+                            }
+                        ],
+                        "steps": [
+                            {"cmd": "dig {{domain}} A", "note": "Rendered from default"},
+                        ],
+                    }
+                ],
+            ):
+                result = load_container_smoke_test_commands()
+
+        assert result == ["dig darklab.sh A"]
+
+
+class TestWorkflowInputLoading:
+    def test_load_workflows_keeps_declared_inputs(self):
+        payload = textwrap.dedent(
+            """
+            - title: "DNS Workflow"
+              description: "Custom workflow"
+              inputs:
+                - id: domain
+                  label: Domain
+                  type: domain
+                  required: true
+                  placeholder: example.com
+                  help: Use the fully qualified domain.
+              steps:
+                - cmd: "dig {{domain}} A"
+                  note: "Check the answer section."
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(payload)
+            with mock.patch("commands.WORKFLOWS_FILE", str(path)):
+                result = load_workflows()
+
+        assert result == [
+            {
+                "title": "DNS Workflow",
+                "description": "Custom workflow",
+                "inputs": [
+                    {
+                        "id": "domain",
+                        "label": "Domain",
+                        "type": "domain",
+                        "required": True,
+                        "placeholder": "example.com",
+                        "default": "",
+                        "help": "Use the fully qualified domain.",
+                    }
+                ],
+                "steps": [
+                    {"cmd": "dig {{domain}} A", "note": "Check the answer section."},
+                ],
+            }
+        ]
+
+    def test_load_workflows_drops_steps_with_undeclared_tokens(self):
+        payload = textwrap.dedent(
+            """
+            - title: "Broken workflow"
+              description: "Unknown token"
+              inputs:
+                - id: host
+                  type: host
+                  required: true
+              steps:
+                - cmd: "ping {{host}}"
+                - cmd: "dig {{domain}} A"
+            """
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            path = Path(tmp) / "workflows.yaml"
+            path.write_text(payload)
+            with mock.patch("commands.WORKFLOWS_FILE", str(path)):
+                result = load_workflows()
+
+        assert result == [
+            {
+                "title": "Broken workflow",
+                "description": "Unknown token",
+                "inputs": [
+                    {
+                        "id": "host",
+                        "label": "Host",
+                        "type": "host",
+                        "required": True,
+                        "placeholder": "",
+                        "default": "",
+                        "help": "",
+                    }
+                ],
+                "steps": [
+                    {"cmd": "ping {{host}}", "note": ""},
+                ],
+            }
+        ]
+
 
 class TestSeedHistoryFixtures:
     def test_visual_flows_fixture_only_stars_two_commands(self):
@@ -1461,13 +1343,13 @@ class TestSeedHistoryFixtures:
 
         assert seed_history.VISUAL_HISTORY_FIXTURES["visual-flows"]["star"] == 2
 
-    def test_seed_history_uses_runtime_autocomplete_examples(self):
+    def test_seed_history_uses_runtime_command_registry_examples(self):
         seed_history = _load_seed_history_module()
         commands_from_seed = seed_history._load_autocomplete_example_commands()
 
         expected_examples = []
         seen = set()
-        for spec in load_autocomplete_context().values():
+        for spec in load_autocomplete_context_from_commands_registry().values():
             if not isinstance(spec, dict):
                 continue
             for example in spec.get("examples") or []:
@@ -1519,74 +1401,6 @@ class TestSeedHistoryFixtures:
             current != previous
             for previous, current in zip(seeded_commands, seeded_commands[1:])
         )
-
-
-# ── load_allowed_commands_grouped ─────────────────────────────────────────────
-
-class TestAllowedCommandsGroupingBasics:
-    def _write(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
-
-    def test_missing_file_returns_none(self):
-        with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/nonexistent/path.txt"):
-            result = load_allowed_commands_grouped()
-        assert result is None
-
-    def test_commands_grouped_by_header(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write(
-                "## Network\nping\ncurl\n## Scanning\nnmap\n", tmp
-            )
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        assert len(result) == 2
-        assert result[0]["name"] == "Network"
-        assert result[0]["commands"] == ["ping", "curl"]
-        assert result[1]["name"] == "Scanning"
-        assert result[1]["commands"] == ["nmap"]
-
-    def test_commands_without_header_get_empty_name(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("ping\nnmap\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        assert len(result) == 1
-        assert result[0]["name"] == ""
-        assert "ping" in result[0]["commands"]
-
-    def test_deny_entries_excluded_from_groups(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("## Scanning\nnmap\n!nmap -sU\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        commands_list = result[0]["commands"]
-        assert "nmap" in commands_list
-        assert "!nmap -su" not in commands_list
-        assert all(not c.startswith("!") for c in commands_list)
-
-    def test_empty_groups_filtered_out(self):
-        # A header with only deny entries under it produces no commands → excluded
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("## Empty\n!nmap -sU\n## Real\nping\n", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is not None
-        names = [g["name"] for g in result]
-        assert "Empty" not in names
-        assert "Real" in names
-
-    def test_empty_file_returns_none(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("", tmp)
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                result = load_allowed_commands_grouped()
-        assert result is None
 
 
 # ── rewrite_command idempotency ───────────────────────────────────────────────
@@ -1959,13 +1773,153 @@ class TestFakeStatus:
 
             with mock.patch("database.DB_PATH", db_path):
                 with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
-                    lines = fake_commands._run_fake_status("tok_statusdemo")
+                    with mock.patch("fake_commands.redis_client", None):
+                        lines = fake_commands._run_fake_status("tok_statusdemo")
 
         text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
-        assert re.search(r"session\s+tok_statusdemo", text)
-        assert re.search(r"session type\s+named token", text)
+        assert re.search(r"session\s+tok_stat••••", text)
+        assert "tok_statusdemo" not in text
+        assert re.search(r"session type\s+session token", text)
+        assert re.search(r"database\s+online", text)
+        assert re.search(r"redis\s+n/a", text)
         assert re.search(r"runs in session\s+2", text)
         assert re.search(r"snapshots\s+1", text)
         assert re.search(r"starred commands\s+1", text)
         assert re.search(r"saved options\s+yes", text)
         assert re.search(r"active jobs\s+1", text)
+
+
+class TestFakeStats:
+    def test_reports_session_activity_and_command_breakdown(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "stats.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            runs = [
+                (
+                    "run-1",
+                    "tok_statsdemo",
+                    "nmap -sV ip.darklab.sh",
+                    "2026-01-01 00:00:00",
+                    "2026-01-01 00:00:10",
+                    0,
+                ),
+                (
+                    "run-2",
+                    "tok_statsdemo",
+                    "nmap -p 443 ip.darklab.sh",
+                    "2026-01-01 00:01:00",
+                    "2026-01-01 00:01:20",
+                    1,
+                ),
+                (
+                    "run-3",
+                    "tok_statsdemo",
+                    "dig darklab.sh",
+                    "2026-01-01 00:02:00",
+                    "2026-01-01 00:02:02",
+                    0,
+                ),
+                (
+                    "run-4",
+                    "tok_statsdemo",
+                    "curl https://darklab.sh",
+                    "2026-01-01 00:03:00",
+                    None,
+                    None,
+                ),
+                (
+                    "run-5",
+                    "tok_statsdemo",
+                    "status",
+                    "2026-01-01 00:03:30",
+                    "2026-01-01 00:03:31",
+                    0,
+                ),
+                (
+                    "run-6",
+                    "tok_statsdemo",
+                    "sslscan ip.darklab.sh",
+                    "2026-01-01 00:04:00",
+                    "2026-01-01 00:05:23",
+                    0,
+                ),
+                (
+                    "other-session-run",
+                    "tok_other",
+                    "whois darklab.sh",
+                    "2026-01-01 00:06:00",
+                    "2026-01-01 00:06:01",
+                    0,
+                ),
+            ]
+            conn.executemany(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code) VALUES (?, ?, ?, ?, ?, ?)",
+                runs,
+            )
+            conn.execute(
+                "INSERT INTO snapshots (id, session_id, label, created, content) VALUES (?, ?, ?, datetime('now'), ?)",
+                ("snap-1", "tok_statsdemo", "demo snapshot", "[]"),
+            )
+            conn.execute(
+                "INSERT INTO starred_commands (session_id, command) VALUES (?, ?)",
+                ("tok_statsdemo", "nmap -sV ip.darklab.sh"),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("fake_commands.active_runs_for_session", return_value=[{"id": "job-1"}]):
+                    lines = fake_commands._run_fake_stats("tok_statsdemo")
+
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        assert re.search(r"session\s+tok_stat••••", text)
+        assert "tok_statsdemo" not in text
+        assert re.search(r"runs\s+6", text)
+        assert re.search(r"snapshots\s+1", text)
+        assert re.search(r"starred commands\s+1", text)
+        assert re.search(r"active jobs\s+1", text)
+        assert re.search(r"success rate\s+80% \(4 ok / 1 failed\)", text)
+        assert re.search(r"average duration\s+23\.[12]s", text)
+        assert "  command      runs         ok       avg" in text
+        assert "  nmap       2 runs     50% ok     15.0s" in text
+        assert "  dig         1 run    100% ok      2.0s" in text
+        assert "  curl        1 run     n/a ok       n/a" in text
+        assert "  sslscan     1 run    100% ok    1m 23s" in text
+        assert "incomplete" not in text
+        assert not re.search(r"status\s+1 run", text)
+        assert "whois" not in text
+
+    def test_top_commands_empty_state_ignores_builtin_only_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db_path = os.path.join(tmp, "stats-builtin-only.db")
+            with mock.patch("database.DB_PATH", db_path):
+                with mock.patch("database.CFG", {"permalink_retention_days": 0}):
+                    database.db_init()
+
+            conn = sqlite3.connect(db_path)
+            conn.execute(
+                "INSERT INTO runs (id, session_id, command, started, finished, exit_code) VALUES (?, ?, ?, ?, ?, ?)",
+                (
+                    "run-1",
+                    "tok_builtinonly",
+                    "status",
+                    "2026-01-01 00:00:00",
+                    "2026-01-01 00:00:01",
+                    0,
+                ),
+            )
+            conn.commit()
+            conn.close()
+
+            with mock.patch("database.DB_PATH", db_path):
+                lines = fake_commands._run_fake_stats("tok_builtinonly")
+
+        text = "\n".join(re.sub(r"\x1b\[[0-9;]*m", "", line["text"]) for line in lines)
+        assert re.search(r"runs\s+1", text)
+        assert re.search(r"success rate\s+100% \(1 ok / 0 failed\)", text)
+        assert "No external tool runs for this session yet." in text
+        assert not re.search(r"status\s+1 run", text)

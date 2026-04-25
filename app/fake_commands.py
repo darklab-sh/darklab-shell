@@ -12,13 +12,14 @@ import random
 import re
 import subprocess  # nosec B404
 import sys
+from typing import TypedDict
 
 from commands import (
     command_root,
-    load_allowed_commands,
-    load_allowed_commands_grouped,
     load_ascii_art,
     load_all_faq,
+    load_command_policy,
+    load_commands_registry,
     resolve_runtime_command,
     runtime_missing_command_message,
     runtime_missing_command_name,
@@ -26,10 +27,20 @@ from commands import (
 )
 from config import APP_VERSION, CFG, PROJECT_README
 from database import db_connect
-from process import active_runs_for_session
+from process import active_runs_for_session, redis_client
 
 
 _STARTED_AT = datetime.now(timezone.utc)
+
+
+class _StatsBucket(TypedDict):
+    count: int
+    success: int
+    failed: int
+    incomplete: int
+    durations: list[float]
+
+
 # Per-OS key labels use {"mac": ..., "other": ...}. Both sides bind to the same
 # DOM event (Option/Alt share e.altKey) — only the printed glyph differs.
 _CURRENT_SHORTCUTS = [
@@ -146,10 +157,9 @@ _SPECIAL_FAKE_COMMANDS = {
 }
 _BACKSPACE_RE = re.compile(r".\x08")
 _DOCUMENTED_FAKE_COMMANDS = [
-    {"name": "autocomplete", "description": "Explain context-aware autocomplete for known commands.",
-     "root": "autocomplete"},
     {"name": "banner", "description": "Print the configured banner art without replaying welcome.", "root": "banner"},
     {"name": "clear", "description": "Clear the current terminal tab output.", "root": "clear"},
+    {"name": "commands", "description": "List built-in and allowed external commands.", "root": "commands"},
     {"name": "config", "description": "Show or update user options from the terminal.", "root": "config"},
     {"name": "date", "description": "Show the current server time.", "root": "date"},
     {"name": "df -h", "description": "Show a compact filesystem summary.", "root": "df"},
@@ -159,7 +169,7 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "fortune", "description": "Print a short operator-themed one-liner.", "root": "fortune"},
     {"name": "free -h", "description": "Show a compact memory summary.", "root": "free"},
     {"name": "groups", "description": "Show the shell group membership.", "root": "groups"},
-    {"name": "help", "description": "List the built-in commands available in this shell.", "root": "help"},
+    {"name": "help", "description": "Show guidance for README, FAQ, shortcuts, and command discovery.", "root": "help"},
     {"name": "history", "description": "List recent commands from this session.", "root": "history"},
     {"name": "hostname", "description": "Show the configured shell instance name.", "root": "hostname"},
     {"name": "id", "description": "Show the shell identity.", "root": "id"},
@@ -167,7 +177,6 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "jobs", "description": "List active jobs for this session.", "root": "jobs"},
     {"name": "last", "description": "Show recent completed runs with timestamps and exit codes.", "root": "last"},
     {"name": "limits", "description": "Show configured runtime, history, and retention limits.", "root": "limits"},
-    {"name": "ls", "description": "List the current allowed command catalog.", "root": "ls"},
     {"name": "man <cmd>", "description": "Show the real man page for an allowed command.", "root": "man"},
     {"name": "ps", "description": "Show the current shell process view plus recent session commands.", "root": "ps"},
     {"name": "pwd", "description": "Show the web shell workspace path.", "root": "pwd"},
@@ -175,7 +184,8 @@ _DOCUMENTED_FAKE_COMMANDS = [
     {"name": "route", "description": "Show the shell routing table summary.", "root": "route"},
     {"name": "session-token", "description": "Show session token status.", "root": "session-token"},
     {"name": "shortcuts", "description": "Show current keyboard shortcuts.", "root": "shortcuts"},
-    {"name": "status", "description": "Show the current session and shell configuration summary.", "root": "status"},
+    {"name": "stats", "description": "Show session activity totals and command-root breakdowns.", "root": "stats"},
+    {"name": "status", "description": "Show the current session summary, limits, and backend health.", "root": "status"},
     {"name": "theme", "description": "Show or apply the active shell theme from the terminal.", "root": "theme"},
     {"name": "tty", "description": "Show the web terminal device path.", "root": "tty"},
     {"name": "type <cmd>", "description": "Describe whether a command is built in, installed, or missing.", "root": "type"},
@@ -230,10 +240,20 @@ def get_special_command_keys() -> list[str]:
     return list(_SPECIAL_FAKE_COMMANDS.keys())
 
 
+def get_fake_command_roots() -> list[str]:
+    """Return the command roots routed by the backend fake-command layer."""
+    exact_roots: set[str] = set()
+    for key in _SPECIAL_FAKE_COMMANDS:
+        root = command_root(key)
+        if root:
+            exact_roots.add(root)
+    return sorted(root for root in (_FAKE_COMMANDS | exact_roots) if root)
+
+
 _FAKE_COMMAND_DISPATCH = {
-    "autocomplete": lambda cmd, sid: _run_fake_autocomplete(),
     "banner":    lambda cmd, sid: _run_fake_banner(),
     "clear":     lambda cmd, sid: _run_fake_clear(),
+    "commands":  lambda cmd, sid: _run_fake_commands(cmd),
     "config":    lambda cmd, sid: _run_fake_client_side_command("config"),
     "date":      lambda cmd, sid: _run_fake_date(),
     "env":       lambda cmd, sid: _run_fake_env(sid),
@@ -248,7 +268,6 @@ _FAKE_COMMAND_DISPATCH = {
     "jobs":      lambda cmd, sid: _run_fake_jobs(sid),
     "last":      lambda cmd, sid: _run_fake_last(sid),
     "limits":    lambda cmd, sid: _run_fake_limits(),
-    "ls":        lambda cmd, sid: _run_fake_ls(cmd),
     "man":       lambda cmd, sid: _run_fake_man(cmd),
     "ps":        lambda cmd, sid: _run_fake_ps(sid, cmd),
     "pwd":       lambda cmd, sid: _run_fake_pwd(),
@@ -259,6 +278,7 @@ _FAKE_COMMAND_DISPATCH = {
     "route":     lambda cmd, sid: _run_fake_route(),
     "session-token": lambda cmd, sid: _run_fake_session_token(cmd, sid),
     "shortcuts": lambda cmd, sid: _run_fake_shortcuts(),
+    "stats":     lambda cmd, sid: _run_fake_stats(sid),
     "status":    lambda cmd, sid: _run_fake_status(sid),
     "sudo":      lambda cmd, sid: _run_fake_sudo(cmd),
     "su_shell":  lambda cmd, sid: _run_fake_su(cmd),
@@ -302,7 +322,7 @@ def _recent_runs(session_id: str, limit: int | None = None):
 
 
 def _allowed_roots() -> set[str]:
-    allowed, _ = load_allowed_commands()
+    allowed, _ = load_command_policy()
     if not allowed:
         return set()
     roots: set[str] = set()
@@ -355,7 +375,26 @@ def _session_has_saved_preferences(session_id: str) -> bool:
 
 
 def _session_type_label(session_id: str) -> str:
-    return "named token" if str(session_id or "").startswith("tok_") else "anonymous"
+    return "session token" if str(session_id or "").startswith("tok_") else "anonymous"
+
+
+def _status_db_label() -> str:
+    try:
+        with db_connect() as conn:
+            conn.execute("SELECT 1")
+        return "online"
+    except Exception:
+        return "offline"
+
+
+def _status_redis_label() -> str:
+    if not redis_client:
+        return "n/a"
+    try:
+        redis_client.ping()
+        return "online"
+    except Exception:
+        return "offline"
 
 
 def _format_duration(total_seconds: int) -> str:
@@ -363,6 +402,26 @@ def _format_duration(total_seconds: int) -> str:
     hours, remainder = divmod(total_seconds, 3600)
     minutes, seconds = divmod(remainder, 60)
     return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+
+
+def _format_stats_duration(total_seconds: float | None) -> str:
+    if total_seconds is None:
+        return "n/a"
+    value = max(0.0, float(total_seconds))
+    if value < 60:
+        return f"{value:.1f}s"
+    total = int(value)
+    minutes, seconds = divmod(total, 60)
+    if minutes < 60:
+        return f"{minutes}m {seconds:02d}s"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes:02d}m {seconds:02d}s"
+
+
+def _format_percent(numerator: int, denominator: int) -> str:
+    if denominator <= 0:
+        return "n/a"
+    return f"{round((numerator / denominator) * 100)}%"
 
 
 def _format_yes_no(value: bool) -> str:
@@ -403,27 +462,92 @@ def _format_native_record(label: str, value: str, width: int) -> str:
 
 
 def _run_fake_help() -> list[dict[str, str]]:
-    sorted_help = sorted(_FAKE_COMMAND_HELP, key=lambda item: item[0].lower())
-    width = max(len(name) for name, _ in sorted_help)
-    pipe_examples = [
-        ("grep", "command | grep <pattern>  e.g. ping darklab.sh | grep ttl"),
-        ("head", "command | head -n <count>  e.g. ping darklab.sh | head -n 5"),
-        ("tail", "command | tail -n <count>  e.g. ping darklab.sh | tail -n 5"),
-        ("wc -l", "command | wc -l  e.g. ping darklab.sh | wc -l"),
-        ("sort", "command | sort -u  e.g. ping darklab.sh | sort -u"),
-        ("uniq", "command | uniq -c  e.g. ping darklab.sh | uniq -c"),
+    lines = [
+        _output_line("Help and discovery:", "fake-section"),
+        _output_line(f"README: {_format_terminal_link(PROJECT_README, PROJECT_README)}", "fake-note"),
+        _output_line("Run `faq` to browse the configured FAQ entries inside the terminal.", "fake-plain"),
+        _output_line("Run `shortcuts` to see the current keyboard shortcuts.", "fake-plain"),
+        _output_line("Run `commands` to browse built-in and allowed external commands.", "fake-plain"),
+        _output_line("Use `commands --built-in` or `commands --external` to filter that catalog.", "fake-plain"),
+        _output_line("Autocomplete appears as you type; press Tab to accept or cycle suggestions.", "fake-plain"),
     ]
-    pipe_width = max(len(name) for name, _ in pipe_examples)
-    lines = [_output_line("Built-in commands:", "fake-section")]
-    for name, description in sorted_help:
-        lines.append(_output_line(f"  {name:<{width}}  {description}", "fake-help-row"))
-    lines.extend([
-        _output_line("", "fake-spacer"),
-        _output_line("Commands with built-in pipe support:", "fake-section"),
-        _output_line("  Chain supported helpers like grep, head, tail, wc -l, sort, and uniq after a command.", "fake-help-note"),
-    ])
-    for name, example in pipe_examples:
-        lines.append(_output_line(f"  {name:<{pipe_width}}  {example}", "fake-help-row"))
+    return lines
+
+
+def _documented_builtin_rows() -> list[tuple[str, str]]:
+    return sorted(_FAKE_COMMAND_HELP, key=lambda item: item[0].lower())
+
+
+def _allowed_external_command_groups() -> list[tuple[str, list[str]]] | None:
+    registry = load_commands_registry()
+    commands = registry.get("commands", [])
+    if not commands:
+        return None
+
+    rows: list[tuple[str, list[str]]] = []
+    group_map: dict[str, list[str]] = {}
+    seen_roots: set[str] = set()
+    for entry in commands:
+        root = str(entry.get("root") or "").strip().lower()
+        if not root or root in seen_roots:
+            continue
+        policy = entry.get("policy") if isinstance(entry.get("policy"), dict) else {}
+        if not policy.get("allow"):
+            continue
+        seen_roots.add(root)
+        category = str(entry.get("category") or "Allowed commands")
+        roots = group_map.get(category)
+        if roots is None:
+            roots = []
+            group_map[category] = roots
+            rows.append((category, roots))
+        roots.append(root)
+    return rows or None
+
+
+def _run_fake_commands(command: str) -> list[dict[str, str]]:
+    parts = _split_command(command)
+    filters = {part.lower() for part in parts[1:]}
+    valid_filters = {"--built-in", "--external"}
+    invalid_filters = sorted(filters - valid_filters)
+    if invalid_filters:
+        return [_output_line("Usage: commands [--built-in] [--external]")]
+
+    show_builtins = True
+    show_external = True
+    if "--built-in" in filters and "--external" not in filters:
+        show_external = False
+    elif "--external" in filters and "--built-in" not in filters:
+        show_builtins = False
+
+    lines: list[dict[str, str]] = []
+
+    if show_builtins:
+        builtins = _documented_builtin_rows()
+        width = max((len(name) for name, _ in builtins), default=0)
+        lines.append(_output_line("Built-in commands:", "fake-section"))
+        for name, description in builtins:
+            lines.append(_output_line(f"  {name:<{width}}  {description}", "fake-help-row"))
+
+    if show_external:
+        external_groups = _allowed_external_command_groups()
+        if lines:
+            lines.append(_output_line("", "fake-spacer"))
+        lines.append(_output_line("Allowed external commands:", "fake-section"))
+        if external_groups is None:
+            lines.extend([
+                _output_line("  No allowlist is configured on this instance.", "fake-note"),
+                _output_line("  External commands are unrestricted here, so there is no finite catalog to print.", "fake-note"),
+            ])
+        else:
+            for name, commands in external_groups:
+                if name:
+                    lines.append(_output_line(f"[{name}]", "fake-section"))
+                lines.extend(_output_line(f"  {cmd}", "fake-catalog-item") for cmd in commands)
+                lines.append(_output_line("", "fake-spacer"))
+            if lines and lines[-1].get("text", "") == "":
+                lines.pop()
+
     return lines
 
 
@@ -678,35 +802,6 @@ def _run_fake_groups() -> list[dict[str, str]]:
     return [{"type": "output", "text": f"{CFG['app_name']} operators"}]
 
 
-def _run_fake_ls(command: str) -> list[dict[str, str]]:
-    parts = _split_command(command)
-    lines: list[dict[str, str]] = []
-    if len(parts) > 1:
-        lines.append(_output_line(
-            f"ls in {CFG['app_name']} shows the allowed command catalog; flags and paths are ignored here.",
-            "fake-note",
-        ))
-
-    grouped = load_allowed_commands_grouped()
-    if grouped:
-        for group in grouped:
-            if lines:
-                lines.append(_output_line("", "fake-spacer"))
-            name = group.get("name") or "General"
-            lines.append(_output_line(f"[{name}]", "fake-section"))
-            lines.extend(_output_line(f"  {cmd}", "fake-catalog-item") for cmd in group.get("commands", []))
-        return lines
-
-    allowed, _ = load_allowed_commands()
-    if allowed is None:
-        return _text_lines([
-            "No allowlist is configured on this instance.",
-            "All commands are currently permitted.",
-        ])
-
-    return _text_lines(allowed or ["No allowed commands are configured."])
-
-
 def _allowed_man_topics() -> set[str]:
     return _allowed_roots()
 
@@ -769,18 +864,6 @@ def _run_fake_whoami() -> list[dict[str, str]]:
         _output_line("A web terminal for remote diagnostics and security tooling against allowed commands.", "fake-plain"),
         _output_line("", "fake-spacer"),
         _output_line(f"README: see the project README at {PROJECT_README}", "fake-note"),
-    ]
-
-
-def _run_fake_autocomplete() -> list[dict[str, str]]:
-    return [
-        _output_line("Autocomplete:", "fake-section"),
-        _output_line("Tab expands shared prefixes before it cycles suggestions.", "fake-plain"),
-        _output_line("Known commands can suggest flags, values, and positional hints.", "fake-plain"),
-        _output_line(
-            "Built-in pipe support can also suggest grep, head, tail, wc -l, sort, and uniq after `command |`.",
-            "fake-plain",
-        ),
     ]
 
 
@@ -977,11 +1060,14 @@ def _run_fake_route() -> list[dict[str, str]]:
 
 def _run_fake_status(session_id: str) -> list[dict[str, str]]:
     width = 18
+    session_label = _mask_session_token(session_id) if session_id else "anonymous"
     return [
         _output_line("Shell status:", "fake-section"),
         _output_line(_format_native_record("app", CFG['app_name'], width), "fake-kv"),
-        _output_line(_format_native_record("session", session_id or 'anonymous', width), "fake-kv"),
+        _output_line(_format_native_record("session", session_label, width), "fake-kv"),
         _output_line(_format_native_record("session type", _session_type_label(session_id), width), "fake-kv"),
+        _output_line(_format_native_record("database", _status_db_label(), width), "fake-kv"),
+        _output_line(_format_native_record("redis", _status_redis_label(), width), "fake-kv"),
         _output_line(_format_native_record("runs in session", str(_session_run_count(session_id)), width), "fake-kv"),
         _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
         _output_line(
@@ -1019,6 +1105,157 @@ def _run_fake_status(session_id: str) -> list[dict[str, str]]:
         _output_line(_format_native_record("tab limit", _format_limit_value(CFG['max_tabs']), width), "fake-kv"),
         _output_line(_format_native_record("retention", _format_limit_value(CFG['permalink_retention_days']), width), "fake-kv"),
     ]
+
+
+def _run_fake_stats(session_id: str) -> list[dict[str, str]]:
+    with db_connect() as conn:
+        raw_rows = conn.execute(
+            """
+            SELECT command,
+                   exit_code,
+                   CASE
+                       WHEN started IS NOT NULL AND finished IS NOT NULL
+                       THEN (julianday(finished) - julianday(started)) * 86400.0
+                       ELSE NULL
+                   END AS elapsed_s
+              FROM runs
+             WHERE session_id = ?
+             ORDER BY started ASC, id ASC
+            """,
+            (session_id,),
+        ).fetchall()
+
+    run_total = len(raw_rows)
+    success_total = 0
+    failed_total = 0
+    total_durations: list[float] = []
+    by_root: dict[str, _StatsBucket] = {}
+
+    for row in raw_rows:
+        command = str(row["command"] or "")
+        root = command_root(command) or command.split(maxsplit=1)[0].lower() or "unknown"
+        is_builtin_root = root in _FAKE_COMMANDS
+
+        exit_code = row["exit_code"]
+        if exit_code is None:
+            pass
+        elif int(exit_code) == 0:
+            success_total += 1
+        else:
+            failed_total += 1
+
+        elapsed = row["elapsed_s"]
+        if elapsed is not None:
+            total_durations.append(float(elapsed))
+
+        if is_builtin_root:
+            continue
+
+        bucket = by_root.setdefault(root, {
+            "count": 0,
+            "success": 0,
+            "failed": 0,
+            "incomplete": 0,
+            "durations": [],
+        })
+        bucket["count"] += 1
+
+        if exit_code is None:
+            bucket["incomplete"] += 1
+        elif int(exit_code) == 0:
+            bucket["success"] += 1
+        else:
+            bucket["failed"] += 1
+
+        if elapsed is not None:
+            bucket["durations"].append(float(elapsed))
+
+    avg_duration = (
+        sum(total_durations) / len(total_durations)
+        if total_durations
+        else None
+    )
+    completed = success_total + failed_total
+    width = 18
+    session_label = _mask_session_token(session_id) if session_id else "anonymous"
+    success_rate = (
+        f"{_format_percent(success_total, completed)} "
+        f"({success_total} ok / {failed_total} failed)"
+    )
+    lines = [
+        _output_line("Session stats:", "fake-section"),
+        _output_line(_format_native_record("session", session_label, width), "fake-kv"),
+        _output_line(_format_native_record("session type", _session_type_label(session_id), width), "fake-kv"),
+        _output_line(_format_native_record("runs", str(run_total), width), "fake-kv"),
+        _output_line(_format_native_record("snapshots", str(_session_snapshot_count(session_id)), width), "fake-kv"),
+        _output_line(
+            _format_native_record("starred commands", str(_session_starred_command_count(session_id)), width),
+            "fake-kv",
+        ),
+        _output_line(_format_native_record("active jobs", str(len(active_runs_for_session(session_id))), width), "fake-kv"),
+        _output_line(
+            _format_native_record(
+                "success rate",
+                success_rate,
+                width,
+            ),
+            "fake-kv",
+        ),
+        _output_line(_format_native_record("average duration", _format_stats_duration(avg_duration), width), "fake-kv"),
+    ]
+
+    if not by_root:
+        lines.append(_output_line("", "fake-spacer"))
+        lines.append(_output_line("Top commands:", "fake-section"))
+        lines.append(_output_line("  No external tool runs for this session yet.", "fake-note"))
+        return lines
+
+    lines.append(_output_line("", "fake-spacer"))
+    lines.append(_output_line("Top commands:", "fake-section"))
+    sorted_roots = sorted(
+        by_root.items(),
+        key=lambda item: (-int(item[1]["count"]), item[0]),
+    )
+    top_rows: list[dict[str, str]] = []
+    for root, bucket in sorted_roots[:10]:
+        durations = bucket["durations"]
+        avg = (
+            sum(durations) / len(durations)
+            if durations
+            else None
+        )
+        count = bucket["count"]
+        success = bucket["success"]
+        failed = bucket["failed"]
+        completed_for_root = success + failed
+        top_rows.append({
+            "root": root,
+            "runs": f"{count} run{'s' if count != 1 else ''}",
+            "ok": f"{_format_percent(success, completed_for_root)} ok",
+            "avg": _format_stats_duration(avg),
+        })
+
+    column_gap = "    "
+    root_width = max(len("command"), *(len(row["root"]) for row in top_rows))
+    runs_width = max(len("runs"), *(len(row["runs"]) for row in top_rows))
+    ok_width = max(len("ok"), *(len(row["ok"]) for row in top_rows))
+    avg_width = max(len("avg"), *(len(row["avg"]) for row in top_rows))
+    header = column_gap.join((
+        f"{'command':<{root_width}}",
+        f"{'runs':>{runs_width}}",
+        f"{'ok':>{ok_width}}",
+        f"{'avg':>{avg_width}}",
+    ))
+    lines.append(_output_line(f"  {header}", "fake-help-row"))
+    for row in top_rows:
+        rendered = column_gap.join((
+            f"{row['root']:<{root_width}}",
+            f"{row['runs']:>{runs_width}}",
+            f"{row['ok']:>{ok_width}}",
+            f"{row['avg']:>{avg_width}}",
+        ))
+        lines.append(_output_line(f"  {rendered}", "fake-help-row"))
+    return lines
 
 
 def _run_fake_tty() -> list[dict[str, str]]:

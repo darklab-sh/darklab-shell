@@ -14,7 +14,7 @@ Usage:
   scripts/capture_ui_screenshots.sh [options]
 
 Options:
-  --theme <name|all|default>  Theme to capture. Unset/default uses the app default.
+  --theme <name|all|default>  Theme to capture. Unset/default uses the configured app default theme name.
   --theme-variant <light|dark|all>  Restrict --theme all to one color-scheme family. Default: ${THEME_VARIANT}
   --ui <desktop|mobile|all>   Which UI pack(s) to capture. Default: all.
   --out-dir <dir>             Output directory. Relative paths resolve from repo root. Default: ${OUT_DIR}

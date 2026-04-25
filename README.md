@@ -3,21 +3,11 @@
 darklab_shell is a full-stack, self-hosted web terminal for running network diagnostics and security reconnaissance against remote targets, designed to feel like a polished operator tool rather than a thin browser wrapper around subprocesses. It combines a Flask + Gunicorn backend, Redis-backed rate limiting and live PID tracking, SQLite-backed persistent history and shareable artifacts, and a single-page terminal UI with real-time SSE streaming, multi-tab workflows, mobile-first layout, and theme-aware exports. Commands pass through an allowlist engine with deny-prefix overrides, loopback blocking, and shell metacharacter rejection before they reach a subprocess; scanners run under a dedicated unprivileged user with no write access outside designated tmpfs mounts. The app ships with over 30 pre-installed security tools plus SecLists, built-in sharing and redaction, and a three-layer test suite spanning pytest, Vitest, Playwright, and container smoke tests. A live instance is available at [shell.darklab.sh](https://shell.darklab.sh/).
 
 <div align="center">
-<table><tr>
-<td align="center"><b>Desktop Demo</b></td>
-<td align="center" width="320"><b>Mobile Demo</b></td>
-</tr><tr>
-<td valign="top">
-
+<b>Desktop Demo</b>
 ![Desktop demo](assets/darklab_shell_demo.mp4)
-
-</td>
-<td valign="top" width="320">
-
+<br>
+<b>Mobile Demo</b>
 ![Mobile demo](assets/darklab_shell_mobile_demo.mp4)
-
-</td>
-</tr></table>
 </div>
 
 ---
@@ -37,7 +27,7 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 
 ## Features
 
-- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, terminal-style prompt flow, bash-like `Tab` completion with context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei plus runtime suggestions for app-owned commands, `Ctrl+R` reverse-history search, built-in pipe support for chained helper stages like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, and client-side stall detection that warns on quiet streams and resumes the live run UI automatically if output starts flowing again
+- **Terminal workflow** — real-time SSE streaming, killable long-running commands, a live run timer, optional line numbers and timestamps, output search, signal-aware findings/warnings/errors/summaries review with per-scope navigation and a transcript-native `command findings` recap block, terminal-style prompt flow, bash-like `Tab` completion with context-aware flag/value hints for tools like nmap, curl, dig, ffuf, and nuclei plus runtime suggestions for app-owned commands, `Ctrl+R` reverse-history search, built-in pipe support for chained helper stages like `grep`, `head`, `tail`, `wc -l`, `sort`, and `uniq`, a keyboard shortcuts reference panel, selection-safe desktop shortcuts, SSE keep-alive heartbeats for slow scans, and client-side stall detection that warns on quiet streams and resumes the live run UI automatically if output starts flowing again
 - **Mobile shell** — dedicated mobile composer, keyboard helper row with character and word-level cursor movement, stable Firefox-friendly layout, shared desktop/mobile Run-button state, output-follow behavior that keeps the latest lines visible when the keyboard opens, and a mobile history sheet with the same type / command name / exit / date / starred filtering model as desktop
 - **Tabs and output handling** — multiple tabs, drag reordering, rename, overflow controls, copy and a `save ▾` dropdown (txt / html / pdf), a jump-to-live / jump-to-bottom helper when you scroll away from the tail, and export output that keeps the live header/title/meta treatment aligned across permalink pages, saved HTML, and PDF as closely as the PDF renderer allows
 - **History and sharing** — recent command chips, a persistent history surface on desktop and mobile with full-text search across command text and stored output text (SQLite FTS5), filtering by type / command name / exit code / date range / starred status, starring/favorites, reconnect-to-active-run continuity after reload, session restore for non-running tabs and drafts, canonical run permalinks, snapshot rows with open/copy/delete actions, snapshot permalinks with native share-sheet support, and full-output artifacts for longer runs
@@ -45,11 +35,11 @@ darklab_shell is a full-stack, self-hosted web terminal for running network diag
 - **Safer sharing** — a built-in basic redaction baseline can mask common secrets or infrastructure details on snapshot permalinks, with optional operator regex rules appended on top. Permalink creation can choose raw vs redacted sharing per snapshot without changing the stored run history; local `save txt/html/pdf` exports remain raw
 - **Run notifications** — optional browser desktop notifications fire on run completion (any exit code or kill); toggled from the Options panel on desktop and intentionally hidden from the mobile Options sheet; uses only the command root in the notification title to avoid exposing arguments or token values
 - **Themes and presentation** — named theme variants, a terminal-native `theme` command, theme-aware permalink/export rendering, mobile/desktop theme parity, browser-aligned permalink/saved-HTML export styling with best-effort PDF parity, MOTD support, a customizable welcome animation (ASCII art, sampled commands, rotating hints), an operator-configurable FAQ modal, and user options for welcome-intro behavior plus default share-snapshot redaction that now follow the active session token instead of staying browser-local
-- **Built-in commands** — native shell commands like `help`, `history`, `last`, `limits`, `status`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `status` now summarizes session type, runs, snapshots, starred commands, saved options, and active jobs alongside the instance limits
-- **Guided workflows** — built-in diagnostic sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive domain recon, subdomain validation, directory discovery, CDN/edge checks, API recon, network path analysis, and fast port/service triage that load individual steps directly into the active prompt; extendable with site-specific sequences via `conf/workflows.yaml`
-- **Security and operations** — allowlist-based execution with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
+- **Built-in commands** — native shell commands like `help`, `commands`, `history`, `last`, `limits`, `status`, `stats`, `config`, `theme`, `which`, `type`, `faq`, `banner`, `jobs`, `ip a`, `route`, `df -h`, and `free -h`, plus real `man` support where available; `help` points users to the README, FAQ, shortcuts, and the command catalog, `commands` groups built-ins and allowed external tools in one place, `status` summarizes session type, runs, snapshots, starred commands, saved options, active jobs, and backend health, and `stats` summarizes session activity by command root
+- **Guided workflows** — built-in diagnostic sequences for DNS, TLS/HTTPS, HTTP, reachability, email, passive domain recon, subdomain validation, directory discovery, CDN/edge checks, API recon, network path analysis, and fast port/service triage with reusable target inputs, per-step prompt fills, and sequential `Run all`; extendable with site-specific sequences via `conf/workflows.yaml`
+- **Security and operations** — registry-backed command policy with deny-prefix lists for loopback and path blocking, shell metacharacter blocking, Redis-backed rate limiting and PID tracking, structured logging with `text` and `gelf` format support, and an IP-gated `/diag` page showing app health, database and Redis status, activity stats, top commands, and per-tool availability
 - **Pre-installed security tooling** — nmap, rustscan, naabu, masscan, nuclei, ffuf, feroxbuster, wfuzz, katana, wafw00f, sslscan, sslyze, openssl, and more, all sandboxed under a dedicated `scanner` user with enforced allowlists and the full [SecLists](https://github.com/danielmiessler/SecLists) collection pre-installed at `/usr/share/wordlists/seclists/`
-- **Operator customization** — context-aware external-tool autocomplete hints configurable via `conf/autocomplete.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
+- **Operator customization** — context-aware external-tool command metadata surfaced from `conf/commands.yaml`, custom FAQ entries via `conf/faq.yaml`, welcome animation with custom ASCII art and sampled commands via `conf/welcome.yaml`, all reloaded live without a server restart
 - **Configurable deployment** — Docker-first runtime, non-Docker local mode, YAML-driven config and theme overlays, SQLite persistence for history, previews, snapshots, and artifacts, and configurable retention pruning via `permalink_retention_days`
 
 See [FEATURES.md](FEATURES.md) for the full grouped capability reference.
@@ -199,17 +189,16 @@ All application settings live in `app/conf/config.yaml`. The values below are th
 
 | File | When changes take effect |
 |------|--------------------------|
-| `conf/allowed_commands.txt` | Immediately — re-read on every request |
 | `conf/faq.yaml` | Immediately — re-read on every request |
 | `conf/ascii.txt` | On next page load — fetched once by the browser on load |
 | `conf/ascii_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/app_hints.txt` | On next page load — fetched once by the browser on load |
 | `conf/app_hints_mobile.txt` | On next page load — fetched once by the browser on load |
 | `conf/welcome.yaml` | On next page load — fetched once by the browser on load |
-| `conf/autocomplete.yaml` | On next page load — fetched once by the browser |
+| `conf/commands.yaml` | On next page load for autocomplete; immediately for command policy, catalog, diagnostics, and smoke-corpus helpers |
 | `conf/config.yaml` | After `docker compose restart` (no rebuild needed) |
 
-Most files under `app/conf/` and `app/conf/themes/` support an optional sibling overlay named `*.local.*` alongside the checked-in base file. `config.local.yaml` works as the main server override file, `allowed_commands.local.txt` and `autocomplete.local.yaml` append local entries, `faq.local.yaml` and `welcome.local.yaml` append local list items, `ascii.local.txt` and `ascii_mobile.local.txt` replace the banner art, and `app_hints.local.txt` / `app_hints_mobile.local.txt` append local hints. Theme files can also use `<name>.local.yaml` overlays under `app/conf/themes/`.
+Most files under `app/conf/` and `app/conf/themes/` support an optional sibling overlay named `*.local.*` alongside the checked-in base file. `config.local.yaml` works as the main server override file, `commands.local.yaml` appends command-registry entries, `faq.local.yaml` and `welcome.local.yaml` append local list items, `ascii.local.txt` and `ascii_mobile.local.txt` replace the banner art, and `app_hints.local.txt` / `app_hints_mobile.local.txt` append local hints. Theme files can also use `<name>.local.yaml` overlays under `app/conf/themes/`.
 
 ### Theme System
 
@@ -251,7 +240,6 @@ The following tools are installed in the Docker image and available for use:
 | `fping` | Fast parallel ICMP ping — sweep multiple hosts or a CIDR range simultaneously |
 | `hping3` | TCP/IP packet assembler — TCP ping, SYN probes, traceroute-style path analysis |
 | `masscan` | High-speed TCP port scanner; requires raw sockets (container has `NET_RAW`/`NET_ADMIN`) |
-| `amass` | In-depth attack surface mapping and subdomain enumeration (OWASP project) |
 | `assetfinder` | Fast passive subdomain discovery using public sources |
 | `fierce` | DNS reconnaissance and subdomain brute-forcing |
 | `dnsenum` | DNS enumeration — zone transfers, subdomains, reverse lookups, Google scraping |
@@ -507,16 +495,16 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
 │   │   ├── run_e2e_server.sh   # Starts one isolated Flask e2e server with per-worker APP_DATA_DIR state
 │   │   └── stop_e2e_servers.sh # Clears the configured Playwright test ports before local runs
 │   ├── check_versions.sh       # Local dependency/version drift helper used by the manual CI job; reports production Docker base image plus CI runner images
-│   ├── container_smoke_test.sh # Builds the container, runs all autocomplete.yaml example commands through /run, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
+│   ├── container_smoke_test.sh # Builds the container, runs the shared smoke corpus through /run, and checks output against tests/py/fixtures/container_smoke_test-expectations.json
 │   ├── capture_container_smoke_test_outputs.sh # Runs the same commands in a browser and writes raw output to /tmp as a manual update reference; does not update the expectations file
 │   ├── capture_output_for_smoke_test.mjs # Browser-driven smoke-test corpus capture helper
 │   ├── generate_theme_examples.py # Regenerates the checked-in dark/light theme example files from app/config.py defaults
-│   ├── seed_history.py         # Populates history.db with autocomplete-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
+│   ├── seed_history.py         # Populates history.db with registry-backed example runs under a UUID or tok_ session; includes the named visual-flows preset used by capture/demo work
 │   ├── build_vendor.mjs        # Generates the committed browser builds in app/static/js/vendor/ from npm packages (run via npm run vendor:sync)
 │   ├── lint_json.mjs           # Validates that all tracked JSON files parse cleanly — used by the lint pipeline
 │   ├── record_demo.sh          # Records the desktop demo video — health-checks container, runs Playwright, stitches frames with ffmpeg
 │   ├── record_demo_mobile.sh   # Same as record_demo.sh but for the mobile shell UI
-│   └── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs + manifest to /tmp/darklab_shell-ui-capture/
+│   └── capture_ui_screenshots.sh # Drives the UI screenshot capture pipeline (desktop + mobile, all themes or one) — emits PNGs, manifests, and a review index to /tmp/darklab_shell-ui-capture/
 ├── assets/                        # README media assets (demo videos)
 ├── tests/
 │   ├── README.md               # Test suite overview, how-to-run, and per-file appendix tables (kept in sync by tests/py/test_docs.py)
@@ -629,8 +617,7 @@ Use this as a navigation map, not a replacement for [ARCHITECTURE.md](ARCHITECTU
     ├── conf/                   # Operator-configurable files — edit these to customize the deployment
     │   ├── config.yaml             # Application configuration (see Configuration section)
     │   ├── config.local.yaml       # Optional untracked deployment overrides loaded after config.yaml; sibling *.local.* overlays are also supported
-    │   ├── allowed_commands.txt    # Command allowlist (one prefix per line, ## headers for FAQ grouping)
-    │   ├── autocomplete.yaml         # Structured external-tool autocomplete hints for context-aware flag and value suggestions
+    │   ├── commands.yaml             # Structured command registry for catalog grouping, autocomplete hints, and smoke-test examples
     │   ├── app_hints.txt           # Rotating footer hints for the welcome animation (optional)
     │   ├── ascii.txt               # Decorative ASCII banner shown during the welcome animation (optional)
     │   ├── ascii_mobile.txt        # Mobile ASCII banner shown during the mobile welcome animation (optional)

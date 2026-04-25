@@ -819,7 +819,7 @@
       "exit_code": 0,
       "command": "wafw00f https://darklab.sh",
       "expected_text": [
-        "Cloudflare"
+        "Checking"
       ]
     },
     {
@@ -1009,7 +1009,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "ffuf -u https://ip.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
+      "command": "ffuf -u https://tor-stats.darklab.sh/FUZZ -w /usr/share/wordlists/seclists/Discovery/Web-Content/common.txt",
       "expected_text": [
         "Method"
       ]
@@ -1025,7 +1025,7 @@
     {
       "no_output": false,
       "exit_code": null,
-      "command": "curl -sIL https://ip.darklab.sh/admin",
+      "command": "curl -sIL https://tor-stats.darklab.sh/admin",
       "expected_text": [
         "content-type"
       ]
@@ -1105,6 +1105,14 @@
     {
       "no_output": false,
       "exit_code": null,
+      "command": "assetfinder -subs-only darklab.sh",
+      "expected_text": [
+        "darklab.sh"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": null,
       "command": "tcptraceroute ip.darklab.sh 443",
       "expected_text": [
         "Tracing the path"
@@ -1141,6 +1149,14 @@
       "command": "nc -zv ip.darklab.sh 80",
       "expected_text": [
         "open"
+      ]
+    },
+    {
+      "no_output": false,
+      "exit_code": 0,
+      "command": "tcptraceroute ip.darklab.sh 80",
+      "expected_text": [
+        "Tracing"
       ]
     }
   ]

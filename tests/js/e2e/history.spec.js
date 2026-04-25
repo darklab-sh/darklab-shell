@@ -213,14 +213,17 @@ test.describe('history drawer', () => {
     await page.locator('.history-entry').first().locator('[data-action="restore"]').click()
 
     const output = page.locator('.tab-panel.active .output')
-    await expect(output).toContainText('wc -l')
-    await expect(output).toContainText('command | wc -l')
-    await expect(output).toContainText('sort')
-    await expect(output).toContainText('command | sort -u')
-    await expect(output).toContainText('uniq')
-    await expect(output).toContainText('command | uniq -c')
-    await expect(output).not.toContainText('command | head -n')
-    await expect(output).not.toContainText('command | tail -n')
+    await expect(output).toContainText(
+      'Run `commands` to browse built-in and allowed external commands.',
+    )
+    await expect(output).toContainText(
+      'Use `commands --built-in` or `commands --external` to filter that catalog.',
+    )
+    await expect(output).toContainText(
+      'Autocomplete appears as you type; press Tab to accept or cycle suggestions.',
+    )
+    await expect(output).not.toContainText('Help and discovery:')
+    await expect(output).not.toContainText('README:')
     await expect(page.locator('#cmd')).toHaveValue('')
   })
 

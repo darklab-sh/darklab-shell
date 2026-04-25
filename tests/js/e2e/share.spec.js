@@ -264,7 +264,7 @@ test.describe('permalink / share', () => {
     const txt = Buffer.concat(txtChunks).toString('utf8')
 
     expect(txt).toContain('anon@darklab:~$ hostname')
-    expect(txt).toMatch(/1\s+anon@darklab:~\$ hostname/)
+    expect(txt).toMatch(/1\s+\+0\.0s\s+anon@darklab:~\$ hostname/)
     expect(txt).toContain('+')
 
     await page.locator('#perm-save-btn').click()

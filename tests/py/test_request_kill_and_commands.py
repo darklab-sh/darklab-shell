@@ -5,7 +5,6 @@ and command/config parsing edge cases.
 
 import os
 import tempfile
-import textwrap
 import json
 import uuid
 import unittest.mock as mock
@@ -18,7 +17,6 @@ from fake_commands import (
     resolve_fake_command,
 )
 from commands import (
-    load_allowed_commands_grouped,
     load_welcome,
     is_command_allowed,
 )
@@ -135,44 +133,6 @@ class TestKillRoute:
         assert json.loads(resp.data)["error"] == "run_id must be a string"
 
 
-# ── commands.py edge coverage ─────────────────────────────────────────────────
-
-class TestAllowedCommandsGroupingEdges:
-    def _write(self, content, tmp_dir):
-        path = os.path.join(tmp_dir, "allowed_commands.txt")
-        with open(path, "w") as f:
-            f.write(textwrap.dedent(content))
-        return path
-
-    def test_groups_commands_by_headers_and_excludes_denies(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            path = self._write("""
-                ## Networking
-                ping
-                traceroute
-                !curl -o
-
-                ## Web
-                curl
-                gobuster
-            """, tmp)
-
-            with mock.patch("commands.ALLOWED_COMMANDS_FILE", path):
-                groups = load_allowed_commands_grouped()
-
-        assert groups is not None
-        assert groups[0]["name"] == "Networking"
-        assert "ping" in groups[0]["commands"]
-        assert "traceroute" in groups[0]["commands"]
-        assert "!curl -o" not in groups[0]["commands"]
-        assert groups[1]["name"] == "Web"
-        assert "curl" in groups[1]["commands"]
-
-    def test_missing_file_returns_none(self):
-        with mock.patch("commands.ALLOWED_COMMANDS_FILE", "/no/such/file.txt"):
-            assert load_allowed_commands_grouped() is None
-
-
 class TestWelcomeLoadingEdges:
     def test_valid_yaml_is_normalized(self):
         with tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False) as f:
@@ -203,7 +163,7 @@ class TestIsCommandAllowedEdges:
     def _check(self, cmd, allow=None, deny=None):
         a = allow if allow is not None else ["ls", "curl", "echo", "nmap"]
         d = deny if deny is not None else []
-        with mock.patch("commands.load_allowed_commands", return_value=(a, d)):
+        with mock.patch("commands.load_command_policy", return_value=(a, d)):
             return is_command_allowed(cmd)
 
     def test_prefix_exactness_ls_does_not_allow_lsblk(self):
@@ -252,8 +212,8 @@ class TestFakeCommandResolution:
 
     def test_resolves_supported_fake_commands(self):
         assert resolve_fake_command("banner") == "banner"
-        assert resolve_fake_command("autocomplete") == "autocomplete"
         assert resolve_fake_command("clear") == "clear"
+        assert resolve_fake_command("commands") == "commands"
         assert resolve_fake_command("date") == "date"
         assert resolve_fake_command("env") == "env"
         assert resolve_fake_command("faq") == "faq"
@@ -265,7 +225,6 @@ class TestFakeCommandResolution:
         assert resolve_fake_command("id") == "id"
         assert resolve_fake_command("last") == "last"
         assert resolve_fake_command("limits") == "limits"
-        assert resolve_fake_command("ls") == "ls"
         assert resolve_fake_command("man curl") == "man"
         assert resolve_fake_command("pwd") == "pwd"
         assert resolve_fake_command("reboot") == "reboot"

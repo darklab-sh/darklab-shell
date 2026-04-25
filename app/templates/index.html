@@ -302,7 +302,10 @@
         <button id="tabs-scroll-right" class="tabs-scroll-btn u-hidden" aria-label="Scroll tabs right" title="Scroll tabs right" aria-hidden="true">▶</button>
       </div>
       <div class="tabbar-chrome">
-        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Alt+S)">⌕ search</button>
+        <button id="search-toggle-btn" class="chrome-btn" title="Search output (Alt+S)" data-search-label="search">⌕ search</button>
+        <span id="search-signal-summary" class="search-signal-summary u-hidden" aria-live="polite"></span>
+        <button id="search-summary-btn" class="chrome-btn" type="button" title="Summarize findings, warnings, errors, and summary lines">summarize</button>
+        <span class="tabbar-chrome-divider" aria-hidden="true"></span>
         <button id="ln-btn" class="chrome-btn" title="Toggle line numbers">ln: off</button>
         <button id="ts-btn" class="chrome-btn" title="Toggle timestamp display">ts: off</button>
       </div>
@@ -311,6 +314,13 @@
     <div class="terminal-wrap">
       <div class="search-bar u-hidden" id="search-bar">
         <input id="search-input" type="text" placeholder="Search output…" autocomplete="off" autocapitalize="none" autocorrect="off" spellcheck="false" inputmode="text" aria-label="Search output">
+        <div class="search-scopes" role="toolbar" aria-label="Search scope">
+          <button class="toggle-btn search-scope-btn active" type="button" data-search-scope="text" aria-pressed="true" title="Text search">text</button>
+          <button class="toggle-btn search-scope-btn" type="button" data-search-scope="findings" aria-pressed="false" title="Jump between findings">findings</button>
+          <button class="toggle-btn search-scope-btn" type="button" data-search-scope="warnings" aria-pressed="false" title="Jump between warnings">warnings</button>
+          <button class="toggle-btn search-scope-btn" type="button" data-search-scope="errors" aria-pressed="false" title="Jump between errors">errors</button>
+          <button class="toggle-btn search-scope-btn" type="button" data-search-scope="summaries" aria-pressed="false" title="Jump between summary lines">summaries</button>
+        </div>
         <div class="search-toggles">
           <button id="search-case-btn" class="toggle-btn" type="button" title="Case sensitive (Aa)" aria-label="Case sensitive" aria-pressed="false">Aa</button>
           <button id="search-regex-btn" class="toggle-btn" type="button" title="Regular expression (.*)" aria-label="Regular expression" aria-pressed="false">.*</button>
@@ -357,7 +367,7 @@
           <span class="hud-label">tabs</span>
           <span id="hud-tabs" class="hud-value hud-muted">0</span>
         </div>
-        <div class="hud-cell">
+        <div class="hud-cell" data-hud-chip="transport">
           <span class="hud-label">transport</span>
           <span class="hud-value hud-value-green">SSE</span>
         </div>
@@ -365,7 +375,7 @@
           <span class="hud-label">latency</span>
           <span id="hud-latency" class="hud-value hud-muted">— ms</span>
         </div>
-        <div class="hud-cell">
+        <div class="hud-cell" data-hud-chip="mode">
           <span class="hud-label">mode</span>
           <span class="hud-value">ISOLATED</span>
         </div>

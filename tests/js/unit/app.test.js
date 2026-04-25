@@ -1220,29 +1220,30 @@ describe('app helpers', () => {
 
     const context = getRuntimeAutocompleteContext({ curl: {}, nmap: {} })
 
+    expect(context.commands.flags.map(item => item.value)).toEqual(['--built-in', '--external'])
     expect(context['session-token'].arg_hints.__positional__.map(item => item.value)).toContain('set <token>')
     expect(context['session-token'].arg_hints.set[0].value).toBe('<token>')
     expect(context.status).toBeTruthy()
     expect(context.whoami).toBeTruthy()
     expect(context.man.arg_hints.__positional__.map(item => item.value)).toEqual(
-      expect.arrayContaining(['curl', 'nmap', 'status', 'whoami']),
+      expect.arrayContaining(['commands', 'curl', 'nmap', 'status', 'whoami']),
     )
     expect(context.which.arg_hints.__positional__.map(item => item.value)).toEqual(
-      expect.arrayContaining(['curl', 'status']),
+      expect.arrayContaining(['commands', 'curl', 'status']),
     )
     expect(context.type.arg_hints.__positional__.map(item => item.value)).toEqual(
-      expect.arrayContaining(['nmap', 'whoami']),
+      expect.arrayContaining(['commands', 'nmap', 'whoami']),
     )
   })
 
-  it('keeps code-owned built-ins out of autocomplete.yaml', () => {
-    const autocompleteYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/autocomplete.yaml'), 'utf8')
+  it('keeps code-owned built-ins out of commands.yaml', () => {
+    const commandsYaml = readFileSync(resolve(REPO_ROOT, 'app/conf/commands.yaml'), 'utf8')
     const yamlRoots = new Set(
-      [...autocompleteYaml.matchAll(/^  ([a-z0-9_-]+):/gm)].map(match => match[1]),
+      [...commandsYaml.matchAll(/^- root: ([a-z0-9_-]+)/gm)].map(match => match[1]),
     )
     const runtimeRoots = [
-      'autocomplete', 'banner', 'clear', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
-      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'ls', 'man',
+      'banner', 'clear', 'commands', 'config', 'date', 'df', 'env', 'faq', 'fortune', 'free',
+      'groups', 'help', 'history', 'hostname', 'id', 'ip', 'jobs', 'last', 'limits', 'man',
       'ps', 'pwd', 'retention', 'route', 'session-token', 'shortcuts', 'status', 'theme', 'tty',
       'type', 'uname', 'uptime', 'version', 'which', 'who', 'whoami',
     ]

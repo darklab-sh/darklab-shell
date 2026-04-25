@@ -1,14 +1,30 @@
 # Custom workflow entries for this instance.
 # Each entry requires 'title', 'description', and 'steps'.
+# Entries may also declare optional 'inputs' for UI-rendered workflow forms.
+# Each input supports:
+#   - id
+#   - label
+#   - type: domain | host | url | port | path
+#   - required
+#   - placeholder
+#   - default
+#   - help
 # Each step requires 'cmd' and optionally 'note'.
+# Use {{input_id}} in cmd/note strings to render user-provided values.
 # Custom entries are appended after the built-in workflows.
 # Changes take effect immediately — no restart needed.
 #
 # Example:
 # - title: "DNS Troubleshooting"
 #   description: "Diagnose why a domain isn't resolving."
+#   inputs:
+#     - id: domain
+#       label: Domain
+#       type: domain
+#       required: true
+#       placeholder: example.com
 #   steps:
-#     - cmd: "dig example.com A"
+#     - cmd: "dig {{domain}} A"
 #       note: "Does it resolve? Check the ANSWER section."
-#     - cmd: "dig @8.8.8.8 example.com A"
+#     - cmd: "dig @8.8.8.8 {{domain}} A"
 #       note: "Does a public resolver see it differently?"

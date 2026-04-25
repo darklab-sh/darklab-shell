@@ -134,7 +134,7 @@ npm run test:unit
 npm run test:e2e
 ```
 
-Current totals: **931 pytest + 754 Vitest + 200 Playwright = 1,885 tests**.
+Current totals: **921 pytest + 775 Vitest + 207 Playwright = 1,903 tests**.
 
 Playwright notes:
 
@@ -269,7 +269,7 @@ When choosing the test layer:
 - use `Vitest` for browser-module logic that can be covered in jsdom
 - use `Playwright` for real browser behavior such as focus, mobile layout, drag/drop, scrolling, and end-to-end flows
 
-After a Dockerfile or packaged-tool change, run the container smoke test before merging. It builds the container, runs every command from `app/conf/autocomplete.yaml` examples, and compares output against the stored expectations:
+After a Dockerfile or packaged-tool change, run the container smoke test before merging. It builds the container, runs every command from the shared smoke corpus (`app/conf/commands.yaml` examples plus workflow steps), and compares output against the stored expectations:
 
 ```bash
 ./scripts/container_smoke_test.sh

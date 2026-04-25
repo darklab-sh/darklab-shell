@@ -36,7 +36,7 @@ function loadOutputFns({ appConfig = {}, extraGlobals = {} } = {}) {
 describe('appendLine', () => {
   beforeEach(() => {
     document.body.innerHTML = `
-      <div id="out">
+      <div id="out" class="output">
         <div id="shell-prompt-wrap" class="prompt-wrap shell-prompt-wrap">
           <span class="prompt-prefix">anon@darklab:~$</span>
           <div class="shell-prompt-line" id="shell-prompt-line" aria-hidden="true">
@@ -129,6 +129,19 @@ describe('appendLine', () => {
     expect(line.dataset.tsE).toMatch(/^\+\d+\.\d+s$/)
   })
 
+  it('uses +0.0s for lines without a true elapsed runtime', () => {
+    const { appendLine } = loadOutputFns({
+      extraGlobals: {
+        tabs: [{ id: 'tab-1', rawLines: [], runStart: 0 }],
+      },
+    })
+
+    appendLine('synthetic line', 'fake-plain', 'tab-1')
+
+    const line = document.querySelector('.line.fake-plain')
+    expect(line?.dataset.tsE).toBe('+0.0s')
+  })
+
   it('toggles the line-number body class and button labels', () => {
     document.body.innerHTML = `
       <button id="ln-btn"></button>
@@ -168,6 +181,22 @@ describe('appendLine', () => {
     expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
   })
 
+  it('does not assign prefixes to synthetic summary lines', () => {
+    const { appendLine, _setLnMode, _setTsMode } = loadOutputFns()
+
+    _setLnMode('on')
+    _setTsMode('elapsed')
+    appendLine('[command findings]', 'fake-signal-summary-header', 'tab-1')
+    appendLine('findings (2)', 'fake-signal-summary-section', 'tab-1')
+    appendLine('- 443/tcp open https', 'fake-signal-summary-row', 'tab-1')
+
+    const lines = document.querySelectorAll('.line')
+    expect(lines[0]?.dataset.prefix || '').toBe('')
+    expect(lines[1]?.dataset.prefix || '').toBe('')
+    expect(lines[2]?.dataset.prefix || '').toBe('')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('1 +0.0s')
+  })
+
   it('combines line numbers and timestamps into a compact shared prefix', () => {
     const { appendLine, _setLnMode, _setTsMode } = loadOutputFns()
 
@@ -177,7 +206,15 @@ describe('appendLine', () => {
     appendLine('timed line', '', 'tab-1')
 
     expect(document.querySelector('.line')?.dataset.prefix).toMatch(/^1\s+\+\d+\.\ds$/)
-    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2')
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('2 +0.0s')
+  })
+
+  it('shows +0.0s for the active prompt in elapsed mode', () => {
+    const { _setTsMode } = loadOutputFns()
+
+    _setTsMode('elapsed')
+
+    expect(document.getElementById('shell-prompt-wrap')?.dataset.prefix).toBe('+0.0s')
   })
 
   it('does nothing when there is no output container for the target tab', () => {

@@ -453,6 +453,14 @@
     font-size: 11px;
   }
 
+  .tabbar-chrome-divider {
+    align-self: stretch;
+    width: 0;
+    margin: 0 4px 0 8px;
+    border-left: 1px solid var(--border);
+    flex: 0 0 auto;
+  }
+
   /* ---- Terminal body container — strip the outer frame ---- */
   .main-col > .terminal-wrap {
     background: var(--bg);
@@ -500,6 +508,10 @@
     white-space: nowrap;
   }
   .hud-cell.hud-status { cursor: pointer; }
+  .hud.hud-running [data-hud-chip="transport"],
+  .hud.hud-running [data-hud-chip="mode"] {
+    display: none;
+  }
 
   .hud-label {
     color: var(--theme-status-bar-text);

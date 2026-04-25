@@ -91,12 +91,12 @@ def db_connect():
 
 
 def _load_autocomplete_example_commands() -> list[str]:
-    """Return surfaced example commands from the runtime autocomplete context."""
+    """Return surfaced example commands from the command registry context."""
     sys.path.insert(0, str(ROOT / "app"))
     commands_mod = importlib.import_module("commands")
     seen = set()
     commands = []
-    for spec in commands_mod.load_autocomplete_context().values():
+    for spec in commands_mod.load_autocomplete_context_from_commands_registry().values():
         if not isinstance(spec, dict):
             continue
         for example in spec.get("examples") or []:
@@ -283,7 +283,7 @@ def seed_runs(session_id: str, count: int, days_span: int, rng: random.Random) -
     earliest = now - timedelta(days=days_span)
     command_pool = _load_autocomplete_example_commands()
     if not command_pool:
-        sys.exit("autocomplete example command pool is empty")
+        sys.exit("command registry example command pool is empty")
 
     rows: list[tuple] = []
     commands_inserted: list[str] = []

@@ -185,6 +185,7 @@ body .hist-chip {
 
 body .hist-chip-overflow { color: var(--theme-chip-overflow-text); }
 body #search-toggle-btn,
+body #search-summary-btn,
 body #ts-btn,
 body #ln-btn {
   background: var(--theme-toolbar-button-bg);
@@ -197,6 +198,7 @@ body #hamburger-btn {
   color: var(--theme-toolbar-button-text);
 }
 body #search-toggle-btn:hover,
+body #search-summary-btn:hover,
 body #ts-btn:hover,
 body #ln-btn:hover {
   background: var(--theme-toolbar-button-hover-bg);
@@ -345,6 +347,34 @@ body .history-action-btn:hover {
   background: var(--surface);
   border-bottom: 1px solid var(--border);
 }
+.search-scopes {
+  display: flex;
+  gap: 4px;
+  flex: 0 0 auto;
+}
+.search-scopes .search-scope-btn {
+  min-width: max-content;
+}
+.search-scope-btn.active {
+  color: var(--text);
+  border-color: var(--text);
+  background: color-mix(in srgb, var(--text) 8%, transparent);
+}
+body #search-toggle-btn.search-discover-pulse {
+  border-color: color-mix(in srgb, var(--amber) 78%, var(--border-bright));
+  color: var(--text);
+  animation: search-discover-pulse 1.4s ease-in-out 5;
+}
+@keyframes search-discover-pulse {
+  0%, 100% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--amber) 0%, transparent);
+    background: transparent;
+  }
+  45% {
+    box-shadow: 0 0 0 2px color-mix(in srgb, var(--amber) 20%, transparent);
+    background: color-mix(in srgb, var(--amber) 10%, transparent);
+  }
+}
 .search-bar input {
   flex: 1;
   min-width: 0;
@@ -403,6 +433,14 @@ body .history-action-btn:hover {
 .search-toggles { display: flex; gap: 4px; }
 mark.search-hl { background: color-mix(in srgb, var(--amber) 35%, transparent); color: inherit; border-radius: 2px; }
 mark.search-hl.current { background: color-mix(in srgb, var(--amber) 70%, transparent); }
+.line.search-signal-hl {
+  background: color-mix(in srgb, var(--amber) 8%, transparent);
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--amber) 55%, transparent);
+}
+.line.search-signal-hl.current {
+  background: color-mix(in srgb, var(--amber) 16%, transparent);
+  box-shadow: inset 3px 0 0 color-mix(in srgb, var(--amber) 88%, transparent);
+}
 
 /* ── Permalink toast ── */
 #permalink-toast,
@@ -943,7 +981,7 @@ body #history-panel { background: var(--theme-history-panel-bg); }
 }
 .history-action-btn:hover { color: var(--green); border-color: var(--green-dim); }
 
-#search-toggle-btn, #ts-btn, #ln-btn {
+#search-toggle-btn, #search-summary-btn, #ts-btn, #ln-btn {
   background: color-mix(in srgb, var(--theme-toolbar-button-bg) 72%, color-mix(in srgb, var(--surface) 92%, transparent));
   border: 1px solid color-mix(in srgb, var(--border-bright) 90%, transparent);
   color: color-mix(in srgb, var(--muted) 82%, var(--text));
@@ -957,6 +995,28 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   gap: 6px;
   transition: border-color 0.2s, color 0.2s, background 0.2s, box-shadow 0.2s;
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--text) 1.5%, transparent);
+}
+#search-summary-btn {
+  border-color: color-mix(in srgb, var(--green-dim) 26%, var(--border-bright));
+  background: color-mix(in srgb, var(--green) 2.5%, var(--surface));
+}
+#search-summary-btn:hover:not(:disabled) {
+  border-color: var(--green-dim);
+  color: var(--green);
+  background: color-mix(in srgb, var(--green) 7%, transparent);
+}
+#search-summary-btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+  border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
+  box-shadow: none;
+}
+#search-summary-btn:disabled:hover {
+  color: color-mix(in srgb, var(--muted) 72%, transparent);
+  border-color: color-mix(in srgb, var(--border) 65%, transparent);
+  background: color-mix(in srgb, var(--surface) 94%, transparent);
 }
 #search-toggle-btn {
   color: transparent;
@@ -973,7 +1033,7 @@ body #history-panel { background: var(--theme-history-panel-bg); }
   transform: translateY(1px);
 }
 #search-toggle-btn::after {
-  content: 'search';
+  content: attr(data-search-label);
   font-size: 12px;
   line-height: 1;
   color: color-mix(in srgb, var(--muted) 92%, var(--text));
@@ -984,6 +1044,52 @@ body #history-panel { background: var(--theme-history-panel-bg); }
 }
 #search-toggle-btn:hover::before,
 #search-toggle-btn:hover::after {
+  color: var(--text);
+}
+.search-signal-summary {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--muted);
+  white-space: nowrap;
+  padding: 0 8px 0 8px;
+  margin-left: -2px;
+  border-left: 1px solid color-mix(in srgb, var(--border-bright) 45%, transparent);
+}
+.search-signal-summary strong {
+  color: var(--text);
+  font-weight: 600;
+}
+.search-signal-sep {
+  color: color-mix(in srgb, var(--muted) 55%, transparent);
+}
+.search-signal-chip {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+.search-signal-chip:hover,
+.search-signal-chip:focus-visible {
+  color: var(--text);
+  outline: none;
+}
+.tabbar-chrome:hover .search-signal-summary,
+#search-toggle-btn:hover + .search-signal-summary,
+.search-signal-summary:hover,
+.search-signal-summary:focus-within {
+  color: color-mix(in srgb, var(--muted) 92%, var(--text));
+  border-left-color: color-mix(in srgb, var(--border-bright) 75%, transparent);
+}
+.tabbar-chrome:hover .search-signal-summary strong,
+#search-toggle-btn:hover + .search-signal-summary strong,
+.search-signal-summary:hover strong,
+.search-signal-summary:focus-within strong {
   color: var(--text);
 }
 #ts-btn, #ln-btn {

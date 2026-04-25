@@ -746,7 +746,10 @@ function applyShareRedactionDefaultPreference(mode, persist = true) {
 
 function _closeMajorOverlays() {
   if (isHistoryPanelOpen()) hideHistoryPanel();
-  if (isWorkflowsOverlayOpen()) hideWorkflowsOverlay();
+  if (isWorkflowsOverlayOpen()) {
+    if (typeof closeWorkflows === 'function') closeWorkflows();
+    else hideWorkflowsOverlay();
+  }
   if (isFaqOverlayOpen()) hideFaqOverlay();
   if (isThemeOverlayOpen()) hideThemeOverlay();
   if (isOptionsOverlayOpen()) hideOptionsOverlay();
@@ -1266,12 +1269,15 @@ function performMobileEditAction(action) {
   if (typeof acHide === 'function') acHide();
 
   const composer = getComposerStateSnapshot();
-  const value = composer && typeof composer.value === 'string'
-    ? composer.value
-    : (input.value || '');
-  const { start, end } = composer
-    ? getCmdSelection(value)
-    : getInputSelection(input, value);
+  const inputValue = input.value || '';
+  const composerValue = composer && typeof composer.value === 'string' ? composer.value : null;
+  const preferLiveInput = document.activeElement === input && composerValue !== inputValue;
+  const value = preferLiveInput
+    ? inputValue
+    : (composerValue !== null ? composerValue : inputValue);
+  const { start, end } = preferLiveInput || !composer
+    ? getInputSelection(input, value)
+    : getCmdSelection(value);
   let nextValue = value;
   let nextStart = start;
   let nextEnd = end;
@@ -1325,6 +1331,22 @@ function performMobileEditAction(action) {
   ) {
     if (typeof syncComposerSelection === 'function') syncComposerSelection(nextStart, nextEnd, { input });
     else if (input && typeof input.setSelectionRange === 'function') input.setSelectionRange(nextStart, nextEnd);
+    setTimeout(() => {
+      if (!input || typeof input.setSelectionRange !== 'function') return;
+      if (typeof document !== 'undefined' && document.activeElement !== input) return;
+      if ((input.value || '') !== value) return;
+      if (input.selectionStart === nextStart && input.selectionEnd === nextEnd) return;
+      input.setSelectionRange(nextStart, nextEnd);
+      if (typeof setComposerState === 'function') {
+        setComposerState({
+          value,
+          selectionStart: nextStart,
+          selectionEnd: nextEnd,
+          activeInput: 'mobile',
+        });
+      }
+      syncShellPrompt();
+    }, 0);
   } else {
     setComposerValue(nextValue, nextStart, nextEnd);
   }
@@ -2114,9 +2136,9 @@ function _runtimeContextSpec({
 }
 
 const _runtimeBuiltinCommandInfo = [
-  ['autocomplete', 'built-in: explain context-aware autocomplete for known commands'],
   ['banner', 'built-in: print the configured banner art'],
   ['clear', 'built-in: clear the current terminal tab output'],
+  ['commands', 'built-in: list built-in and allowed external commands'],
   ['config', 'built-in: show or update user options'],
   ['date', 'built-in: show the current server time'],
   ['df', 'built-in: show a compact filesystem summary'],
@@ -2125,7 +2147,7 @@ const _runtimeBuiltinCommandInfo = [
   ['fortune', 'built-in: print a short operator-themed one-liner'],
   ['free', 'built-in: show a compact memory summary'],
   ['groups', 'built-in: show the shell group membership'],
-  ['help', 'built-in: list all built-in commands'],
+  ['help', 'built-in: show README, FAQ, shortcuts, and command-discovery guidance'],
   ['history', 'built-in: list recent commands from this session'],
   ['hostname', 'built-in: show the configured shell instance name'],
   ['id', 'built-in: show the shell identity'],
@@ -2133,7 +2155,6 @@ const _runtimeBuiltinCommandInfo = [
   ['jobs', 'built-in: list active jobs for this session'],
   ['last', 'built-in: show recent completed runs with timestamps and exit codes'],
   ['limits', 'built-in: show configured runtime, history, and retention limits'],
-  ['ls', 'built-in: show the allowed command catalog'],
   ['man', 'built-in: show a real or built-in manual page'],
   ['ps', 'built-in: show the current shell process view'],
   ['pwd', 'built-in: show the web shell workspace path'],
@@ -2141,7 +2162,8 @@ const _runtimeBuiltinCommandInfo = [
   ['route', 'built-in: show the shell routing table summary'],
   ['session-token', 'built-in: show or manage persistent session tokens'],
   ['shortcuts', 'built-in: show current keyboard shortcuts'],
-  ['status', 'built-in: show the current session and shell configuration summary'],
+  ['stats', 'built-in: show session activity totals and command breakdowns'],
+  ['status', 'built-in: show the current session summary, limits, and backend health'],
   ['theme', 'built-in: show or apply the active shell theme'],
   ['tty', 'built-in: show the web terminal device path'],
   ['type', 'built-in: describe whether a command is built-in, installed, or missing'],
@@ -2204,11 +2226,10 @@ function _runtimeStaticBuiltinContext() {
   context.ip = _runtimeContextSpec({
     argHints: { __positional__: [_runtimeHint('a', 'Show all network interfaces and addresses')] },
   });
-  context.ls = _runtimeContextSpec({
+  context.commands = _runtimeContextSpec({
     flags: [
-      _runtimeHint('-la', 'Long listing including hidden files'),
-      _runtimeHint('-lh', 'Long listing with human-readable sizes'),
-      _runtimeHint('-l', 'Long listing format'),
+      _runtimeHint('--built-in', 'Show only built-in shell commands'),
+      _runtimeHint('--external', 'Show only allowed external commands'),
     ],
   });
   context['session-token'] = _runtimeContextSpec({
@@ -2484,6 +2505,306 @@ function renderFaqItems(items) {
   wireFaqCommandChips(faqBody);
 }
 
+const WORKFLOW_TOKEN_RE = /{{\s*([a-z][a-z0-9_]*)\s*}}/g;
+const WORKFLOW_INPUT_STATE_KEY = 'workflow_input_state_v1';
+const _workflowRunQueueByTab = new Map();
+
+function getWorkflowStorageKey(workflow) {
+  const title = String(workflow?.title || '').trim();
+  const description = String(workflow?.description || '').trim();
+  return `${title}::${description}`;
+}
+
+function readWorkflowInputState() {
+  if (typeof localStorage === 'undefined') return {};
+  try {
+    const raw = localStorage.getItem(WORKFLOW_INPUT_STATE_KEY);
+    const parsed = raw ? JSON.parse(raw) : {};
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (_err) {
+    return {};
+  }
+}
+
+function writeWorkflowInputState(nextState) {
+  if (typeof localStorage === 'undefined') return;
+  try {
+    localStorage.setItem(WORKFLOW_INPUT_STATE_KEY, JSON.stringify(nextState || {}));
+  } catch (_err) {
+    // Non-critical persistence failure; the workflow form still works in-memory.
+  }
+}
+
+function loadWorkflowInputValues(workflow) {
+  const base = getWorkflowInputValues(workflow);
+  const state = readWorkflowInputState();
+  const saved = state[getWorkflowStorageKey(workflow)];
+  if (!saved || typeof saved !== 'object') return base;
+  const next = { ...base };
+  Object.entries(saved).forEach(([key, value]) => {
+    const input = (workflow?.inputs || []).find((item) => item.id === key);
+    if (!input) return;
+    next[key] = sanitizeWorkflowInputValue(input, value);
+  });
+  return next;
+}
+
+function persistWorkflowInputValues(workflow, values) {
+  const state = readWorkflowInputState();
+  const nextState = { ...state };
+  nextState[getWorkflowStorageKey(workflow)] = { ...(values || {}) };
+  writeWorkflowInputState(nextState);
+}
+
+function sanitizeWorkflowInputValue(input, value) {
+  const raw = String(value == null ? '' : value).trim();
+  if (!input || !raw) return raw;
+  if (input.type === 'port') return raw.replace(/[^\d]/g, '');
+  return raw;
+}
+
+function getWorkflowInputValues(workflow) {
+  const values = {};
+  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
+  inputs.forEach((input) => {
+    values[input.id] = sanitizeWorkflowInputValue(input, input.default || '');
+  });
+  return values;
+}
+
+function renderWorkflowCommandTemplate(template, values) {
+  return String(template || '').replace(WORKFLOW_TOKEN_RE, (_match, token) => values[token] || '');
+}
+
+function workflowInputsReady(workflow, values) {
+  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
+  return inputs.every((input) => !input.required || String(values[input.id] || '').trim().length > 0);
+}
+
+function buildRenderedWorkflow(workflow, values) {
+  const renderedValues = { ...(values || {}) };
+  const ready = workflowInputsReady(workflow, renderedValues);
+  const steps = Array.isArray(workflow?.steps) ? workflow.steps : [];
+  return {
+    ready,
+    steps: steps.map((step) => ({
+      ...step,
+      renderedCmd: renderWorkflowCommandTemplate(step.cmd || '', renderedValues).trim(),
+    })),
+  };
+}
+
+function runWorkflowCommands(commands) {
+  const runnable = (commands || []).map((cmd) => String(cmd || '').trim()).filter(Boolean);
+  if (!runnable.length) return;
+  const targetTabId = typeof getActiveTabId === 'function' ? getActiveTabId() : activeTabId;
+  if (!targetTabId) return;
+  if (typeof welcomeOwnsTab === 'function' && welcomeOwnsTab(targetTabId)) {
+    if (typeof cancelWelcome === 'function') cancelWelcome(targetTabId);
+    if (typeof clearTab === 'function') clearTab(targetTabId);
+    if (typeof setTabStatus === 'function') setTabStatus(targetTabId, 'idle');
+  }
+  _closeMajorOverlays();
+  _workflowRunQueueByTab.set(targetTabId, {
+    commands: runnable.slice(),
+    nextIndex: 1,
+    total: runnable.length,
+  });
+  if (typeof activateTab === 'function') activateTab(targetTabId);
+  if (typeof appendLine === 'function' && runnable.length > 1) {
+    appendLine(`[workflow] Running ${runnable.length} steps sequentially in this tab.`, 'notice', targetTabId);
+  }
+  if (typeof submitComposerCommand === 'function') {
+    submitComposerCommand(runnable[0], {
+      dismissKeyboard: true,
+      focusAfterSubmit: true,
+    });
+  }
+}
+
+function _runNextWorkflowQueueStep(tabId) {
+  const queue = _workflowRunQueueByTab.get(tabId);
+  if (!queue) return;
+  const nextCommand = queue.commands[queue.nextIndex];
+  if (!nextCommand) {
+    _workflowRunQueueByTab.delete(tabId);
+    if (typeof appendLine === 'function') {
+      appendLine('[workflow] Completed all queued steps.', 'exit-ok', tabId);
+    }
+    return;
+  }
+  queue.nextIndex += 1;
+  if (typeof appendLine === 'function') {
+    appendLine(`[workflow] Continuing with step ${queue.nextIndex}/${queue.total}.`, 'notice', tabId);
+  }
+  if (typeof activateTab === 'function') activateTab(tabId, { focusComposer: false });
+  if (typeof submitComposerCommand === 'function') {
+    submitComposerCommand(nextCommand, {
+      dismissKeyboard: false,
+      focusAfterSubmit: false,
+    });
+  }
+}
+
+function _scheduleNextWorkflowQueueStep(tabId) {
+  const waitForFlush = () => {
+    if (!_workflowRunQueueByTab.has(tabId)) return;
+    if (typeof hasPendingOutputBatch === 'function' && hasPendingOutputBatch(tabId)) {
+      setTimeout(waitForFlush, 20);
+      return;
+    }
+    _runNextWorkflowQueueStep(tabId);
+  };
+  setTimeout(waitForFlush, 0);
+}
+
+if (typeof onUiEvent === 'function') {
+  onUiEvent('app:tab-status-changed', (e) => {
+    const tabId = e?.detail?.id;
+    const status = e?.detail?.status;
+    if (!tabId || !_workflowRunQueueByTab.has(tabId) || status === 'running') return;
+    if (status === 'killed') {
+      _workflowRunQueueByTab.delete(tabId);
+      if (typeof appendLine === 'function') {
+        appendLine('[workflow] Queue stopped because the current step was killed.', 'denied', tabId);
+      }
+      return;
+    }
+    _scheduleNextWorkflowQueueStep(tabId);
+  });
+}
+
+function renderWorkflowInputCard(card, workflow) {
+  const inputs = Array.isArray(workflow?.inputs) ? workflow.inputs : [];
+  if (!inputs.length) return null;
+
+  const panel = document.createElement('div');
+  panel.className = 'workflow-input-panel';
+
+  const intro = document.createElement('div');
+  intro.className = 'workflow-input-intro';
+  intro.textContent = 'Fill in your target to preview the exact commands before loading or running a step.';
+  panel.appendChild(intro);
+
+  const grid = document.createElement('div');
+  grid.className = 'workflow-input-grid';
+  panel.appendChild(grid);
+
+  const values = loadWorkflowInputValues(workflow);
+  const hint = document.createElement('div');
+  hint.className = 'workflow-input-hint';
+  const actions = document.createElement('div');
+  actions.className = 'workflow-input-actions';
+
+  const runAllBtn = document.createElement('button');
+  runAllBtn.type = 'button';
+  runAllBtn.className = 'btn btn-secondary btn-compact workflow-run-all';
+  runAllBtn.textContent = 'Run all';
+  runAllBtn.title = 'Run each rendered workflow step sequentially in this tab';
+  actions.appendChild(runAllBtn);
+
+  panel.appendChild(actions);
+
+  inputs.forEach((input) => {
+    const field = document.createElement('label');
+    field.className = 'workflow-input-field';
+
+    const label = document.createElement('span');
+    label.className = 'workflow-input-label';
+    label.textContent = input.label || input.id || '';
+    field.appendChild(label);
+
+    const control = document.createElement('input');
+    control.className = 'options-token-input workflow-input-control';
+    control.type = input.type === 'port' ? 'text' : 'text';
+    control.autocomplete = 'off';
+    control.autocapitalize = 'none';
+    control.autocorrect = 'off';
+    control.spellcheck = false;
+    control.inputMode = input.type === 'port' ? 'numeric' : 'text';
+    control.placeholder = input.placeholder || '';
+    control.value = values[input.id] || '';
+    control.dataset.workflowInputId = input.id;
+    if (input.required) {
+      control.required = true;
+      control.setAttribute('aria-required', 'true');
+    }
+    field.appendChild(control);
+
+    if (input.help) {
+      const help = document.createElement('span');
+      help.className = 'workflow-input-help';
+      help.textContent = input.help;
+      field.appendChild(help);
+    }
+
+    grid.appendChild(field);
+  });
+
+  panel.appendChild(hint);
+
+  const applyRenderedState = () => {
+    const rendered = buildRenderedWorkflow(workflow, values);
+    const stepsEl = card.querySelector('.workflow-steps');
+    if (!stepsEl) return;
+    stepsEl.querySelectorAll('.workflow-step').forEach((stepEl, idx) => {
+      const chip = stepEl.querySelector('.workflow-step-cmd');
+      const runBtn = stepEl.querySelector('.workflow-step-run');
+      const renderedStep = rendered.steps[idx];
+      const renderedCmd = renderedStep?.renderedCmd || '';
+      if (chip) {
+        chip.textContent = rendered.ready ? (renderedCmd || renderedStep?.cmd || '') : (renderedStep?.cmd || '');
+        if (rendered.ready && renderedCmd) {
+          chip.title = 'Click to load into prompt';
+          chip.dataset.faqCommand = renderedCmd;
+          chip.classList.remove('is-disabled');
+        } else {
+          chip.title = 'Fill required workflow inputs to load this step';
+          delete chip.dataset.faqCommand;
+          chip.classList.add('is-disabled');
+        }
+      }
+      if (runBtn) {
+        runBtn.dataset.workflowStepCmd = rendered.ready ? renderedCmd : '';
+        runBtn.disabled = !(rendered.ready && renderedCmd);
+        runBtn.setAttribute('aria-disabled', runBtn.disabled ? 'true' : 'false');
+        runBtn.title = runBtn.disabled ? 'Fill required workflow inputs to run this step' : 'Run this step';
+        runBtn.setAttribute('aria-label', rendered.ready && renderedCmd ? `Run: ${renderedCmd}` : 'Run this step');
+      }
+    });
+    runAllBtn.disabled = !(rendered.ready && rendered.steps.some((step) => step.renderedCmd));
+    runAllBtn.setAttribute('aria-disabled', runAllBtn.disabled ? 'true' : 'false');
+    hint.textContent = rendered.ready
+      ? 'Rendered commands are live. Click a chip to load it, use ▶ to run one step, or Run all to execute the full workflow here in sequence.'
+      : 'Fill the required fields to render runnable commands.';
+    wireFaqCommandChips(card);
+    wireWorkflowStepRunButtons(card);
+  };
+
+  bindPressable(runAllBtn, {
+    onActivate: () => {
+      const rendered = buildRenderedWorkflow(workflow, values);
+      if (!rendered.ready) return;
+      runWorkflowCommands(rendered.steps.map((step) => step.renderedCmd));
+    },
+  });
+
+  grid.querySelectorAll('.workflow-input-control').forEach((control) => {
+    control.addEventListener('input', () => {
+      const input = inputs.find((item) => item.id === control.dataset.workflowInputId);
+      values[control.dataset.workflowInputId || ''] = sanitizeWorkflowInputValue(input, control.value);
+      if (input?.type === 'port' && control.value !== values[control.dataset.workflowInputId || '']) {
+        control.value = values[control.dataset.workflowInputId || ''];
+      }
+      persistWorkflowInputValues(workflow, values);
+      applyRenderedState();
+    });
+  });
+
+  panel._workflowApplyRenderedState = applyRenderedState;
+  return panel;
+}
+
 function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
   const body = document.querySelector('.workflows-body');
   if (!body) return;
@@ -2505,6 +2826,9 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
       card.appendChild(desc);
     }
 
+    const inputPanel = renderWorkflowInputCard(card, item);
+    if (inputPanel) card.appendChild(inputPanel);
+
     const steps = item.steps || [];
     if (steps.length) {
       const stepsEl = document.createElement('ol');
@@ -2519,17 +2843,30 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
         const chip = document.createElement('span');
         chip.className = 'allowed-chip faq-chip workflow-step-cmd';
         chip.textContent = step.cmd || '';
-        chip.title = 'Click to load into prompt';
-        chip.dataset.faqCommand = step.cmd || '';
+        if (inputPanel) {
+          chip.title = 'Fill required workflow inputs to load this step';
+          chip.classList.add('is-disabled');
+        } else {
+          chip.title = 'Click to load into prompt';
+          chip.dataset.faqCommand = step.cmd || '';
+        }
         main.appendChild(chip);
 
         const runBtn = document.createElement('button');
         runBtn.type = 'button';
         runBtn.className = 'btn btn-ghost btn-compact btn-icon-only workflow-step-run';
         runBtn.textContent = '▶';
-        runBtn.title = 'Run this step';
-        runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
-        runBtn.dataset.workflowStepCmd = step.cmd || '';
+        if (inputPanel) {
+          runBtn.title = 'Fill required workflow inputs to run this step';
+          runBtn.setAttribute('aria-label', 'Run this step');
+          runBtn.dataset.workflowStepCmd = '';
+          runBtn.disabled = true;
+          runBtn.setAttribute('aria-disabled', 'true');
+        } else {
+          runBtn.title = 'Run this step';
+          runBtn.setAttribute('aria-label', `Run: ${step.cmd || ''}`);
+          runBtn.dataset.workflowStepCmd = step.cmd || '';
+        }
         main.appendChild(runBtn);
 
         li.appendChild(main);
@@ -2544,6 +2881,10 @@ function renderWorkflowItems(items, { emitCatalogEvent = true } = {}) {
         stepsEl.appendChild(li);
       });
       card.appendChild(stepsEl);
+    }
+
+    if (inputPanel && typeof inputPanel._workflowApplyRenderedState === 'function') {
+      inputPanel._workflowApplyRenderedState();
     }
 
     body.appendChild(card);
